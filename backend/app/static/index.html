@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>NewsFlo — Alerts</title>
+  <style>
+    body { font-family: sans-serif; background: #111; color: #eee; padding: 24px; }
+    .alert { border: 1px solid #333; padding: 12px; margin-bottom: 12px; }
+    .company { margin-left: 12px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>NewsFlo — Live Alerts</h1>
+  <div id="alerts">Loading...</div>
+  <script>
+    async function load() {
+      const res = await fetch('/api/alerts');
+      const alerts = await res.json();
+      const container = document.getElementById('alerts');
+      if (alerts.length === 0) {
+        container.textContent = 'No alerts yet.';
+        return;
+      }
+      container.innerHTML = alerts.map(a => `
+        <div class="alert">
+          <strong>${a.article.title}</strong> (${a.category})
+          ${a.companies.map(c => `<div class="company">${c.name || c.ticker} [${c.index_tier}] ${c.direction} ${c.magnitude_low}-${c.magnitude_high}% — ${c.rationale}</div>`).join('')}
+        </div>
+      `).join('');
+    }
+    load();
+  </script>
+</body>
+</html>
