@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
 
+from app.alerting.matcher import match_alert_to_holdings
+from app.alerting.sender import send_pending_notifications
 from app.analysis.claude_client import analyze_article
 from app.calibration.blender import get_calibrated_magnitude
 from app.companies.resolution import resolve_companies
@@ -50,5 +52,11 @@ def process_new_articles(session: Session, claude_client) -> int:
         article.category = analysis.category
         session.commit()
         alerts_created += 1
+
+        # Plan 3: fan out email alerts to any users holding an affected company.
+        # With no matching holdings this is a no-op — the matcher returns [] and
+        # the sender processes an empty list — so existing tests are unaffected.
+        new_notifications = match_alert_to_holdings(session, alert)
+        send_pending_notifications(session, new_notifications)
 
     return alerts_created
