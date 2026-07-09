@@ -4,15 +4,21 @@ import { useAuth } from '../lib/auth';
 import { useAlertsSocket } from '../lib/useAlertsSocket';
 import AlertCard from './AlertCard';
 
-// Prepend live pushes ahead of the fetched list, deduping by id (a live entry
-// for an id already present wins, since it is iterated first).
+// Prepend live pushes ahead of the fetched list, deduping by id. On an id
+// collision the `fetched` copy's data wins: REST-fetched alerts carry the
+// accurate per-viewer `in_my_holdings` flag, while live WS-pushed payloads
+// always report `in_my_holdings: false` (the pipeline has no per-viewer
+// context at broadcast time). Live entries only contribute brand-new ids
+// (and their own data) that aren't yet present in `fetched`, so a fresh
+// push still appears immediately at the top of the feed.
 export function mergeAlerts(live: Alert[], fetched: Alert[]): Alert[] {
+  const fetchedById = new Map(fetched.map((alert) => [alert.id, alert]));
   const seen = new Set<number>();
   const merged: Alert[] = [];
   for (const alert of [...live, ...fetched]) {
     if (seen.has(alert.id)) continue;
     seen.add(alert.id);
-    merged.push(alert);
+    merged.push(fetchedById.get(alert.id) ?? alert);
   }
   return merged;
 }

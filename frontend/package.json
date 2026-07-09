@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:backend": "vite build --outDir ../backend/app/static --emptyOutDir",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
