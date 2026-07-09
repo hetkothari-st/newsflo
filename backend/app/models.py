@@ -61,6 +61,23 @@ class AlertCompany(Base):
     magnitude_high = Column(Float, nullable=False)
     rationale = Column(Text, nullable=False)
     basis = Column(String, nullable=False)  # direct_mention | sector_inference
+    confidence = Column(String, nullable=False, default="llm_estimate")  # llm_estimate | calibrated
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company")
+
+
+class CalibrationSample(Base):
+    __tablename__ = "calibration_samples"
+    __table_args__ = (
+        UniqueConstraint("alert_company_id", "horizon_days", name="uq_calibration_alert_company_horizon"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    alert_company_id = Column(Integer, ForeignKey("alert_companies.id"), nullable=False)
+    category = Column(String, nullable=False)  # copied from the Alert's category at sample time
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    direction = Column(String, nullable=False)  # bullish | bearish (sign of magnitude_actual)
+    magnitude_actual = Column(Float, nullable=False)  # actual % price move over the horizon
+    horizon_days = Column(Integer, nullable=False)  # 1 | 3 | 7
+    sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
