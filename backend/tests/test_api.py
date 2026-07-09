@@ -26,7 +26,8 @@ def test_list_alerts_returns_nested_companies(db_session):
 
     db_session.add(AlertCompany(
         alert_id=alert.id, company_id=company.id, direction="bullish",
-        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin", basis="direct_mention",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
     ))
     db_session.commit()
 
@@ -36,6 +37,7 @@ def test_list_alerts_returns_nested_companies(db_session):
     body = response.json()
     assert len(body) == 1
     assert body[0]["companies"][0]["ticker"] == "RELIANCE.NS"
+    assert body[0]["companies"][0]["confidence"] == "llm_estimate"
     assert body[0]["article"]["title"] == "Test headline"
 
     app.dependency_overrides.clear()

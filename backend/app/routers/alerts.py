@@ -19,6 +19,6 @@ def list_alerts(db: Session = Depends(get_db)):
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
             "index_tier": ac.company.index_tier, "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
-            "rationale": ac.rationale, "basis": ac.basis,
+            "rationale": ac.rationale, "basis": ac.basis, "confidence": ac.confidence,
         } for ac in alert.companies],
     } for alert in alerts]
