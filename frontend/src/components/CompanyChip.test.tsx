@@ -40,6 +40,14 @@ describe('CompanyChip', () => {
     expect(screen.getByText('Refiner margins expand.')).toBeInTheDocument();
   });
 
+  it('expands on the Space key when focused', async () => {
+    render(<CompanyChip company={company} />);
+    const chip = screen.getByRole('button', { name: /reliance/i });
+    chip.focus();
+    await userEvent.keyboard('{ }');
+    expect(screen.getByText('Refiner margins expand.')).toBeInTheDocument();
+  });
+
   it('colors a bearish range with bearish styling', () => {
     render(<CompanyChip company={{ ...company, direction: 'bearish', magnitude_low: -3, magnitude_high: -1 }} />);
     expect(screen.getByText('-3.0% to -1.0%')).toHaveClass('text-bearish');
