@@ -14,3 +14,4 @@ bcrypt
 PyJWT
 python-multipart
 email-validator
+websockets
