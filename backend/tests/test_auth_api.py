@@ -63,3 +63,34 @@ def test_login_fails_for_unknown_email(db_session):
     assert response.json()["detail"] == "Invalid email or password"
 
     app.dependency_overrides.clear()
+
+
+def test_register_rejects_password_over_72_bytes(db_session):
+    client = _client(db_session)
+    response = client.post(
+        "/api/auth/register", json={"email": "toolong@example.com", "password": "x" * 73}
+    )
+
+    assert response.status_code == 422
+
+    app.dependency_overrides.clear()
+
+
+def test_register_rejects_empty_password(db_session):
+    client = _client(db_session)
+    response = client.post("/api/auth/register", json={"email": "empty@example.com", "password": ""})
+
+    assert response.status_code == 422
+
+    app.dependency_overrides.clear()
+
+
+def test_register_rejects_malformed_email(db_session):
+    client = _client(db_session)
+    response = client.post(
+        "/api/auth/register", json={"email": "not-an-email", "password": "pw12345"}
+    )
+
+    assert response.status_code == 422
+
+    app.dependency_overrides.clear()

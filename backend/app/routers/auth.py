@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.auth.security import hash_password, verify_password
@@ -11,8 +11,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class AuthRequest(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=72)
 
 
 class TokenResponse(BaseModel):
