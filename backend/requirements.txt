@@ -7,3 +7,5 @@ anthropic
 feedparser
 httpx
 pytest
+yfinance
+pandas
