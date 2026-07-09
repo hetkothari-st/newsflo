@@ -81,3 +81,12 @@ class CalibrationSample(Base):
     magnitude_actual = Column(Float, nullable=False)  # actual % price move over the horizon
     horizon_days = Column(Integer, nullable=False)  # 1 | 3 | 7
     sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String, nullable=False, unique=True)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

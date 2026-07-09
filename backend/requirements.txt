@@ -10,3 +10,4 @@ pytest
 yfinance
 pandas
 apscheduler
+bcrypt
