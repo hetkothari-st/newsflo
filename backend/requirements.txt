@@ -12,3 +12,4 @@ pandas
 apscheduler
 bcrypt
 PyJWT
+python-multipart
