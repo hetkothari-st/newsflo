@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.analysis.claude_client import analyze_article
+from app.calibration.blender import get_calibrated_magnitude
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
 from app.models import Alert, AlertCompany, Article
@@ -33,6 +34,16 @@ def process_new_articles(session: Session, claude_client) -> int:
         session.flush()
 
         for entry in resolved:
+            calibrated = get_calibrated_magnitude(
+                session, category=analysis.category, company_id=entry["company_id"],
+            )
+            if calibrated is not None:
+                low, high = calibrated
+                entry["magnitude_low"] = low
+                entry["magnitude_high"] = high
+                entry["confidence"] = "calibrated"
+            else:
+                entry["confidence"] = "llm_estimate"
             session.add(AlertCompany(alert_id=alert.id, **entry))
 
         article.status = "ANALYZED"
