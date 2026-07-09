@@ -7,6 +7,41 @@ from app.calibration.blender import get_calibrated_magnitude
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
 from app.models import Alert, AlertCompany, Article
+from app.ws.manager import manager
+
+
+def _alert_broadcast_payload(alert: Alert) -> dict:
+    """Shape one live-push payload identical to a single GET /api/alerts entry,
+    MINUS the per-viewer ``in_my_holdings`` flag.
+
+    Known simplification: the pipeline has no viewer context at broadcast time,
+    so live-pushed companies carry no holdings-match. The frontend defaults
+    live-pushed companies to ``in_my_holdings: false`` and the next full
+    ``GET /api/alerts`` refresh reconciles them — correct-eventually, and
+    simpler than threading per-user state through the broadcast.
+    """
+    return {
+        "id": alert.id,
+        "category": alert.category,
+        "created_at": alert.created_at.isoformat(),
+        "article": {
+            "id": alert.article.id,
+            "title": alert.article.title,
+            "url": alert.article.url,
+        },
+        "companies": [{
+            "company_id": ac.company_id,
+            "ticker": ac.company.ticker,
+            "name": ac.company.name,
+            "index_tier": ac.company.index_tier,
+            "direction": ac.direction,
+            "magnitude_low": ac.magnitude_low,
+            "magnitude_high": ac.magnitude_high,
+            "rationale": ac.rationale,
+            "basis": ac.basis,
+            "confidence": ac.confidence,
+        } for ac in alert.companies],
+    }
 
 
 def process_new_articles(session: Session, claude_client) -> int:
@@ -54,9 +89,13 @@ def process_new_articles(session: Session, claude_client) -> int:
         alerts_created += 1
 
         # Plan 3: fan out email alerts to any users holding an affected company.
-        # With no matching holdings this is a no-op — the matcher returns [] and
-        # the sender processes an empty list — so existing tests are unaffected.
+        # With no matching holdings this is a no-op.
         new_notifications = match_alert_to_holdings(session, alert)
         send_pending_notifications(session, new_notifications)
+
+        # Plan 4: push the new alert to every connected dashboard over WebSocket.
+        # Safe no-op if the app hasn't started (no captured loop) or nobody is
+        # connected — this never crashes headless pipeline runs or tests.
+        manager.broadcast_sync(_alert_broadcast_payload(alert))
 
     return alerts_created
