@@ -11,3 +11,4 @@ yfinance
 pandas
 apscheduler
 bcrypt
+PyJWT
