@@ -56,3 +56,27 @@ def test_analyze_article_parses_sector_mention():
 
     assert result.companies[0].is_direct is False
     assert result.companies[0].sector == "oil_gas"
+
+
+class FakeMessagesNoToolUse:
+    """Fake messages that returns empty content (no tool_use block)."""
+    def create(self, **kwargs):
+        return SimpleNamespace(content=[])
+
+
+class FakeClientNoToolUse:
+    def __init__(self):
+        self.messages = FakeMessagesNoToolUse()
+
+
+def test_analyze_article_raises_on_missing_tool_use_block():
+    """Test that a clear ValueError is raised when Claude response has no tool_use block."""
+    client = FakeClientNoToolUse()
+    article_title = "Test Article Title"
+
+    try:
+        analyze_article(client, title=article_title, content="Some content")
+        assert False, "Expected ValueError to be raised"
+    except ValueError as e:
+        assert "Claude response contained no tool_use block" in str(e)
+        assert article_title in str(e)

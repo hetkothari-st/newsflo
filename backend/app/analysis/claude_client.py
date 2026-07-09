@@ -54,5 +54,7 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             ),
         }],
     )
-    tool_use = next(block for block in message.content if block.type == "tool_use")
+    tool_use = next((block for block in message.content if block.type == "tool_use"), None)
+    if tool_use is None:
+        raise ValueError(f"Claude response contained no tool_use block for article: {title!r}")
     return AnalysisOutput.model_validate(tool_use.input)
