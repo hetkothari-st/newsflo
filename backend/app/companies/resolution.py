@@ -1,9 +1,20 @@
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.analysis.schemas import CompanyMention
 from app.models import Company
 
 TOP_N_SECTOR_COMPANIES = 5
+
+# Portable (SQLite + Postgres) ordering expression: rank companies by index
+# tier so sector-inference picks the most prominent companies first. Lower
+# rank value = higher priority.
+_TIER_RANK = case(
+    (Company.index_tier == "NIFTY50", 0),
+    (Company.index_tier == "NIFTY100", 1),
+    (Company.index_tier == "NIFTY500", 2),
+    else_=3,
+)
 
 
 def _to_resolved(company: Company, mention: CompanyMention, basis: str) -> dict:
@@ -33,7 +44,7 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
             companies = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
-                .order_by(Company.market_cap.desc())
+                .order_by(_TIER_RANK.asc(), Company.ticker.asc())
                 .limit(TOP_N_SECTOR_COMPANIES)
                 .all()
             )

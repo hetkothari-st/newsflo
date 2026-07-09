@@ -14,3 +14,9 @@ def get_engine(url: str | None = None):
 
 engine = get_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+def init_db() -> None:
+    from app import models  # noqa: F401  ensures models are registered on Base
+
+    Base.metadata.create_all(engine)

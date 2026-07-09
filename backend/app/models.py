@@ -30,8 +30,8 @@ class Article(Base):
     url = Column(String, nullable=False)
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False, default="")
-    published_at = Column(DateTime, nullable=True)
-    fetched_at = Column(DateTime, nullable=False, default=utcnow)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     status = Column(String, nullable=False, default="NEW")  # NEW|FILTERED|CATEGORIZED|ANALYZED|ANALYSIS_FAILED
     category = Column(String, nullable=True)
 
@@ -44,7 +44,7 @@ class Alert(Base):
     id = Column(Integer, primary_key=True)
     article_id = Column(Integer, ForeignKey("articles.id"), nullable=False)
     category = Column(String, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")

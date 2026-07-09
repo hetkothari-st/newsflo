@@ -25,6 +25,21 @@ def test_classify_category_matches_plural_tariffs():
     assert classify_category("Officials announce fresh tariffs on imports", "") == "geopolitics"
 
 
+def test_classify_category_no_false_positive_warning():
+    # "war" keyword must not match inside "warning"
+    assert classify_category("Company issues profit warning", "") is None
+
+
+def test_classify_category_no_false_positive_warehouse():
+    # "war" keyword must not match inside "warehouse"
+    assert classify_category("New warehouse opens in Pune", "") is None
+
+
+def test_classify_category_no_false_positive_ward():
+    # "war" keyword must not match inside "ward"
+    assert classify_category("Ward elections held", "") is None
+
+
 def test_filter_new_articles_updates_status(db_session):
     relevant = Article(source="test", url="https://example.com/1", title="RBI hikes repo rate", content="")
     irrelevant = Article(source="test", url="https://example.com/2", title="Cat stuck in tree", content="")
