@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # JWT_SECRET_KEY in the environment for any real deployment. (Same
     # optional-at-dev-time pattern as anthropic_api_key defaulting to "".)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "dev-insecure-secret-change-in-production")
+    resend_api_key: str = os.environ.get("RESEND_API_KEY", "")
 
 
 settings = Settings()
