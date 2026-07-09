@@ -10,6 +10,21 @@ def test_classify_category_returns_none_for_irrelevant_text():
     assert classify_category("Local bakery wins award", "") is None
 
 
+def test_classify_category_no_match_substring_war_in_award():
+    # Prefix-match boundary still prevents "war" matching inside "award"
+    assert classify_category("Local bakery wins award", "") is None
+
+
+def test_classify_category_matches_plural_sanctions():
+    # Plural form "sanctions" should match keyword "sanction"
+    assert classify_category("Government imposes new sanctions on firms", "") == "geopolitics"
+
+
+def test_classify_category_matches_plural_tariffs():
+    # Plural form "tariffs" should match keyword "tariff"
+    assert classify_category("Officials announce fresh tariffs on imports", "") == "geopolitics"
+
+
 def test_filter_new_articles_updates_status(db_session):
     relevant = Article(source="test", url="https://example.com/1", title="RBI hikes repo rate", content="")
     irrelevant = Article(source="test", url="https://example.com/2", title="Cat stuck in tree", content="")

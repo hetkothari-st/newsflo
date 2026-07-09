@@ -20,8 +20,9 @@ def classify_category(title: str, content: str) -> str | None:
                 if keyword in text:
                     return category
             else:
-                # Single word: use word boundary matching to avoid false positives
-                if re.search(rf"\b{re.escape(keyword)}\b", text):
+                # Single word: use prefix word-boundary matching to avoid false positives
+                # while still matching plural/inflected forms (e.g. "sanction" matches "sanctions")
+                if re.search(rf"\b{re.escape(keyword)}", text):
                     return category
     return None
 
