@@ -22,7 +22,7 @@ Modular monolith — single deployable service with clean internal module bounda
 3. **Analysis** — one Claude API call per surviving article, structured output: category, direct company mentions, sector/event reasoning, direction (bullish/bearish), magnitude range, rationale text.
 4. **Company Resolution** — expands sector-level reasoning into concrete companies via the company master table (sector, market cap, index membership); direct mentions pass through as-is.
 5. **Calibration** — maintains a historical outcomes database of (news category, company) → actual subsequent price move. Blends empirical stats into the magnitude estimate once a (category, company) pair has enough samples (threshold, e.g. 5); otherwise the LLM's estimate stands, flagged `low_confidence`.
-6. **Holdings** — per-user demat holdings, populated via manual entry/CSV upload (v1 default) or broker API (Zerodha Kite Connect first integration).
+6. **Holdings** — per-user demat holdings, populated via manual entry/CSV upload or broker API (Zerodha Kite Connect first integration) — both supported in v1, user picks either.
 7. **Alerting** — matches newly resolved affected-companies against each user's holdings; queues an email alert on match.
 8. **Outcome Tracker** — scheduled job; for alerts past fixed horizons (1d/3d/7d), fetches actual price move (yfinance) and writes a new sample into the calibration database. This is what makes the system improve over time — it starts with LLM-only estimates and gradually earns empirical confidence.
 9. **API + WebSocket layer** — serves the dashboard, pushes new alerts to connected clients live.
@@ -57,7 +57,7 @@ Modular monolith — single deployable service with clean internal module bounda
 
 - Claude call failure/timeout → retry once, then mark article `analysis_failed` (visible in an internal ops view, never silently dropped).
 - Outcome-tracker price fetch failure → retry on the next scheduled run; failure on one ticker never blocks others in the same batch.
-- Broker API integration (phase 2 of Holdings) must degrade gracefully to manual/CSV entry if the broker connection fails — manual entry is always available as a fallback path, not replaced by the API integration.
+- Broker API integration must degrade gracefully to manual/CSV entry if the broker connection fails — manual entry is always available as a fallback path, not replaced by the API integration.
 
 ## Testing
 
