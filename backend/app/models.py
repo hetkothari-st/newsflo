@@ -90,3 +90,14 @@ class User(Base):
     email = Column(String, nullable=False, unique=True)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Holding(Base):
+    __tablename__ = "holdings"
+    __table_args__ = (UniqueConstraint("user_id", "company_id", name="uq_holdings_user_company"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    quantity = Column(Float, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
