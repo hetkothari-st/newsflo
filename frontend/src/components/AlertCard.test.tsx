@@ -65,4 +65,64 @@ describe('AlertCard', () => {
     render(<AlertCard alert={alert} isAuthenticated />);
     expect(screen.getByText('Mixed')).toBeInTheDocument();
   });
+
+  it('recomputes the sentiment pill when switching tabs to a different majority direction', async () => {
+    // Predicted (all companies): 2 bullish, 1 bearish -> majority bullish -> "Net Bullish".
+    // My Demat (only held companies): the single held company is bearish -> "Net Bearish".
+    const mixedDirectionAlert: Alert = {
+      ...alert,
+      companies: [
+        { ...alert.companies[0], company_id: 1, direction: 'bullish', in_my_holdings: false },
+        { ...alert.companies[0], company_id: 2, direction: 'bullish', in_my_holdings: false },
+        { ...alert.companies[1], company_id: 3, direction: 'bearish', in_my_holdings: true },
+      ],
+    };
+    render(<AlertCard alert={mixedDirectionAlert} isAuthenticated />);
+    await userEvent.click(screen.getByText('US strikes Iran oil export sites'));
+
+    expect(screen.getByText('Net Bullish')).toBeInTheDocument();
+    expect(screen.queryByText('Net Bearish')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /my demat/i }));
+
+    expect(screen.getByText('Net Bearish')).toBeInTheDocument();
+    expect(screen.queryByText('Net Bullish')).not.toBeInTheDocument();
+  });
+
+  it('renders tier group headings in Nifty 50 -> Nifty 100 -> Nifty 500 -> Other order', async () => {
+    // Companies are listed out of tier order in the source data to prove the
+    // component re-orders them rather than merely preserving input order.
+    const tierAlert: Alert = {
+      ...alert,
+      companies: [
+        { ...alert.companies[1], company_id: 1, name: 'Other Co', index_tier: 'SMALLCAP' },
+        { ...alert.companies[1], company_id: 2, name: 'Five Hundred Co', index_tier: 'NIFTY500' },
+        { ...alert.companies[0], company_id: 3, name: 'Fifty Co', index_tier: 'NIFTY50' },
+        { ...alert.companies[1], company_id: 4, name: 'Hundred Co', index_tier: 'NIFTY100' },
+      ],
+    };
+    render(<AlertCard alert={tierAlert} isAuthenticated />);
+    await userEvent.click(screen.getByText('US strikes Iran oil export sites'));
+
+    const headings = screen.getAllByText(/^(Nifty 50|Nifty 100|Nifty 500|Other)$/);
+    expect(headings.map((el) => el.textContent)).toEqual(['Nifty 50', 'Nifty 100', 'Nifty 500', 'Other']);
+  });
+
+  it('expands the card on Enter when the header is focused', async () => {
+    render(<AlertCard alert={alert} isAuthenticated />);
+    const header = screen.getByRole('button', { name: /us strikes iran/i });
+    header.focus();
+    expect(screen.queryByText('Reliance Industries')).not.toBeInTheDocument();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+  });
+
+  it('expands the card on Space when the header is focused', async () => {
+    render(<AlertCard alert={alert} isAuthenticated />);
+    const header = screen.getByRole('button', { name: /us strikes iran/i });
+    header.focus();
+    expect(screen.queryByText('Reliance Industries')).not.toBeInTheDocument();
+    await userEvent.keyboard('{ }');
+    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+  });
 });
