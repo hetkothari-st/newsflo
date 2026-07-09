@@ -101,3 +101,17 @@ class Holding(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     quantity = Column(Float, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class EmailNotification(Base):
+    __tablename__ = "email_notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "alert_company_id", name="uq_notification_user_alert_company"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    alert_company_id = Column(Integer, ForeignKey("alert_companies.id"), nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending | sent | failed
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
