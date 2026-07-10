@@ -135,6 +135,20 @@ def test_resolve_dedupes_repeated_sector_inference_across_mentions(db_session):
     assert len({r["company_id"] for r in resolved}) == 3
 
 
+def test_tier_rank_prefers_niftynext50_over_midcap150(db_session):
+    next50 = _make_company(db_session, "NEXT50CO.NS", "Next50 Co", "oil_gas", None, index_tier="NIFTYNEXT50")
+    midcap = _make_company(db_session, "MIDCO.NS", "Mid Co", "oil_gas", None, index_tier="NIFTYMIDCAP150")
+
+    mention = CompanyMention(
+        name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
+    )
+    resolved = resolve_companies(db_session, [mention])
+    resolved_ids = [r["company_id"] for r in resolved]
+
+    assert resolved_ids.index(next50.id) < resolved_ids.index(midcap.id)
+
+
 def test_resolve_dedupes_direct_mention_already_covered_by_sector_inference(db_session):
     # A company resolved via an earlier sector-wide expansion must not be
     # appended again if a later direct mention in the same article names it.

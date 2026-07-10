@@ -11,9 +11,10 @@ TOP_N_SECTOR_COMPANIES = 5
 # rank value = higher priority.
 _TIER_RANK = case(
     (Company.index_tier == "NIFTY50", 0),
-    (Company.index_tier == "NIFTY100", 1),
-    (Company.index_tier == "NIFTY500", 2),
-    else_=3,
+    (Company.index_tier == "NIFTYNEXT50", 1),
+    (Company.index_tier == "NIFTYMIDCAP150", 2),
+    (Company.index_tier == "NIFTYSMALLCAP250", 3),
+    else_=4,
 )
 
 
