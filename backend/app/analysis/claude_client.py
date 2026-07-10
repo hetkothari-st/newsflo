@@ -1,6 +1,6 @@
 import json
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from app.analysis.schemas import SECTORS, AnalysisOutput
 
@@ -85,7 +85,56 @@ RECORD_ANALYSIS_TOOL = {
 }
 
 
-def build_client(api_key: str) -> OpenAI:
+class _RotatingCompletions:
+    def __init__(self, rotator: "RotatingClient"):
+        self._rotator = rotator
+
+    def create(self, **kwargs):
+        return self._rotator._call(**kwargs)
+
+
+class _RotatingChat:
+    def __init__(self, rotator: "RotatingClient"):
+        self.completions = _RotatingCompletions(rotator)
+
+
+class RotatingClient:
+    """Duck-types the subset of the OpenAI client surface analyze_article
+    uses (client.chat.completions.create(...)), backed by multiple API keys.
+
+    On a RateLimitError from the currently active key, tries the next key in
+    the rotation before giving up -- a rate-limited key stays "current" for
+    subsequent calls once another key is found to work, rather than resetting
+    to the first key every time (so a working key isn't abandoned prematurely
+    on the next call). Any error OTHER than a rate limit is not a rotation
+    trigger -- it propagates immediately, so a genuine bug isn't masked by
+    silently trying more keys.
+    """
+
+    def __init__(self, api_keys: list[str], base_url: str):
+        if not api_keys:
+            raise ValueError("RotatingClient requires at least one API key")
+        self._clients = [OpenAI(api_key=key, base_url=base_url) for key in api_keys]
+        self._active = 0
+        self.chat = _RotatingChat(self)
+
+    def _call(self, **kwargs):
+        last_error: RateLimitError | None = None
+        for offset in range(len(self._clients)):
+            index = (self._active + offset) % len(self._clients)
+            try:
+                result = self._clients[index].chat.completions.create(**kwargs)
+                self._active = index
+                return result
+            except RateLimitError as exc:
+                last_error = exc
+                continue
+        raise last_error
+
+
+def build_client(api_key: str | list[str]) -> OpenAI | RotatingClient:
+    if isinstance(api_key, list):
+        return RotatingClient(api_key, base_url=GROQ_BASE_URL)
     return OpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
 
 

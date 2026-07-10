@@ -11,6 +11,17 @@ class Settings(BaseSettings):
     openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     groq_api_key: str = os.environ.get("GROQ_API_KEY", "")
+    # Comma-separated additional Groq keys, rotated to automatically when the
+    # currently-active key hits a rate limit (see RotatingClient). Empty by
+    # default -- a single groq_api_key alone works fine, this only adds
+    # failover capacity when more keys are available.
+    groq_api_keys_extra: str = os.environ.get("GROQ_API_KEYS_EXTRA", "")
+
+    @property
+    def groq_api_keys(self) -> list[str]:
+        keys = [self.groq_api_key] if self.groq_api_key else []
+        keys += [k.strip() for k in self.groq_api_keys_extra.split(",") if k.strip()]
+        return keys
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
     poll_interval_minutes: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "2"))
     # DEV-ONLY default — this value is INSECURE and unsafe for production. Set
