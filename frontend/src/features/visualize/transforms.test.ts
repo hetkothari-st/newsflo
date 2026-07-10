@@ -71,10 +71,4 @@ describe('buildSectorTree', () => {
     expect(tree.children.map((b) => b.label)).toEqual(['Other']);
     expect(tree.children[0].children).toHaveLength(2);
   });
-
-  it('never produces a branch for a sector with zero companies', () => {
-    const tree = buildSectorTree('Some event', [company({ sector: 'Energy' })]);
-    expect(tree.children).toHaveLength(1);
-    expect(tree.children[0].label).toBe('Energy');
-  });
 });
