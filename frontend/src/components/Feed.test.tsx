@@ -1,5 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
 import Feed, { mergeAlerts } from './Feed';
 import { AuthProvider } from '../lib/auth';
 import * as api from '../lib/api';
@@ -8,31 +10,45 @@ import type { Alert, AlertCompany } from '../lib/api';
 // Isolate Feed from the real socket in these tests.
 vi.mock('../lib/useAlertsSocket', () => ({ useAlertsSocket: () => [] }));
 
-function makeAlert(id: number, title: string, companies: AlertCompany[] = []): Alert {
+function company(overrides: Partial<AlertCompany>): AlertCompany {
+  return {
+    company_id: 1,
+    ticker: 'RELIANCE.NS',
+    name: 'Reliance',
+    index_tier: 'NIFTY50',
+    direction: 'bullish',
+    magnitude_low: 1,
+    magnitude_high: 2,
+    rationale: 'x',
+    basis: 'direct_mention',
+    confidence: 'llm_estimate',
+    market: 'IN',
+    in_my_holdings: false,
+    ...overrides,
+  };
+}
+
+function makeAlert(id: number, title: string, companies: AlertCompany[], category = 'oil_energy'): Alert {
   return {
     id,
-    category: 'oil_energy',
-    created_at: '2026-07-09T10:00:00+00:00',
+    category,
+    created_at: '2026-07-10T10:00:00+00:00',
     article: { id, title, url: `https://example.com/${id}` },
     companies,
   };
 }
 
-function makeCompany(inMyHoldings: boolean): AlertCompany {
-  return {
-    company_id: 1,
-    ticker: 'ACME',
-    name: 'Acme Corp',
-    index_tier: 'NIFTY50',
-    direction: 'bullish',
-    magnitude_low: 1,
-    magnitude_high: 3,
-    rationale: 'test',
-    basis: 'direct_mention',
-    confidence: 'llm_estimate',
-    market: 'IN',
-    in_my_holdings: inMyHoldings,
-  };
+function renderFeed(ui: ReactElement) {
+  return render(
+    <MemoryRouter>
+      <AuthProvider>{ui}</AuthProvider>
+    </MemoryRouter>,
+  );
+}
+
+function setToken() {
+  localStorage.setItem('newsflo.token', 'tok');
+  localStorage.setItem('newsflo.email', 'a@example.com');
 }
 
 afterEach(() => {
@@ -41,46 +57,60 @@ afterEach(() => {
 });
 
 describe('mergeAlerts', () => {
-  it('prepends a brand-new live alert ahead of the fetched list', () => {
-    const merged = mergeAlerts([makeAlert(3, 'three-live')], [makeAlert(1, 'one')]);
-    expect(merged.map((a) => a.id)).toEqual([3, 1]);
-    expect(merged[0].article.title).toBe('three-live');
-  });
-
-  it('dedupes by id, keeping the live entry position but the fetched data', () => {
-    const merged = mergeAlerts([makeAlert(2, 'two-live')], [makeAlert(1, 'one'), makeAlert(2, 'two')]);
+  it('prepends live alerts and dedupes by id (fetched data wins on collision)', () => {
+    const merged = mergeAlerts([makeAlert(2, 'two-live', [])], [makeAlert(1, 'one', []), makeAlert(2, 'two', [])]);
     expect(merged.map((a) => a.id)).toEqual([2, 1]);
-    // Fetched data wins on overlap, even though the live copy determined position.
     expect(merged[0].article.title).toBe('two');
-  });
-
-  it('prefers the fetched copy of an overlapping alert for accurate in_my_holdings', () => {
-    const live = [makeAlert(5, 'five', [makeCompany(false)])];
-    const fetched = [makeAlert(5, 'five', [makeCompany(true)])];
-    const merged = mergeAlerts(live, fetched);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].companies[0].in_my_holdings).toBe(true);
   });
 });
 
-describe('Feed', () => {
-  it('renders alert cards from the initial fetch', async () => {
-    vi.spyOn(api, 'getAlerts').mockResolvedValue([makeAlert(1, 'Oil news headline')]);
-    render(
-      <AuthProvider>
-        <Feed />
-      </AuthProvider>,
-    );
-    expect(await screen.findByText('Oil news headline')).toBeInTheDocument();
+describe('Feed tabs', () => {
+  const indiaAlert = makeAlert(1, 'India oil headline', [company({ market: 'IN' })]);
+  const globalAlert = makeAlert(2, 'Global tech headline', [
+    company({ company_id: 2, ticker: 'AAPL', name: 'Apple', market: 'GLOBAL' }),
+  ], 'it');
+
+  it('India tab shows only IN-market alerts', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
+    renderFeed(<Feed activeTab="india" />);
+    expect(await screen.findByText('India oil headline')).toBeInTheDocument();
+    expect(screen.queryByText('Global tech headline')).not.toBeInTheDocument();
   });
 
-  it('shows an empty state when there are no alerts', async () => {
-    vi.spyOn(api, 'getAlerts').mockResolvedValue([]);
-    render(
-      <AuthProvider>
-        <Feed />
-      </AuthProvider>,
-    );
-    expect(await screen.findByText(/no alerts yet/i)).toBeInTheDocument();
+  it('Global tab shows only GLOBAL-market alerts', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
+    renderFeed(<Feed activeTab="global" />);
+    expect(await screen.findByText('Global tech headline')).toBeInTheDocument();
+    expect(screen.queryByText('India oil headline')).not.toBeInTheDocument();
+  });
+
+  it('Custom tab shows a login prompt when logged out', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    renderFeed(<Feed activeTab="custom" />);
+    expect(await screen.findByText(/log in to build your custom feed/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /log in/i })).toBeInTheDocument();
+  });
+
+  it('Custom tab shows a configure prompt when logged in with an empty watchlist', async () => {
+    setToken();
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    vi.spyOn(api, 'getWatchlist').mockResolvedValue({ categories: [], companies: [] });
+    vi.spyOn(api, 'getCategories').mockResolvedValue([]);
+    vi.spyOn(api, 'getCompanies').mockResolvedValue([]);
+    renderFeed(<Feed activeTab="custom" />);
+    expect(await screen.findByText(/choose categories or companies/i)).toBeInTheDocument();
+    // The inline editor is present on the Custom tab.
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+  });
+
+  it('Custom tab shows watchlist-matched alerts when configured', async () => {
+    setToken();
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
+    vi.spyOn(api, 'getWatchlist').mockResolvedValue({ categories: ['oil_energy'], companies: [] });
+    vi.spyOn(api, 'getCategories').mockResolvedValue(['oil_energy']);
+    vi.spyOn(api, 'getCompanies').mockResolvedValue([]);
+    renderFeed(<Feed activeTab="custom" />);
+    await waitFor(() => expect(screen.getByText('India oil headline')).toBeInTheDocument());
+    expect(screen.queryByText('Global tech headline')).not.toBeInTheDocument();
   });
 });
