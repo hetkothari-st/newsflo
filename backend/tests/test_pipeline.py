@@ -162,3 +162,29 @@ def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch)
     assert created == 0
     refreshed = db_session.query(Article).filter_by(id=irrelevant.id).one()
     assert refreshed.status == "FILTERED"
+
+
+def test_alert_broadcast_payload_includes_sector(db_session):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/broadcast-sector", title="Sector broadcast test")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    payload = pipeline_module._alert_broadcast_payload(alert)
+
+    assert payload["companies"][0]["sector"] == "oil_gas"

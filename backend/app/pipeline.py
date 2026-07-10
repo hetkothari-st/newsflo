@@ -37,6 +37,7 @@ def _alert_broadcast_payload(alert: Alert) -> dict:
             "ticker": ac.company.ticker,
             "name": ac.company.name,
             "index_tier": ac.company.index_tier,
+            "sector": ac.company.sector,
             "direction": ac.direction,
             "magnitude_low": ac.magnitude_low,
             "magnitude_high": ac.magnitude_high,
