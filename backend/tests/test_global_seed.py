@@ -29,3 +29,14 @@ def test_every_global_ticker_is_non_indian():
     # them all as GLOBAL.
     for entry in GLOBAL_COMPANIES:
         assert not entry["ticker"].endswith((".NS", ".BO")), entry
+
+
+def test_no_duplicate_tickers():
+    tickers = [e["ticker"] for e in GLOBAL_COMPANIES]
+    assert len(tickers) == len(set(tickers))
+
+
+def test_fifty_companies_per_sector():
+    from collections import Counter
+    counts = Counter(e["sector"] for e in GLOBAL_COMPANIES)
+    assert counts == {s: 50 for s in SECTORS}

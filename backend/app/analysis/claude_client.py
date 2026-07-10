@@ -4,8 +4,8 @@ from openai import OpenAI
 
 from app.analysis.schemas import SECTORS, AnalysisOutput
 
-MODEL = "anthropic/claude-sonnet-4.5"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+MODEL = "llama-3.3-70b-versatile"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 RECORD_ANALYSIS_TOOL = {
     "type": "function",
@@ -28,7 +28,16 @@ RECORD_ANALYSIS_TOOL = {
                             "direction": {"type": "string", "enum": ["bullish", "bearish"]},
                             "magnitude_low": {"type": "number"},
                             "magnitude_high": {"type": "number"},
-                            "rationale": {"type": "string"},
+                            "rationale": {
+                                "type": "string",
+                                "description": (
+                                    "Company-specific reasoning for THIS company only -- "
+                                    "reference its actual business (products, exposure, "
+                                    "market position) and how this specific news affects "
+                                    "it. Never reuse the same sentence for multiple "
+                                    "companies in the same response."
+                                ),
+                            },
                         },
                         "required": ["name", "is_direct", "direction", "magnitude_low", "magnitude_high", "rationale"],
                     },
@@ -41,13 +50,13 @@ RECORD_ANALYSIS_TOOL = {
 
 
 def build_client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL)
+    return OpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
 
 
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     response = client.chat.completions.create(
         model=MODEL,
-        max_tokens=600,
+        max_tokens=1024,
         tools=[RECORD_ANALYSIS_TOOL],
         tool_choice={"type": "function", "function": {"name": "record_analysis"}},
         messages=[{
@@ -55,7 +64,11 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             "content": (
                 "Analyze this financial news article. Identify which companies are directly "
                 "named and which sectors are indirectly affected, with direction and an "
-                "estimated percentage price-move range.\n\n"
+                "estimated percentage price-move range. For every company you list, write "
+                "a rationale specific to THAT company's own business and exposure -- do "
+                "not write one generic rationale and repeat it across companies; each "
+                "one must explain why that particular company, given what it actually "
+                "does, is affected by this specific news.\n\n"
                 f"Title: {title}\n\nContent: {content}"
             ),
         }],

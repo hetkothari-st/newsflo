@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./newsflo.db")
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")
+    openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
+    groq_api_key: str = os.environ.get("GROQ_API_KEY", "")
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
     poll_interval_minutes: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "2"))
     # DEV-ONLY default — this value is INSECURE and unsafe for production. Set
