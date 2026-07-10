@@ -15,8 +15,14 @@ function normalize(ws: WsAlert): Alert {
   };
 }
 
-export function useAlertsSocket(): Alert[] {
+export interface AlertsSocket {
+  alerts: Alert[];
+  connected: boolean;
+}
+
+export function useAlertsSocket(): AlertsSocket {
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [connected, setConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closedRef = useRef(false);
@@ -28,6 +34,10 @@ export function useAlertsSocket(): Alert[] {
       const socket = new WebSocket(wsUrl());
       socketRef.current = socket;
 
+      socket.onopen = () => {
+        setConnected(true);
+      };
+
       socket.onmessage = (event: MessageEvent) => {
         const raw = JSON.parse(event.data as string) as WsAlert;
         const incoming = normalize(raw);
@@ -38,6 +48,7 @@ export function useAlertsSocket(): Alert[] {
       };
 
       socket.onclose = () => {
+        setConnected(false);
         if (closedRef.current) return; // intentional unmount close -> do not retry
         timerRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
       };
@@ -52,5 +63,5 @@ export function useAlertsSocket(): Alert[] {
     };
   }, []);
 
-  return alerts;
+  return { alerts, connected };
 }
