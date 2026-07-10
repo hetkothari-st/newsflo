@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import type { ReactElement } from 'react';
+import BottomNav from './components/BottomNav';
 import NavBar from './components/NavBar';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
@@ -15,7 +16,7 @@ function RequireAuth({ children }: { children: ReactElement }) {
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-page font-sans text-ink">
+    <div className="min-h-screen bg-page pb-14 font-sans text-ink md:pb-0">
       <NavBar />
       <Routes>
         <Route path="/" element={<FeedPage />} />
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
       </Routes>
+      <BottomNav />
     </div>
   );
 }

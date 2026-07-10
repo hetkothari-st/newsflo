@@ -5,11 +5,11 @@ export default function NavBar() {
   const { token, email, logout } = useAuth();
   return (
     <nav className="border-b border-hairline bg-page">
-      <div className="mx-auto flex max-w-feed items-center justify-between px-4 py-4">
-        <div className="flex items-center gap-6">
-          <Link to="/" className="font-display text-lg font-bold text-ink">
-            NewsFlo
-          </Link>
+      <div className="mx-auto flex h-14 max-w-feed items-center px-4 md:h-auto md:justify-between md:py-4">
+        <Link to="/" className="font-display text-lg font-bold text-ink">
+          NewsFlo
+        </Link>
+        <div className="hidden items-center gap-6 md:flex">
           <Link to="/" className="text-xs uppercase tracking-widest text-muted hover:text-ink">
             Feed
           </Link>
@@ -17,7 +17,7 @@ export default function NavBar() {
             Holdings
           </Link>
         </div>
-        <div className="flex items-center gap-4 text-xs uppercase tracking-widest">
+        <div className="hidden items-center gap-4 text-xs uppercase tracking-widest md:flex">
           {token ? (
             <>
               <span className="text-muted">{email}</span>
