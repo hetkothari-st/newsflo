@@ -4,6 +4,7 @@ from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.claude_client import analyze_article
 from app.calibration.blender import get_calibrated_magnitude
+from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
 from app.models import Alert, AlertCompany, Article
@@ -40,6 +41,7 @@ def _alert_broadcast_payload(alert: Alert) -> dict:
             "rationale": ac.rationale,
             "basis": ac.basis,
             "confidence": ac.confidence,
+            "market": infer_market(ac.company.ticker),
         } for ac in alert.companies],
     }
 

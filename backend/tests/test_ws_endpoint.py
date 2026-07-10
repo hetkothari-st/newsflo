@@ -63,6 +63,7 @@ def test_pipeline_broadcasts_new_alert_to_connected_client(db_session, monkeypat
     assert payload["category"] == "oil_energy"
     assert payload["companies"][0]["ticker"] == "RELIANCE.NS"
     assert payload["companies"][0]["direction"] == "bullish"
+    assert payload["companies"][0]["market"] == "IN"
     assert payload["companies"][0]["confidence"] == "llm_estimate"
     # The pipeline has no per-viewer context at broadcast time, so the payload
     # intentionally omits in_my_holdings (the frontend defaults it to false).

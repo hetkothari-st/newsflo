@@ -37,6 +37,7 @@ def test_list_alerts_returns_nested_companies(db_session):
     body = response.json()
     assert len(body) == 1
     assert body[0]["companies"][0]["ticker"] == "RELIANCE.NS"
+    assert body[0]["companies"][0]["market"] == "IN"
     assert body[0]["companies"][0]["confidence"] == "llm_estimate"
     # Anonymous request (no Authorization header) -> in_my_holdings is present and False.
     assert body[0]["companies"][0]["in_my_holdings"] is False
