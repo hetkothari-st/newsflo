@@ -3,6 +3,7 @@ import type { Alert, AlertCompany } from '../lib/api';
 import CategorySwatch from './CategorySwatch';
 import CompanyChip from './CompanyChip';
 import SentimentPill from './SentimentPill';
+import VisualizeModal from '../features/visualize/VisualizeModal';
 
 type Tab = 'predicted' | 'my_demat';
 
@@ -32,6 +33,7 @@ function formatTime(iso: string): string {
 export default function AlertCard({ alert, isAuthenticated }: { alert: Alert; isAuthenticated: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [tab, setTab] = useState<Tab>('predicted');
+  const [visualizeOpen, setVisualizeOpen] = useState(false);
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
 
@@ -56,6 +58,11 @@ export default function AlertCard({ alert, isAuthenticated }: { alert: Alert; is
     e.stopPropagation(); // tab click must not toggle the card
     setTab(next);
     setExpanded(true);
+  }
+
+  function openVisualize(e: MouseEvent) {
+    e.stopPropagation(); // must not toggle the card, same reasoning as selectTab
+    setVisualizeOpen(true);
   }
 
   const tabClass = (active: boolean) =>
@@ -101,6 +108,15 @@ export default function AlertCard({ alert, isAuthenticated }: { alert: Alert; is
 
       {expanded && (
         <div className="mt-4 flex flex-col gap-4 motion-safe:transition-all">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={openVisualize}
+              className="text-xs uppercase tracking-widest text-muted hover:text-ink"
+            >
+              Visualize →
+            </button>
+          </div>
           {visible.length === 0 ? (
             <p className="text-xs text-muted">{emptyCopy}</p>
           ) : (
@@ -117,6 +133,7 @@ export default function AlertCard({ alert, isAuthenticated }: { alert: Alert; is
           )}
         </div>
       )}
+      {visualizeOpen && <VisualizeModal alert={alert} onClose={() => setVisualizeOpen(false)} />}
     </article>
   );
 }

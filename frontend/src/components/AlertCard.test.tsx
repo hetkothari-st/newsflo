@@ -125,4 +125,20 @@ describe('AlertCard', () => {
     await userEvent.keyboard('{ }');
     expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
   });
+
+  it('opens the visualize modal from the expanded card', async () => {
+    render(<AlertCard alert={alert} isAuthenticated />);
+    await userEvent.click(screen.getByText('US strikes Iran oil export sites'));
+    await userEvent.click(screen.getByRole('button', { name: /visualize/i }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('closes the visualize modal without collapsing the card', async () => {
+    render(<AlertCard alert={alert} isAuthenticated />);
+    await userEvent.click(screen.getByText('US strikes Iran oil export sites'));
+    await userEvent.click(screen.getByRole('button', { name: /visualize/i }));
+    await userEvent.click(screen.getByLabelText('Close'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+  });
 });
