@@ -80,7 +80,6 @@ export default function TreeCanvas({
         fitView
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
-        panOnDrag={false}
       >
         <Background color="#262626" gap={24} />
         <Controls showInteractive={false} />
