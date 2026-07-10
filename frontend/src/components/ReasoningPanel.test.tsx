@@ -22,7 +22,7 @@ describe('precedentLine', () => {
   it('cites the blended range as historical precedent when calibrated', () => {
     const line = precedentLine({ ...base, confidence: 'calibrated' });
     expect(line).toMatch(/historical precedent/i);
-    expect(line).toContain('+2.0% to +4.0%');
+    expect(line).toContain('comparable bullish move');
   });
   it('notes the model estimate when not calibrated', () => {
     expect(precedentLine(base)).toMatch(/model's own estimate/i);

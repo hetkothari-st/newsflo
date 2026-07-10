@@ -2,13 +2,52 @@ import { useState, type KeyboardEvent } from 'react';
 import type { AlertCompany } from '../lib/api';
 import ReasoningPanel from './ReasoningPanel';
 
-function fmtPct(v: number): string {
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
+// No verified per-company domain/logo exists in the data model — guessing a
+// domain from the ticker risks rendering a different company's real brand
+// mark (e.g. "reliance.com" belongs to a US steel company, not Reliance
+// Industries). A deterministic monogram is the honest stand-in: same ticker
+// always resolves to the same initials + color, no network fetch, no risk of
+// a wrong logo. Swap in a real <img src={logo_url}> here if the backend ever
+// adds a verified logo field.
+const AVATAR_PALETTE = [
+  '#F5A623', // amber
+  '#4A90D9', // blue
+  '#2DD4BF', // teal
+  '#E85D4C', // red-orange
+  '#9B7EDE', // violet
+  '#5FB878', // green
+  '#D4708C', // rose
+  '#6C8CD5', // indigo
+];
+
+function avatarColor(ticker: string): string {
+  let hash = 0;
+  for (let i = 0; i < ticker.length; i++) hash = (hash * 31 + ticker.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+function initials(ticker: string): string {
+  const base = ticker.split('.')[0];
+  return base.slice(0, 2).toUpperCase();
+}
+
+function CompanyAvatar({ ticker }: { ticker: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-page"
+      style={{ backgroundColor: avatarColor(ticker) }}
+    >
+      {initials(ticker)}
+    </span>
+  );
 }
 
 export default function CompanyChip({ company }: { company: AlertCompany }) {
   const [expanded, setExpanded] = useState(false);
-  const magnitudeClass = company.direction === 'bullish' ? 'text-bullish' : 'text-bearish';
+  const bullish = company.direction === 'bullish';
+  const magnitudeClass = bullish ? 'text-bullish' : 'text-bearish';
+  const badgeClass = bullish ? 'border-bullish' : 'border-bearish';
 
   function toggle() {
     setExpanded((v) => !v);
@@ -29,11 +68,22 @@ export default function CompanyChip({ company }: { company: AlertCompany }) {
         aria-expanded={expanded}
         onClick={toggle}
         onKeyDown={onKeyDown}
-        className="flex cursor-pointer items-center justify-between rounded-lg border border-hairline bg-surface px-3 py-2 motion-safe:transition-colors hover:border-muted"
+        className="flex cursor-pointer flex-col gap-2.5 rounded-lg border border-hairline bg-surface p-3 motion-safe:transition-colors hover:border-muted"
       >
-        <span className="text-sm text-ink">{company.name}</span>
-        <span className={`text-xs tabular-nums ${magnitudeClass}`}>
-          {fmtPct(company.magnitude_low)} to {fmtPct(company.magnitude_high)}
+        <div className="flex items-center gap-2.5">
+          <CompanyAvatar ticker={company.ticker} />
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-sm text-ink">{company.name}</span>
+            <span className="truncate text-[11px] uppercase tracking-wide text-muted">{company.ticker}</span>
+          </div>
+        </div>
+        <span
+          className={`inline-flex w-fit items-center gap-1 rounded-full border-[1.5px] bg-transparent px-2 py-0.5 text-xs uppercase tracking-wide ${badgeClass}`}
+        >
+          <span aria-hidden="true" className={magnitudeClass}>
+            {bullish ? '▲' : '▼'}
+          </span>
+          <span className={magnitudeClass}>{bullish ? 'Bullish' : 'Bearish'}</span>
         </span>
       </div>
       {expanded && <ReasoningPanel company={company} />}

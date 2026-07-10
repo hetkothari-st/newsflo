@@ -20,10 +20,10 @@ const company: AlertCompany = {
 };
 
 describe('CompanyChip', () => {
-  it('shows the company name and a signed magnitude range', () => {
+  it('shows the company name and direction label', () => {
     render(<CompanyChip company={company} />);
     expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
-    expect(screen.getByText('+2.0% to +4.0%')).toBeInTheDocument();
+    expect(screen.getByText('Bullish')).toBeInTheDocument();
   });
 
   it('is collapsed by default and expands the reasoning panel on click', async () => {
@@ -49,8 +49,8 @@ describe('CompanyChip', () => {
     expect(screen.getByText('Refiner margins expand.')).toBeInTheDocument();
   });
 
-  it('colors a bearish range with bearish styling', () => {
+  it('colors a bearish label with bearish styling', () => {
     render(<CompanyChip company={{ ...company, direction: 'bearish', magnitude_low: -3, magnitude_high: -1 }} />);
-    expect(screen.getByText('-3.0% to -1.0%')).toHaveClass('text-bearish');
+    expect(screen.getByText('Bearish')).toHaveClass('text-bearish');
   });
 });

@@ -107,9 +107,11 @@ export default function AlertCard({ alert, isAuthenticated }: { alert: Alert; is
             grouped.map((group) => (
               <div key={group.tier} className="flex flex-col gap-2">
                 <p className="text-xs uppercase tracking-widest text-muted">{group.label}</p>
-                {group.companies.map((company) => (
-                  <CompanyChip key={company.company_id} company={company} />
-                ))}
+                <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
+                  {group.companies.map((company) => (
+                    <CompanyChip key={company.company_id} company={company} />
+                  ))}
+                </div>
               </div>
             ))
           )}

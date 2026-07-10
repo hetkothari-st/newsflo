@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getCategories, getCompanies, getWatchlist, putWatchlist, type Company } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import CategorySwatch from './CategorySwatch';
+
+// Full static class strings (not built by interpolation) so Tailwind's content
+// scanner keeps them. Selected chips tint with the same accent used for the
+// category's swatch dot everywhere else in the app.
+const CHIP_ACCENT: Record<string, string> = {
+  oil_energy: 'border-swatch-oil_energy bg-swatch-oil_energy/10',
+  banking: 'border-swatch-banking bg-swatch-banking/10',
+  auto_ev: 'border-swatch-auto_ev bg-swatch-auto_ev/10',
+  geopolitics: 'border-swatch-geopolitics bg-swatch-geopolitics/10',
+};
+const CHIP_ACCENT_FALLBACK = 'border-swatch-other bg-swatch-other/10';
 
 export default function WatchlistSettings({ onSaved }: { onSaved?: () => void }) {
   const { token } = useAuth();
@@ -81,30 +93,39 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
   return (
     <form
       onSubmit={handleSave}
-      className="flex flex-col gap-5 rounded-lg border border-hairline bg-surface p-5"
+      className="flex flex-col gap-6 rounded-lg border border-hairline bg-surface p-6"
       aria-label="Custom filters"
     >
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <p className="text-xs uppercase tracking-widest text-muted">Categories</p>
         {categories.length === 0 ? (
           <p className="text-xs text-muted">No categories yet.</p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {categories.map((category) => (
-              <label key={category} className="flex items-center gap-2 text-sm text-ink">
-                <input
-                  type="checkbox"
-                  checked={selectedCategories.has(category)}
-                  onChange={() => toggleCategory(category)}
-                />
-                <span>{category}</span>
-              </label>
-            ))}
+          <div className="flex flex-wrap gap-2">
+            {categories.map((category) => {
+              const selected = selectedCategories.has(category);
+              const accent = selected ? (CHIP_ACCENT[category] ?? CHIP_ACCENT_FALLBACK) : 'border-hairline bg-page hover:border-muted';
+              return (
+                <label
+                  key={category}
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 motion-safe:transition-colors ${accent}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={selected}
+                    onChange={() => toggleCategory(category)}
+                    aria-label={category}
+                  />
+                  <CategorySwatch category={category} active={selected} />
+                </label>
+              );
+            })}
           </div>
         )}
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <p className="text-xs uppercase tracking-widest text-muted">Companies</p>
         <input
           type="text"
@@ -114,18 +135,37 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
           aria-label="Filter companies"
           className="rounded-lg border border-hairline bg-page px-3 py-2 text-ink outline-none focus:border-muted"
         />
-        <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
-          {filteredCompanies.map((company) => (
-            <label key={company.id} className="flex items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={selectedCompanyIds.has(company.id)}
-                onChange={() => toggleCompany(company.id)}
-              />
-              <span>{company.name}</span>
-              <span className="text-xs text-muted">{company.ticker}</span>
-            </label>
-          ))}
+        <div className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
+          {filteredCompanies.map((company) => {
+            const selected = selectedCompanyIds.has(company.id);
+            return (
+              <label
+                key={company.id}
+                className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 motion-safe:transition-colors ${
+                  selected ? 'border-ink bg-hairline/40' : 'border-hairline bg-page hover:border-muted'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={selected}
+                    onChange={() => toggleCompany(company.id)}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none ${
+                      selected ? 'border-ink bg-ink text-page' : 'border-hairline text-transparent'
+                    }`}
+                  >
+                    ✓
+                  </span>
+                  <span className="text-sm text-ink">{company.name}</span>
+                </span>
+                <span className="text-xs text-muted">{company.ticker}</span>
+              </label>
+            );
+          })}
         </div>
       </div>
 

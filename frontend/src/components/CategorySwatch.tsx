@@ -14,13 +14,13 @@ const CATEGORY_LABEL: Record<string, string> = {
   geopolitics: 'Geopolitics',
 };
 
-export default function CategorySwatch({ category }: { category: string }) {
+export default function CategorySwatch({ category, active = false }: { category: string; active?: boolean }) {
   const dotClass = SWATCH_CLASS[category] ?? 'bg-swatch-other';
   const label = CATEGORY_LABEL[category] ?? category.replace(/_/g, ' ');
   return (
     <span className="inline-flex items-center gap-2">
       <span className={`h-2 w-2 rounded-full ${dotClass}`} aria-hidden="true" />
-      <span className="text-xs uppercase tracking-widest text-muted">{label}</span>
+      <span className={`text-xs uppercase tracking-widest ${active ? 'text-ink' : 'text-muted'}`}>{label}</span>
     </span>
   );
 }

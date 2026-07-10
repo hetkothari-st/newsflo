@@ -1,17 +1,13 @@
 import type { AlertCompany } from '../lib/api';
 
-function fmtPct(v: number): string {
-  return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
-}
-
 // Spec fallback rule: once the calibration DB has enough samples the confidence
-// is "calibrated" and the blended range is framed as historical precedent;
-// otherwise the LLM's own estimate stands.
+// is "calibrated" and the direction is framed as historical precedent;
+// otherwise the LLM's own estimate stands. Magnitude percentages are
+// deliberately not shown -- they're frequently inaccurate and would overstate
+// precision the model doesn't actually have.
 export function precedentLine(company: AlertCompany): string {
   if (company.confidence === 'calibrated') {
-    return `Historical precedent: similar past events averaged ${fmtPct(company.magnitude_low)} to ${fmtPct(
-      company.magnitude_high,
-    )} over comparable horizons.`;
+    return `Historical precedent: similar past events showed a comparable ${company.direction} move over comparable horizons.`;
   }
   return `No calibrated history yet — showing the model's own estimate.`;
 }
