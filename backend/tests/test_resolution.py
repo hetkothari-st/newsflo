@@ -106,3 +106,48 @@ def test_resolve_direct_mention_name_fallback_is_case_insensitive(db_session):
 
     assert len(resolved) == 1
     assert resolved[0]["company_id"] == company.id
+
+
+def test_resolve_dedupes_repeated_sector_inference_across_mentions(db_session):
+    # Observed in production: the model named 4 specific companies in one
+    # article but marked all 4 is_direct=false with the same sector -- each
+    # independently expanding to the same top-5 sector companies produced 20
+    # duplicate rows for a single article. Same sector mentioned twice must
+    # resolve the sector's companies only once.
+    for i in range(3):
+        _make_company(db_session, f"OIL_{i}.NS", f"Oil Co {i}", "oil_gas", None, index_tier="NIFTY50")
+    mentions = [
+        CompanyMention(
+            name="Indian Oil Corporation", ticker="IOC.NS", is_direct=False, sector="oil_gas",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="easing crude prices",
+        ),
+        CompanyMention(
+            name="Bharat Petroleum", ticker="BPCL.NS", is_direct=False, sector="oil_gas",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="easing crude prices",
+        ),
+    ]
+
+    resolved = resolve_companies(db_session, mentions)
+
+    assert len(resolved) == 3
+    assert len({r["company_id"] for r in resolved}) == 3
+
+
+def test_resolve_dedupes_direct_mention_already_covered_by_sector_inference(db_session):
+    # A company resolved via an earlier sector-wide expansion must not be
+    # appended again if a later direct mention in the same article names it.
+    company = _make_company(db_session, "OIL_0.NS", "Oil Co 0", "oil_gas", None, index_tier="NIFTY50")
+    mentions = [
+        CompanyMention(
+            name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
+        ),
+        CompanyMention(
+            name="Oil Co 0", ticker="OIL_0.NS", is_direct=True, sector="oil_gas",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="named directly",
+        ),
+    ]
+
+    resolved = resolve_companies(db_session, mentions)
+
+    assert len([r for r in resolved if r["company_id"] == company.id]) == 1
