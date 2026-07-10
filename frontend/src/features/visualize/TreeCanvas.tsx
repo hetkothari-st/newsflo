@@ -33,7 +33,10 @@ function BranchNode({ data }: NodeProps<TreeNodeRenderData>) {
 }
 
 function LeafNode({ data, selected }: NodeProps<TreeNodeRenderData>) {
-  const bullish = data.leaf?.direction === 'bullish';
+  const direction = data.leaf?.direction;
+  const arrow = direction === 'bullish' ? '▲' : direction === 'bearish' ? '▼' : '●';
+  const directionClass =
+    direction === 'bullish' ? 'text-bullish' : direction === 'bearish' ? 'text-bearish' : 'text-muted';
   return (
     <div
       className={`flex min-w-[160px] items-center gap-1.5 rounded-lg border bg-surface p-2.5 text-sm text-ink motion-safe:transition-colors ${
@@ -41,8 +44,8 @@ function LeafNode({ data, selected }: NodeProps<TreeNodeRenderData>) {
       }`}
     >
       <Handle type="target" position={Position.Top} className="opacity-0" />
-      <span aria-hidden="true" className={bullish ? 'text-bullish' : 'text-bearish'}>
-        {bullish ? '▲' : '▼'}
+      <span aria-hidden="true" className={directionClass}>
+        {arrow}
       </span>
       <span className="truncate">{data.label}</span>
     </div>
