@@ -46,8 +46,7 @@ function CompanyAvatar({ ticker }: { ticker: string }) {
 export default function CompanyChip({ company }: { company: AlertCompany }) {
   const [expanded, setExpanded] = useState(false);
   const bullish = company.direction === 'bullish';
-  const magnitudeClass = bullish ? 'text-bullish' : 'text-bearish';
-  const badgeClass = bullish ? 'border-bullish' : 'border-bearish';
+  const directionClass = bullish ? 'text-bullish' : 'text-bearish';
 
   function toggle() {
     setExpanded((v) => !v);
@@ -68,23 +67,18 @@ export default function CompanyChip({ company }: { company: AlertCompany }) {
         aria-expanded={expanded}
         onClick={toggle}
         onKeyDown={onKeyDown}
-        className="flex cursor-pointer flex-col gap-2.5 rounded-lg border border-hairline bg-surface p-3 motion-safe:transition-colors hover:border-muted"
+        className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-hairline bg-surface p-3 motion-safe:transition-colors hover:border-muted"
       >
-        <div className="flex items-center gap-2.5">
-          <CompanyAvatar ticker={company.ticker} />
-          <div className="flex min-w-0 flex-col">
-            <span className="truncate text-sm text-ink">{company.name}</span>
-            <span className="truncate text-[11px] uppercase tracking-wide text-muted">{company.ticker}</span>
-          </div>
-        </div>
-        <span
-          className={`inline-flex w-fit items-center gap-1 rounded-full border-[1.5px] bg-transparent px-2 py-0.5 text-xs uppercase tracking-wide ${badgeClass}`}
-        >
-          <span aria-hidden="true" className={magnitudeClass}>
-            {bullish ? '▲' : '▼'}
+        <CompanyAvatar ticker={company.ticker} />
+        <div className="flex min-w-0 flex-col">
+          <span className="flex items-center gap-1.5 truncate text-sm text-ink">
+            <span aria-hidden="true" className={directionClass}>
+              {bullish ? '▲' : '▼'}
+            </span>
+            <span className="truncate">{company.name}</span>
           </span>
-          <span className={magnitudeClass}>{bullish ? 'Bullish' : 'Bearish'}</span>
-        </span>
+          <span className="truncate text-[11px] uppercase tracking-wide text-muted">{company.ticker}</span>
+        </div>
       </div>
       {expanded && <ReasoningPanel company={company} />}
     </div>
