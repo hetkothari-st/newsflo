@@ -1,10 +1,27 @@
 import json
+from types import SimpleNamespace
 
+from anthropic import Anthropic
+from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
 
 from app.analysis.schemas import SECTORS, AnalysisOutput
 
+# Anthropic is the primary provider when a real (funded) key is configured --
+# best quality, native forced tool-use. Groq is the fallback so a real,
+# funded key is never wasted on calls that a free provider could have
+# served, and so the app keeps working if Anthropic's own rate limit is hit.
+ANTHROPIC_MODEL = "claude-sonnet-4-5"
+
 MODEL = "llama-3.3-70b-versatile"
+# Groq enforces daily token quotas PER MODEL, not per key -- multiple keys on
+# the same org share one quota bucket for a given model (confirmed: 3 keys
+# from the same org all hit the same "org_..." rate-limit error for MODEL at
+# the same time). FALLBACK_MODEL is a smaller model with its own SEPARATE
+# quota bucket, used only when MODEL is rate-limited -- best quality when
+# available, still available (slightly less reliable on strict schema
+# adherence) when the primary model's daily budget is exhausted.
+FALLBACK_MODEL = "llama-3.1-8b-instant"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # Precise definitions the model must use for sector inference. Ambiguity here
@@ -132,19 +149,119 @@ class RotatingClient:
         raise last_error
 
 
-def build_client(api_key: str | list[str]) -> OpenAI | RotatingClient:
-    if isinstance(api_key, list):
-        return RotatingClient(api_key, base_url=GROQ_BASE_URL)
-    return OpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
+class _AnthropicCompletions:
+    """Translates an OpenAI-shape chat.completions.create(...) call into a
+    native Anthropic messages.create(...) call and translates the response
+    back into the OpenAI response shape -- so analyze_article's parsing code
+    (response.choices[0].message.tool_calls[...]) works unchanged for either
+    provider. The `model` kwarg passed in is ignored; this always calls
+    ANTHROPIC_MODEL, since callers pass Groq model names meant for the Groq
+    path.
+    """
+
+    def __init__(self, anthropic_client: Anthropic):
+        self._client = anthropic_client
+
+    def create(self, *, max_tokens, tools, messages, **_ignored):
+        system_content = None
+        chat_messages = []
+        for m in messages:
+            if m["role"] == "system":
+                system_content = m["content"]
+            else:
+                chat_messages.append({"role": m["role"], "content": m["content"]})
+
+        function_spec = tools[0]["function"]
+        anthropic_tool = {
+            "name": function_spec["name"],
+            "description": function_spec["description"],
+            "input_schema": function_spec["parameters"],
+        }
+
+        response = self._client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=max_tokens,
+            system=system_content,
+            tools=[anthropic_tool],
+            tool_choice={"type": "tool", "name": anthropic_tool["name"]},
+            messages=chat_messages,
+        )
+        tool_use = next((block for block in response.content if block.type == "tool_use"), None)
+        if tool_use is None:
+            fake_tool_calls = []
+        else:
+            fake_tool_calls = [SimpleNamespace(
+                function=SimpleNamespace(name=tool_use.name, arguments=json.dumps(tool_use.input)),
+            )]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=fake_tool_calls))])
+
+
+class _AnthropicChat:
+    def __init__(self, anthropic_client: Anthropic):
+        self.completions = _AnthropicCompletions(anthropic_client)
+
+
+class AnthropicAdapter:
+    """Duck-types the OpenAI client surface analyze_article uses, backed by
+    the native Anthropic SDK, so the rest of the pipeline never needs to know
+    which provider actually served a given call."""
+
+    def __init__(self, api_key: str):
+        self.chat = _AnthropicChat(Anthropic(api_key=api_key))
+
+
+class _FallbackCompletions:
+    def __init__(self, fallback_client: "FallbackClient"):
+        self._fallback_client = fallback_client
+
+    def create(self, **kwargs):
+        return self._fallback_client._call(**kwargs)
+
+
+class _FallbackChat:
+    def __init__(self, fallback_client: "FallbackClient"):
+        self.completions = _FallbackCompletions(fallback_client)
+
+
+class FallbackClient:
+    """Tries the primary client (Anthropic) first; on ANY Anthropic API-level
+    failure (rate limit, insufficient credit balance, auth, server error,
+    connection failure -- anthropic.APIError covers all of these) or an
+    OpenAI-style RateLimitError, falls through to the secondary client (Groq,
+    itself possibly a RotatingClient/model-fallback already). A credit/billing
+    failure is a real, expected production scenario for a paid API -- not
+    catching it here would crash the whole pipeline instead of degrading to
+    the fallback provider. Errors from the secondary client itself still
+    propagate normally.
+    """
+
+    def __init__(self, primary, secondary):
+        self._primary = primary
+        self._secondary = secondary
+        self.chat = _FallbackChat(self)
+
+    def _call(self, **kwargs):
+        try:
+            return self._primary.chat.completions.create(**kwargs)
+        except (RateLimitError, AnthropicAPIError):
+            return self._secondary.chat.completions.create(**kwargs)
+
+
+def build_client(
+    groq_api_key: str | list[str], anthropic_api_key: str | None = None,
+) -> OpenAI | RotatingClient | FallbackClient:
+    if isinstance(groq_api_key, list):
+        groq_client = RotatingClient(groq_api_key, base_url=GROQ_BASE_URL)
+    else:
+        groq_client = OpenAI(api_key=groq_api_key, base_url=GROQ_BASE_URL)
+
+    if anthropic_api_key:
+        return FallbackClient(AnthropicAdapter(anthropic_api_key), groq_client)
+    return groq_client
 
 
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=1024,
-        tools=[RECORD_ANALYSIS_TOOL],
-        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
-        messages=[
+    messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -165,8 +282,9 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
                 "price shock, a rate decision, a regulatory change) that plausibly moves "
                 "EVERY company in that sector similarly -- not a speculative multi-step "
                 "chain of reasoning.\n"
-                "3. The `sector` value MUST come from this exact list, using these exact "
-                "definitions -- if the real-world industry you're reasoning about does not "
+                "3. The `sector` value MUST be written EXACTLY as shown below -- lowercase, "
+                "exact spelling, e.g. \"it\" not \"IT\", \"oil_gas\" not \"Oil_Gas\" or "
+                "\"Oil & Gas\". If the real-world industry you're reasoning about does not "
                 "match one of these definitions, DO NOT force it into the closest-sounding "
                 "one. Omit that company/sector entirely instead:\n"
                 f"{SECTOR_DEFINITIONS}\n"
@@ -182,8 +300,26 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
                 "a sentence that would apply equally to any company in its sector.\n\n"
                 f"Title: {title}\n\nContent: {content or '(no summary available -- reason only from the title, and be more conservative about sector-level inference given the limited signal)'}"
             ),
-        }],
-    )
+        },
+    ]
+
+    def _call(model: str):
+        return client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            tools=[RECORD_ANALYSIS_TOOL],
+            tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+            messages=messages,
+        )
+
+    try:
+        response = _call(MODEL)
+    except RateLimitError:
+        # MODEL's daily quota is exhausted -- FALLBACK_MODEL has a separate
+        # quota bucket on Groq, so this is a real fallback, not a retry of
+        # the same exhausted budget.
+        response = _call(FALLBACK_MODEL)
+
     message = response.choices[0].message
     tool_calls = message.tool_calls or []
     tool_call = next((tc for tc in tool_calls if tc.function.name == "record_analysis"), None)

@@ -39,7 +39,7 @@ def _run_ingestion_and_analysis() -> None:
     session = SessionLocal()
     try:
         inserted = fetch_new_articles(session, RSS_FEEDS)
-        client = build_client(settings.groq_api_keys)
+        client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
         created = process_new_articles(session, client, throttle_seconds=2.5)
         logger.info("Poll cycle: %s new articles, %s alerts created", inserted, created)
     except Exception:

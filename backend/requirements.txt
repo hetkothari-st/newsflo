@@ -4,6 +4,7 @@ sqlalchemy
 pydantic
 pydantic-settings
 openai
+anthropic
 feedparser
 httpx
 pytest

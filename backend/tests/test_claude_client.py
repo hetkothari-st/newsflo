@@ -2,15 +2,29 @@ import json
 from types import SimpleNamespace
 
 import httpx
+from anthropic import BadRequestError as AnthropicBadRequestError
+from anthropic import RateLimitError as AnthropicRateLimitError
 from openai import RateLimitError
 
-from app.analysis.claude_client import RotatingClient, analyze_article, build_client
+from app.analysis.claude_client import (
+    AnthropicAdapter,
+    FallbackClient,
+    RotatingClient,
+    analyze_article,
+    build_client,
+)
 
 
 def _rate_limit_error() -> RateLimitError:
     request = httpx.Request("POST", "https://example.test/v1/chat/completions")
     response = httpx.Response(status_code=429, request=request)
     return RateLimitError("rate limited", response=response, body=None)
+
+
+def _anthropic_rate_limit_error() -> AnthropicRateLimitError:
+    request = httpx.Request("POST", "https://example.test/v1/messages")
+    response = httpx.Response(status_code=429, request=request)
+    return AnthropicRateLimitError("rate limited", response=response, body=None)
 
 
 class FakeToolCall:
@@ -162,6 +176,42 @@ def test_rotating_client_raises_when_every_key_is_rate_limited():
         pass
 
 
+class FakeCompletionsModelFallback:
+    """Raises a rate limit for the primary MODEL, succeeds for FALLBACK_MODEL."""
+    def __init__(self, response_input):
+        self._response_input = response_input
+        self.models_called = []
+
+    def create(self, **kwargs):
+        from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+        self.models_called.append(kwargs["model"])
+        if kwargs["model"] == MODEL:
+            raise _rate_limit_error()
+        assert kwargs["model"] == FALLBACK_MODEL
+        message = SimpleNamespace(tool_calls=[FakeToolCall("record_analysis", self._response_input)])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+def test_analyze_article_falls_back_to_secondary_model_on_rate_limit():
+    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+
+    fake_output = {
+        "category": "oil_energy",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "Top refiner benefits from crude price spike.",
+        }],
+    }
+    completions = FakeCompletionsModelFallback(fake_output)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    result = analyze_article(client, title="US strikes Iran oil sites", content="crude oil markets react")
+
+    assert result.companies[0].ticker == "RELIANCE.NS"
+    assert completions.models_called == [MODEL, FALLBACK_MODEL]
+
+
 def test_rotating_client_does_not_rotate_on_non_rate_limit_errors():
     rotator = RotatingClient(["key-a", "key-b"], base_url="https://example.test/v1")
     rotator._clients[0] = _FailingUnderlyingClient(ValueError("something else broke"))
@@ -174,3 +224,160 @@ def test_rotating_client_does_not_rotate_on_non_rate_limit_errors():
         assert False, "Expected ValueError to propagate without rotating"
     except ValueError:
         pass
+
+
+def test_build_client_wraps_in_fallback_when_anthropic_key_given():
+    client = build_client("groq-key", "anthropic-key")
+    assert isinstance(client, FallbackClient)
+    assert isinstance(client._primary, AnthropicAdapter)
+
+
+def test_build_client_skips_fallback_wrapper_without_anthropic_key():
+    client = build_client("groq-key", None)
+    assert not isinstance(client, FallbackClient)
+
+
+def test_fallback_client_uses_primary_when_it_succeeds():
+    sentinel = SimpleNamespace(choices=[])
+    primary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kw: (_ for _ in ()).throw(AssertionError("secondary should not be called")),
+    )))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
+
+
+def test_fallback_client_falls_through_to_secondary_on_anthropic_rate_limit():
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(_anthropic_rate_limit_error())
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
+
+
+def test_fallback_client_falls_through_to_secondary_on_openai_rate_limit():
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(_rate_limit_error())
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
+
+
+def test_fallback_client_falls_through_to_secondary_on_anthropic_credit_failure():
+    # Insufficient credit balance is anthropic.BadRequestError (400), not a
+    # rate limit -- must still fall through, or a real funded-then-exhausted
+    # key crashes the whole pipeline instead of degrading to Groq.
+    request = httpx.Request("POST", "https://example.test/v1/messages")
+    response = httpx.Response(status_code=400, request=request)
+    credit_error = AnthropicBadRequestError("credit balance too low", response=response, body=None)
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(credit_error)
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
+
+
+def test_fallback_client_does_not_fall_through_on_other_errors():
+    primary = _FailingUnderlyingClient(ValueError("real bug"))
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kw: (_ for _ in ()).throw(AssertionError("secondary should not be called")),
+    )))
+
+    try:
+        FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+        assert False, "Expected ValueError to propagate without falling through"
+    except ValueError:
+        pass
+
+
+class _FakeAnthropicToolUseBlock:
+    type = "tool_use"
+
+    def __init__(self, name, input_data):
+        self.name = name
+        self.input = input_data
+
+
+class _FakeAnthropicMessages:
+    def __init__(self, tool_input):
+        self._tool_input = tool_input
+        self.last_kwargs = None
+
+    def create(self, **kwargs):
+        self.last_kwargs = kwargs
+        return SimpleNamespace(content=[_FakeAnthropicToolUseBlock("record_analysis", self._tool_input)])
+
+
+def test_anthropic_adapter_translates_request_and_response_to_openai_shape():
+    tool_input = {
+        "category": "oil_energy",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "Refiner margins expand.",
+        }],
+    }
+    fake_messages = _FakeAnthropicMessages(tool_input)
+    adapter = AnthropicAdapter.__new__(AnthropicAdapter)  # bypass __init__'s real Anthropic() construction
+    adapter.chat = SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kw: _translate_via_fake(fake_messages, **kw),
+    ))
+
+    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL, SYSTEM_PROMPT
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[RECORD_ANALYSIS_TOOL],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Title: test\n\nContent: test"},
+        ],
+    )
+
+    # Request was translated to Anthropic's shape correctly.
+    assert fake_messages.last_kwargs["system"] == SYSTEM_PROMPT
+    assert fake_messages.last_kwargs["tools"][0]["name"] == "record_analysis"
+    assert "input_schema" in fake_messages.last_kwargs["tools"][0]
+    assert fake_messages.last_kwargs["messages"] == [{"role": "user", "content": "Title: test\n\nContent: test"}]
+
+    # Response was translated back to the OpenAI shape analyze_article expects.
+    tool_call = result.choices[0].message.tool_calls[0]
+    assert tool_call.function.name == "record_analysis"
+    assert json.loads(tool_call.function.arguments) == tool_input
+
+
+def _translate_via_fake(fake_messages, **kwargs):
+    from app.analysis.claude_client import _AnthropicCompletions
+    completions = _AnthropicCompletions.__new__(_AnthropicCompletions)
+    completions._client = SimpleNamespace(messages=fake_messages)
+    return completions.create(**kwargs)
+
+
+def test_analyze_article_works_end_to_end_via_anthropic_adapter():
+    tool_input = {
+        "category": "oil_energy",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "Refiner margins expand.",
+        }],
+    }
+    fake_messages = _FakeAnthropicMessages(tool_input)
+    adapter = AnthropicAdapter.__new__(AnthropicAdapter)
+    adapter.chat = SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kw: _translate_via_fake(fake_messages, **kw),
+    ))
+
+    result = analyze_article(adapter, title="US strikes Iran oil sites", content="crude oil markets react")
+
+    assert result.category == "oil_energy"
+    assert result.companies[0].ticker == "RELIANCE.NS"
