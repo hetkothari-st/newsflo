@@ -8,6 +8,7 @@ from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.claude_client import analyze_article
 from app.calibration.blender import get_calibrated_magnitude
+from app.companies.history import get_past_mentions
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
@@ -27,7 +28,7 @@ def decode_key_points(alert_company: AlertCompany) -> list[str]:
     return json.loads(alert_company.key_points_json)
 
 
-def _alert_broadcast_payload(alert: Alert) -> dict:
+def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
     """Shape one live-push payload identical to a single GET /api/alerts entry,
     MINUS the per-viewer ``in_my_holdings`` flag.
 
@@ -60,6 +61,7 @@ def _alert_broadcast_payload(alert: Alert) -> dict:
             "basis": ac.basis,
             "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
+            "past_mentions": get_past_mentions(session, ac.company_id, alert.created_at),
         } for ac in alert.companies],
     }
 
@@ -134,7 +136,7 @@ def _persist_alert(session: Session, article: Article, category: str, entries: l
 
     new_notifications = match_alert_to_holdings(session, alert)
     send_pending_notifications(session, new_notifications)
-    manager.broadcast_sync(_alert_broadcast_payload(alert))
+    manager.broadcast_sync(_alert_broadcast_payload(session, alert))
     return alert
 
 

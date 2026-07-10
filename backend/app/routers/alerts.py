@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
+from app.companies.history import get_past_mentions
 from app.companies.market import infer_market
 from app.models import Alert, Holding, User
 from app.pipeline import decode_key_points
@@ -39,5 +40,6 @@ def list_alerts(
             "basis": ac.basis, "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
             "in_my_holdings": ac.company_id in held_company_ids,
+            "past_mentions": get_past_mentions(db, ac.company_id, alert.created_at),
         } for ac in alert.companies],
     } for alert in alerts]

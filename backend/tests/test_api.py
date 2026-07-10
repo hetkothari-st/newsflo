@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -45,6 +47,55 @@ def test_list_alerts_returns_nested_companies(db_session):
     assert body[0]["companies"][0]["in_my_holdings"] is False
     assert body[0]["article"]["title"] == "Test headline"
     assert body[0]["article"]["image_url"] == "https://example.com/x.jpg"
+    # Only one alert exists for this company -- no prior history.
+    assert body[0]["companies"][0]["past_mentions"] == []
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_includes_past_mentions_for_the_same_company(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    older_article = Article(source="test", url="https://example.com/older", title="Older Reliance story", status="ANALYZED")
+    db_session.add(older_article)
+    db_session.commit()
+    older_alert = Alert(article_id=older_article.id, category="corporate_event", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    db_session.add(older_alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=older_alert.id, company_id=company.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="older reasoning", basis="direct_mention",
+    ))
+    db_session.commit()
+
+    newer_article = Article(source="test", url="https://example.com/newer", title="Newer Reliance story", status="ANALYZED")
+    db_session.add(newer_article)
+    db_session.commit()
+    newer_alert = Alert(article_id=newer_article.id, category="oil_energy", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc))
+    db_session.add(newer_alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=newer_alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="newer reasoning", basis="direct_mention",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = {a["article"]["title"]: a for a in response.json()}
+    # The newer alert's company sees the older one as history.
+    newer_mentions = body["Newer Reliance story"]["companies"][0]["past_mentions"]
+    assert len(newer_mentions) == 1
+    assert newer_mentions[0]["article_title"] == "Older Reliance story"
+    assert newer_mentions[0]["direction"] == "bearish"
+    # The older alert has no history of its own.
+    assert body["Older Reliance story"]["companies"][0]["past_mentions"] == []
 
     app.dependency_overrides.clear()
 

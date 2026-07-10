@@ -13,12 +13,12 @@ const alert: Alert = {
     {
       company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
       direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner up.', key_points: [],
-      basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true,
+      basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true, past_mentions: [],
     },
     {
       company_id: 2, ticker: 'ONGC.NS', name: 'ONGC', index_tier: 'NIFTY100',
       direction: 'bearish', magnitude_low: -3, magnitude_high: -1, rationale: 'Cost pressure.', key_points: [],
-      basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false,
+      basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [],
     },
   ],
 };

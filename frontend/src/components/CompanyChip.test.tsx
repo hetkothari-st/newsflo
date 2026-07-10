@@ -18,6 +18,7 @@ const company: AlertCompany = {
   confidence: 'llm_estimate',
   market: 'IN',
   in_my_holdings: false,
+  past_mentions: [],
 };
 
 describe('CompanyChip', () => {

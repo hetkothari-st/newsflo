@@ -1,5 +1,11 @@
 import type { AlertCompany } from '../lib/api';
 
+function formatMentionDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // Spec fallback rule: once the calibration DB has enough samples the confidence
 // is "calibrated" and the direction is framed as historical precedent;
 // otherwise the LLM's own estimate stands. Magnitude percentages are
@@ -43,6 +49,32 @@ export default function ReasoningPanel({ company }: { company: AlertCompany }) {
         ))}
       </ul>
       <p className="mt-2 text-xs text-muted">{precedentLine(company)}</p>
+      {company.past_mentions.length > 0 && (
+        <div className="mt-3 border-t border-hairline pt-2">
+          <p className="text-xs uppercase tracking-widest text-muted">Previously</p>
+          <ul className="mt-1.5 space-y-1">
+            {company.past_mentions.map((mention) => (
+              <li key={mention.alert_id}>
+                <a
+                  href={mention.article_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-baseline gap-2 text-xs text-ink hover:underline"
+                >
+                  <span
+                    className={mention.direction === 'bullish' ? 'text-bullish' : 'text-bearish'}
+                    aria-hidden="true"
+                  >
+                    {mention.direction === 'bullish' ? '▲' : '▼'}
+                  </span>
+                  <span className="flex-1">{mention.article_title}</span>
+                  <span className="shrink-0 text-muted">{formatMentionDate(mention.created_at)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

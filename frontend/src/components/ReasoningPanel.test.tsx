@@ -13,6 +13,7 @@ const base: AlertCompany = {
   magnitude_high: 4,
   rationale: 'Margins up.',
   key_points: [],
+  past_mentions: [],
   basis: 'direct_mention',
   confidence: 'llm_estimate',
   market: 'IN',
@@ -85,5 +86,27 @@ describe('ReasoningPanel', () => {
     expect(items[0]).toHaveTextContent('Crude eases, margins widen');
     expect(items[1]).toHaveTextContent('2018 sanctions precedent: GRM +$2/bbl');
     expect(screen.queryByText(/A long paragraph/)).not.toBeInTheDocument();
+  });
+
+  it('shows past mentions as links when present', () => {
+    const withHistory = {
+      ...base,
+      past_mentions: [
+        {
+          alert_id: 5, article_title: 'HDFC raises EMI cap on personal loans',
+          article_url: 'https://example.com/hdfc-emi', created_at: '2026-05-01T00:00:00+00:00',
+          direction: 'bearish', category: 'banking',
+        },
+      ],
+    };
+    render(<ReasoningPanel company={withHistory} />);
+    expect(screen.getByText('Previously')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /HDFC raises EMI cap on personal loans/ });
+    expect(link).toHaveAttribute('href', 'https://example.com/hdfc-emi');
+  });
+
+  it('omits the Previously section when there is no history', () => {
+    render(<ReasoningPanel company={base} />);
+    expect(screen.queryByText('Previously')).not.toBeInTheDocument();
   });
 });

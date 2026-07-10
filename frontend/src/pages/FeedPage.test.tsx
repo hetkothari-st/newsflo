@@ -20,6 +20,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
     magnitude_high: 2,
     rationale: 'x',
     key_points: [],
+    past_mentions: [],
     basis: 'direct_mention',
     confidence: 'llm_estimate',
     market: 'IN',
