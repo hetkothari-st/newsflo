@@ -118,12 +118,16 @@ export default function Feed() {
     window.scrollTo({ top: 0 });
   }, [tabAlerts]);
 
-  // Switching tabs mounts a fresh list, so there's no scroll position to
-  // disrupt -- silently reveal whatever's already queued for the tab being
-  // switched to (a push that arrived while on a *different* tab shouldn't
-  // require an extra "N new" tap once the user actually navigates there).
-  // Deliberately keyed on `tab` alone: a live push arriving while the tab
-  // stays active must still queue behind "N new" instead of auto-revealing.
+  // Switching tabs silently reveals whatever's already queued for the tab
+  // being switched to (a push that arrived while on a *different* tab
+  // shouldn't require an extra "N new" tap once the user actually navigates
+  // there). MobileFeedCarousel is NOT remounted on tab change (same DOM node,
+  // new content), so there's no free "fresh scroll position" here -- reset
+  // it explicitly, same as revealNew, or a revisit to a tab with residual
+  // scroll offset would silently shift content under the user, reproducing
+  // the exact bug this queueing exists to prevent. Deliberately keyed on
+  // `tab` alone: a live push arriving while the tab stays active must still
+  // queue behind "N new" instead of auto-revealing.
   useEffect(() => {
     setRevealedIds((prev) => {
       const next = new Set(prev);
@@ -136,6 +140,8 @@ export default function Feed() {
       });
       return changed ? next : prev;
     });
+    carouselRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 

@@ -200,4 +200,19 @@ describe('Feed', () => {
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 0 });
     expect(windowScrollToSpy).toHaveBeenCalledWith({ top: 0 });
   });
+
+  it('scrolls to top on tab switch, so a residual scroll offset never carries a stale position into the new tab', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
+    renderFeed();
+    await screen.findAllByText('India oil headline');
+
+    const scrollToSpy = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollToSpy;
+    const windowScrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+
+    await userEvent.click(screen.getByRole('tab', { name: /global/i }));
+
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 0 });
+    expect(windowScrollToSpy).toHaveBeenCalledWith({ top: 0 });
+  });
 });
