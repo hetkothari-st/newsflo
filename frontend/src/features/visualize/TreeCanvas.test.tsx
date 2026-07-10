@@ -1,5 +1,4 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import TreeCanvas from './TreeCanvas';
 import type { Node, Edge } from 'reactflow';
@@ -20,10 +19,10 @@ describe('TreeCanvas', () => {
     expect(screen.getByText('Alpha Co')).toBeInTheDocument();
   });
 
-  it('calls onLeafClick with the company id when a leaf node is clicked', async () => {
+  it('calls onLeafClick with the company id when a leaf node is clicked', () => {
     const onLeafClick = vi.fn();
     render(<TreeCanvas nodes={nodes} edges={edges} onLeafClick={onLeafClick} />);
-    await userEvent.click(screen.getByText('Alpha Co'));
+    fireEvent.click(screen.getByText('Alpha Co'));
     expect(onLeafClick).toHaveBeenCalledWith(7);
   });
 });
