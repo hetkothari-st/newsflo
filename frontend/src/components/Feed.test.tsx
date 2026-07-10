@@ -147,4 +147,57 @@ describe('Feed', () => {
     expect((await screen.findAllByText('Live oil headline')).length).toBeGreaterThan(0);
     expect(screen.queryByText('1 new')).not.toBeInTheDocument();
   });
+
+  it('does not count a live alert on a market the user is not viewing', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [], connected: true });
+    const { rerender } = renderFeed();
+    await screen.findAllByText('India oil headline');
+
+    // User is on the India tab (default); a live GLOBAL alert arrives.
+    const liveGlobalAlert = makeAlert(4, 'Live global headline', [
+      company({ company_id: 4, ticker: 'MSFT', name: 'Microsoft', market: 'GLOBAL' }),
+    ], 'it');
+    vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [liveGlobalAlert], connected: true });
+    rerender(
+      <MemoryRouter>
+        <AuthProvider>
+          <Feed />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    // The India tab must not show a misleading "new" pill for a Global-only alert.
+    expect(screen.queryByText('1 new')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: /global/i }));
+    expect((await screen.findAllByText('Live global headline')).length).toBeGreaterThan(0);
+  });
+
+  it('scrolls the carousel and window to top when "N new" is revealed', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [], connected: true });
+    const { rerender } = renderFeed();
+    await screen.findAllByText('India oil headline');
+
+    const liveAlert = makeAlert(5, 'Another live headline', [company({ company_id: 5, market: 'IN' })]);
+    vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [liveAlert], connected: true });
+    rerender(
+      <MemoryRouter>
+        <AuthProvider>
+          <Feed />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText('1 new');
+
+    const scrollToSpy = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollToSpy;
+    const windowScrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+
+    await userEvent.click(screen.getByText('1 new'));
+
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 0 });
+    expect(windowScrollToSpy).toHaveBeenCalledWith({ top: 0 });
+  });
 });

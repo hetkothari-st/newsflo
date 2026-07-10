@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { getAlerts, getWatchlist, type Alert, type Watchlist } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -46,6 +46,7 @@ export default function Feed() {
   // arriving mid-scroll must never shift the user's scroll-snap position).
   const [revealedIds, setRevealedIds] = useState<Set<number>>(new Set());
   const { alerts: live, connected } = useAlertsSocket();
+  const carouselRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -84,23 +85,59 @@ export default function Feed() {
 
   const alerts = useMemo(() => mergeAlerts(live, fetched), [live, fetched]);
 
+  // "New" and "visible" are both scoped to the ACTIVE tab -- otherwise a live
+  // push on a tab the user isn't viewing would light up "N new" with nothing
+  // to actually reveal there (whole-branch review finding).
+  const tabAlerts = useMemo(() => {
+    if (tab === 'india') return alerts.filter((a) => alertMatchesMarket(a, 'IN'));
+    if (tab === 'global') return alerts.filter((a) => alertMatchesMarket(a, 'GLOBAL'));
+    return alerts.filter((a) => alertMatchesWatchlist(a, watchlist));
+  }, [alerts, tab, watchlist]);
+
   const newCount = useMemo(
-    () => alerts.filter((a) => !revealedIds.has(a.id)).length,
-    [alerts, revealedIds],
+    () => tabAlerts.filter((a) => !revealedIds.has(a.id)).length,
+    [tabAlerts, revealedIds],
   );
-  const shownAlerts = useMemo(
+  const visibleAlerts = useMemo(
+    () => tabAlerts.filter((a) => revealedIds.has(a.id)),
+    [tabAlerts, revealedIds],
+  );
+  // LiveStatus's "time since last alert" stays feed-wide (not tab-scoped) --
+  // it reports overall freshness, independent of which tab is active.
+  const revealedAlerts = useMemo(
     () => alerts.filter((a) => revealedIds.has(a.id)),
     [alerts, revealedIds],
   );
   const revealNew = useCallback(() => {
-    setRevealedIds(new Set(alerts.map((a) => a.id)));
-  }, [alerts]);
+    setRevealedIds((prev) => {
+      const next = new Set(prev);
+      tabAlerts.forEach((a) => next.add(a.id));
+      return next;
+    });
+    carouselRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+  }, [tabAlerts]);
 
-  const visibleAlerts = useMemo(() => {
-    if (tab === 'india') return shownAlerts.filter((a) => alertMatchesMarket(a, 'IN'));
-    if (tab === 'global') return shownAlerts.filter((a) => alertMatchesMarket(a, 'GLOBAL'));
-    return shownAlerts.filter((a) => alertMatchesWatchlist(a, watchlist));
-  }, [shownAlerts, tab, watchlist]);
+  // Switching tabs mounts a fresh list, so there's no scroll position to
+  // disrupt -- silently reveal whatever's already queued for the tab being
+  // switched to (a push that arrived while on a *different* tab shouldn't
+  // require an extra "N new" tap once the user actually navigates there).
+  // Deliberately keyed on `tab` alone: a live push arriving while the tab
+  // stays active must still queue behind "N new" instead of auto-revealing.
+  useEffect(() => {
+    setRevealedIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      tabAlerts.forEach((a) => {
+        if (!next.has(a.id)) {
+          next.add(a.id);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const openAlert = alerts.find((a) => a.id === openAlertId) ?? null;
   const customConfigured = watchlist.categories.length > 0 || watchlist.companies.length > 0;
@@ -134,7 +171,7 @@ export default function Feed() {
   } else {
     body = (
       <>
-        <MobileFeedCarousel alerts={visibleAlerts} onOpen={setOpenAlertId} />
+        <MobileFeedCarousel ref={carouselRef} alerts={visibleAlerts} onOpen={setOpenAlertId} />
         <DesktopFeedGrid alerts={visibleAlerts} onOpen={setOpenAlertId} />
       </>
     );
@@ -151,7 +188,7 @@ export default function Feed() {
           active={tab}
           onChange={setTab}
           connected={connected}
-          lastAlertAt={shownAlerts[0]?.created_at ?? null}
+          lastAlertAt={revealedAlerts[0]?.created_at ?? null}
           newCount={newCount}
           onRevealNew={revealNew}
           onOpenCustomSettings={() => setSettingsOpen(true)}
