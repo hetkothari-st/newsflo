@@ -27,3 +27,13 @@ def db_session():
         yield session
     finally:
         session.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_og_image_fetch(monkeypatch):
+    # process_new_articles fetches each article's og:image over a real HTTP
+    # GET (see app/ingestion/og_image.py). Stub it everywhere by default so
+    # the suite never makes network calls; app/ingestion/og_image.py's own
+    # tests exercise the real function directly and are unaffected since
+    # they don't go through app.pipeline.
+    monkeypatch.setattr("app.pipeline.fetch_og_image", lambda url: None)
