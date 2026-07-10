@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import ReasoningPanel, { precedentLine } from './ReasoningPanel';
+import ReasoningPanel, { precedentLine, splitRationaleIntoPoints } from './ReasoningPanel';
 import type { AlertCompany } from '../lib/api';
 
 const base: AlertCompany = {
@@ -29,10 +29,46 @@ describe('precedentLine', () => {
   });
 });
 
+describe('splitRationaleIntoPoints', () => {
+  it('splits a multi-sentence rationale into one point per sentence', () => {
+    const rationale =
+      'State Bank of India is the parent of SBI Funds Management. ' +
+      'For a bank of SBI size, the direct earnings impact is modest. ' +
+      'Historical precedent: PSU bank holding-company premiums expand when subsidiaries list.';
+    const points = splitRationaleIntoPoints(rationale);
+    expect(points).toEqual([
+      'State Bank of India is the parent of SBI Funds Management.',
+      'For a bank of SBI size, the direct earnings impact is modest.',
+      'Historical precedent: PSU bank holding-company premiums expand when subsidiaries list.',
+    ]);
+  });
+
+  it('does not split on a decimal number or mid-sentence abbreviation', () => {
+    const rationale = 'Revenue grew 2.5x amid strong e.g. demand from exports.';
+    expect(splitRationaleIntoPoints(rationale)).toEqual([rationale]);
+  });
+
+  it('returns a single point for a single-sentence rationale', () => {
+    expect(splitRationaleIntoPoints('Margins up.')).toEqual(['Margins up.']);
+  });
+});
+
 describe('ReasoningPanel', () => {
   it('renders the company, ticker and rationale', () => {
     render(<ReasoningPanel company={base} />);
     expect(screen.getByText(/RELIANCE\.NS/)).toBeInTheDocument();
     expect(screen.getByText('Margins up.')).toBeInTheDocument();
+  });
+
+  it('renders a multi-sentence rationale as separate bullet points', () => {
+    const multiSentence = {
+      ...base,
+      rationale: 'First reason applies here. Second reason applies too.',
+    };
+    render(<ReasoningPanel company={multiSentence} />);
+    const items = screen.getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent('First reason applies here.');
+    expect(items[1]).toHaveTextContent('Second reason applies too.');
   });
 });
