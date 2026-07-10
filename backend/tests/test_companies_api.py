@@ -57,3 +57,21 @@ def test_list_companies_filter_global(db_session):
     assert all(c["market"] == "GLOBAL" for c in body)
 
     app.dependency_overrides.clear()
+
+
+def test_list_companies_includes_isin_and_logo_url(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1.0, isin="INE002A01018",
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get("/api/companies").json()
+
+    row = next(c for c in body if c["ticker"] == "RELIANCE.NS")
+    assert row["isin"] == "INE002A01018"
+    assert row["logo_url"] is None  # BRANDFETCH_CLIENT_ID unset in test env
+
+    app.dependency_overrides.clear()

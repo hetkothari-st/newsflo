@@ -8,6 +8,15 @@ export interface AlertArticle {
   image_url: string | null;
 }
 
+export interface PastMention {
+  alert_id: number;
+  article_title: string;
+  article_url: string;
+  created_at: string;
+  direction: string; // bullish | bearish
+  category: string;
+}
+
 export interface AlertCompany {
   company_id: number;
   ticker: string;
@@ -22,6 +31,7 @@ export interface AlertCompany {
   confidence: string; // llm_estimate | calibrated
   market: 'IN' | 'GLOBAL';
   in_my_holdings: boolean;
+  past_mentions: PastMention[]; // this company's prior alerts, most recent first
 }
 
 export interface Alert {
@@ -72,6 +82,8 @@ export interface Company {
   sector: string;
   index_tier: string;
   market: 'IN' | 'GLOBAL';
+  isin: string | null;
+  logo_url: string | null;
 }
 
 export interface WatchlistCompany {

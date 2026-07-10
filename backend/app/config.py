@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # optional-at-dev-time pattern as anthropic_api_key defaulting to "".)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "dev-insecure-secret-change-in-production")
     resend_api_key: str = os.environ.get("RESEND_API_KEY", "")
+    brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
 
 
 settings = Settings()
