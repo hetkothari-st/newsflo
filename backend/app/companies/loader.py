@@ -4,7 +4,17 @@ from sqlalchemy.orm import Session
 
 from app.models import Company
 
+# Order matters: _normalize_sector returns on the FIRST keyword match, so
+# more specific keywords must come before broader ones they could be
+# confused with. NSE's own industry classification bundles coal producers
+# into a combined "Oil, Gas & Consumable Fuels" sector alongside true oil &
+# gas companies -- without "coal" checked first, Coal India Ltd. (a thermal
+# coal miner, confirmed via yfinance: industry="Thermal Coal") was matching
+# the "oil"/"gas" keywords in that combined industry string and getting
+# bucketed into oil_gas, where sector-inference then applied oil-refiner
+# reasoning to a company that does not refine anything.
 SECTOR_MAP = {
+    "coal": "metals",
     "oil": "oil_gas", "gas": "oil_gas", "petroleum": "oil_gas",
     "bank": "banking", "financial": "banking",
     "automobile": "auto", "auto": "auto",
