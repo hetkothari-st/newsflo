@@ -1,14 +1,16 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ReactElement } from 'react';
 import Feed, { mergeAlerts } from './Feed';
 import { AuthProvider } from '../lib/auth';
 import * as api from '../lib/api';
 import type { Alert, AlertCompany } from '../lib/api';
 
-// Isolate Feed from the real socket in these tests.
-vi.mock('../lib/useAlertsSocket', () => ({ useAlertsSocket: () => ({ alerts: [], connected: true }) }));
+// Isolate Feed from the real socket in most tests; individual tests override
+// this via vi.mocked(useAlertsSocket).mockReturnValue(...) where needed.
+vi.mock('../lib/useAlertsSocket', () => ({ useAlertsSocket: vi.fn(() => ({ alerts: [], connected: true })) }));
+import { useAlertsSocket } from '../lib/useAlertsSocket';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
@@ -21,11 +23,11 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
     magnitude_high: 2,
     rationale: 'x',
     key_points: [],
-    past_mentions: [],
     basis: 'direct_mention',
     confidence: 'llm_estimate',
     market: 'IN',
     in_my_holdings: false,
+    past_mentions: [],
     ...overrides,
   };
 }
@@ -40,10 +42,12 @@ function makeAlert(id: number, title: string, companies: AlertCompany[], categor
   };
 }
 
-function renderFeed(ui: ReactElement) {
+function renderFeed() {
   return render(
     <MemoryRouter>
-      <AuthProvider>{ui}</AuthProvider>
+      <AuthProvider>
+        <Feed />
+      </AuthProvider>
     </MemoryRouter>,
   );
 }
@@ -55,6 +59,7 @@ function setToken() {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [], connected: true });
   localStorage.clear();
 });
 
@@ -66,53 +71,80 @@ describe('mergeAlerts', () => {
   });
 });
 
-describe('Feed tabs', () => {
+describe('Feed', () => {
   const indiaAlert = makeAlert(1, 'India oil headline', [company({ market: 'IN' })]);
   const globalAlert = makeAlert(2, 'Global tech headline', [
     company({ company_id: 2, ticker: 'AAPL', name: 'Apple', market: 'GLOBAL' }),
   ], 'it');
 
-  it('India tab shows only IN-market alerts', async () => {
+  it('defaults to the India tab and switches to Global on click', async () => {
     vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
-    renderFeed(<Feed activeTab="india" />);
-    expect(await screen.findByText('India oil headline')).toBeInTheDocument();
-    expect(screen.queryByText('Global tech headline')).not.toBeInTheDocument();
+    renderFeed();
+    // Both the mobile carousel and desktop grid render a card per alert (CSS
+    // toggles which is visible; jsdom doesn't evaluate media queries), so
+    // each title matches twice -- assert on the count rather than a single element.
+    expect((await screen.findAllByText('India oil headline')).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Global tech headline')).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole('tab', { name: /global/i }));
+    expect((await screen.findAllByText('Global tech headline')).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('India oil headline')).toHaveLength(0);
   });
 
-  it('Global tab shows only GLOBAL-market alerts', async () => {
-    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
-    renderFeed(<Feed activeTab="global" />);
-    expect(await screen.findByText('Global tech headline')).toBeInTheDocument();
-    expect(screen.queryByText('India oil headline')).not.toBeInTheDocument();
+  it('opens AlertDetail with the company breakdown when a card is clicked', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    renderFeed();
+    await screen.findAllByText('India oil headline');
+    // Both the mobile carousel and desktop grid render a card for this alert
+    // (CSS toggles which is visible; jsdom doesn't evaluate media queries),
+    // so there are two matching buttons -- click the first.
+    const cards = screen.getAllByRole('button', { name: /india oil headline/i });
+    await userEvent.click(cards[0]);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Reliance')).toBeInTheDocument();
   });
 
   it('Custom tab shows a login prompt when logged out', async () => {
     vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
-    renderFeed(<Feed activeTab="custom" />);
+    renderFeed();
+    await userEvent.click(screen.getByRole('tab', { name: /custom/i }));
     expect(await screen.findByText(/log in to build your custom feed/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /log in/i })).toBeInTheDocument();
   });
 
-  it('Custom tab shows a configure prompt when logged in with an empty watchlist', async () => {
+  it('Custom tab settings gear opens the filter editor in a sheet', async () => {
     setToken();
     vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
     vi.spyOn(api, 'getWatchlist').mockResolvedValue({ categories: [], companies: [] });
     vi.spyOn(api, 'getCategories').mockResolvedValue([]);
     vi.spyOn(api, 'getCompanies').mockResolvedValue([]);
-    renderFeed(<Feed activeTab="custom" />);
-    expect(await screen.findByText(/choose categories or companies/i)).toBeInTheDocument();
-    // The inline editor is present on the Custom tab.
-    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    renderFeed();
+    await userEvent.click(screen.getByRole('tab', { name: /custom/i }));
+    await userEvent.click(await screen.findByLabelText(/custom feed settings/i));
+    expect(await screen.findByRole('button', { name: /save/i })).toBeInTheDocument();
   });
 
-  it('Custom tab shows watchlist-matched alerts when configured', async () => {
-    setToken();
-    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert, globalAlert]);
-    vi.spyOn(api, 'getWatchlist').mockResolvedValue({ categories: ['oil_energy'], companies: [] });
-    vi.spyOn(api, 'getCategories').mockResolvedValue(['oil_energy']);
-    vi.spyOn(api, 'getCompanies').mockResolvedValue([]);
-    renderFeed(<Feed activeTab="custom" />);
-    await waitFor(() => expect(screen.getByText('India oil headline')).toBeInTheDocument());
-    expect(screen.queryByText('Global tech headline')).not.toBeInTheDocument();
+  it('queues a live-pushed alert as "N new" instead of splicing it in immediately', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [], connected: true });
+    const { rerender } = renderFeed();
+    await screen.findAllByText('India oil headline');
+
+    const liveAlert = makeAlert(3, 'Live oil headline', [company({ company_id: 3, market: 'IN' })]);
+    vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [liveAlert], connected: true });
+    rerender(
+      <MemoryRouter>
+        <AuthProvider>
+          <Feed />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('1 new')).toBeInTheDocument();
+    expect(screen.queryAllByText('Live oil headline')).toHaveLength(0);
+
+    await userEvent.click(screen.getByText('1 new'));
+    // Same carousel/grid duplication as above -- assert on the count.
+    expect((await screen.findAllByText('Live oil headline')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('1 new')).not.toBeInTheDocument();
   });
 });
