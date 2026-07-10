@@ -60,6 +60,63 @@ SYSTEM_PROMPT = (
     "manufacture one."
 )
 
+# Static instructions sent on every analyze_article call, identical
+# regardless of the article. Precomputed once at import time (rather than
+# rebuilt per call) and concatenated with the per-article Title/Content text
+# as a single string -- NOT split into separate content parts. That split
+# was tried for Anthropic prompt caching and reverted: A/B testing the same
+# text as one string vs. two parts showed a real behavior change via
+# OpenRouter's Claude passthrough (2/3 runs returned real picks as one
+# string vs. 0/3 as two parts, on an identical prompt) -- concatenating into
+# one string is the only form verified not to alter output.
+ANALYSIS_INSTRUCTIONS = (
+    "Analyze this financial news article for a trading-signal app. Accuracy "
+    "matters more than coverage -- a wrong or speculative pick is worse than "
+    "no pick, since real users may trade on this.\n\n"
+    "RULES:\n"
+    "1. You are a 20+ year analyst -- you already know real companies in every "
+    "major sector, their actual business models, and how they differ from each "
+    "other. Use that knowledge: prefer companies literally named in the article, "
+    "OR companies you are specifically, confidently thinking of even if not named "
+    "verbatim -- set is_direct=true and put the real company name, with "
+    "ticker=null if you are not sure of the exact symbol. This applies EVEN for a "
+    "sector-wide catalyst -- if you can name the 3-5 specific companies you know "
+    "are most exposed, name them individually with is_direct=true rather than "
+    "reaching for sector=<value>. Do NOT drop down to sector-level inference just "
+    "because you lack the ticker, and do NOT drop down to it just because "
+    "reasoning about individual companies is more work than reasoning about a "
+    "sector in aggregate.\n"
+    "2. Only use sector-level inference (is_direct=false, sector=<value>) as a "
+    "last resort -- when you genuinely cannot name specific companies at all, "
+    "only a general sense that some unnamed part of a sector is affected. Sector- "
+    "level inference produces the SAME rationale for every company the resolver "
+    "picks, which is only honest when you truly have no company-specific view; "
+    "if you have one, use is_direct=true instead so each company gets its own "
+    "reasoning.\n"
+    "3. The `sector` value MUST be written EXACTLY as shown below -- lowercase, "
+    "exact spelling, e.g. \"it\" not \"IT\", \"oil_gas\" not \"Oil_Gas\" or "
+    "\"Oil & Gas\". If the real-world industry you're reasoning about does not "
+    "match one of these definitions, DO NOT force it into the closest-sounding "
+    "one. Omit that company/sector entirely instead:\n"
+    f"{SECTOR_DEFINITIONS}\n"
+    "4. Do not chain multiple unrelated sector inferences from one article "
+    "(e.g. do not infer both an oil-sector effect AND an IT-sector effect from "
+    "one macro/rates story unless the article is genuinely, specifically about "
+    "both).\n"
+    "5. List at most 5 companies total, fewer if you are not genuinely confident "
+    "in more. If nothing in the article has a specific, defensible link to a "
+    "real company or one of the sectors above, return an empty companies list -- "
+    "that is a correct answer, not a failure.\n"
+    "6. Each rationale must name the specific mechanism for THAT company, grounded "
+    "in what you actually know about it -- its specific role (e.g. upstream "
+    "producer vs refiner vs distributor vs miner: never assume every company in a "
+    "sector plays the same role), its market position (market leader vs smaller "
+    "player, export vs domestic focus), and a real precedent if you know one (how "
+    "this company or a directly comparable one actually moved in a similar past "
+    "event). Not a sentence that would apply equally to any company in its "
+    "sector.\n\n"
+)
+
 RECORD_ANALYSIS_TOOL = {
     "type": "function",
     "function": {
@@ -271,56 +328,13 @@ def build_client(
 
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                "Analyze this financial news article for a trading-signal app. Accuracy "
-                "matters more than coverage -- a wrong or speculative pick is worse than "
-                "no pick, since real users may trade on this.\n\n"
-                "RULES:\n"
-                "1. You are a 20+ year analyst -- you already know real companies in every "
-                "major sector, their actual business models, and how they differ from each "
-                "other. Use that knowledge: prefer companies literally named in the article, "
-                "OR companies you are specifically, confidently thinking of even if not named "
-                "verbatim -- set is_direct=true and put the real company name, with "
-                "ticker=null if you are not sure of the exact symbol. This applies EVEN for a "
-                "sector-wide catalyst -- if you can name the 3-5 specific companies you know "
-                "are most exposed, name them individually with is_direct=true rather than "
-                "reaching for sector=<value>. Do NOT drop down to sector-level inference just "
-                "because you lack the ticker, and do NOT drop down to it just because "
-                "reasoning about individual companies is more work than reasoning about a "
-                "sector in aggregate.\n"
-                "2. Only use sector-level inference (is_direct=false, sector=<value>) as a "
-                "last resort -- when you genuinely cannot name specific companies at all, "
-                "only a general sense that some unnamed part of a sector is affected. Sector- "
-                "level inference produces the SAME rationale for every company the resolver "
-                "picks, which is only honest when you truly have no company-specific view; "
-                "if you have one, use is_direct=true instead so each company gets its own "
-                "reasoning.\n"
-                "3. The `sector` value MUST be written EXACTLY as shown below -- lowercase, "
-                "exact spelling, e.g. \"it\" not \"IT\", \"oil_gas\" not \"Oil_Gas\" or "
-                "\"Oil & Gas\". If the real-world industry you're reasoning about does not "
-                "match one of these definitions, DO NOT force it into the closest-sounding "
-                "one. Omit that company/sector entirely instead:\n"
-                f"{SECTOR_DEFINITIONS}\n"
-                "4. Do not chain multiple unrelated sector inferences from one article "
-                "(e.g. do not infer both an oil-sector effect AND an IT-sector effect from "
-                "one macro/rates story unless the article is genuinely, specifically about "
-                "both).\n"
-                "5. List at most 5 companies total, fewer if you are not genuinely confident "
-                "in more. If nothing in the article has a specific, defensible link to a "
-                "real company or one of the sectors above, return an empty companies list -- "
-                "that is a correct answer, not a failure.\n"
-                "6. Each rationale must name the specific mechanism for THAT company, grounded "
-                "in what you actually know about it -- its specific role (e.g. upstream "
-                "producer vs refiner vs distributor vs miner: never assume every company in a "
-                "sector plays the same role), its market position (market leader vs smaller "
-                "player, export vs domestic focus), and a real precedent if you know one (how "
-                "this company or a directly comparable one actually moved in a similar past "
-                "event). Not a sentence that would apply equally to any company in its "
-                "sector.\n\n"
-                f"Title: {title}\n\nContent: {content or '(no summary available -- reason only from the title, and be more conservative about sector-level inference given the limited signal)'}"
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                ANALYSIS_INSTRUCTIONS
+                + f"Title: {title}\n\nContent: "
+                + f"{content or '(no summary available -- reason only from the title, and be more conservative about sector-level inference given the limited signal)'}"
             ),
         },
     ]

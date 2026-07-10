@@ -150,6 +150,91 @@ def test_process_new_articles_marks_analysis_failed_after_retries(db_session, mo
     assert refreshed.status == "ANALYSIS_FAILED"
 
 
+def test_process_new_articles_reuses_analysis_for_republished_article(db_session, monkeypatch):
+    # RSS sources frequently republish the identical wire story. The second
+    # article (same title, different casing/whitespace, different URL --
+    # exactly how a republish looks) must reuse the first's analysis
+    # instead of spending a second LLM call, and must produce the SAME
+    # AlertCompany data a second real call would have.
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    first = Article(
+        source="source-a", url="https://example.com/first",
+        title="US strikes Iran oil export sites", content="crude oil markets react",
+    )
+    second = Article(
+        source="source-b", url="https://example.com/second",
+        title="  US STRIKES   Iran oil export sites  ", content="crude oil markets react, wire copy",
+    )
+    db_session.add_all([first, second])
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+        )],
+    )
+    call_count = {"n": 0}
+
+    def counting_analyze(client, title, content):
+        call_count["n"] += 1
+        return fake_output
+
+    monkeypatch.setattr(pipeline_module, "analyze_article", counting_analyze)
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    assert created == 2
+    assert call_count["n"] == 1  # only the first article triggered a real LLM call
+
+    alerts = db_session.query(Alert).order_by(Alert.id).all()
+    assert len(alerts) == 2
+    assert alerts[0].category == alerts[1].category == "oil_energy"
+
+    first_ac = db_session.query(AlertCompany).filter_by(alert_id=alerts[0].id).one()
+    second_ac = db_session.query(AlertCompany).filter_by(alert_id=alerts[1].id).one()
+    assert second_ac.company_id == first_ac.company_id
+    assert second_ac.direction == first_ac.direction
+    assert second_ac.rationale == first_ac.rationale
+    assert second_ac.basis == first_ac.basis
+
+    refreshed_second = db_session.query(Article).filter_by(id=second.id).one()
+    assert refreshed_second.status == "ANALYZED"
+
+
+def test_process_new_articles_sets_image_url_from_og_image_fetch(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/img",
+        title="US strikes Iran oil export sites", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "fetch_og_image", lambda url: "https://example.com/img.jpg")
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    refreshed = db_session.query(Article).filter_by(id=article.id).one()
+    assert refreshed.image_url == "https://example.com/img.jpg"
+
+
 def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch):
     irrelevant = Article(source="test", url="https://example.com/c", title="Cat stuck in tree", content="")
     db_session.add(irrelevant)
