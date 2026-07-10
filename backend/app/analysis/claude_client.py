@@ -47,7 +47,7 @@ def build_client(api_key: str) -> OpenAI:
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     response = client.chat.completions.create(
         model=MODEL,
-        max_tokens=1024,
+        max_tokens=600,
         tools=[RECORD_ANALYSIS_TOOL],
         tool_choice={"type": "function", "function": {"name": "record_analysis"}},
         messages=[{

@@ -8,6 +8,14 @@ CATEGORY_KEYWORDS = {
     "banking": ["rbi", "repo rate", "interest rate", "npa"],
     "auto_ev": ["ev subsidy", "electric vehicle", "fame scheme", "auto sales"],
     "geopolitics": ["sanction", "strike", "conflict", "tariff", "export ban", "war"],
+    "market_news": [
+        "shares", "stock", "surge", "rally", "crash", "slump", "plunge", "tumble",
+        "dividend", "quarterly results", "q1 results", "q2 results", "q3 results",
+        "q4 results", "earnings", "ipo", "brokerage", "target price", "nifty",
+        "sensex", "rate hike", "rate cut", "inflation", "gdp", "buyback", "merger",
+        "acquisition", "stake sale", "record date", "bonus issue", "stock split",
+        "upgrade", "downgrade", "market cap", "profit", "revenue", "guidance",
+    ],
 }
 
 

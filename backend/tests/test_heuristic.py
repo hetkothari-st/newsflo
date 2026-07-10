@@ -26,8 +26,15 @@ def test_classify_category_matches_plural_tariffs():
 
 
 def test_classify_category_no_false_positive_warning():
-    # "war" keyword must not match inside "warning"
-    assert classify_category("Company issues profit warning", "") is None
+    # "war" keyword must not match inside "warning" (kept keyword-neutral so the
+    # new market_news keywords, e.g. "profit", don't confound this boundary check)
+    assert classify_category("Security team issues a warning about phishing", "") is None
+
+
+def test_classify_category_matches_market_news_profit_warning():
+    # A profit warning is genuine market-moving news -- should now be caught by
+    # the broader market_news category rather than silently filtered out.
+    assert classify_category("Company issues profit warning", "") == "market_news"
 
 
 def test_classify_category_no_false_positive_warehouse():
@@ -38,6 +45,14 @@ def test_classify_category_no_false_positive_warehouse():
 def test_classify_category_no_false_positive_ward():
     # "war" keyword must not match inside "ward"
     assert classify_category("Ward elections held", "") is None
+
+
+def test_classify_category_matches_market_news_dividend():
+    assert classify_category("Bharti Airtel fixes record date for its highest-ever dividend", "") == "market_news"
+
+
+def test_classify_category_matches_market_news_shares_crash():
+    assert classify_category("Dr Reddy's shares crash 9% in 2 days", "") == "market_news"
 
 
 def test_filter_new_articles_updates_status(db_session):
