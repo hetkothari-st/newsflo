@@ -29,7 +29,7 @@ def list_alerts(
         "article": {"id": alert.article.id, "title": alert.article.title, "url": alert.article.url},
         "companies": [{
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
-            "index_tier": ac.company.index_tier, "direction": ac.direction,
+            "index_tier": ac.company.index_tier, "sector": ac.company.sector, "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": ac.rationale, "basis": ac.basis, "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
