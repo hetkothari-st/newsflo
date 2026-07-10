@@ -19,6 +19,19 @@ class Company(Base):
     sector = Column(String, nullable=False)
     index_tier = Column(String, nullable=False)  # NIFTY50 | NIFTY100 | NIFTY500 | OTHER
     market_cap = Column(Float, nullable=True)
+    isin = Column(String, nullable=True, unique=True)
+
+
+class CompanyIndexMembership(Base):
+    __tablename__ = "company_index_memberships"
+    __table_args__ = (UniqueConstraint("company_id", "index_code", name="uq_company_index"),)
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    index_code = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    company = relationship("Company")
 
 
 class Article(Base):
