@@ -14,6 +14,11 @@ class CompanyMention(BaseModel):
     magnitude_low: float
     magnitude_high: float
     rationale: str
+    # Short, scannable version of `rationale` for the feed UI -- the full
+    # paragraph is kept for anyone who wants the depth, but a feed of alerts
+    # is unreadable if every card is a paragraph. Defaults to empty for any
+    # caller not yet passing it (older tests, older stored data).
+    key_points: list[str] = []
 
 
 class AnalysisOutput(BaseModel):

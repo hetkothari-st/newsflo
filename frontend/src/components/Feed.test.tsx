@@ -8,7 +8,7 @@ import * as api from '../lib/api';
 import type { Alert, AlertCompany } from '../lib/api';
 
 // Isolate Feed from the real socket in these tests.
-vi.mock('../lib/useAlertsSocket', () => ({ useAlertsSocket: () => [] }));
+vi.mock('../lib/useAlertsSocket', () => ({ useAlertsSocket: () => ({ alerts: [], connected: true }) }));
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
@@ -20,6 +20,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
     magnitude_low: 1,
     magnitude_high: 2,
     rationale: 'x',
+    key_points: [],
     basis: 'direct_mention',
     confidence: 'llm_estimate',
     market: 'IN',
@@ -33,7 +34,7 @@ function makeAlert(id: number, title: string, companies: AlertCompany[], categor
     id,
     category,
     created_at: '2026-07-10T10:00:00+00:00',
-    article: { id, title, url: `https://example.com/${id}` },
+    article: { id, title, url: `https://example.com/${id}`, image_url: null },
     companies,
   };
 }

@@ -34,6 +34,7 @@ class Article(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     status = Column(String, nullable=False, default="NEW")  # NEW|FILTERED|CATEGORIZED|ANALYZED|ANALYSIS_FAILED
     category = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)  # og:image / twitter:image scraped from the article page
 
     alerts = relationship("Alert", back_populates="article")
 
@@ -60,6 +61,7 @@ class AlertCompany(Base):
     magnitude_low = Column(Float, nullable=False)
     magnitude_high = Column(Float, nullable=False)
     rationale = Column(Text, nullable=False)
+    key_points_json = Column(Text, nullable=True)  # JSON-encoded list[str]; null for pre-existing rows
     basis = Column(String, nullable=False)  # direct_mention | sector_inference
     confidence = Column(String, nullable=False, default="llm_estimate")  # llm_estimate | calibrated
 

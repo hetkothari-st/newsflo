@@ -12,6 +12,7 @@ const base: AlertCompany = {
   magnitude_low: 2,
   magnitude_high: 4,
   rationale: 'Margins up.',
+  key_points: [],
   basis: 'direct_mention',
   confidence: 'llm_estimate',
   market: 'IN',
@@ -60,7 +61,7 @@ describe('ReasoningPanel', () => {
     expect(screen.getByText('Margins up.')).toBeInTheDocument();
   });
 
-  it('renders a multi-sentence rationale as separate bullet points', () => {
+  it('renders a multi-sentence rationale as separate bullet points when key_points is empty', () => {
     const multiSentence = {
       ...base,
       rationale: 'First reason applies here. Second reason applies too.',
@@ -70,5 +71,19 @@ describe('ReasoningPanel', () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent('First reason applies here.');
     expect(items[1]).toHaveTextContent('Second reason applies too.');
+  });
+
+  it('prefers key_points over the full rationale when present', () => {
+    const withKeyPoints = {
+      ...base,
+      rationale: 'A long paragraph nobody wants to read in full on a feed card.',
+      key_points: ['Crude eases, margins widen', '2018 sanctions precedent: GRM +$2/bbl'],
+    };
+    render(<ReasoningPanel company={withKeyPoints} />);
+    const items = screen.getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent('Crude eases, margins widen');
+    expect(items[1]).toHaveTextContent('2018 sanctions precedent: GRM +$2/bbl');
+    expect(screen.queryByText(/A long paragraph/)).not.toBeInTheDocument();
   });
 });

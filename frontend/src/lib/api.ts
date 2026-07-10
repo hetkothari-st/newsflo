@@ -5,6 +5,7 @@ export interface AlertArticle {
   id: number;
   title: string;
   url: string;
+  image_url: string | null;
 }
 
 export interface AlertCompany {
@@ -16,6 +17,7 @@ export interface AlertCompany {
   magnitude_low: number;
   magnitude_high: number;
   rationale: string;
+  key_points: string[]; // short, scannable version of `rationale` -- empty for legacy alerts
   basis: string; // direct_mention | sector_inference
   confidence: string; // llm_estimate | calibrated
   market: 'IN' | 'GLOBAL';
@@ -43,6 +45,7 @@ export interface Article {
   url: string;
   status: string;
   category: string | null;
+  image_url: string | null;
   fetched_at: string | null;
 }
 

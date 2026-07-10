@@ -12,6 +12,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
     magnitude_low: 1,
     magnitude_high: 2,
     rationale: 'x',
+    key_points: [],
     basis: 'direct_mention',
     confidence: 'llm_estimate',
     market: 'IN',
@@ -25,7 +26,7 @@ function alert(overrides: Partial<Alert>): Alert {
     id: 1,
     category: 'oil_energy',
     created_at: '2026-07-10T10:00:00+00:00',
-    article: { id: 1, title: 't', url: 'https://example.com/1' },
+    article: { id: 1, title: 't', url: 'https://example.com/1', image_url: null },
     companies: [],
     ...overrides,
   };

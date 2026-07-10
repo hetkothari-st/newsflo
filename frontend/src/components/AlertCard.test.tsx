@@ -8,16 +8,16 @@ const alert: Alert = {
   id: 1,
   category: 'oil_energy',
   created_at: '2026-07-09T10:00:00+00:00',
-  article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a' },
+  article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a', image_url: null },
   companies: [
     {
       company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
-      direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner up.',
+      direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner up.', key_points: [],
       basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true,
     },
     {
       company_id: 2, ticker: 'ONGC.NS', name: 'ONGC', index_tier: 'NIFTY100',
-      direction: 'bearish', magnitude_low: -3, magnitude_high: -1, rationale: 'Cost pressure.',
+      direction: 'bearish', magnitude_low: -3, magnitude_high: -1, rationale: 'Cost pressure.', key_points: [],
       basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false,
     },
   ],

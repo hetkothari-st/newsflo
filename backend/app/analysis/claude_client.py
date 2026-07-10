@@ -114,7 +114,12 @@ ANALYSIS_INSTRUCTIONS = (
     "player, export vs domestic focus), and a real precedent if you know one (how "
     "this company or a directly comparable one actually moved in a similar past "
     "event). Not a sentence that would apply equally to any company in its "
-    "sector.\n\n"
+    "sector.\n"
+    "7. Also fill in key_points: 2-4 short bullet fragments (not full "
+    "sentences, no restating the company name, max ~12 words each) that "
+    "compress `rationale` down to only the essential facts a reader would "
+    "actually scan -- the specific number/event, the specific mechanism, "
+    "and the specific precedent, each as its own terse fragment.\n\n"
 )
 
 RECORD_ANALYSIS_TOOL = {
@@ -157,8 +162,21 @@ RECORD_ANALYSIS_TOOL = {
                                     "per company, not a shared sector-level rationale."
                                 ),
                             },
+                            "key_points": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "2-4 short bullet fragments (not full sentences, max ~12 "
+                                    "words each) that compress `rationale` into only the "
+                                    "essential facts -- for a feed UI where nobody reads a "
+                                    "full paragraph per company."
+                                ),
+                            },
                         },
-                        "required": ["name", "is_direct", "direction", "magnitude_low", "magnitude_high", "rationale"],
+                        "required": [
+                            "name", "is_direct", "direction", "magnitude_low", "magnitude_high",
+                            "rationale", "key_points",
+                        ],
                     },
                 },
             },

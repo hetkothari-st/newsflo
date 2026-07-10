@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import timedelta
 
@@ -18,6 +19,12 @@ from app.ws.manager import manager
 # story. Bounded so a months-old identical title (a rare coincidence, not a
 # genuine republish) never gets silently reused with stale reasoning.
 DEDUP_LOOKBACK_HOURS = 24
+
+
+def decode_key_points(alert_company: AlertCompany) -> list[str]:
+    if not alert_company.key_points_json:
+        return []
+    return json.loads(alert_company.key_points_json)
 
 
 def _alert_broadcast_payload(alert: Alert) -> dict:
@@ -49,6 +56,7 @@ def _alert_broadcast_payload(alert: Alert) -> dict:
             "magnitude_low": ac.magnitude_low,
             "magnitude_high": ac.magnitude_high,
             "rationale": ac.rationale,
+            "key_points": decode_key_points(ac),
             "basis": ac.basis,
             "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
@@ -112,6 +120,7 @@ def _persist_alert(session: Session, article: Article, category: str, entries: l
             magnitude_low=magnitude_low,
             magnitude_high=magnitude_high,
             rationale=entry["rationale"],
+            key_points_json=json.dumps(entry.get("key_points") or []),
             basis=entry["basis"],
             confidence=confidence,
         ))
@@ -158,7 +167,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             entries = [{
                 "company_id": ac.company_id, "direction": ac.direction,
                 "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
-                "rationale": ac.rationale, "basis": ac.basis,
+                "rationale": ac.rationale, "key_points": decode_key_points(ac), "basis": ac.basis,
             } for ac in reusable_alert.companies]
             _persist_alert(session, article, reusable_alert.category, entries)
             alerts_created += 1

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user_optional
 from app.companies.market import infer_market
 from app.models import Alert, Holding, User
+from app.pipeline import decode_key_points
 from app.routers.articles import get_db
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
@@ -26,12 +27,16 @@ def list_alerts(
         "id": alert.id,
         "category": alert.category,
         "created_at": alert.created_at.isoformat(),
-        "article": {"id": alert.article.id, "title": alert.article.title, "url": alert.article.url},
+        "article": {
+            "id": alert.article.id, "title": alert.article.title, "url": alert.article.url,
+            "image_url": alert.article.image_url,
+        },
         "companies": [{
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
             "index_tier": ac.company.index_tier, "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
-            "rationale": ac.rationale, "basis": ac.basis, "confidence": ac.confidence,
+            "rationale": ac.rationale, "key_points": decode_key_points(ac),
+            "basis": ac.basis, "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
             "in_my_holdings": ac.company_id in held_company_ids,
         } for ac in alert.companies],

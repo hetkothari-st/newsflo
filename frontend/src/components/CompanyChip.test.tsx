@@ -13,6 +13,7 @@ const company: AlertCompany = {
   magnitude_low: 2,
   magnitude_high: 4,
   rationale: 'Refiner margins expand.',
+  key_points: [],
   basis: 'direct_mention',
   confidence: 'llm_estimate',
   market: 'IN',

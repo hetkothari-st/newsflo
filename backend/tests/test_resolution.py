@@ -15,6 +15,7 @@ def test_resolve_direct_mention(db_session):
     mention = CompanyMention(
         name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
         direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        key_points=["Crude prices ease", "Refining margins widen"],
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -22,6 +23,7 @@ def test_resolve_direct_mention(db_session):
     assert len(resolved) == 1
     assert resolved[0]["company_id"] == company.id
     assert resolved[0]["basis"] == "direct_mention"
+    assert resolved[0]["key_points"] == ["Crude prices ease", "Refining margins widen"]
 
 
 def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):

@@ -34,11 +34,11 @@ function makeWsAlert(id: number): WsAlert {
     id,
     category: 'oil_energy',
     created_at: '2026-07-09T10:00:00+00:00',
-    article: { id, title: `Story ${id}`, url: `https://example.com/${id}` },
+    article: { id, title: `Story ${id}`, url: `https://example.com/${id}`, image_url: null },
     companies: [
       {
         company_id: id, ticker: 'RELIANCE.NS', name: 'Reliance', index_tier: 'NIFTY50',
-        direction: 'bullish', magnitude_low: 1, magnitude_high: 2, rationale: 'x',
+        direction: 'bullish', magnitude_low: 1, magnitude_high: 2, rationale: 'x', key_points: [],
         basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
       },
     ],
@@ -61,15 +61,24 @@ describe('useAlertsSocket', () => {
     const { result } = renderHook(() => useAlertsSocket());
     act(() => MockWebSocket.instances[0].emit(makeWsAlert(1)));
     act(() => MockWebSocket.instances[0].emit(makeWsAlert(2)));
-    expect(result.current.map((a) => a.id)).toEqual([2, 1]);
-    expect(result.current[0].companies[0].in_my_holdings).toBe(false);
+    expect(result.current.alerts.map((a) => a.id)).toEqual([2, 1]);
+    expect(result.current.alerts[0].companies[0].in_my_holdings).toBe(false);
   });
 
   it('dedupes repeated alert ids', () => {
     const { result } = renderHook(() => useAlertsSocket());
     act(() => MockWebSocket.instances[0].emit(makeWsAlert(1)));
     act(() => MockWebSocket.instances[0].emit(makeWsAlert(1)));
-    expect(result.current).toHaveLength(1);
+    expect(result.current.alerts).toHaveLength(1);
+  });
+
+  it('reports connected once the socket opens, and disconnected once it closes', () => {
+    const { result } = renderHook(() => useAlertsSocket());
+    expect(result.current.connected).toBe(false);
+    act(() => MockWebSocket.instances[0].onopen?.());
+    expect(result.current.connected).toBe(true);
+    act(() => MockWebSocket.instances[0].triggerClose());
+    expect(result.current.connected).toBe(false);
   });
 
   it('reconnects after a fixed backoff when the socket closes', () => {

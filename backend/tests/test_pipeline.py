@@ -32,6 +32,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"],
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -49,6 +50,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert alert_companies[0].confidence == "llm_estimate"
     assert alert_companies[0].magnitude_low == 2.0
     assert alert_companies[0].magnitude_high == 4.0
+    assert pipeline_module.decode_key_points(alert_companies[0]) == ["Crude eases", "Refining margins widen"]
 
     # No holdings exist, so no email notifications were created (matcher no-op).
     assert db_session.query(EmailNotification).count() == 0
@@ -176,6 +178,7 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"],
         )],
     )
     call_count = {"n": 0}
@@ -201,6 +204,8 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
     assert second_ac.direction == first_ac.direction
     assert second_ac.rationale == first_ac.rationale
     assert second_ac.basis == first_ac.basis
+    assert pipeline_module.decode_key_points(second_ac) == pipeline_module.decode_key_points(first_ac)
+    assert pipeline_module.decode_key_points(first_ac) == ["Crude eases", "Refining margins widen"]
 
     refreshed_second = db_session.query(Article).filter_by(id=second.id).one()
     assert refreshed_second.status == "ANALYZED"

@@ -25,7 +25,10 @@ export function splitRationaleIntoPoints(rationale: string): string[] {
 }
 
 export default function ReasoningPanel({ company }: { company: AlertCompany }) {
-  const points = splitRationaleIntoPoints(company.rationale);
+  // key_points is the model's own short, terse summary -- prefer it. Fall
+  // back to sentence-splitting the full rationale only for alerts analyzed
+  // before key_points existed (empty array).
+  const points = company.key_points.length > 0 ? company.key_points : splitRationaleIntoPoints(company.rationale);
   return (
     <div className="rounded-lg border border-hairline bg-surface px-3 py-3">
       <p className="text-xs uppercase tracking-widest text-muted">
