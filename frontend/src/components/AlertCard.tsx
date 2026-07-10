@@ -93,7 +93,7 @@ export default function AlertCard({ alert, isAuthenticated }: { alert: Alert; is
             Predicted
           </button>
           <button type="button" onClick={(e) => selectTab(e, 'my_demat')} className={tabClass(tab === 'my_demat')}>
-            My Demat
+            My Portfolio
           </button>
         </div>
         <SentimentPill companies={visible} />

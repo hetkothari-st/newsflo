@@ -40,24 +40,24 @@ describe('AlertCard', () => {
     expect(screen.getByText('ONGC')).toBeInTheDocument();
   });
 
-  it('filters to held companies only on the My Demat tab', async () => {
+  it('filters to held companies only on the My Portfolio tab', async () => {
     render(<AlertCard alert={alert} isAuthenticated />);
-    await userEvent.click(screen.getByRole('button', { name: /my demat/i }));
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
     expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
     expect(screen.queryByText('ONGC')).not.toBeInTheDocument();
   });
 
-  it('shows the login prompt on My Demat when logged out and nothing matches', async () => {
+  it('shows the login prompt on My Portfolio when logged out and nothing matches', async () => {
     const anon: Alert = { ...alert, companies: alert.companies.map((c) => ({ ...c, in_my_holdings: false })) };
     render(<AlertCard alert={anon} isAuthenticated={false} />);
-    await userEvent.click(screen.getByRole('button', { name: /my demat/i }));
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
     expect(screen.getByText(/log in to see holdings-matched alerts/i)).toBeInTheDocument();
   });
 
-  it('shows an empty-holdings message on My Demat when logged in with no matches', async () => {
+  it('shows an empty-holdings message on My Portfolio when logged in with no matches', async () => {
     const noneHeld: Alert = { ...alert, companies: alert.companies.map((c) => ({ ...c, in_my_holdings: false })) };
     render(<AlertCard alert={noneHeld} isAuthenticated />);
-    await userEvent.click(screen.getByRole('button', { name: /my demat/i }));
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
     expect(screen.getByText(/none of your holdings are affected/i)).toBeInTheDocument();
   });
 
@@ -68,7 +68,7 @@ describe('AlertCard', () => {
 
   it('recomputes the sentiment pill when switching tabs to a different majority direction', async () => {
     // Predicted (all companies): 2 bullish, 1 bearish -> majority bullish -> "Net Bullish".
-    // My Demat (only held companies): the single held company is bearish -> "Net Bearish".
+    // My Portfolio (only held companies): the single held company is bearish -> "Net Bearish".
     const mixedDirectionAlert: Alert = {
       ...alert,
       companies: [
@@ -83,7 +83,7 @@ describe('AlertCard', () => {
     expect(screen.getByText('Net Bullish')).toBeInTheDocument();
     expect(screen.queryByText('Net Bearish')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /my demat/i }));
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
 
     expect(screen.getByText('Net Bearish')).toBeInTheDocument();
     expect(screen.queryByText('Net Bullish')).not.toBeInTheDocument();
