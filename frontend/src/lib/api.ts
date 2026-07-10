@@ -12,6 +12,7 @@ export interface AlertCompany {
   ticker: string;
   name: string;
   index_tier: string; // NIFTY50 | NIFTY100 | NIFTY500 | GLOBAL_LARGE_CAP | OTHER
+  sector?: string;
   direction: string; // bullish | bearish
   magnitude_low: number;
   magnitude_high: number;
