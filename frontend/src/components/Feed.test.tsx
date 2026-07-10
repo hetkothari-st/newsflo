@@ -30,6 +30,7 @@ function makeCompany(inMyHoldings: boolean): AlertCompany {
     rationale: 'test',
     basis: 'direct_mention',
     confidence: 'llm_estimate',
+    market: 'IN',
     in_my_holdings: inMyHoldings,
   };
 }

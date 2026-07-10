@@ -14,6 +14,7 @@ const base: AlertCompany = {
   rationale: 'Margins up.',
   basis: 'direct_mention',
   confidence: 'llm_estimate',
+  market: 'IN',
   in_my_holdings: false,
 };
 
