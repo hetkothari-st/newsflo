@@ -4,6 +4,7 @@ import pytest
 
 import app.pipeline as pipeline_module
 from app.analysis.schemas import AnalysisOutput, CompanyMention
+from app.companies.global_seed import GLOBAL_COMPANIES, load_global_companies
 from app.ingestion.poller import fetch_new_articles
 from app.models import CalibrationSample, Company, EmailNotification
 from app.pipeline import process_new_articles
@@ -181,5 +182,89 @@ def test_full_pipeline_notifies_holder_end_to_end(db_session, monkeypatch):
     notifications = db_session.query(EmailNotification).all()
     assert len(notifications) == 1
     assert notifications[0].status == "sent"
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_feed_tabs_end_to_end(db_session, monkeypatch):
+    from app.main import app as fastapi_app
+    from app.routers.articles import get_db
+    from fastapi.testclient import TestClient
+
+    fastapi_app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(fastapi_app)
+
+    # Seed the Indian company the analysis will resolve to, plus the global set.
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance Industries",
+        sector="oil_gas", index_tier="NIFTY50", market_cap=1_800_000.0,
+    ))
+    db_session.commit()
+    loaded = load_global_companies(db_session)
+    assert loaded == len(GLOBAL_COMPANIES)
+
+    # Register a real user and save a watchlist (one category, one company).
+    token = client.post(
+        "/api/auth/register", json={"email": "tabs@example.com", "password": "pw12345"},
+    ).json()["access_token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    reliance = db_session.query(Company).filter_by(ticker="RELIANCE.NS").one()
+    put = client.put(
+        "/api/watchlist",
+        json={"categories": ["oil_energy"], "company_ids": [reliance.id]},
+        headers=auth,
+    )
+    assert put.status_code == 200
+
+    # Ingest one RSS article and run the pipeline (Claude analysis mocked).
+    feed_entries = [{
+        "link": "https://example.com/breaking-oil-news-tabs",
+        "title": "US strikes Iran oil export sites",
+        "summary": "Crude oil markets react sharply to the strikes.",
+    }]
+    monkeypatch.setattr(
+        "app.ingestion.poller.feedparser.parse",
+        lambda url: SimpleNamespace(entries=feed_entries),
+    )
+    inserted = fetch_new_articles(db_session, [{"source": "test_feed", "url": "http://feed.test/rss"}])
+    assert inserted == 1
+
+    fake_output = AnalysisOutput(
+        category="oil_energy",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    # (a) GET /api/watchlist reflects the saved selection.
+    watchlist = client.get("/api/watchlist", headers=auth).json()
+    assert watchlist["categories"] == ["oil_energy"]
+    assert [c["ticker"] for c in watchlist["companies"]] == ["RELIANCE.NS"]
+
+    # (b) GET /api/companies?market=IN returns the Indian company (and no global).
+    india = client.get("/api/companies?market=IN").json()
+    india_tickers = {c["ticker"] for c in india}
+    assert "RELIANCE.NS" in india_tickers
+    assert all(c["market"] == "IN" for c in india)
+    assert "AAPL" not in india_tickers
+
+    # ...and ?market=GLOBAL returns the seeded global set.
+    glob = client.get("/api/companies?market=GLOBAL").json()
+    glob_tickers = {c["ticker"] for c in glob}
+    assert "AAPL" in glob_tickers
+    assert "RELIANCE.NS" not in glob_tickers
+
+    # (c) GET /api/categories reflects the analyzed alert's category.
+    assert client.get("/api/categories").json() == ["oil_energy"]
+
+    # (d) The alert itself carries the computed market on its company.
+    alert_body = client.get("/api/alerts", headers=auth).json()
+    assert alert_body[0]["companies"][0]["market"] == "IN"
 
     fastapi_app.dependency_overrides.clear()

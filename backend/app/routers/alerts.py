@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
+from app.companies.market import infer_market
 from app.models import Alert, Holding, User
 from app.routers.articles import get_db
 
@@ -31,6 +32,7 @@ def list_alerts(
             "index_tier": ac.company.index_tier, "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": ac.rationale, "basis": ac.basis, "confidence": ac.confidence,
+            "market": infer_market(ac.company.ticker),
             "in_my_holdings": ac.company_id in held_company_ids,
         } for ac in alert.companies],
     } for alert in alerts]

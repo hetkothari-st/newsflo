@@ -115,3 +115,27 @@ class EmailNotification(Base):
     status = Column(String, nullable=False, default="pending")  # pending | sent | failed
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     sent_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class UserWatchlistCategory(Base):
+    __tablename__ = "user_watchlist_categories"
+    __table_args__ = (
+        UniqueConstraint("user_id", "category", name="uq_watchlist_category_user_category"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    category = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class UserWatchlistCompany(Base):
+    __tablename__ = "user_watchlist_companies"
+    __table_args__ = (
+        UniqueConstraint("user_id", "company_id", name="uq_watchlist_company_user_company"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
