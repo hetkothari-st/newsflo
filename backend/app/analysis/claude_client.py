@@ -7,6 +7,26 @@ from app.analysis.schemas import SECTORS, AnalysisOutput
 MODEL = "llama-3.3-70b-versatile"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
+# Precise definitions the model must use for sector inference. Ambiguity here
+# (e.g. treating "semiconductor" as close enough to "it") is what causes the
+# resolver to attach real reasoning about one company (say, a Korean chip
+# maker) to an unrelated company that merely shares a loosely-matched sector
+# tag (e.g. an Indian IT services firm). Precision here is load-bearing.
+SECTOR_DEFINITIONS = """
+- oil_gas: oil & gas exploration, refining, and marketing companies only.
+- banking: deposit-taking banks, NBFCs, and financial services firms only.
+- auto: automobile and two-wheeler manufacturers, and auto component makers.
+- it: INDIAN IT SERVICES / software consulting / outsourcing firms only \
+(e.g. TCS, Infosys, Wipro). Does NOT include semiconductor, chip, or \
+hardware manufacturers -- those have no matching sector in this system.
+- pharma: pharmaceutical and healthcare companies.
+- fmcg: fast-moving consumer goods, food & beverage, personal care.
+- metals: metals, mining, and materials companies.
+- telecom: telecommunications and network infrastructure operators.
+- infra: industrial, infrastructure, construction, and heavy equipment.
+- other: none of the above.
+""".strip()
+
 RECORD_ANALYSIS_TOOL = {
     "type": "function",
     "function": {
@@ -32,10 +52,10 @@ RECORD_ANALYSIS_TOOL = {
                                 "type": "string",
                                 "description": (
                                     "Company-specific reasoning for THIS company only -- "
-                                    "reference its actual business (products, exposure, "
-                                    "market position) and how this specific news affects "
-                                    "it. Never reuse the same sentence for multiple "
-                                    "companies in the same response."
+                                    "state the concrete mechanism (what the news changes, "
+                                    "and how this company's actual, specific business is "
+                                    "exposed to that change). Never reuse the same sentence "
+                                    "for multiple companies in the same response."
                                 ),
                             },
                         },
@@ -62,14 +82,38 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         messages=[{
             "role": "user",
             "content": (
-                "Analyze this financial news article. Identify which companies are directly "
-                "named and which sectors are indirectly affected, with direction and an "
-                "estimated percentage price-move range. For every company you list, write "
-                "a rationale specific to THAT company's own business and exposure -- do "
-                "not write one generic rationale and repeat it across companies; each "
-                "one must explain why that particular company, given what it actually "
-                "does, is affected by this specific news.\n\n"
-                f"Title: {title}\n\nContent: {content}"
+                "Analyze this financial news article for a trading-signal app. Accuracy "
+                "matters more than coverage -- a wrong or speculative pick is worse than "
+                "no pick, since real users may trade on this.\n\n"
+                "RULES:\n"
+                "1. Prefer companies literally named in the article, OR companies you are "
+                "specifically, confidently thinking of even if not named verbatim -- set "
+                "is_direct=true and put the real company name, with ticker=null if you "
+                "are not sure of the exact symbol. Do NOT drop down to sector-level "
+                "inference just because you lack the ticker; only use sector-level "
+                "inference when you do NOT have specific companies in mind at all, only "
+                "a general sense that a whole sector is affected.\n"
+                "2. Only use sector-level inference (is_direct=false, sector=<value>) when "
+                "the news is a genuine, PROXIMATE, sector-wide catalyst (e.g. a commodity "
+                "price shock, a rate decision, a regulatory change) that plausibly moves "
+                "EVERY company in that sector similarly -- not a speculative multi-step "
+                "chain of reasoning.\n"
+                "3. The `sector` value MUST come from this exact list, using these exact "
+                "definitions -- if the real-world industry you're reasoning about does not "
+                "match one of these definitions, DO NOT force it into the closest-sounding "
+                "one. Omit that company/sector entirely instead:\n"
+                f"{SECTOR_DEFINITIONS}\n"
+                "4. Do not chain multiple unrelated sector inferences from one article "
+                "(e.g. do not infer both an oil-sector effect AND an IT-sector effect from "
+                "one macro/rates story unless the article is genuinely, specifically about "
+                "both).\n"
+                "5. List at most 5 companies total, fewer if you are not genuinely confident "
+                "in more. If nothing in the article has a specific, defensible link to a "
+                "real company or one of the sectors above, return an empty companies list -- "
+                "that is a correct answer, not a failure.\n"
+                "6. Each rationale must name the specific mechanism for THAT company -- not "
+                "a sentence that would apply equally to any company in its sector.\n\n"
+                f"Title: {title}\n\nContent: {content or '(no summary available -- reason only from the title, and be more conservative about sector-level inference given the limited signal)'}"
             ),
         }],
     )

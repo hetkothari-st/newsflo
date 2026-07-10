@@ -28,13 +28,43 @@ def _to_resolved(company: Company, mention: CompanyMention, basis: str) -> dict:
     }
 
 
+def _find_direct_company(session: Session, mention: CompanyMention) -> Company | None:
+    """Resolve a direct mention to a Company, trying ticker first, then name.
+
+    The analysis model sometimes names a real company it is confident about
+    without being confident of the exact ticker symbol. Falling straight
+    through to sector-wide inference in that case would discard the model's
+    specific reasoning and substitute a generic top-N-by-tier sector pick --
+    exactly the kind of unrelated-company mismatch this resolver must avoid.
+    Name matching only returns a company when there is exactly ONE candidate
+    (either an exact case-insensitive match, or a single company whose name
+    contains the mention's name or vice versa) -- an ambiguous match returns
+    None rather than guessing, consistent with "omit rather than mismatch".
+    """
+    if mention.ticker:
+        company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
+        if company is not None:
+            return company
+    if not mention.name:
+        return None
+    name_lower = mention.name.strip().lower()
+    if not name_lower:
+        return None
+    all_companies = session.query(Company).all()
+    exact = [c for c in all_companies if c.name.strip().lower() == name_lower]
+    if len(exact) == 1:
+        return exact[0]
+    contains = [c for c in all_companies if name_lower in c.name.lower() or c.name.lower() in name_lower]
+    if len(contains) == 1:
+        return contains[0]
+    return None
+
+
 def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[dict]:
     resolved = []
     for mention in mentions:
         if mention.is_direct:
-            if not mention.ticker:
-                continue
-            company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
+            company = _find_direct_company(session, mention)
             if company is None:
                 continue
             resolved.append(_to_resolved(company, mention, basis="direct_mention"))

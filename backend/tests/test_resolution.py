@@ -61,3 +61,48 @@ def test_resolve_direct_mention_with_unknown_ticker_is_skipped(db_session):
     resolved = resolve_companies(db_session, [mention])
 
     assert resolved == []
+
+
+def test_resolve_direct_mention_falls_back_to_name_when_ticker_missing(db_session):
+    # The model is confident of the company but not the exact ticker -- the
+    # resolver must still use the specific name rather than discarding the
+    # mention or falling back to unrelated sector-wide picks.
+    company = _make_company(db_session, "SBIN.NS", "State Bank of India", "banking", None)
+    mention = CompanyMention(
+        name="State Bank of India", ticker=None, is_direct=True, sector="banking",
+        direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="higher funding costs",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert len(resolved) == 1
+    assert resolved[0]["company_id"] == company.id
+    assert resolved[0]["basis"] == "direct_mention"
+
+
+def test_resolve_direct_mention_name_fallback_skips_ambiguous_matches(db_session):
+    # Two companies both contain "Bank" -- an ambiguous substring match must
+    # be skipped entirely (omit rather than mismatch), not guessed at.
+    _make_company(db_session, "HDFCBANK.NS", "HDFC Bank", "banking", None)
+    _make_company(db_session, "ICICIBANK.NS", "ICICI Bank", "banking", None)
+    mention = CompanyMention(
+        name="Bank", ticker=None, is_direct=True, sector="banking",
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="vague",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved == []
+
+
+def test_resolve_direct_mention_name_fallback_is_case_insensitive(db_session):
+    company = _make_company(db_session, "TCS.NS", "Tata Consultancy Services", "it", None)
+    mention = CompanyMention(
+        name="tata consultancy services", ticker=None, is_direct=True, sector="it",
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="strong order book",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert len(resolved) == 1
+    assert resolved[0]["company_id"] == company.id

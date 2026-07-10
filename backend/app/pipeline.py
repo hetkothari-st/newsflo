@@ -1,3 +1,5 @@
+import time
+
 from sqlalchemy.orm import Session
 
 from app.alerting.matcher import match_alert_to_holdings
@@ -46,7 +48,18 @@ def _alert_broadcast_payload(alert: Alert) -> dict:
     }
 
 
-def process_new_articles(session: Session, claude_client) -> int:
+def process_new_articles(session: Session, claude_client, throttle_seconds: float = 0) -> int:
+    """Run the filter -> analyze -> resolve -> alert pipeline over every
+    CATEGORIZED article.
+
+    ``throttle_seconds`` sleeps between each article's analysis call (and
+    before each retry) to stay under a rate-limited provider's requests-per-
+    minute cap -- a real free-tier limit, not a hypothetical one: an
+    unthrottled run over a backlog of ~50 articles previously blew through
+    Groq's free-tier rate limit and failed nearly every one of them. Defaults
+    to 0 (no delay) so the test suite, which always uses a mocked/instant
+    client, is not slowed down; the scheduler passes a real value.
+    """
     filter_new_articles(session)
 
     alerts_created = 0
@@ -54,12 +67,15 @@ def process_new_articles(session: Session, claude_client) -> int:
 
     for article in pending:
         analysis = None
-        for _ in range(2):  # try once, retry once
+        for attempt in range(2):  # try once, retry once
             try:
                 analysis = analyze_article(claude_client, article.title, article.content)
                 break
             except Exception:
+                if attempt == 0:
+                    time.sleep(throttle_seconds)
                 continue
+        time.sleep(throttle_seconds)  # stay under the provider's rate limit before the next article
 
         if analysis is None:
             article.status = "ANALYSIS_FAILED"

@@ -40,7 +40,7 @@ def _run_ingestion_and_analysis() -> None:
     try:
         inserted = fetch_new_articles(session, RSS_FEEDS)
         client = build_client(settings.groq_api_key)
-        created = process_new_articles(session, client)
+        created = process_new_articles(session, client, throttle_seconds=2.5)
         logger.info("Poll cycle: %s new articles, %s alerts created", inserted, created)
     except Exception:
         logger.exception("Ingestion/analysis poll cycle failed")
