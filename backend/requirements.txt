@@ -3,7 +3,7 @@ uvicorn
 sqlalchemy
 pydantic
 pydantic-settings
-anthropic
+openai
 feedparser
 httpx
 pytest

@@ -1,49 +1,55 @@
-from anthropic import Anthropic
+import json
+
+from openai import OpenAI
 
 from app.analysis.schemas import SECTORS, AnalysisOutput
 
-MODEL = "claude-sonnet-4-5"
+MODEL = "anthropic/claude-sonnet-4.5"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 RECORD_ANALYSIS_TOOL = {
-    "name": "record_analysis",
-    "description": "Record which companies are affected by this news article and how.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "category": {"type": "string"},
-            "companies": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "ticker": {"type": ["string", "null"]},
-                        "is_direct": {"type": "boolean"},
-                        "sector": {"type": ["string", "null"], "enum": SECTORS + [None]},
-                        "direction": {"type": "string", "enum": ["bullish", "bearish"]},
-                        "magnitude_low": {"type": "number"},
-                        "magnitude_high": {"type": "number"},
-                        "rationale": {"type": "string"},
+    "type": "function",
+    "function": {
+        "name": "record_analysis",
+        "description": "Record which companies are affected by this news article and how.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "companies": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "ticker": {"type": ["string", "null"]},
+                            "is_direct": {"type": "boolean"},
+                            "sector": {"type": ["string", "null"], "enum": SECTORS + [None]},
+                            "direction": {"type": "string", "enum": ["bullish", "bearish"]},
+                            "magnitude_low": {"type": "number"},
+                            "magnitude_high": {"type": "number"},
+                            "rationale": {"type": "string"},
+                        },
+                        "required": ["name", "is_direct", "direction", "magnitude_low", "magnitude_high", "rationale"],
                     },
-                    "required": ["name", "is_direct", "direction", "magnitude_low", "magnitude_high", "rationale"],
                 },
             },
+            "required": ["category", "companies"],
         },
-        "required": ["category", "companies"],
     },
 }
 
 
-def build_client(api_key: str) -> Anthropic:
-    return Anthropic(api_key=api_key)
+def build_client(api_key: str) -> OpenAI:
+    return OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL)
 
 
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
-    message = client.messages.create(
+    response = client.chat.completions.create(
         model=MODEL,
         max_tokens=1024,
         tools=[RECORD_ANALYSIS_TOOL],
-        tool_choice={"type": "tool", "name": "record_analysis"},
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
         messages=[{
             "role": "user",
             "content": (
@@ -54,7 +60,10 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             ),
         }],
     )
-    tool_use = next((block for block in message.content if block.type == "tool_use"), None)
-    if tool_use is None:
+    message = response.choices[0].message
+    tool_calls = message.tool_calls or []
+    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_analysis"), None)
+    if tool_call is None:
         raise ValueError(f"Claude response contained no tool_use block for article: {title!r}")
-    return AnalysisOutput.model_validate(tool_use.input)
+    arguments = json.loads(tool_call.function.arguments)
+    return AnalysisOutput.model_validate(arguments)

@@ -1,26 +1,31 @@
+import json
 from types import SimpleNamespace
 
 from app.analysis.claude_client import analyze_article
 
 
-class FakeToolUseBlock:
-    type = "tool_use"
-
-    def __init__(self, input_data):
-        self.input = input_data
+class FakeToolCall:
+    def __init__(self, name, arguments_dict):
+        self.function = SimpleNamespace(name=name, arguments=json.dumps(arguments_dict))
 
 
-class FakeMessages:
+class FakeCompletions:
     def __init__(self, response_input):
         self._response_input = response_input
 
     def create(self, **kwargs):
-        return SimpleNamespace(content=[FakeToolUseBlock(self._response_input)])
+        message = SimpleNamespace(tool_calls=[FakeToolCall("record_analysis", self._response_input)])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class FakeChat:
+    def __init__(self, response_input):
+        self.completions = FakeCompletions(response_input)
 
 
 class FakeClient:
     def __init__(self, response_input):
-        self.messages = FakeMessages(response_input)
+        self.chat = FakeChat(response_input)
 
 
 def test_analyze_article_parses_direct_mention():
@@ -58,19 +63,20 @@ def test_analyze_article_parses_sector_mention():
     assert result.companies[0].sector == "oil_gas"
 
 
-class FakeMessagesNoToolUse:
-    """Fake messages that returns empty content (no tool_use block)."""
+class FakeCompletionsNoToolCall:
+    """Fake completions that returns no tool_calls."""
     def create(self, **kwargs):
-        return SimpleNamespace(content=[])
+        message = SimpleNamespace(tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 class FakeClientNoToolUse:
     def __init__(self):
-        self.messages = FakeMessagesNoToolUse()
+        self.chat = SimpleNamespace(completions=FakeCompletionsNoToolCall())
 
 
 def test_analyze_article_raises_on_missing_tool_use_block():
-    """Test that a clear ValueError is raised when Claude response has no tool_use block."""
+    """Test that a clear ValueError is raised when the response has no tool call."""
     client = FakeClientNoToolUse()
     article_title = "Test Article Title"
 

@@ -2,8 +2,13 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.analysis.claude_client import build_client
+from app.config import settings
 from app.db import SessionLocal
+from app.ingestion.poller import fetch_new_articles
+from app.ingestion.sources import RSS_FEEDS
 from app.outcomes.tracker import check_pending_outcomes
+from app.pipeline import process_new_articles
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,23 @@ def _run_horizon(horizon_days: int) -> None:
         session.close()
 
 
+def _run_ingestion_and_analysis() -> None:
+    """Poll RSS feeds, then run the pipeline over anything new. Claude call
+    failures are already handled per-article by process_new_articles (retry
+    once, then ANALYSIS_FAILED) — this only guards against the poll/pipeline
+    call itself raising, so one bad run never crashes the scheduler thread."""
+    session = SessionLocal()
+    try:
+        inserted = fetch_new_articles(session, RSS_FEEDS)
+        client = build_client(settings.openrouter_api_key)
+        created = process_new_articles(session, client)
+        logger.info("Poll cycle: %s new articles, %s alerts created", inserted, created)
+    except Exception:
+        logger.exception("Ingestion/analysis poll cycle failed")
+    finally:
+        session.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     scheduler = BackgroundScheduler()
@@ -37,5 +59,11 @@ def start_scheduler() -> None:
             args=[horizon],
             id=f"outcome_tracker_{horizon}d",
         )
+    scheduler.add_job(
+        _run_ingestion_and_analysis,
+        trigger="interval",
+        minutes=settings.poll_interval_minutes,
+        id="rss_poll",
+    )
     scheduler.start()
     _scheduler = scheduler
