@@ -11,13 +11,14 @@ export interface AlertCompany {
   company_id: number;
   ticker: string;
   name: string;
-  index_tier: string; // NIFTY50 | NIFTY100 | NIFTY500 | OTHER
+  index_tier: string; // NIFTY50 | NIFTY100 | NIFTY500 | GLOBAL_LARGE_CAP | OTHER
   direction: string; // bullish | bearish
   magnitude_low: number;
   magnitude_high: number;
   rationale: string;
   basis: string; // direct_mention | sector_inference
   confidence: string; // llm_estimate | calibrated
+  market: 'IN' | 'GLOBAL';
   in_my_holdings: boolean;
 }
 
@@ -59,6 +60,26 @@ export interface Holding {
 
 export interface CsvUploadResponse {
   loaded: number;
+}
+
+export interface Company {
+  id: number;
+  ticker: string;
+  name: string;
+  sector: string;
+  index_tier: string;
+  market: 'IN' | 'GLOBAL';
+}
+
+export interface WatchlistCompany {
+  company_id: number;
+  ticker: string;
+  name: string;
+}
+
+export interface Watchlist {
+  categories: string[];
+  companies: WatchlistCompany[];
 }
 
 interface ApiError {
@@ -137,4 +158,37 @@ export async function uploadHoldingsCsv(token: string, file: File): Promise<CsvU
   });
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as CsvUploadResponse;
+}
+
+export async function getCompanies(market?: 'IN' | 'GLOBAL'): Promise<Company[]> {
+  const query = market ? `?market=${market}` : '';
+  const res = await fetch(`/api/companies${query}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Company[];
+}
+
+export async function getCategories(): Promise<string[]> {
+  const res = await fetch('/api/categories');
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as string[];
+}
+
+export async function getWatchlist(token: string): Promise<Watchlist> {
+  const res = await fetch('/api/watchlist', { headers: authHeaders(token) });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Watchlist;
+}
+
+export async function putWatchlist(
+  token: string,
+  categories: string[],
+  companyIds: number[],
+): Promise<Watchlist> {
+  const res = await fetch('/api/watchlist', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ categories, company_ids: companyIds }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Watchlist;
 }

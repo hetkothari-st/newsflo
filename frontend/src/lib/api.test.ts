@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { addHolding, getAlerts, login, register } from './api';
+import {
+  addHolding,
+  getAlerts,
+  getCategories,
+  getCompanies,
+  getWatchlist,
+  login,
+  putWatchlist,
+  register,
+} from './api';
 
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
   const fn = vi.fn().mockResolvedValue({
@@ -54,5 +63,45 @@ describe('api client', () => {
   it('login throws the backend detail message on error', async () => {
     mockFetchOnce({ detail: 'Invalid email or password' }, false, 401);
     await expect(login('a@example.com', 'wrong')).rejects.toThrow('Invalid email or password');
+  });
+
+  it('getCompanies fetches all companies with no query when no market given', async () => {
+    const fetchMock = mockFetchOnce([]);
+    await getCompanies();
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies');
+  });
+
+  it('getCompanies appends the market query param', async () => {
+    const fetchMock = mockFetchOnce([]);
+    await getCompanies('IN');
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies?market=IN');
+  });
+
+  it('getCategories fetches the categories endpoint', async () => {
+    const fetchMock = mockFetchOnce(['banking', 'oil_energy']);
+    const result = await getCategories();
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/categories');
+    expect(result).toEqual(['banking', 'oil_energy']);
+  });
+
+  it('getWatchlist attaches the Bearer token', async () => {
+    const fetchMock = mockFetchOnce({ categories: [], companies: [] });
+    await getWatchlist('tok');
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/watchlist');
+    expect((opts.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
+
+  it('putWatchlist PUTs categories and company_ids with the Bearer token', async () => {
+    const fetchMock = mockFetchOnce({ categories: ['oil_energy'], companies: [] });
+    await putWatchlist('tok', ['oil_energy'], [7]);
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/watchlist');
+    expect(opts.method).toBe('PUT');
+    expect((opts.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    expect(JSON.parse(opts.body as string)).toEqual({ categories: ['oil_energy'], company_ids: [7] });
   });
 });
