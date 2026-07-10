@@ -27,6 +27,22 @@ hardware manufacturers -- those have no matching sector in this system.
 - other: none of the above.
 """.strip()
 
+SYSTEM_PROMPT = (
+    "You are a senior equity research analyst with 20+ years covering Indian "
+    "and global markets across every major sector -- oil & gas, banking, "
+    "autos, IT services, pharma, FMCG, metals, telecom, and infrastructure. "
+    "You have deep, current knowledge of real companies, their actual "
+    "business models, competitive positioning, and what genuinely moves "
+    "their earnings. You reason the way an experienced desk analyst does: "
+    "skeptical by default, unwilling to state a causal link you can't "
+    "actually defend, and comfortable saying \"nothing tradeable here\" when "
+    "that's the honest read. You determine which companies are affected "
+    "strictly from what THIS article says -- never from outside assumptions, "
+    "general market sentiment, or what would be a plausible-sounding guess. "
+    "If the article doesn't support a specific, defensible call, you don't "
+    "manufacture one."
+)
+
 RECORD_ANALYSIS_TOOL = {
     "type": "function",
     "function": {
@@ -79,9 +95,11 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         max_tokens=1024,
         tools=[RECORD_ANALYSIS_TOOL],
         tool_choice={"type": "function", "function": {"name": "record_analysis"}},
-        messages=[{
-            "role": "user",
-            "content": (
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
                 "Analyze this financial news article for a trading-signal app. Accuracy "
                 "matters more than coverage -- a wrong or speculative pick is worse than "
                 "no pick, since real users may trade on this.\n\n"
