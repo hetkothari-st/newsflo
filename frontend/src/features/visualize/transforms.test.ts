@@ -32,6 +32,19 @@ describe('buildImpactTree', () => {
     const tree = buildImpactTree('Some event', [company({ direction: 'unknown' })]);
     expect(tree.children).toHaveLength(0);
   });
+
+  it('excludes an unrecognized-direction company while still bucketing its bullish/bearish siblings', () => {
+    const tree = buildImpactTree('Some event', [
+      company({ company_id: 1, direction: 'bullish' }),
+      company({ company_id: 2, direction: 'bearish' }),
+      company({ company_id: 3, direction: 'unknown' }),
+    ]);
+    const bullish = tree.children.find((b) => b.label === 'Bullish');
+    const bearish = tree.children.find((b) => b.label === 'Bearish');
+    expect(bullish?.children).toHaveLength(1);
+    expect(bearish?.children).toHaveLength(1);
+    expect(tree.children).toHaveLength(2);
+  });
 });
 
 describe('buildSectorTree', () => {
@@ -48,5 +61,20 @@ describe('buildSectorTree', () => {
   it('groups companies with no sector under "Other"', () => {
     const tree = buildSectorTree('Some event', [company({ sector: undefined })]);
     expect(tree.children.map((b) => b.label)).toEqual(['Other']);
+  });
+
+  it('groups companies with an empty or whitespace-only sector under "Other"', () => {
+    const tree = buildSectorTree('Some event', [
+      company({ company_id: 1, sector: '' }),
+      company({ company_id: 2, sector: '   ' }),
+    ]);
+    expect(tree.children.map((b) => b.label)).toEqual(['Other']);
+    expect(tree.children[0].children).toHaveLength(2);
+  });
+
+  it('never produces a branch for a sector with zero companies', () => {
+    const tree = buildSectorTree('Some event', [company({ sector: 'Energy' })]);
+    expect(tree.children).toHaveLength(1);
+    expect(tree.children[0].label).toBe('Energy');
   });
 });
