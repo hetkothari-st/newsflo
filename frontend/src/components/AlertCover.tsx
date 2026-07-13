@@ -38,33 +38,13 @@ export default function AlertCover({ imageUrl, category }: { imageUrl: string | 
     return <CategoryCover category={category} />;
   }
 
-  // Scraped og:image thumbnails (typically ~600-1200px wide) are far lower
-  // resolution than the tall card they'd need to fill edge-to-edge --
-  // stretching one edge-to-edge upscales it well past its real detail,
-  // reading as blurry/pixelated. A blurred duplicate of the same photo as
-  // full-bleed backdrop, behind the real photo shown crisp and untouched at
-  // its own natural size, gives every card a filled background with zero
-  // upscaling of the sharp copy. No tint/scrim on top of either layer -- a
-  // wash there is what read as a "whitish layer on the photo" before.
+  // Every place this renders now sizes its own box to a fixed, modest
+  // height (AlertCoverCard's banner) instead of letting it stretch across
+  // an entire viewport-height card -- so object-cover fills that box exactly
+  // from a typical og:image thumbnail's real resolution, with no upscale,
+  // no blur, no tinted backdrop standing in for missing pixels, and nothing
+  // layered on top of it.
   return (
-    <div className="relative h-full w-full overflow-hidden">
-      <img
-        src={imageUrl}
-        alt=""
-        aria-hidden="true"
-        loading="lazy"
-        onError={() => setFailed(true)}
-        className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl motion-reduce:blur-md"
-      />
-      <div className="relative flex h-full w-full items-center justify-center p-6">
-        <img
-          src={imageUrl}
-          alt=""
-          loading="lazy"
-          onError={() => setFailed(true)}
-          className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
-        />
-      </div>
-    </div>
+    <img src={imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} className="h-full w-full object-cover" />
   );
 }

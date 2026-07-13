@@ -67,7 +67,7 @@ export default function CompanyChip({ company }: { company: AlertCompany }) {
         aria-expanded={expanded}
         onClick={toggle}
         onKeyDown={onKeyDown}
-        className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-hairline bg-surface p-3 motion-safe:transition-colors hover:border-muted theme-light:border-transparent theme-light:shadow-neu-sm"
+        className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-hairline bg-page p-3 motion-safe:transition-colors hover:border-muted theme-light:shadow-neu-sm"
       >
         <CompanyAvatar ticker={company.ticker} />
         <div className="flex min-w-0 flex-col">
