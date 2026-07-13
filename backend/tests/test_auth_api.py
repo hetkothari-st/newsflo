@@ -134,3 +134,42 @@ def test_patch_me_updates_email_alerts_enabled(db_session):
     assert refetch.json()["email_alerts_enabled"] is False
 
     app.dependency_overrides.clear()
+
+
+def test_change_password_succeeds_and_new_password_logs_in(db_session):
+    client = _client(db_session)
+    reg = client.post("/api/auth/register", json={"email": "pwchange@example.com", "password": "oldpass1"})
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.post(
+        "/api/auth/me/password",
+        json={"current_password": "oldpass1", "new_password": "newpass2"},
+        headers=headers,
+    )
+    assert response.status_code == 204
+
+    old_login = client.post("/api/auth/login", json={"email": "pwchange@example.com", "password": "oldpass1"})
+    assert old_login.status_code == 401
+
+    new_login = client.post("/api/auth/login", json={"email": "pwchange@example.com", "password": "newpass2"})
+    assert new_login.status_code == 200
+
+    app.dependency_overrides.clear()
+
+
+def test_change_password_rejects_wrong_current_password(db_session):
+    client = _client(db_session)
+    reg = client.post("/api/auth/register", json={"email": "pwwrong@example.com", "password": "rightpass"})
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.post(
+        "/api/auth/me/password",
+        json={"current_password": "WRONG", "new_password": "newpass2"},
+        headers=headers,
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Current password is incorrect"
+
+    app.dependency_overrides.clear()

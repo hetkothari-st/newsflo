@@ -32,6 +32,11 @@ class PreferencesRequest(BaseModel):
     email_alerts_enabled: bool
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=1, max_length=72)
+
+
 def _serialize_profile(user: User) -> ProfileResponse:
     return ProfileResponse(
         id=user.id,
@@ -78,3 +83,15 @@ def patch_me(
     db.commit()
     db.refresh(current_user)
     return _serialize_profile(current_user)
+
+
+@router.post("/me/password", status_code=204)
+def change_password(
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    current_user.hashed_password = hash_password(payload.new_password)
+    db.commit()
