@@ -173,3 +173,50 @@ def test_change_password_rejects_wrong_current_password(db_session):
     assert response.json()["detail"] == "Current password is incorrect"
 
     app.dependency_overrides.clear()
+
+
+def test_delete_me_removes_user_and_cascades(db_session):
+    from app.models import Company, EmailNotification, Holding, User, UserWatchlistCategory, UserWatchlistCompany
+
+    client = _client(db_session)
+    reg = client.post("/api/auth/register", json={"email": "delete@example.com", "password": "deleteme1"})
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = decode_access_token(token)
+
+    company = Company(ticker="DEL.NS", name="DelCo", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    db_session.add(Holding(user_id=user_id, company_id=company.id, quantity=1.0))
+    db_session.add(UserWatchlistCategory(user_id=user_id, category="banking"))
+    db_session.add(UserWatchlistCompany(user_id=user_id, company_id=company.id))
+    db_session.commit()
+
+    response = client.request(
+        "DELETE", "/api/auth/me", json={"password": "deleteme1"}, headers=headers
+    )
+    assert response.status_code == 204
+
+    assert db_session.query(User).filter_by(id=user_id).one_or_none() is None
+    assert db_session.query(Holding).filter_by(user_id=user_id).count() == 0
+    assert db_session.query(UserWatchlistCategory).filter_by(user_id=user_id).count() == 0
+    assert db_session.query(UserWatchlistCompany).filter_by(user_id=user_id).count() == 0
+
+    app.dependency_overrides.clear()
+
+
+def test_delete_me_rejects_wrong_password(db_session):
+    client = _client(db_session)
+    reg = client.post("/api/auth/register", json={"email": "delwrong@example.com", "password": "rightpass"})
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.request(
+        "DELETE", "/api/auth/me", json={"password": "WRONG"}, headers=headers
+    )
+    assert response.status_code == 401
+
+    login = client.post("/api/auth/login", json={"email": "delwrong@example.com", "password": "rightpass"})
+    assert login.status_code == 200  # user was NOT deleted
+
+    app.dependency_overrides.clear()

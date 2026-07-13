@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user
 from app.auth.security import hash_password, verify_password
 from app.auth.tokens import create_access_token
-from app.models import User
+from app.models import EmailNotification, Holding, User, UserWatchlistCategory, UserWatchlistCompany
 from app.routers.articles import get_db
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -35,6 +35,10 @@ class PreferencesRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=1, max_length=72)
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
 
 
 def _serialize_profile(user: User) -> ProfileResponse:
@@ -94,4 +98,20 @@ def change_password(
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
     current_user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+
+
+@router.delete("/me", status_code=204)
+def delete_me(
+    payload: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    db.query(Holding).filter_by(user_id=current_user.id).delete()
+    db.query(UserWatchlistCategory).filter_by(user_id=current_user.id).delete()
+    db.query(UserWatchlistCompany).filter_by(user_id=current_user.id).delete()
+    db.query(EmailNotification).filter_by(user_id=current_user.id).delete()
+    db.delete(current_user)
     db.commit()
