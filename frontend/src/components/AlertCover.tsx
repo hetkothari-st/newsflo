@@ -38,23 +38,30 @@ export default function AlertCover({ imageUrl, category }: { imageUrl: string | 
     return <CategoryCover category={category} />;
   }
 
-  // A single object-cover fill, biased toward the top of the source photo
-  // (object-top) since a news photo's subject is usually upper-frame while
-  // captions/logos/signage sit lower -- cropping the bottom loses less than
-  // a center crop would. Previously this stacked a blurred object-cover
-  // backdrop behind a sharp object-contain foreground: on a tall mobile
-  // card, a small/plain source image made the contain layer read as nearly
-  // blank against the dominant blur, and the backdrop's own scale-110 crop
-  // was visible around it -- worse on both fronts than a plain cover fill.
+  // Scraped og:image thumbnails (typically ~600x315) are far lower-res than
+  // the tall mobile card they fill -- a single object-cover layer forces the
+  // browser to upscale the sharp image well past its real detail, reading as
+  // blurry/pixelated (confirmed: this is what a plain object-cover fill
+  // produced). A blurred object-cover backdrop fills the full bleed (blur
+  // hides its own upscale softness, reads as intentional rather than a
+  // quality bug), while the foreground uses the image's OWN natural size --
+  // max-width/max-height:100% with no explicit width/height means the
+  // browser never enlarges it past that size, only shrinks it if it doesn't
+  // fit, so it's mathematically guaranteed to stay sharp regardless of how
+  // tall the card is.
   return (
     <div className="relative h-full w-full overflow-hidden">
       <img
         src={imageUrl}
         alt=""
+        aria-hidden="true"
         loading="lazy"
         onError={() => setFailed(true)}
-        className="h-full w-full object-cover object-top"
+        className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl motion-reduce:blur-md"
       />
+      <div className="relative flex h-full w-full items-center justify-center">
+        <img src={imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} className="max-h-full max-w-full" />
+      </div>
     </div>
   );
 }
