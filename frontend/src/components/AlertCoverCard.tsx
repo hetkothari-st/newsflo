@@ -64,6 +64,13 @@ export default function AlertCoverCard({
         className="absolute inset-0 bg-gradient-to-t from-page/95 via-page/40 to-transparent"
         aria-hidden="true"
       />
+      {/* Independent top scrim: the category/time row must stay legible over
+          any photo color, not just whatever the bottom gradient's faded tail
+          happens to leave behind. */}
+      <div
+        className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-page/90 via-page/50 to-transparent"
+        aria-hidden="true"
+      />
       <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4">
         <CategorySwatch category={alert.category} active />
         <time className="text-xs uppercase tracking-widest text-ink/80">{formatTime(alert.created_at)}</time>

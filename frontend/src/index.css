@@ -32,3 +32,14 @@
 body {
   @apply bg-page text-ink font-sans antialiased;
 }
+
+/* CategoryTabs: keep the tab row + live status on one line; on widths too
+   narrow to fit (e.g. while "Reconnecting" is showing), scroll instead of
+   wrapping to a second line -- without a visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

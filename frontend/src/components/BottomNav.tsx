@@ -20,7 +20,7 @@ export default function BottomNav() {
 
   return (
     <>
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex h-14 border-t border-hairline bg-page theme-light:border-none theme-light:shadow-neu-sm md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex h-14 border-t border-hairline bg-page md:hidden">
         {LINKS.map((l) => (
           <Link key={l.to} to={l.to} className={itemClass(pathname === l.to)}>
             {l.label}
