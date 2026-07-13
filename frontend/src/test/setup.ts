@@ -7,3 +7,4 @@ import '@testing-library/jest-dom';
 // their own spy/mock to assert on call args.
 Element.prototype.scrollTo = function scrollTo() {};
 window.scrollTo = function scrollTo() {};
+Element.prototype.scrollIntoView = function scrollIntoView() {};

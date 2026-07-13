@@ -125,12 +125,6 @@ export default function Feed() {
     () => tabAlerts.filter((a) => revealedIds.has(a.id)),
     [tabAlerts, revealedIds],
   );
-  // LiveStatus's "time since last alert" stays feed-wide (not tab-scoped) --
-  // it reports overall freshness, independent of which tab is active.
-  const revealedAlerts = useMemo(
-    () => alerts.filter((a) => revealedIds.has(a.id)),
-    [alerts, revealedIds],
-  );
   const revealNew = useCallback(() => {
     setRevealedIds((prev) => {
       const next = new Set(prev);
@@ -224,7 +218,6 @@ export default function Feed() {
           active={tab}
           onChange={setTab}
           connected={connected}
-          lastAlertAt={revealedAlerts[0]?.created_at ?? null}
           newCount={newCount}
           onRevealNew={revealNew}
           onOpenCustomSettings={() => setSettingsOpen(true)}

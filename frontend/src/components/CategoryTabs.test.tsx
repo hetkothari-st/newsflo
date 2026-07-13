@@ -9,7 +9,6 @@ function renderTabs(overrides: Partial<Parameters<typeof CategoryTabs>[0]> = {})
       active="india"
       onChange={() => {}}
       connected
-      lastAlertAt={null}
       newCount={0}
       onRevealNew={() => {}}
       onOpenCustomSettings={() => {}}
@@ -46,7 +45,6 @@ describe('CategoryTabs', () => {
         active="india"
         onChange={() => {}}
         connected
-        lastAlertAt={null}
         newCount={3}
         onRevealNew={onRevealNew}
         onOpenCustomSettings={() => {}}
@@ -65,7 +63,6 @@ describe('CategoryTabs', () => {
         active="custom"
         onChange={() => {}}
         connected
-        lastAlertAt={null}
         newCount={0}
         onRevealNew={() => {}}
         onOpenCustomSettings={() => {}}

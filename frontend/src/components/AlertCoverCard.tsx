@@ -1,4 +1,4 @@
-import { useEffect, type KeyboardEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import type { Alert } from '../lib/api';
 import AlertCompanies from './AlertCompanies';
 import AlertCover from './AlertCover';
@@ -57,6 +57,14 @@ export default function AlertCoverCard({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [expanded, onClose]);
 
+  const companiesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Open straight to the companies section instead of the top of the
+    // news block -- otherwise it's below the fold and the user has to
+    // scroll down just to see what they tapped the card to see.
+    if (expanded) companiesRef.current?.scrollIntoView({ block: 'start' });
+  }, [expanded]);
+
   if (expanded) {
     // Bifurcated into two clearly distinct blocks: the news (cover banner +
     // headline + sentiment) and the affected companies (on `surface`,
@@ -86,7 +94,10 @@ export default function AlertCoverCard({
           </div>
           <div className="absolute inset-0 bg-page/70 backdrop-blur-[2px]" aria-hidden="true" />
         </div>
-        <div className="flex-1 border-t border-hairline bg-surface p-4 theme-light:border-transparent theme-light:shadow-neu-inset">
+        <div
+          ref={companiesRef}
+          className="flex-1 border-t border-hairline bg-surface p-4 theme-light:border-transparent theme-light:shadow-neu-inset"
+        >
           <AlertCompanies
             alert={alert}
             isAuthenticated={isAuthenticated}
