@@ -26,7 +26,7 @@ export default function CategoryTabs({
   onOpenCustomSettings: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border-b border-hairline p-2 theme-light:border-none theme-light:shadow-neu-sm">
       <div className="flex gap-6" role="tablist" aria-label="Feed markets">
         {TABS.map((t) => {
           const isActive = t.key === active;
@@ -38,7 +38,7 @@ export default function CategoryTabs({
               aria-selected={isActive}
               onClick={() => onChange(t.key)}
               className={`border-b-2 pb-3 text-base font-bold uppercase tracking-widest motion-safe:transition-colors ${
-                isActive ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
+                isActive ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-ink'
               }`}
             >
               {t.label}

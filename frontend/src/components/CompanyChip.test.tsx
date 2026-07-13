@@ -55,4 +55,9 @@ describe('CompanyChip', () => {
     render(<CompanyChip company={{ ...company, direction: 'bearish', magnitude_low: -3, magnitude_high: -1 }} />);
     expect(screen.getByText('▼')).toHaveClass('text-bearish');
   });
+
+  it('gets a raised shadow in light mode', () => {
+    render(<CompanyChip company={company} />);
+    expect(screen.getByRole('button', { name: /reliance/i })).toHaveClass('theme-light:shadow-neu-sm');
+  });
 });

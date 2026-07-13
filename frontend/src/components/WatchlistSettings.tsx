@@ -104,7 +104,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
           <div className="flex flex-wrap gap-2">
             {categories.map((category) => {
               const selected = selectedCategories.has(category);
-              const accent = selected ? (CHIP_ACCENT[category] ?? CHIP_ACCENT_FALLBACK) : 'border-hairline bg-page hover:border-muted';
+              const accent = selected ? (CHIP_ACCENT[category] ?? CHIP_ACCENT_FALLBACK) : 'border-hairline bg-page hover:border-muted theme-light:shadow-neu-sm';
               return (
                 <label
                   key={category}
@@ -142,7 +142,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
               <label
                 key={company.id}
                 className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 motion-safe:transition-colors ${
-                  selected ? 'border-ink bg-hairline/40' : 'border-hairline bg-page hover:border-muted'
+                  selected ? 'border-accent bg-accent/10' : 'border-hairline bg-page hover:border-muted theme-light:shadow-neu-sm'
                 }`}
               >
                 <span className="flex items-center gap-2">
@@ -155,7 +155,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
                   <span
                     aria-hidden="true"
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none ${
-                      selected ? 'border-ink bg-ink text-page' : 'border-hairline text-transparent'
+                      selected ? 'border-accent bg-accent text-page' : 'border-hairline text-transparent'
                     }`}
                   >
                     ✓

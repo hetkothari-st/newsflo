@@ -80,4 +80,9 @@ describe('CategoryTabs', () => {
     await userEvent.click(screen.getByLabelText(/custom feed settings/i));
     expect(onOpenCustomSettings).toHaveBeenCalled();
   });
+
+  it('uses the accent token for the active tab and gets a raised shadow container', () => {
+    renderTabs({ active: 'india' });
+    expect(screen.getByRole('tab', { name: /india/i })).toHaveClass('border-accent', 'text-accent');
+  });
 });
