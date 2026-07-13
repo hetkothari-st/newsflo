@@ -72,9 +72,14 @@ New `frontend/src/pages/AccountPage.tsx`, route `/account` wrapped in
 1. **Profile** — email, "member since" (from `getMe`).
 2. **Preferences** — `LanguagePicker`, `ThemeToggle`, and a new email-alerts
    on/off checkbox wired to `getMe`/`updatePreferences`.
-3. **Watchlist** — `WatchlistSettings` component, moved here from
-   `Feed.tsx` (currently rendered there per `components/Feed.tsx`). Feed page
-   keeps only the feed itself after the move.
+3. **Watchlist** — `WatchlistSettings` component, rendered directly (not in
+   an `AlertDetail` sheet, since the page itself is the modal-equivalent
+   surface here). `Feed.tsx` already mounts the same component inside an
+   `AlertDetail` sheet as the "Custom tab → gear icon" configuration flow
+   (`components/Feed.tsx`, `settingsOpen` state) — that mount point is
+   load-bearing UX and stays untouched. Account page adds a second, plain
+   mount of the same component; this is component reuse, not duplicated
+   logic.
 4. **Holdings** — a card linking to `/holdings` (existing page, not
    duplicated here).
 5. **Security** — change-password form (current + new password fields).
@@ -119,5 +124,7 @@ itself).
 - Frontend (Vitest + RTL, matching existing `*.test.tsx` style): new
   `AccountPage.test.tsx` covering profile display, preference toggle,
   password-change success/failure, delete-account confirm flow, and that
-  `WatchlistSettings` renders within the page. Existing `Feed.test.tsx` and
-  `WatchlistSettings.test.tsx` updated for the component's new mount point.
+  `WatchlistSettings` renders within the page. `Feed.test.tsx` and
+  `WatchlistSettings.test.tsx` are unaffected (no changes to that mount
+  point). `NavBar.test.tsx` and `BottomNav.test.tsx` updated: both now assert
+  an `/account` link instead of inline email+logout / the logout-only sheet.
