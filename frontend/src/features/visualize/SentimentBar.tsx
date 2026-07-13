@@ -15,7 +15,7 @@ export default function SentimentBar({ companies }: { companies: AlertCompany[] 
       <div className="flex h-2 overflow-hidden rounded-full bg-hairline">
         {bullish > 0 && (
           <div
-            className={`bg-bullish ${bearish > 0 ? 'border-r-2 border-page' : ''}`}
+            className={`bg-bullish ${bearish > 0 ? 'border-r-2 border-surface' : ''}`}
             style={{ width: `${bullishPct}%` }}
           />
         )}
