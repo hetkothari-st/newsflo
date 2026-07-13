@@ -89,4 +89,14 @@ describe('AlertCompanies', () => {
     expect(screen.getByText('Reliance Industries').closest('.opacity-70')).toBeNull();
     expect(screen.getByText('ONGC').closest('.opacity-70')).not.toBeNull();
   });
+
+  it('shows the empty-state message instead of a blank panel when Impact mode has no groupable companies', async () => {
+    const noDirectionAlert: Alert = {
+      ...alert,
+      companies: alert.companies.map((c) => ({ ...c, direction: 'unknown' })),
+    };
+    render(<AlertCompanies alert={noDirectionAlert} isAuthenticated />);
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
+    expect(screen.getByText('No affected companies for this story.')).toBeInTheDocument();
+  });
 });

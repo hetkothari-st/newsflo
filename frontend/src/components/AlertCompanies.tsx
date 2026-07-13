@@ -75,7 +75,7 @@ export default function AlertCompanies({
           </select>
         </label>
       </div>
-      {visible.length === 0 ? (
+      {grouped.length === 0 ? (
         <p className="text-xs text-muted">{emptyCopy}</p>
       ) : (
         grouped.map((group) => (
