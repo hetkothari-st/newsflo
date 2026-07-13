@@ -59,4 +59,9 @@ describe('AlertCoverCard', () => {
     render(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
     expect(screen.getByText('US strikes Iran oil export sites')).toHaveClass('line-clamp-4');
   });
+
+  it('gets a raised shadow in light mode', () => {
+    render(<AlertCoverCard alert={alert} onOpen={() => {}} variant="grid" />);
+    expect(screen.getByRole('button', { name: /us strikes iran/i })).toHaveClass('theme-light:shadow-neu');
+  });
 });

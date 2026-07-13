@@ -55,7 +55,7 @@ export default function AlertCoverCard({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={onKeyDown}
-      className={`relative w-full shrink-0 cursor-pointer overflow-hidden ${SIZE_CLASS[variant]}`}
+      className={`relative w-full shrink-0 cursor-pointer overflow-hidden theme-light:shadow-neu ${SIZE_CLASS[variant]}`}
     >
       <div className="absolute inset-0">
         <AlertCover imageUrl={alert.article.image_url} category={alert.category} />

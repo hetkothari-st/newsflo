@@ -35,7 +35,7 @@ export default function AlertDetail({
         role="dialog"
         aria-modal="true"
         tabIndex={-1}
-        className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-lg border border-hairline bg-surface p-6 outline-none motion-safe:transition-transform md:max-h-[80vh] md:max-w-lg md:rounded-lg"
+        className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-lg border border-hairline bg-surface p-6 outline-none motion-safe:transition-transform md:max-h-[80vh] md:max-w-lg md:rounded-lg theme-light:border-transparent theme-light:shadow-neu"
       >
         <button
           type="button"

@@ -66,4 +66,13 @@ describe('AlertDetail', () => {
     );
     expect(screen.getByRole('dialog')).toHaveFocus();
   });
+
+  it('gets a raised shadow instead of a border in light mode', () => {
+    render(
+      <AlertDetail open onClose={() => {}}>
+        <p>content</p>
+      </AlertDetail>,
+    );
+    expect(screen.getByRole('dialog')).toHaveClass('theme-light:shadow-neu');
+  });
 });
