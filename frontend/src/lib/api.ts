@@ -220,3 +220,25 @@ export async function putWatchlist(
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as Watchlist;
 }
+
+export interface TranslationStatus {
+  total: number;
+  translated: number;
+  running: boolean;
+}
+
+// Kicks off an on-demand backend translation drain for `lang` (bounded to
+// the most recent alerts -- see backend/app/routers/translation.py). A
+// no-op for English. Fire-and-forget: progress is observed via
+// getTranslationStatus, not this response.
+export async function triggerTranslation(lang: Language): Promise<{ started: boolean }> {
+  const res = await fetch(`/api/translation/run?lang=${lang}`, { method: 'POST' });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as { started: boolean };
+}
+
+export async function getTranslationStatus(lang: Language): Promise<TranslationStatus> {
+  const res = await fetch(`/api/translation/status?lang=${lang}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as TranslationStatus;
+}

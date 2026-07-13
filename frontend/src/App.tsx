@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import BottomNav from './components/BottomNav';
 import NavBar from './components/NavBar';
+import TranslationProgressOverlay from './components/TranslationProgressOverlay';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
@@ -17,6 +18,7 @@ function RequireAuth({ children }: { children: ReactElement }) {
 export default function App() {
   return (
     <div className="min-h-screen bg-page pb-14 font-sans text-ink md:pb-0">
+      <TranslationProgressOverlay />
       <NavBar />
       <Routes>
         <Route path="/" element={<FeedPage />} />
