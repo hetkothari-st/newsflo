@@ -1,4 +1,6 @@
 import type { AlertCompany } from '../lib/api';
+import { translate, type Language } from '../lib/i18n';
+import { useLanguage } from '../lib/language';
 
 function formatMentionDate(iso: string): string {
   const d = new Date(iso);
@@ -11,11 +13,16 @@ function formatMentionDate(iso: string): string {
 // otherwise the LLM's own estimate stands. Magnitude percentages are
 // deliberately not shown -- they're frequently inaccurate and would overstate
 // precision the model doesn't actually have.
-export function precedentLine(company: AlertCompany): string {
+//
+// `lang` defaults to English so this stays a plain, providerless pure
+// function for callers/tests that don't care about localization -- the
+// component below passes the viewer's actual language via useLanguage().
+export function precedentLine(company: AlertCompany, lang: Language = 'en'): string {
   if (company.confidence === 'calibrated') {
-    return `Historical precedent: similar past events showed a comparable ${company.direction} move over comparable horizons.`;
+    const direction = translate(lang, company.direction === 'bullish' ? 'reasoning.bullish' : 'reasoning.bearish');
+    return translate(lang, 'reasoning.calibratedPrecedent', { direction });
   }
-  return `No calibrated history yet — showing the model's own estimate.`;
+  return translate(lang, 'reasoning.noCalibratedHistory');
 }
 
 // The model's rationale is a full paragraph (deliberately kept rich — that
@@ -31,6 +38,7 @@ export function splitRationaleIntoPoints(rationale: string): string[] {
 }
 
 export default function ReasoningPanel({ company }: { company: AlertCompany }) {
+  const { language, t } = useLanguage();
   // key_points is the model's own short, terse summary -- prefer it. Fall
   // back to sentence-splitting the full rationale only for alerts analyzed
   // before key_points existed (empty array).
@@ -48,10 +56,10 @@ export default function ReasoningPanel({ company }: { company: AlertCompany }) {
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs text-muted">{precedentLine(company)}</p>
+      <p className="mt-2 text-xs text-muted">{precedentLine(company, language)}</p>
       {company.past_mentions.length > 0 && (
         <div className="mt-3 border-t border-hairline pt-2">
-          <p className="text-xs uppercase tracking-widest text-muted">Previously</p>
+          <p className="text-xs uppercase tracking-widest text-muted">{t('reasoning.previously')}</p>
           <ul className="mt-1.5 space-y-1">
             {company.past_mentions.map((mention) => (
               <li key={mention.alert_id}>

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HoldingsForm from './HoldingsForm';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 
 function setToken() {
@@ -19,9 +20,11 @@ describe('HoldingsForm', () => {
   it('validates ticker and a positive quantity', async () => {
     setToken();
     render(
-      <AuthProvider>
-        <HoldingsForm onAdded={() => {}} />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <HoldingsForm onAdded={() => {}} />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     await userEvent.click(screen.getByRole('button', { name: /add/i }));
     expect(screen.getByRole('alert')).toHaveTextContent(/ticker and a positive quantity/i);
@@ -34,9 +37,11 @@ describe('HoldingsForm', () => {
       .mockResolvedValue({ company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance', quantity: 5 });
     const onAdded = vi.fn();
     render(
-      <AuthProvider>
-        <HoldingsForm onAdded={onAdded} />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <HoldingsForm onAdded={onAdded} />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     await userEvent.type(screen.getByLabelText(/ticker/i), 'RELIANCE.NS');
     await userEvent.type(screen.getByLabelText(/quantity/i), '5');

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { Alert, AlertCompany } from '../lib/api';
+import type { TranslationKey } from '../lib/i18n';
+import { useLanguage } from '../lib/language';
 import CompanyChip from './CompanyChip';
 import SentimentBar from '../features/visualize/SentimentBar';
 import CompanyTree from '../features/visualize/CompanyTree';
@@ -15,10 +17,10 @@ type Tab = 'predicted' | 'my_demat';
 type ViewMode = 'list' | 'chart';
 
 const GROUP_MODES: GroupMode[] = ['tier', 'impact', 'sector'];
-const GROUP_LABEL: Record<GroupMode, string> = {
-  tier: 'Tier',
-  impact: 'Impact',
-  sector: 'Sector',
+const GROUP_LABEL_KEY: Record<GroupMode, TranslationKey> = {
+  tier: 'companies.groupTier',
+  impact: 'companies.groupImpact',
+  sector: 'companies.groupSector',
 };
 
 function groupCompanies(mode: GroupMode, companies: AlertCompany[]): CompanyGroup[] {
@@ -39,6 +41,7 @@ export default function AlertCompanies({
   alert: Alert;
   isAuthenticated: boolean;
 }) {
+  const { t } = useLanguage();
   const [tab, setTab] = useState<Tab>('predicted');
   const [groupMode, setGroupMode] = useState<GroupMode>('tier');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -54,24 +57,24 @@ export default function AlertCompanies({
   const emptyCopy =
     tab === 'my_demat'
       ? isAuthenticated
-        ? 'None of your holdings are affected by this story.'
-        : 'Log in to see holdings-matched alerts.'
-      : 'No affected companies for this story.';
+        ? t('companies.emptyMyDematAuthed')
+        : t('companies.emptyMyDematAnon')
+      : t('companies.emptyPredicted');
 
   return (
     <div className="flex flex-col gap-4">
       <div className="no-scrollbar flex flex-nowrap items-center justify-between gap-x-4 overflow-x-auto">
         <div className="flex shrink-0 gap-4">
           <button type="button" onClick={() => setTab('predicted')} className={tabClass(tab === 'predicted')}>
-            Predicted
+            {t('companies.predicted')}
           </button>
           <button type="button" onClick={() => setTab('my_demat')} className={tabClass(tab === 'my_demat')}>
-            My Portfolio
+            {t('companies.myPortfolio')}
           </button>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
-            Group
+            {t('companies.group')}
             <select
               value={groupMode}
               onChange={(e) => setGroupMode(e.target.value as GroupMode)}
@@ -79,7 +82,7 @@ export default function AlertCompanies({
             >
               {GROUP_MODES.map((mode) => (
                 <option key={mode} value={mode}>
-                  {GROUP_LABEL[mode]}
+                  {t(GROUP_LABEL_KEY[mode])}
                 </option>
               ))}
             </select>
@@ -101,7 +104,7 @@ export default function AlertCompanies({
                   viewMode === mode ? 'bg-page text-ink' : 'text-muted'
                 }`}
               >
-                {mode === 'list' ? 'List' : 'Chart'}
+                {mode === 'list' ? t('companies.list') : t('companies.chart')}
               </button>
             ))}
           </div>

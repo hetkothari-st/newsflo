@@ -1,7 +1,13 @@
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
 import CategoryTabs from './CategoryTabs';
+import { LanguageProvider } from '../lib/language';
+
+function render(ui: ReactElement) {
+  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 function renderTabs(overrides: Partial<Parameters<typeof CategoryTabs>[0]> = {}) {
   return render(
@@ -41,14 +47,16 @@ describe('CategoryTabs', () => {
     const { rerender } = renderTabs({ newCount: 0, onRevealNew });
     expect(screen.queryByText(/new/i)).not.toBeInTheDocument();
     rerender(
-      <CategoryTabs
-        active="india"
-        onChange={() => {}}
-        connected
-        newCount={3}
-        onRevealNew={onRevealNew}
-        onOpenCustomSettings={() => {}}
-      />,
+      <LanguageProvider>
+        <CategoryTabs
+          active="india"
+          onChange={() => {}}
+          connected
+          newCount={3}
+          onRevealNew={onRevealNew}
+          onOpenCustomSettings={() => {}}
+        />
+      </LanguageProvider>,
     );
     const pill = screen.getByText('3 new');
     await userEvent.click(pill);
@@ -59,14 +67,16 @@ describe('CategoryTabs', () => {
     const { rerender } = renderTabs({ active: 'india' });
     expect(screen.queryByLabelText(/custom feed settings/i)).not.toBeInTheDocument();
     rerender(
-      <CategoryTabs
-        active="custom"
-        onChange={() => {}}
-        connected
-        newCount={0}
-        onRevealNew={() => {}}
-        onOpenCustomSettings={() => {}}
-      />,
+      <LanguageProvider>
+        <CategoryTabs
+          active="custom"
+          onChange={() => {}}
+          connected
+          newCount={0}
+          onRevealNew={() => {}}
+          onOpenCustomSettings={() => {}}
+        />
+      </LanguageProvider>,
     );
     expect(screen.getByLabelText(/custom feed settings/i)).toBeInTheDocument();
   });

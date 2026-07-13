@@ -33,6 +33,7 @@ function makeWsAlert(id: number): WsAlert {
   return {
     id,
     category: 'oil_energy',
+    category_label: 'oil_energy',
     created_at: '2026-07-09T10:00:00+00:00',
     article: { id, title: `Story ${id}`, url: `https://example.com/${id}`, image_url: null },
     companies: [

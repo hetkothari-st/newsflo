@@ -26,6 +26,7 @@ function alert(overrides: Partial<Alert>): Alert {
   return {
     id: 1,
     category: 'oil_energy',
+    category_label: 'oil_energy',
     created_at: '2026-07-10T10:00:00+00:00',
     article: { id: 1, title: 't', url: 'https://example.com/1', image_url: null },
     companies: [],

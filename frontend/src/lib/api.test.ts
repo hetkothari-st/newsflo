@@ -30,7 +30,7 @@ describe('api client', () => {
     const fetchMock = mockFetchOnce([]);
     await getAlerts();
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('/api/alerts');
+    expect(url).toBe('/api/alerts?lang=en');
     expect((opts.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
@@ -80,11 +80,12 @@ describe('api client', () => {
   });
 
   it('getCategories fetches the categories endpoint', async () => {
-    const fetchMock = mockFetchOnce(['banking', 'oil_energy']);
+    const body = [{ category: 'banking', label: 'banking' }, { category: 'oil_energy', label: 'oil_energy' }];
+    const fetchMock = mockFetchOnce(body);
     const result = await getCategories();
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('/api/categories');
-    expect(result).toEqual(['banking', 'oil_energy']);
+    expect(url).toBe('/api/categories?lang=en');
+    expect(result).toEqual(body);
   });
 
   it('getWatchlist attaches the Bearer token', async () => {

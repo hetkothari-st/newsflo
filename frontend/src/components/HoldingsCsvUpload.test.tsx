@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HoldingsCsvUpload from './HoldingsCsvUpload';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 
 afterEach(() => {
@@ -17,9 +18,11 @@ describe('HoldingsCsvUpload', () => {
     const spy = vi.spyOn(api, 'uploadHoldingsCsv').mockResolvedValue({ loaded: 2 });
     const onUploaded = vi.fn();
     render(
-      <AuthProvider>
-        <HoldingsCsvUpload onUploaded={onUploaded} />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <HoldingsCsvUpload onUploaded={onUploaded} />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     const file = new File(['Ticker,Quantity\nRELIANCE.NS,10\n'], 'holdings.csv', { type: 'text/csv' });
     await userEvent.upload(screen.getByLabelText(/upload holdings csv/i), file);

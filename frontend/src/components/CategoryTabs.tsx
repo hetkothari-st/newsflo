@@ -1,11 +1,13 @@
+import type { TranslationKey } from '../lib/i18n';
+import { useLanguage } from '../lib/language';
 import LiveStatus from './LiveStatus';
 
 export type FeedTab = 'india' | 'global' | 'custom';
 
-const TABS: { key: FeedTab; label: string }[] = [
-  { key: 'india', label: 'India' },
-  { key: 'global', label: 'Global' },
-  { key: 'custom', label: 'Custom' },
+const TABS: { key: FeedTab; labelKey: TranslationKey }[] = [
+  { key: 'india', labelKey: 'tabs.india' },
+  { key: 'global', labelKey: 'tabs.global' },
+  { key: 'custom', labelKey: 'tabs.custom' },
 ];
 
 export default function CategoryTabs({
@@ -23,23 +25,24 @@ export default function CategoryTabs({
   onRevealNew: () => void;
   onOpenCustomSettings: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="no-scrollbar flex flex-nowrap items-center justify-between gap-x-3 overflow-x-auto border-b border-hairline theme-light:-mx-4 theme-light:border-none theme-light:p-4 theme-light:shadow-neu-sm md:theme-light:mx-0 md:theme-light:rounded-lg md:theme-light:p-2">
-      <div className="flex shrink-0 gap-4 sm:gap-6" role="tablist" aria-label="Feed markets">
-        {TABS.map((t) => {
-          const isActive = t.key === active;
+      <div className="flex shrink-0 gap-4 sm:gap-6" role="tablist" aria-label={t('tabs.marketsAria')}>
+        {TABS.map((tab) => {
+          const isActive = tab.key === active;
           return (
             <button
-              key={t.key}
+              key={tab.key}
               type="button"
               role="tab"
               aria-selected={isActive}
-              onClick={() => onChange(t.key)}
+              onClick={() => onChange(tab.key)}
               className={`border-b-2 pb-3 text-base font-bold uppercase tracking-widest motion-safe:transition-colors ${
                 isActive ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-ink'
               }`}
             >
-              {t.label}
+              {t(tab.labelKey)}
             </button>
           );
         })}
@@ -51,7 +54,7 @@ export default function CategoryTabs({
             onClick={onRevealNew}
             className="shrink-0 rounded-full border-[1.5px] border-bullish px-3 py-1 text-xs uppercase tracking-widest text-bullish"
           >
-            {newCount} new
+            {t('tabs.newCount', { n: newCount })}
           </button>
         )}
         <LiveStatus connected={connected} />
@@ -59,7 +62,7 @@ export default function CategoryTabs({
           <button
             type="button"
             onClick={onOpenCustomSettings}
-            aria-label="Custom feed settings"
+            aria-label={t('tabs.customSettingsAria')}
             className="text-muted hover:text-ink"
           >
             ⚙

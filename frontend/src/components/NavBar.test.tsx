@@ -3,15 +3,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import NavBar from './NavBar';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import { ThemeProvider } from '../lib/theme';
 
 function renderNav() {
   return render(
     <MemoryRouter>
       <ThemeProvider>
-        <AuthProvider>
-          <NavBar />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <NavBar />
+          </AuthProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </MemoryRouter>,
   );

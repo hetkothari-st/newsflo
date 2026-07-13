@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import type { TranslationKey } from '../lib/i18n';
+import { useLanguage } from '../lib/language';
 import AlertDetail from './AlertDetail';
 
-const LINKS = [
-  { to: '/', label: 'Feed' },
-  { to: '/holdings', label: 'Holdings' },
+const LINKS: { to: string; labelKey: TranslationKey }[] = [
+  { to: '/', labelKey: 'nav.feed' },
+  { to: '/holdings', labelKey: 'nav.holdings' },
 ];
 
 export default function BottomNav() {
   const { pathname } = useLocation();
   const { token, email, logout } = useAuth();
+  const { t } = useLanguage();
   const [accountOpen, setAccountOpen] = useState(false);
 
   const itemClass = (activeCondition: boolean) =>
@@ -23,16 +26,16 @@ export default function BottomNav() {
       <nav className="fixed inset-x-0 bottom-0 z-40 flex h-14 border-t border-hairline bg-page md:hidden">
         {LINKS.map((l) => (
           <Link key={l.to} to={l.to} className={itemClass(pathname === l.to)}>
-            {l.label}
+            {t(l.labelKey)}
           </Link>
         ))}
         {token ? (
           <button type="button" onClick={() => setAccountOpen(true)} className={itemClass(accountOpen)}>
-            Account
+            {t('nav.account')}
           </button>
         ) : (
           <Link to="/login" className={itemClass(pathname === '/login')}>
-            Account
+            {t('nav.account')}
           </Link>
         )}
       </nav>
@@ -47,7 +50,7 @@ export default function BottomNav() {
             }}
             className="self-start rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50 theme-light:border-transparent theme-light:bg-accent theme-light:text-page theme-light:shadow-neu"
           >
-            Logout
+            {t('nav.logout')}
           </button>
         </div>
       </AlertDetail>

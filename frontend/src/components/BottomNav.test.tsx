@@ -4,15 +4,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import BottomNav from './BottomNav';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import { ThemeProvider } from '../lib/theme';
 
 function renderNav(path = '/') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <ThemeProvider>
-        <AuthProvider>
-          <BottomNav />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <BottomNav />
+          </AuthProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </MemoryRouter>,
   );

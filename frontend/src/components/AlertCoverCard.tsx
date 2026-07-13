@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import type { Alert } from '../lib/api';
+import { useLanguage } from '../lib/language';
 import AlertCompanies from './AlertCompanies';
 import AlertCover from './AlertCover';
 import CategorySwatch from './CategorySwatch';
@@ -41,6 +42,13 @@ export default function AlertCoverCard({
   onClose?: () => void;
   isAuthenticated?: boolean;
 }) {
+  const { language, t } = useLanguage();
+  // The client-side CATEGORY_LABEL map inside CategorySwatch is still
+  // correct for English (no CategoryTranslation row is ever written for
+  // "en") -- only override it with the server-translated label once the
+  // viewer has actually switched away from English.
+  const categoryLabel = language === 'en' ? undefined : alert.category_label;
+
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -93,7 +101,7 @@ export default function AlertCoverCard({
               aria-hidden="true"
             />
             <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4">
-              <CategorySwatch category={alert.category} active />
+              <CategorySwatch category={alert.category} label={categoryLabel} active />
               <time className="text-xs uppercase tracking-widest text-ink/80">{formatTime(alert.created_at)}</time>
             </div>
           </div>
@@ -115,7 +123,7 @@ export default function AlertCoverCard({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('common.close')}
             className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-surface text-muted hover:text-ink theme-light:shadow-neu-sm"
           >
             ✕
@@ -145,7 +153,7 @@ export default function AlertCoverCard({
           aria-hidden="true"
         />
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4">
-          <CategorySwatch category={alert.category} active />
+          <CategorySwatch category={alert.category} label={categoryLabel} active />
           <time className="text-xs uppercase tracking-widest text-ink/80">{formatTime(alert.created_at)}</time>
         </div>
         <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3 p-4">
@@ -180,7 +188,7 @@ export default function AlertCoverCard({
         <AlertCover imageUrl={alert.article.image_url} category={alert.category} />
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3">
           <span className="inline-flex items-center rounded-full bg-page/85 px-2.5 py-1 backdrop-blur-sm">
-            <CategorySwatch category={alert.category} active />
+            <CategorySwatch category={alert.category} label={categoryLabel} active />
           </span>
           <time className="rounded-full bg-page/85 px-2.5 py-1 text-xs uppercase tracking-widest text-ink backdrop-blur-sm">
             {formatTime(alert.created_at)}

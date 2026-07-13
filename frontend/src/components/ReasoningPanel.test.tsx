@@ -1,7 +1,13 @@
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
 import ReasoningPanel, { precedentLine, splitRationaleIntoPoints } from './ReasoningPanel';
 import type { AlertCompany } from '../lib/api';
+import { LanguageProvider } from '../lib/language';
+
+function render(ui: ReactElement) {
+  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 const base: AlertCompany = {
   company_id: 1,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { getCategories, getCompanies, getWatchlist, putWatchlist, type Company } from '../lib/api';
+import { getCategories, getCompanies, getWatchlist, putWatchlist, type CategoryOption, type Company } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/language';
 import CategorySwatch from './CategorySwatch';
 
 // Full static class strings (not built by interpolation) so Tailwind's content
@@ -16,7 +17,8 @@ const CHIP_ACCENT_FALLBACK = 'border-swatch-other bg-swatch-other/10';
 
 export default function WatchlistSettings({ onSaved }: { onSaved?: () => void }) {
   const { token } = useAuth();
-  const [categories, setCategories] = useState<string[]>([]);
+  const { language, t } = useLanguage();
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<number>>(new Set());
@@ -28,7 +30,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
   useEffect(() => {
     if (!token) return;
     let active = true;
-    Promise.all([getCategories(), getCompanies(), getWatchlist(token)])
+    Promise.all([getCategories(language), getCompanies(), getWatchlist(token)])
       .then(([cats, comps, watchlist]) => {
         if (!active) return;
         setCategories(cats);
@@ -39,12 +41,12 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
       .catch((err: unknown) => {
         if (!active) return;
         setIsError(true);
-        setMessage(err instanceof Error ? err.message : 'Failed to load filters.');
+        setMessage(err instanceof Error ? err.message : t('watchlist.loadFailed'));
       });
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, language, t]);
 
   const filteredCompanies = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -80,11 +82,11 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
     try {
       await putWatchlist(token, [...selectedCategories], [...selectedCompanyIds]);
       setIsError(false);
-      setMessage('Filters saved.');
+      setMessage(t('watchlist.saved'));
       onSaved?.();
     } catch (err) {
       setIsError(true);
-      setMessage(err instanceof Error ? err.message : 'Could not save filters.');
+      setMessage(err instanceof Error ? err.message : t('watchlist.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -94,15 +96,15 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
     <form
       onSubmit={handleSave}
       className="flex flex-col gap-6 rounded-lg border border-hairline bg-surface p-6"
-      aria-label="Custom filters"
+      aria-label={t('watchlist.formAria')}
     >
       <div className="flex flex-col gap-3">
-        <p className="text-xs uppercase tracking-widest text-muted">Categories</p>
+        <p className="text-xs uppercase tracking-widest text-muted">{t('watchlist.categoriesLabel')}</p>
         {categories.length === 0 ? (
-          <p className="text-xs text-muted">No categories yet.</p>
+          <p className="text-xs text-muted">{t('watchlist.noCategories')}</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {categories.map((category) => {
+            {categories.map(({ category, label }) => {
               const selected = selectedCategories.has(category);
               const accent = selected ? (CHIP_ACCENT[category] ?? CHIP_ACCENT_FALLBACK) : 'border-hairline bg-page hover:border-muted theme-light:shadow-neu-sm';
               return (
@@ -115,9 +117,9 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
                     className="sr-only"
                     checked={selected}
                     onChange={() => toggleCategory(category)}
-                    aria-label={category}
+                    aria-label={label}
                   />
-                  <CategorySwatch category={category} active={selected} />
+                  <CategorySwatch category={category} label={language === 'en' ? undefined : label} active={selected} />
                 </label>
               );
             })}
@@ -126,13 +128,13 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
       </div>
 
       <div className="flex flex-col gap-3">
-        <p className="text-xs uppercase tracking-widest text-muted">Companies</p>
+        <p className="text-xs uppercase tracking-widest text-muted">{t('watchlist.companiesLabel')}</p>
         <input
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by name or ticker"
-          aria-label="Filter companies"
+          placeholder={t('watchlist.filterPlaceholder')}
+          aria-label={t('watchlist.filterAria')}
           className="rounded-lg border border-hairline bg-page px-3 py-2 text-ink outline-none focus:border-muted theme-light:border-transparent theme-light:shadow-neu-inset"
         />
         <div className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
@@ -181,7 +183,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
         disabled={saving}
         className="self-start rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50 theme-light:border-transparent theme-light:bg-accent theme-light:text-page theme-light:shadow-neu"
       >
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? t('watchlist.saving') : t('watchlist.save')}
       </button>
     </form>
   );

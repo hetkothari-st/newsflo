@@ -1,8 +1,14 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
 import CompanyTree from './CompanyTree';
 import type { AlertCompany } from '../../lib/api';
+import { LanguageProvider } from '../../lib/language';
 import { groupByImpact, groupByTier, type CompanyGroup } from './transforms';
+
+function render(ui: ReactElement) {
+  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {

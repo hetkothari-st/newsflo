@@ -4,10 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import RegisterForm from './RegisterForm';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 
 function renderWithAuth(ui: ReactElement) {
-  return render(<AuthProvider>{ui}</AuthProvider>);
+  return render(
+    <LanguageProvider>
+      <AuthProvider>{ui}</AuthProvider>
+    </LanguageProvider>,
+  );
 }
 
 afterEach(() => {

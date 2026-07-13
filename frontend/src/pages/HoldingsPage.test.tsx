@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HoldingsPage from './HoldingsPage';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 
 afterEach(() => {
@@ -17,9 +18,11 @@ describe('HoldingsPage', () => {
       { company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance', quantity: 3 },
     ]);
     render(
-      <AuthProvider>
-        <HoldingsPage />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <HoldingsPage />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     expect(await screen.findByText('Reliance')).toBeInTheDocument();
   });

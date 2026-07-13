@@ -14,9 +14,21 @@ const CATEGORY_LABEL: Record<string, string> = {
   geopolitics: 'Geopolitics',
 };
 
-export default function CategorySwatch({ category, active = false }: { category: string; active?: boolean }) {
+export default function CategorySwatch({
+  category,
+  active = false,
+  label: translatedLabel,
+}: {
+  category: string;
+  active?: boolean;
+  // Server-translated display label for non-English languages (see
+  // Alert.category_label / CategoryOption.label in lib/api.ts). Omitted (or
+  // undefined) in English -- the client-side CATEGORY_LABEL map below still
+  // wins there, unchanged from before this feature existed.
+  label?: string;
+}) {
   const dotClass = SWATCH_CLASS[category] ?? 'bg-swatch-other';
-  const label = CATEGORY_LABEL[category] ?? category.replace(/_/g, ' ');
+  const label = translatedLabel ?? CATEGORY_LABEL[category] ?? category.replace(/_/g, ' ');
   return (
     <span className="inline-flex items-center gap-2">
       <span className={`h-2 w-2 rounded-full ${dotClass}`} aria-hidden="true" />

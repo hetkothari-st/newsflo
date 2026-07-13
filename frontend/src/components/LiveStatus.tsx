@@ -1,4 +1,7 @@
+import { useLanguage } from '../lib/language';
+
 export default function LiveStatus({ connected }: { connected: boolean }) {
+  const { t } = useLanguage();
   return (
     <div className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs uppercase tracking-widest">
       <span className="relative flex h-2 w-2">
@@ -7,7 +10,7 @@ export default function LiveStatus({ connected }: { connected: boolean }) {
         )}
         <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-bullish' : 'bg-muted'}`} />
       </span>
-      <span className={connected ? 'text-ink' : 'text-muted'}>{connected ? 'Live' : 'Reconnecting'}</span>
+      <span className={connected ? 'text-ink' : 'text-muted'}>{connected ? t('live.live') : t('live.reconnecting')}</span>
     </div>
   );
 }

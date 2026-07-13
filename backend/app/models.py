@@ -154,3 +154,60 @@ class UserWatchlistCompany(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class ArticleTranslation(Base):
+    __tablename__ = "article_translations"
+    __table_args__ = (UniqueConstraint("article_id", "lang", name="uq_article_translation_lang"),)
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False)
+    lang = Column(String, nullable=False)  # hi | mr | gu | ml | te | ta | kn
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    article = relationship("Article")
+
+
+class AlertCompanyTranslation(Base):
+    __tablename__ = "alert_company_translations"
+    __table_args__ = (
+        UniqueConstraint("alert_company_id", "lang", name="uq_alert_company_translation_lang"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    alert_company_id = Column(Integer, ForeignKey("alert_companies.id"), nullable=False)
+    lang = Column(String, nullable=False)
+    rationale = Column(Text, nullable=False)
+    key_points_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    alert_company = relationship("AlertCompany")
+
+
+class CategoryTranslation(Base):
+    __tablename__ = "category_translations"
+    __table_args__ = (UniqueConstraint("category", "lang", name="uq_category_translation_lang"),)
+
+    id = Column(Integer, primary_key=True)
+    category = Column(String, nullable=False)  # raw English category text -- the key, not an FK
+    lang = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class TranslationFailure(Base):
+    """Retry-cap bookkeeping so an alert whose translation call keeps failing
+    (bad content, model keeps refusing the schema) doesn't get retried by the
+    scheduler job forever -- once attempts hits MAX_TRANSLATION_ATTEMPTS
+    (see app/translation/job.py) it's skipped, and the silent English
+    fallback in app/translation/lookup.py serves it indefinitely."""
+    __tablename__ = "translation_failures"
+    __table_args__ = (UniqueConstraint("alert_id", name="uq_translation_failure_alert"),)
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    last_attempted_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

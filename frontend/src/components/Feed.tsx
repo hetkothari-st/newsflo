@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link } from 'react-router-dom';
 import { getAlerts, getWatchlist, type Alert, type Watchlist } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/language';
 import { useAlertsSocket } from '../lib/useAlertsSocket';
 import { alertMatchesMarket, alertMatchesWatchlist } from '../lib/feedFilters';
 import AlertCompanies from './AlertCompanies';
@@ -57,6 +58,7 @@ const EMPTY_WATCHLIST: Watchlist = { categories: [], companies: [] };
 
 export default function Feed() {
   const { token } = useAuth();
+  const { language, t } = useLanguage();
   const [tab, setTab] = useState<FeedTab>('india');
   const [fetched, setFetched] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +76,7 @@ export default function Feed() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    getAlerts(token)
+    getAlerts(token, language)
       .then((data) => {
         if (active) {
           setFetched(data);
@@ -91,7 +93,7 @@ export default function Feed() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, language]);
 
   const refreshWatchlist = useCallback(() => {
     if (!token) return;
@@ -167,29 +169,29 @@ export default function Feed() {
 
   let body: ReactNode;
   if (loading) {
-    body = <p className="p-4 text-xs uppercase tracking-widest text-muted">Loading…</p>;
+    body = <p className="p-4 text-xs uppercase tracking-widest text-muted">{t('feed.loading')}</p>;
   } else if (error) {
     body = <p className="p-4 text-xs uppercase tracking-widest text-bearish">{error}</p>;
   } else if (tab === 'custom' && !token) {
     body = (
       <p className="p-4 text-xs uppercase tracking-widest text-muted">
-        Log in to build your custom feed.{' '}
+        {t('feed.loginPrompt')}{' '}
         <Link to="/login" className="text-ink underline">
-          Log in
+          {t('feed.loginLink')}
         </Link>
       </p>
     );
   } else if (tab === 'custom' && !customConfigured) {
     body = (
       <p className="p-4 text-xs uppercase tracking-widest text-muted">
-        Choose categories or companies to build your custom feed.
+        {t('feed.customEmpty')}
       </p>
     );
   } else if (visibleAlerts.length === 0) {
     const emptyMessage =
       tab === 'custom'
-        ? 'No alerts match your custom filters yet.'
-        : `No ${tab === 'india' ? 'India' : 'Global'} alerts yet. New stories will appear here live.`;
+        ? t('feed.customNoMatch')
+        : t(tab === 'india' ? 'feed.emptyIndia' : 'feed.emptyGlobal');
     body = <p className="p-4 text-xs uppercase tracking-widest text-muted">{emptyMessage}</p>;
   } else {
     body = (

@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/language';
 
 export default function LoginForm({ onSuccess }: { onSuccess?: () => void }) {
   const { login } = useAuth();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +14,7 @@ export default function LoginForm({ onSuccess }: { onSuccess?: () => void }) {
     e.preventDefault();
     setError(null);
     if (!email || !password) {
-      setError('Enter your email and password.');
+      setError(t('auth.loginMissing'));
       return;
     }
     setSubmitting(true);
@@ -20,16 +22,16 @@ export default function LoginForm({ onSuccess }: { onSuccess?: () => void }) {
       await login(email, password);
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed.');
+      setError(err instanceof Error ? err.message : t('auth.loginFailed'));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-label="Log in">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-label={t('auth.loginFormAria')}>
       <label className="flex flex-col gap-1">
-        <span className="text-xs uppercase tracking-widest text-muted">Email</span>
+        <span className="text-xs uppercase tracking-widest text-muted">{t('auth.emailLabel')}</span>
         <input
           type="email"
           value={email}
@@ -38,7 +40,7 @@ export default function LoginForm({ onSuccess }: { onSuccess?: () => void }) {
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-xs uppercase tracking-widest text-muted">Password</span>
+        <span className="text-xs uppercase tracking-widest text-muted">{t('auth.passwordLabel')}</span>
         <input
           type="password"
           value={password}
@@ -52,7 +54,7 @@ export default function LoginForm({ onSuccess }: { onSuccess?: () => void }) {
         disabled={submitting}
         className="rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50 theme-light:border-transparent theme-light:bg-accent theme-light:text-page theme-light:shadow-neu"
       >
-        {submitting ? 'Signing in…' : 'Log in'}
+        {submitting ? t('auth.signingIn') : t('auth.logIn')}
       </button>
     </form>
   );

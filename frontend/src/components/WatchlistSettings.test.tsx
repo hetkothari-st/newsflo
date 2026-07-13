@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WatchlistSettings from './WatchlistSettings';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 import type { Company, Watchlist } from '../lib/api';
 
@@ -17,7 +18,10 @@ function setToken() {
 }
 
 function mockApis(watchlist: Watchlist) {
-  vi.spyOn(api, 'getCategories').mockResolvedValue(['banking', 'oil_energy']);
+  vi.spyOn(api, 'getCategories').mockResolvedValue([
+    { category: 'banking', label: 'banking' },
+    { category: 'oil_energy', label: 'oil_energy' },
+  ]);
   vi.spyOn(api, 'getCompanies').mockResolvedValue(companies);
   vi.spyOn(api, 'getWatchlist').mockResolvedValue(watchlist);
 }
@@ -32,9 +36,11 @@ describe('WatchlistSettings', () => {
     setToken();
     mockApis({ categories: [], companies: [] });
     render(
-      <AuthProvider>
-        <WatchlistSettings />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <WatchlistSettings />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     expect(await screen.findByLabelText('oil_energy')).toBeInTheDocument();
     expect(screen.getByLabelText('banking')).toBeInTheDocument();
@@ -46,9 +52,11 @@ describe('WatchlistSettings', () => {
     setToken();
     mockApis({ categories: ['oil_energy'], companies: [{ company_id: 1, ticker: 'AAPL', name: 'Apple' }] });
     render(
-      <AuthProvider>
-        <WatchlistSettings />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <WatchlistSettings />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     expect(await screen.findByLabelText('oil_energy')).toBeChecked();
     expect(screen.getByLabelText('banking')).not.toBeChecked();
@@ -63,9 +71,11 @@ describe('WatchlistSettings', () => {
       .spyOn(api, 'putWatchlist')
       .mockResolvedValue({ categories: ['oil_energy'], companies: [{ company_id: 1, ticker: 'AAPL', name: 'Apple' }] });
     render(
-      <AuthProvider>
-        <WatchlistSettings />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <WatchlistSettings />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     await userEvent.click(await screen.findByLabelText('oil_energy'));
     await userEvent.click(screen.getByLabelText(/Apple/));
@@ -78,9 +88,11 @@ describe('WatchlistSettings', () => {
     setToken();
     mockApis({ categories: [], companies: [{ company_id: 1, ticker: 'AAPL', name: 'Apple' }] });
     render(
-      <AuthProvider>
-        <WatchlistSettings />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <WatchlistSettings />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     const row = (await screen.findByLabelText(/Apple/)).closest('label');
     expect(row).toHaveClass('bg-hairline/40', 'theme-light:bg-accent/10');
@@ -90,9 +102,11 @@ describe('WatchlistSettings', () => {
     setToken();
     mockApis({ categories: [], companies: [] });
     render(
-      <AuthProvider>
-        <WatchlistSettings />
-      </AuthProvider>,
+      <LanguageProvider>
+        <AuthProvider>
+          <WatchlistSettings />
+        </AuthProvider>
+      </LanguageProvider>,
     );
     await screen.findByLabelText(/Apple/);
     await userEvent.type(screen.getByLabelText(/filter companies/i), 'relian');

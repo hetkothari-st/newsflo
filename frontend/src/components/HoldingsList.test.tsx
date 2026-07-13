@@ -1,6 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
 import HoldingsList from './HoldingsList';
+import { LanguageProvider } from '../lib/language';
+
+function render(ui: ReactElement) {
+  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 describe('HoldingsList', () => {
   it('shows an empty state with no holdings', () => {

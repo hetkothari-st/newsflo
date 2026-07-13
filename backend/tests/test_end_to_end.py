@@ -261,7 +261,7 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
     assert "RELIANCE.NS" not in glob_tickers
 
     # (c) GET /api/categories reflects the analyzed alert's category.
-    assert client.get("/api/categories").json() == ["oil_energy"]
+    assert client.get("/api/categories").json() == [{"category": "oil_energy", "label": "oil_energy"}]
 
     # (d) The alert itself carries the computed market on its company.
     alert_body = client.get("/api/alerts", headers=auth).json()

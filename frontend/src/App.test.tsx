@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { AuthProvider } from './lib/auth';
+import { LanguageProvider } from './lib/language';
 import { ThemeProvider } from './lib/theme';
 
 // Minimal no-op WebSocket + empty fetch so the (later) live FeedPage mounts
@@ -31,9 +32,11 @@ function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <ThemeProvider>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </MemoryRouter>,
   );

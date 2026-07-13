@@ -1,6 +1,8 @@
 // Response shapes copied verbatim from the backend routers. These interfaces
 // are the single source of truth for every component in the app.
 
+import type { Language } from './i18n';
+
 export interface AlertArticle {
   id: number;
   title: string;
@@ -37,7 +39,11 @@ export interface AlertCompany {
 
 export interface Alert {
   id: number;
+  // Raw, canonical, untranslated category slug -- used for watchlist
+  // matching and swatch-color lookup. Never render this directly in a
+  // non-English UI; use `category_label` for display.
   category: string;
+  category_label: string;
   created_at: string;
   article: AlertArticle;
   companies: AlertCompany[];
@@ -56,8 +62,14 @@ export interface Article {
   url: string;
   status: string;
   category: string | null;
+  category_label: string | null;
   image_url: string | null;
   fetched_at: string | null;
+}
+
+export interface CategoryOption {
+  category: string;
+  label: string;
 }
 
 export interface TokenResponse {
@@ -116,14 +128,14 @@ async function parseError(res: Response): Promise<string> {
   }
 }
 
-export async function getAlerts(token: string | null = null): Promise<Alert[]> {
-  const res = await fetch('/api/alerts', { headers: authHeaders(token) });
+export async function getAlerts(token: string | null = null, lang: Language = 'en'): Promise<Alert[]> {
+  const res = await fetch(`/api/alerts?lang=${lang}`, { headers: authHeaders(token) });
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as Alert[];
 }
 
-export async function getArticles(): Promise<Article[]> {
-  const res = await fetch('/api/articles');
+export async function getArticles(lang: Language = 'en'): Promise<Article[]> {
+  const res = await fetch(`/api/articles?lang=${lang}`);
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as Article[];
 }
@@ -183,10 +195,10 @@ export async function getCompanies(market?: 'IN' | 'GLOBAL'): Promise<Company[]>
   return (await res.json()) as Company[];
 }
 
-export async function getCategories(): Promise<string[]> {
-  const res = await fetch('/api/categories');
+export async function getCategories(lang: Language = 'en'): Promise<CategoryOption[]> {
+  const res = await fetch(`/api/categories?lang=${lang}`);
   if (!res.ok) throw new Error(await parseError(res));
-  return (await res.json()) as string[];
+  return (await res.json()) as CategoryOption[];
 }
 
 export async function getWatchlist(token: string): Promise<Watchlist> {

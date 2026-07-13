@@ -1,12 +1,19 @@
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
 import AlertCompanies from './AlertCompanies';
 import type { Alert } from '../lib/api';
+import { LanguageProvider } from '../lib/language';
+
+function render(ui: ReactElement) {
+  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 const alert: Alert = {
   id: 1,
   category: 'oil_energy',
+  category_label: 'oil_energy',
   created_at: '2026-07-09T10:00:00+00:00',
   article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a', image_url: null },
   companies: [

@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Feed, { dedupeByTitle, mergeAlerts } from './Feed';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 import type { Alert, AlertCompany } from '../lib/api';
 
@@ -36,6 +37,7 @@ function makeAlert(id: number, title: string, companies: AlertCompany[], categor
   return {
     id,
     category,
+    category_label: category,
     created_at: '2026-07-10T10:00:00+00:00',
     article: { id, title, url: `https://example.com/${id}`, image_url: null },
     companies,
@@ -45,9 +47,11 @@ function makeAlert(id: number, title: string, companies: AlertCompany[], categor
 function renderFeed() {
   return render(
     <MemoryRouter>
-      <AuthProvider>
-        <Feed />
-      </AuthProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <Feed />
+        </AuthProvider>
+      </LanguageProvider>
     </MemoryRouter>,
   );
 }
@@ -161,9 +165,11 @@ describe('Feed', () => {
     vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [liveAlert], connected: true });
     rerender(
       <MemoryRouter>
-        <AuthProvider>
-          <Feed />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <Feed />
+          </AuthProvider>
+        </LanguageProvider>
       </MemoryRouter>,
     );
 
@@ -189,9 +195,11 @@ describe('Feed', () => {
     vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [liveGlobalAlert], connected: true });
     rerender(
       <MemoryRouter>
-        <AuthProvider>
-          <Feed />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <Feed />
+          </AuthProvider>
+        </LanguageProvider>
       </MemoryRouter>,
     );
 
@@ -212,9 +220,11 @@ describe('Feed', () => {
     vi.mocked(useAlertsSocket).mockReturnValue({ alerts: [liveAlert], connected: true });
     rerender(
       <MemoryRouter>
-        <AuthProvider>
-          <Feed />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <Feed />
+          </AuthProvider>
+        </LanguageProvider>
       </MemoryRouter>,
     );
     await screen.findByText('1 new');

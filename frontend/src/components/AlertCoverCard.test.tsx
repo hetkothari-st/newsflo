@@ -1,12 +1,19 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
 import AlertCoverCard from './AlertCoverCard';
 import type { Alert } from '../lib/api';
+import { LanguageProvider } from '../lib/language';
+
+function renderWithLanguage(ui: ReactElement) {
+  return render(<LanguageProvider>{ui}</LanguageProvider>);
+}
 
 const alert: Alert = {
   id: 1,
   category: 'oil_energy',
+  category_label: 'oil_energy',
   created_at: '2026-07-09T10:00:00+00:00',
   article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a', image_url: 'https://example.com/pic.jpg' },
   companies: [
@@ -20,7 +27,7 @@ const alert: Alert = {
 
 describe('AlertCoverCard', () => {
   it('renders the headline, category, and sentiment', () => {
-    render(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
+    renderWithLanguage(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
     expect(screen.getByText('US strikes Iran oil export sites')).toBeInTheDocument();
     expect(screen.getByText('Oil & Energy')).toBeInTheDocument();
     expect(screen.getByText('Net Bullish')).toBeInTheDocument();
@@ -28,14 +35,14 @@ describe('AlertCoverCard', () => {
 
   it('calls onOpen when clicked', async () => {
     const onOpen = vi.fn();
-    render(<AlertCoverCard alert={alert} onOpen={onOpen} variant="carousel" />);
+    renderWithLanguage(<AlertCoverCard alert={alert} onOpen={onOpen} variant="carousel" />);
     await userEvent.click(screen.getByRole('button', { name: /us strikes iran/i }));
     expect(onOpen).toHaveBeenCalled();
   });
 
   it('calls onOpen on Enter when focused', async () => {
     const onOpen = vi.fn();
-    render(<AlertCoverCard alert={alert} onOpen={onOpen} variant="grid" />);
+    renderWithLanguage(<AlertCoverCard alert={alert} onOpen={onOpen} variant="grid" />);
     const card = screen.getByRole('button', { name: /us strikes iran/i });
     card.focus();
     await userEvent.keyboard('{Enter}');
@@ -45,7 +52,7 @@ describe('AlertCoverCard', () => {
   it('clamps the grid variant headline so a long title can never overflow the fixed-aspect tile', () => {
     const longTitle =
       'A very long headline that would otherwise wrap across many lines and grow taller than the narrow fixed-aspect grid tile can hold';
-    render(
+    renderWithLanguage(
       <AlertCoverCard
         alert={{ ...alert, article: { ...alert.article, title: longTitle } }}
         onOpen={() => {}}
@@ -56,12 +63,12 @@ describe('AlertCoverCard', () => {
   });
 
   it('clamps the carousel variant headline too, with more room for a longer title', () => {
-    render(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
+    renderWithLanguage(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
     expect(screen.getByText('US strikes Iran oil export sites')).toHaveClass('line-clamp-4');
   });
 
   it('gets a raised shadow in light mode', () => {
-    render(<AlertCoverCard alert={alert} onOpen={() => {}} variant="grid" />);
+    renderWithLanguage(<AlertCoverCard alert={alert} onOpen={() => {}} variant="grid" />);
     expect(screen.getByRole('button', { name: /us strikes iran/i })).toHaveClass('theme-light:shadow-neu');
   });
 });

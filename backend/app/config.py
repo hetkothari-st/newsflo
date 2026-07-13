@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         return keys
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
     poll_interval_minutes: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "2"))
+    translation_interval_minutes: int = int(os.environ.get("TRANSLATION_INTERVAL_MINUTES", "5"))
     # DEV-ONLY default — this value is INSECURE and unsafe for production. Set
     # JWT_SECRET_KEY in the environment for any real deployment. (Same
     # optional-at-dev-time pattern as anthropic_api_key defaulting to "".)

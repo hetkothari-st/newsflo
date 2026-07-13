@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import FeedPage from './FeedPage';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import * as api from '../lib/api';
 
 vi.mock('../lib/useAlertsSocket', () => ({ useAlertsSocket: () => ({ alerts: [], connected: true }) }));
@@ -16,9 +17,11 @@ describe('FeedPage', () => {
     vi.spyOn(api, 'getAlerts').mockResolvedValue([]);
     render(
       <MemoryRouter>
-        <AuthProvider>
-          <FeedPage />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <FeedPage />
+          </AuthProvider>
+        </LanguageProvider>
       </MemoryRouter>,
     );
     expect(await screen.findByRole('tab', { name: /india/i })).toBeInTheDocument();

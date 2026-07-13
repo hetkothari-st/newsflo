@@ -41,6 +41,14 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
     return {
         "id": alert.id,
         "category": alert.category,
+        # Translation happens on a separate, later scheduler tick (see
+        # app/translation/job.py) -- it can never exist yet at broadcast
+        # time, so this is always the raw English category. The client's
+        # next REST refresh (GET /api/alerts?lang=...) reconciles it with a
+        # real translated label once one exists, the same eventual-
+        # consistency treatment already used for in_my_holdings on this same
+        # broadcast path.
+        "category_label": alert.category,
         "created_at": alert.created_at.isoformat(),
         "article": {
             "id": alert.article.id,
