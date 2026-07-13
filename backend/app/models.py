@@ -104,6 +104,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String, nullable=False, unique=True)
     hashed_password = Column(String, nullable=False)
+    email_alerts_enabled = Column(Integer, nullable=False, default=True)  # Using Integer for SQLite boolean compatibility
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 

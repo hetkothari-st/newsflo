@@ -64,3 +64,17 @@ def test_matcher_is_idempotent(db_session):
     assert len(first) == 1
     assert second == []  # only newly created rows are returned; the pre-existing one is not
     assert db_session.query(EmailNotification).count() == 1
+
+
+def test_matcher_skips_users_with_email_alerts_disabled(db_session):
+    alert, company, ac = _seed_alert_with_company(db_session)
+    user = User(email="u@example.com", hashed_password="x", email_alerts_enabled=False)
+    db_session.add(user)
+    db_session.commit()
+    db_session.add(Holding(user_id=user.id, company_id=company.id, quantity=5.0))
+    db_session.commit()
+
+    created = match_alert_to_holdings(db_session, alert)
+
+    assert created == []
+    assert db_session.query(EmailNotification).count() == 0
