@@ -26,7 +26,7 @@ export default function CategoryTabs({
   onOpenCustomSettings: () => void;
 }) {
   return (
-    <div className="no-scrollbar flex flex-nowrap items-center justify-between gap-x-3 overflow-x-auto border-b border-hairline theme-light:rounded-lg theme-light:border-none theme-light:p-2 theme-light:shadow-neu-sm">
+    <div className="no-scrollbar flex flex-nowrap items-center justify-between gap-x-3 overflow-x-auto border-b border-hairline theme-light:-mx-4 theme-light:border-none theme-light:p-4 theme-light:shadow-neu-sm md:theme-light:mx-0 md:theme-light:rounded-lg md:theme-light:p-2">
       <div className="flex shrink-0 gap-4 sm:gap-6" role="tablist" aria-label="Feed markets">
         {TABS.map((t) => {
           const isActive = t.key === active;

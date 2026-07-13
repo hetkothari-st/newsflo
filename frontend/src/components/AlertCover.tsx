@@ -33,29 +33,20 @@ function CategoryCover({ category }: { category: string }) {
 
 export default function AlertCover({ imageUrl, category }: { imageUrl: string | null; category: string }) {
   const [failed, setFailed] = useState(false);
-  const bgClass = COVER_BG[category] ?? COVER_BG_FALLBACK;
 
   if (!imageUrl || failed) {
     return <CategoryCover category={category} />;
   }
 
-  // Scraped og:image thumbnails (typically ~600-1200px wide) are far lower
-  // resolution than the tall full-bleed mobile card they'd need to fill --
-  // stretching one edge-to-edge upscales it well past its real detail,
-  // reading as blurry/pixelated. A blurred duplicate as backdrop (the prior
-  // approach) traded that for a different complaint: a hazy, washed-out
-  // blob dominating most of the card. A flat category-tinted backdrop (the
-  // same one the no-image fallback uses) behind the untouched, natural-size
-  // photo keeps every pixel of the real photo crisp with no blur anywhere.
+  // Natural-size-capped, letterboxed photos (the prior approach) left most
+  // of a tall card as flat category-tinted backdrop around a comparatively
+  // tiny image -- exactly the "whitish layer on top of the photo" complaint,
+  // since the pale tint dominates far more of the card than the photo does.
+  // object-cover fills its box exactly with no dead space; AlertCoverCard
+  // now caps the box height itself (not full-card) so a normal og:image
+  // thumbnail covers it without the browser needing to upscale past its
+  // real resolution.
   return (
-    <div className={`flex h-full w-full items-center justify-center p-6 ${bgClass}`}>
-      <img
-        src={imageUrl}
-        alt=""
-        loading="lazy"
-        onError={() => setFailed(true)}
-        className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
-      />
-    </div>
+    <img src={imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} className="h-full w-full object-cover" />
   );
 }
