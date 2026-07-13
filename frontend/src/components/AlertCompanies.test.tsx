@@ -14,11 +14,13 @@ const alert: Alert = {
       company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
       direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner up.', key_points: [],
       basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true, past_mentions: [],
+      sector: 'Energy',
     },
     {
       company_id: 2, ticker: 'ONGC.NS', name: 'ONGC', index_tier: 'NIFTYNEXT50',
       direction: 'bearish', magnitude_low: -3, magnitude_high: -1, rationale: 'Cost pressure.', key_points: [],
       basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [],
+      sector: 'Financials',
     },
   ],
 };
@@ -67,17 +69,34 @@ describe('AlertCompanies', () => {
     ]);
   });
 
-  it('opens the visualize modal when the Visualize button is clicked', async () => {
+  it('shows Bullish/Bearish group headers with counts when grouped by Impact', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
-    await userEvent.click(screen.getByRole('button', { name: /visualize/i }));
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
+    expect(screen.getByText('Bullish · 1')).toBeInTheDocument();
+    expect(screen.getByText('Bearish · 1')).toBeInTheDocument();
   });
 
-  it('closes the visualize modal on Close without affecting the company list', async () => {
+  it('shows sector group headers with counts when grouped by Sector', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
-    await userEvent.click(screen.getByRole('button', { name: /visualize/i }));
-    await userEvent.click(screen.getByLabelText('Close'));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'sector');
+    expect(screen.getByText('Energy · 1')).toBeInTheDocument();
+    expect(screen.getByText('Financials · 1')).toBeInTheDocument();
+  });
+
+  it('mutes sector-inferred companies relative to direct-mention companies when grouped', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
+    expect(screen.getByText('Reliance Industries').closest('.opacity-70')).toBeNull();
+    expect(screen.getByText('ONGC').closest('.opacity-70')).not.toBeNull();
+  });
+
+  it('shows the empty-state message instead of a blank panel when Impact mode has no groupable companies', async () => {
+    const noDirectionAlert: Alert = {
+      ...alert,
+      companies: alert.companies.map((c) => ({ ...c, direction: 'unknown' })),
+    };
+    render(<AlertCompanies alert={noDirectionAlert} isAuthenticated />);
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
+    expect(screen.getByText('No affected companies for this story.')).toBeInTheDocument();
   });
 });

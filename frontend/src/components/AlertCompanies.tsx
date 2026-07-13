@@ -1,29 +1,27 @@
 import { useState } from 'react';
 import type { Alert, AlertCompany } from '../lib/api';
 import CompanyChip from './CompanyChip';
-import VisualizeModal from '../features/visualize/VisualizeModal';
+import { groupByTier, groupByImpact, groupBySector, type CompanyGroup } from '../features/visualize/transforms';
 
 type Tab = 'predicted' | 'my_demat';
+type GroupMode = 'tier' | 'impact' | 'sector';
 
-const TIER_ORDER = [
-  'NIFTY50',
-  'NIFTYNEXT50',
-  'NIFTYMIDCAP150',
-  'NIFTYSMALLCAP250',
-  'GLOBAL_LARGE_CAP',
-  'OTHER',
-] as const;
-const TIER_LABEL: Record<string, string> = {
-  NIFTY50: 'Nifty 50',
-  NIFTYNEXT50: 'Nifty Next 50',
-  NIFTYMIDCAP150: 'Nifty Midcap 150',
-  NIFTYSMALLCAP250: 'Nifty Smallcap 250',
-  GLOBAL_LARGE_CAP: 'Global',
-  OTHER: 'Other',
+const GROUP_MODES: GroupMode[] = ['tier', 'impact', 'sector'];
+const GROUP_LABEL: Record<GroupMode, string> = {
+  tier: 'Tier',
+  impact: 'Impact',
+  sector: 'Sector',
 };
 
-function tierKey(company: AlertCompany): string {
-  return TIER_LABEL[company.index_tier] ? company.index_tier : 'OTHER';
+function groupCompanies(mode: GroupMode, companies: AlertCompany[]): CompanyGroup[] {
+  if (mode === 'impact') return groupByImpact(companies);
+  if (mode === 'sector') return groupBySector(companies);
+  return groupByTier(companies);
+}
+
+function headerClass(mode: GroupMode, group: CompanyGroup): string {
+  if (mode === 'impact') return group.key === 'bullish' ? 'text-bullish' : 'text-bearish';
+  return 'text-muted';
 }
 
 export default function AlertCompanies({
@@ -34,15 +32,10 @@ export default function AlertCompanies({
   isAuthenticated: boolean;
 }) {
   const [tab, setTab] = useState<Tab>('predicted');
-  const [visualizeOpen, setVisualizeOpen] = useState(false);
+  const [groupMode, setGroupMode] = useState<GroupMode>('tier');
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
-
-  const grouped = TIER_ORDER.map((tier) => ({
-    tier,
-    label: TIER_LABEL[tier],
-    companies: visible.filter((c) => tierKey(c) === tier),
-  })).filter((g) => g.companies.length > 0);
+  const grouped = groupCompanies(groupMode, visible);
 
   const tabClass = (active: boolean) =>
     `pb-1 text-xs uppercase tracking-widest border-b-2 ${
@@ -67,29 +60,45 @@ export default function AlertCompanies({
             My Portfolio
           </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setVisualizeOpen(true)}
-          className="text-xs uppercase tracking-widest text-muted hover:text-ink"
-        >
-          Visualize →
-        </button>
+        <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+          Group
+          <select
+            value={groupMode}
+            onChange={(e) => setGroupMode(e.target.value as GroupMode)}
+            className="rounded-md border border-hairline bg-surface px-1.5 py-0.5 text-xs text-ink theme-light:border-transparent theme-light:shadow-neu-sm"
+          >
+            {GROUP_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {GROUP_LABEL[mode]}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-      {visible.length === 0 ? (
+      {grouped.length === 0 ? (
         <p className="text-xs text-muted">{emptyCopy}</p>
       ) : (
         grouped.map((group) => (
-          <div key={group.tier} className="flex flex-col gap-2">
-            <p className="text-xs uppercase tracking-widest text-muted">{group.label}</p>
+          <div key={group.key} className="flex flex-col gap-2">
+            <p className={`flex items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}>
+              {group.color && (
+                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
+              )}
+              {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
+            </p>
             <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
               {group.companies.map((company) => (
-                <CompanyChip key={company.company_id} company={company} />
+                <div
+                  key={company.company_id}
+                  className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
+                >
+                  <CompanyChip company={company} />
+                </div>
               ))}
             </div>
           </div>
         ))
       )}
-      {visualizeOpen && <VisualizeModal alert={alert} onClose={() => setVisualizeOpen(false)} />}
     </div>
   );
 }

@@ -1,42 +1,53 @@
 import type { AlertCompany } from '../../lib/api';
-import type { TreeNodeData } from './tree';
 import { sectorColor } from './colors';
 
-const BULLISH_COLOR = '#34C759';
-const BEARISH_COLOR = '#FF453A';
-
-function leafNode(company: AlertCompany): TreeNodeData {
-  return {
-    id: `company-${company.company_id}`,
-    label: company.name,
-    kind: 'leaf',
-    leaf: {
-      companyId: company.company_id,
-      ticker: company.ticker,
-      name: company.name,
-      direction: company.direction,
-      rationale: company.rationale,
-    },
-    children: [],
-  };
+export interface CompanyGroup {
+  key: string;
+  label: string;
+  color?: string;
+  companies: AlertCompany[];
 }
 
-export function buildImpactTree(articleTitle: string, companies: AlertCompany[]): TreeNodeData {
+const TIER_ORDER = [
+  'NIFTY50',
+  'NIFTYNEXT50',
+  'NIFTYMIDCAP150',
+  'NIFTYSMALLCAP250',
+  'GLOBAL_LARGE_CAP',
+  'OTHER',
+] as const;
+const TIER_LABEL: Record<string, string> = {
+  NIFTY50: 'Nifty 50',
+  NIFTYNEXT50: 'Nifty Next 50',
+  NIFTYMIDCAP150: 'Nifty Midcap 150',
+  NIFTYSMALLCAP250: 'Nifty Smallcap 250',
+  GLOBAL_LARGE_CAP: 'Global',
+  OTHER: 'Other',
+};
+
+function tierKey(company: AlertCompany): string {
+  return TIER_LABEL[company.index_tier] ? company.index_tier : 'OTHER';
+}
+
+export function groupByTier(companies: AlertCompany[]): CompanyGroup[] {
+  return TIER_ORDER.map((tier) => ({
+    key: tier,
+    label: TIER_LABEL[tier],
+    companies: companies.filter((c) => tierKey(c) === tier),
+  })).filter((g) => g.companies.length > 0);
+}
+
+export function groupByImpact(companies: AlertCompany[]): CompanyGroup[] {
   const bullish = companies.filter((c) => c.direction === 'bullish');
   const bearish = companies.filter((c) => c.direction === 'bearish');
 
-  const branches: TreeNodeData[] = [];
-  if (bullish.length > 0) {
-    branches.push({ id: 'branch-bullish', label: 'Bullish', kind: 'branch', color: BULLISH_COLOR, children: bullish.map(leafNode) });
-  }
-  if (bearish.length > 0) {
-    branches.push({ id: 'branch-bearish', label: 'Bearish', kind: 'branch', color: BEARISH_COLOR, children: bearish.map(leafNode) });
-  }
-
-  return { id: 'root', label: articleTitle, kind: 'root', children: branches };
+  const groups: CompanyGroup[] = [];
+  if (bullish.length > 0) groups.push({ key: 'bullish', label: 'Bullish', companies: bullish });
+  if (bearish.length > 0) groups.push({ key: 'bearish', label: 'Bearish', companies: bearish });
+  return groups;
 }
 
-export function buildSectorTree(articleTitle: string, companies: AlertCompany[]): TreeNodeData {
+export function groupBySector(companies: AlertCompany[]): CompanyGroup[] {
   const bySector = new Map<string, AlertCompany[]>();
   for (const company of companies) {
     const sector = company.sector && company.sector.trim().length > 0 ? company.sector : 'Other';
@@ -45,11 +56,7 @@ export function buildSectorTree(articleTitle: string, companies: AlertCompany[])
     bySector.set(sector, group);
   }
 
-  const branches: TreeNodeData[] = [...bySector.entries()]
+  return [...bySector.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([sector, group]) => ({
-      id: `branch-${sector}`, label: sector, kind: 'branch', color: sectorColor(sector), children: group.map(leafNode),
-    }));
-
-  return { id: 'root', label: articleTitle, kind: 'root', children: branches };
+    .map(([sector, group]) => ({ key: sector, label: sector, color: sectorColor(sector), companies: group }));
 }
