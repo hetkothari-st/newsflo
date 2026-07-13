@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.auth.security import hash_password, verify_password
 from app.auth.tokens import create_access_token
 from app.models import User
@@ -18,6 +19,26 @@ class AuthRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class ProfileResponse(BaseModel):
+    id: int
+    email: str
+    created_at: str
+    email_alerts_enabled: bool
+
+
+class PreferencesRequest(BaseModel):
+    email_alerts_enabled: bool
+
+
+def _serialize_profile(user: User) -> ProfileResponse:
+    return ProfileResponse(
+        id=user.id,
+        email=user.email,
+        created_at=user.created_at.isoformat(),
+        email_alerts_enabled=user.email_alerts_enabled,
+    )
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -40,3 +61,20 @@ def login(payload: AuthRequest, db: Session = Depends(get_db)):
     if user is None or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     return TokenResponse(access_token=create_access_token(user.id))
+
+
+@router.get("/me", response_model=ProfileResponse)
+def get_me(current_user: User = Depends(get_current_user)):
+    return _serialize_profile(current_user)
+
+
+@router.patch("/me", response_model=ProfileResponse)
+def patch_me(
+    payload: PreferencesRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.email_alerts_enabled = payload.email_alerts_enabled
+    db.commit()
+    db.refresh(current_user)
+    return _serialize_profile(current_user)

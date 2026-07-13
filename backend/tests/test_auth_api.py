@@ -94,3 +94,43 @@ def test_register_rejects_malformed_email(db_session):
     assert response.status_code == 422
 
     app.dependency_overrides.clear()
+
+
+def test_get_me_returns_profile(db_session):
+    client = _client(db_session)
+    reg = client.post("/api/auth/register", json={"email": "me@example.com", "password": "pw12345"})
+    token = reg.json()["access_token"]
+
+    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["email"] == "me@example.com"
+    assert body["email_alerts_enabled"] is True
+    assert "created_at" in body
+
+    app.dependency_overrides.clear()
+
+
+def test_get_me_requires_auth(db_session):
+    client = _client(db_session)
+    response = client.get("/api/auth/me")
+    assert response.status_code in (401, 403)
+    app.dependency_overrides.clear()
+
+
+def test_patch_me_updates_email_alerts_enabled(db_session):
+    client = _client(db_session)
+    reg = client.post("/api/auth/register", json={"email": "toggle@example.com", "password": "pw12345"})
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.patch("/api/auth/me", json={"email_alerts_enabled": False}, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["email_alerts_enabled"] is False
+
+    refetch = client.get("/api/auth/me", headers=headers)
+    assert refetch.json()["email_alerts_enabled"] is False
+
+    app.dependency_overrides.clear()
