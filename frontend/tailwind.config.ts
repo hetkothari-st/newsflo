@@ -2,18 +2,25 @@ import type { Config } from 'tailwindcss';
 
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  safelist: [
+    'theme-light:shadow-neu',
+    'theme-light:shadow-neu-inset',
+    'theme-light:shadow-neu-sm',
+  ],
   theme: {
     extend: {
       colors: {
-        page: '#0A0A0A',       // near-true-black page background
-        surface: '#161616',    // card surface, one step up from page bg
-        hairline: '#262626',   // card border, hairline
-        ink: '#F2F2F2',        // primary text
-        muted: '#8E8E93',      // secondary / metadata text
-        bullish: '#34C759',
-        bearish: '#FF453A',
+        page: 'rgb(var(--color-page) / <alpha-value>)',
+        surface: 'rgb(var(--color-surface) / <alpha-value>)',
+        hairline: 'rgb(var(--color-hairline) / <alpha-value>)',
+        ink: 'rgb(var(--color-ink) / <alpha-value>)',
+        muted: 'rgb(var(--color-muted) / <alpha-value>)',
+        bullish: 'rgb(var(--color-bullish) / <alpha-value>)',
+        bearish: 'rgb(var(--color-bearish) / <alpha-value>)',
+        accent: 'rgb(var(--color-accent) / <alpha-value>)',
+        'accent-secondary': 'rgb(var(--color-accent-secondary) / <alpha-value>)',
         swatch: {
-          oil_energy: '#F5A623',   // amber
+          oil_energy: '#F5A623',   // amber -- category identity, unchanged across themes
           banking: '#4A90D9',      // blue
           auto_ev: '#2DD4BF',      // teal
           geopolitics: '#E85D4C',  // red-orange
@@ -31,15 +38,31 @@ export default {
         ],
       },
       borderRadius: {
-        lg: '12px', // CRED-style moderate radius (~12px), per spec token
+        lg: '12px',
       },
       maxWidth: {
         feed: '680px',
       },
       letterSpacing: {
-        widest: '0.08em', // tracked-uppercase metadata/tabs/buttons
+        widest: '0.08em',
+      },
+      boxShadow: {
+        // Light-mode-only neumorphic recipes (dual light/dark soft shadow,
+        // calibrated against the new light `page` background #E4E8F1).
+        // Never referenced unprefixed -- always via `theme-light:`.
+        neu: '6px 6px 14px rgb(163 177 198 / 0.45), -6px -6px 14px rgb(255 255 255 / 0.8)',
+        'neu-inset': 'inset 4px 4px 10px rgb(163 177 198 / 0.45), inset -4px -4px 10px rgb(255 255 255 / 0.8)',
+        'neu-sm': '3px 3px 8px rgb(163 177 198 / 0.4), -3px -3px 8px rgb(255 255 255 / 0.75)',
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // A `.light` ancestor class (set by ThemeProvider, see frontend/src/lib/theme.tsx)
+    // activates `theme-light:*` classes. `:root` itself carries dark values
+    // (see index.css), so the ABSENCE of `.light` -- the default, zero-JS
+    // state -- already renders today's exact dark theme.
+    ({ addVariant }: { addVariant: (name: string, definition: string) => void }) => {
+      addVariant('theme-light', '.light &');
+    },
+  ],
 } satisfies Config;
