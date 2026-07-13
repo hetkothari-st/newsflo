@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildImpactTree, buildSectorTree } from './transforms';
+import { groupByTier, groupByImpact, groupBySector } from './transforms';
 import type { AlertCompany } from '../../lib/api';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
@@ -12,64 +12,94 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
   };
 }
 
-describe('buildImpactTree', () => {
-  it('splits companies into Bullish and Bearish branches', () => {
-    const tree = buildImpactTree('Some event', [
+describe('groupByTier', () => {
+  it('orders groups Nifty 50 -> Next 50 -> Midcap 150 -> Smallcap 250 -> Global -> Other', () => {
+    const groups = groupByTier([
+      company({ company_id: 1, index_tier: 'OTHER' }),
+      company({ company_id: 2, index_tier: 'GLOBAL_LARGE_CAP' }),
+      company({ company_id: 3, index_tier: 'NIFTY50' }),
+      company({ company_id: 4, index_tier: 'NIFTYNEXT50' }),
+      company({ company_id: 5, index_tier: 'NIFTYMIDCAP150' }),
+      company({ company_id: 6, index_tier: 'NIFTYSMALLCAP250' }),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual([
+      'Nifty 50', 'Nifty Next 50', 'Nifty Midcap 150', 'Nifty Smallcap 250', 'Global', 'Other',
+    ]);
+  });
+
+  it('falls back unrecognized tiers to Other', () => {
+    const groups = groupByTier([company({ index_tier: 'SMALLCAP' })]);
+    expect(groups.map((g) => g.label)).toEqual(['Other']);
+  });
+
+  it('omits a tier group with zero companies', () => {
+    const groups = groupByTier([company({ index_tier: 'NIFTY50' })]);
+    expect(groups.map((g) => g.label)).toEqual(['Nifty 50']);
+  });
+});
+
+describe('groupByImpact', () => {
+  it('splits companies into Bullish and Bearish groups', () => {
+    const groups = groupByImpact([
       company({ company_id: 1, direction: 'bullish' }),
       company({ company_id: 2, direction: 'bearish' }),
     ]);
-    expect(tree.label).toBe('Some event');
-    expect(tree.children.map((b) => b.label)).toEqual(['Bullish', 'Bearish']);
-    expect(tree.children[0].children).toHaveLength(1);
-    expect(tree.children[1].children).toHaveLength(1);
+    expect(groups.map((g) => g.label)).toEqual(['Bullish', 'Bearish']);
+    expect(groups[0].companies).toHaveLength(1);
+    expect(groups[1].companies).toHaveLength(1);
   });
 
-  it('omits a branch with zero companies rather than rendering it empty', () => {
-    const tree = buildImpactTree('Some event', [company({ direction: 'bullish' })]);
-    expect(tree.children.map((b) => b.label)).toEqual(['Bullish']);
+  it('omits a group with zero companies rather than rendering it empty', () => {
+    const groups = groupByImpact([company({ direction: 'bullish' })]);
+    expect(groups.map((g) => g.label)).toEqual(['Bullish']);
   });
 
   it('excludes companies whose direction is neither bullish nor bearish', () => {
-    const tree = buildImpactTree('Some event', [company({ direction: 'unknown' })]);
-    expect(tree.children).toHaveLength(0);
+    const groups = groupByImpact([company({ direction: 'unknown' })]);
+    expect(groups).toHaveLength(0);
   });
 
   it('excludes an unrecognized-direction company while still bucketing its bullish/bearish siblings', () => {
-    const tree = buildImpactTree('Some event', [
+    const groups = groupByImpact([
       company({ company_id: 1, direction: 'bullish' }),
       company({ company_id: 2, direction: 'bearish' }),
       company({ company_id: 3, direction: 'unknown' }),
     ]);
-    const bullish = tree.children.find((b) => b.label === 'Bullish');
-    const bearish = tree.children.find((b) => b.label === 'Bearish');
-    expect(bullish?.children).toHaveLength(1);
-    expect(bearish?.children).toHaveLength(1);
-    expect(tree.children).toHaveLength(2);
+    const bullish = groups.find((g) => g.label === 'Bullish');
+    const bearish = groups.find((g) => g.label === 'Bearish');
+    expect(bullish?.companies).toHaveLength(1);
+    expect(bearish?.companies).toHaveLength(1);
+    expect(groups).toHaveLength(2);
   });
 });
 
-describe('buildSectorTree', () => {
+describe('groupBySector', () => {
   it('groups companies by sector, alphabetically', () => {
-    const tree = buildSectorTree('Some event', [
+    const groups = groupBySector([
       company({ company_id: 1, sector: 'Financials' }),
       company({ company_id: 2, sector: 'Energy' }),
       company({ company_id: 3, sector: 'Energy' }),
     ]);
-    expect(tree.children.map((b) => b.label)).toEqual(['Energy', 'Financials']);
-    expect(tree.children[0].children).toHaveLength(2);
+    expect(groups.map((g) => g.label)).toEqual(['Energy', 'Financials']);
+    expect(groups[0].companies).toHaveLength(2);
   });
 
   it('groups companies with no sector under "Other"', () => {
-    const tree = buildSectorTree('Some event', [company({ sector: undefined })]);
-    expect(tree.children.map((b) => b.label)).toEqual(['Other']);
+    const groups = groupBySector([company({ sector: undefined })]);
+    expect(groups.map((g) => g.label)).toEqual(['Other']);
   });
 
   it('groups companies with an empty or whitespace-only sector under "Other"', () => {
-    const tree = buildSectorTree('Some event', [
+    const groups = groupBySector([
       company({ company_id: 1, sector: '' }),
       company({ company_id: 2, sector: '   ' }),
     ]);
-    expect(tree.children.map((b) => b.label)).toEqual(['Other']);
-    expect(tree.children[0].children).toHaveLength(2);
+    expect(groups.map((g) => g.label)).toEqual(['Other']);
+    expect(groups[0].companies).toHaveLength(2);
+  });
+
+  it('assigns each sector group a deterministic color', () => {
+    const groups = groupBySector([company({ sector: 'Energy' })]);
+    expect(groups[0].color).toMatch(/^#[0-9A-Fa-f]{6}$/);
   });
 });
