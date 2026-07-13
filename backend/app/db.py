@@ -28,15 +28,28 @@ _ADDED_COLUMNS = [
 ]
 
 
+def _existing_columns(conn, table: str) -> set[str]:
+    if engine.dialect.name == "sqlite":
+        return {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+    # postgresql (production) and any other standard-information_schema backend
+    rows = conn.exec_driver_sql(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,)
+    )
+    return {row[0] for row in rows}
+
+
 def _add_missing_columns() -> None:
-    """Guarded ALTER TABLE for each entry in ``_ADDED_COLUMNS``. SQLite only
-    (the only backend this project runs against); a no-op on any other engine.
+    """Guarded ALTER TABLE for each entry in ``_ADDED_COLUMNS``. Runs against
+    SQLite (local dev) and PostgreSQL (production) -- create_all only creates
+    missing TABLES, never missing columns on one that's already there, and
+    there's no Alembic in this project, so each new column must be registered
+    here or it raises "no such column"/"column does not exist" the moment a
+    query touches it against a database whose companies table predates that
+    column.
     """
-    if engine.dialect.name != "sqlite":
-        return
     with engine.connect() as conn:
         for table, column, sql_type in _ADDED_COLUMNS:
-            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            existing = _existing_columns(conn, table)
             if column not in existing:
                 conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
                 conn.commit()
