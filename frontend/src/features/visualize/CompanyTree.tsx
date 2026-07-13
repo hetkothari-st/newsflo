@@ -2,15 +2,68 @@ import { useState } from 'react';
 import type { CompanyGroup, GroupMode } from './transforms';
 import ReasoningPanel from '../../components/ReasoningPanel';
 
-const COL_WIDTH = 108;
-const NODE_HEIGHT = 26;
+const NODE_HEIGHT = 28;
 const ROW_GAP = 8;
+const COL_GAP = 12;
 const LEVEL_GAP = 36;
 const TOP_PADDING = 18;
 const SIDE_PADDING = 12;
+const NODE_H_PADDING = 12;
+const MIN_COL_WIDTH = 92;
+const MAX_COL_WIDTH = 200;
+const BRANCH_FONT = 'bold 11px -apple-system, BlinkMacSystemFont, Inter, sans-serif';
+const LEAF_FONT = '11px -apple-system, BlinkMacSystemFont, Inter, sans-serif';
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+// Real text metrics when a canvas 2D context is available (every real
+// browser); a per-character estimate in jsdom (its test environment) --
+// so column widths always fit their actual label instead of a fixed guess
+// that clips longer names like "Nifty Smallcap 250". jsdom's own canvas
+// getContext('2d') isn't implemented and logs a console error on every
+// call, so this checks jsdom's own userAgent marker to skip the call
+// entirely there rather than calling it and swallowing the warning.
+const CANVAS_MEASUREMENT_AVAILABLE =
+  typeof navigator !== 'undefined' && !navigator.userAgent.includes('jsdom');
+let measureCanvas: HTMLCanvasElement | null = null;
+function textWidth(text: string, font: string): number {
+  if (!CANVAS_MEASUREMENT_AVAILABLE) return text.length * 6.5;
+  measureCanvas ??= document.createElement('canvas');
+  const ctx = measureCanvas.getContext('2d');
+  if (!ctx) return text.length * 6.5;
+  ctx.font = font;
+  return ctx.measureText(text).width;
+}
+
+function branchLabel(group: CompanyGroup): string {
+  return `${group.label} · ${group.companies.length}`;
+}
+
+function leafLabel(ticker: string): string {
+  return ticker.replace(/\.NS$/, '');
+}
+
+// Columns size themselves to fit their content, but MAX_COL_WIDTH still caps
+// how wide any single column can grow (so one long sector name/ticker can't
+// blow out the whole tree's width). SVG <text> isn't clipped by its sibling
+// <rect> the way HTML text-overflow would be, so anything that still doesn't
+// fit once the cap is hit must be truncated here, or it paints past its own
+// box and can be visually covered by the next column's rect.
+function fitText(text: string, font: string, maxWidth: number): string {
+  if (textWidth(text, font) <= maxWidth) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (textWidth(`${text.slice(0, mid)}…`, font) <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo > 0 ? `${text.slice(0, lo)}…` : '…';
+}
+
+function columnWidth(group: CompanyGroup): number {
+  const branchWidth = textWidth(branchLabel(group), BRANCH_FONT);
+  const leafWidth = Math.max(0, ...group.companies.map((c) => textWidth(leafLabel(c.ticker), LEAF_FONT)));
+  const needed = Math.max(branchWidth, leafWidth + 18) + NODE_H_PADDING * 2;
+  return Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, needed));
 }
 
 function branchClass(mode: GroupMode, group: CompanyGroup): string {
@@ -35,9 +88,16 @@ export default function CompanyTree({
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  const branchCount = groups.length;
+  const colWidths = groups.map(columnWidth);
+  const colStarts = colWidths.reduce<number[]>((acc, _, i) => {
+    acc.push(i === 0 ? SIDE_PADDING : acc[i - 1] + colWidths[i - 1] + COL_GAP);
+    return acc;
+  }, []);
+  const width = colStarts.length > 0
+    ? colStarts[colStarts.length - 1] + colWidths[colWidths.length - 1] + SIDE_PADDING
+    : SIDE_PADDING * 2;
+
   const maxLeaves = Math.max(1, ...groups.map((g) => g.companies.length));
-  const width = branchCount * COL_WIDTH + SIDE_PADDING * 2;
   const branchY = TOP_PADDING + NODE_HEIGHT / 2 + LEVEL_GAP;
   const firstLeafY = branchY + NODE_HEIGHT / 2 + LEVEL_GAP;
   const height = firstLeafY + maxLeaves * (NODE_HEIGHT + ROW_GAP) + TOP_PADDING;
@@ -51,12 +111,13 @@ export default function CompanyTree({
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto">
         <svg width={width} height={height} role="group" aria-label={`${articleTitle} ${groupMode} tree`}>
-          <text x={rootX} y={rootY} textAnchor="middle" dominantBaseline="middle" className="fill-muted text-[10px]">
-            {truncate(articleTitle, 34)}
+          <text x={rootX} y={rootY} textAnchor="middle" dominantBaseline="middle" className="fill-muted text-[11px]">
+            {articleTitle.length > 40 ? `${articleTitle.slice(0, 39)}…` : articleTitle}
           </text>
 
           {groups.map((group, i) => {
-            const branchX = SIDE_PADDING + i * COL_WIDTH + COL_WIDTH / 2;
+            const colWidth = colWidths[i];
+            const branchX = colStarts[i] + colWidth / 2;
             const leafCount = group.companies.length;
             const lastLeafY = firstLeafY + (leafCount - 1) * (NODE_HEIGHT + ROW_GAP);
 
@@ -82,11 +143,11 @@ export default function CompanyTree({
                 )}
 
                 <rect
-                  x={branchX - COL_WIDTH / 2 + 4}
+                  x={colStarts[i]}
                   y={branchY - NODE_HEIGHT / 2}
-                  width={COL_WIDTH - 8}
+                  width={colWidth}
                   height={NODE_HEIGHT}
-                  rx={6}
+                  rx={7}
                   className={branchClass(groupMode, group)}
                   style={branchStyle(groupMode, group)}
                   strokeWidth={1.5}
@@ -96,9 +157,9 @@ export default function CompanyTree({
                   y={branchY}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  className="fill-ink text-[10px] font-bold uppercase tracking-wide"
+                  className="fill-ink text-[11px] font-bold"
                 >
-                  {truncate(group.label, 12)} · {leafCount}
+                  {fitText(branchLabel(group), BRANCH_FONT, colWidth - NODE_H_PADDING * 2)}
                 </text>
 
                 {group.companies.map((company, j) => {
@@ -121,24 +182,29 @@ export default function CompanyTree({
                       className="cursor-pointer"
                     >
                       <rect
-                        x={branchX - COL_WIDTH / 2 + 4}
+                        x={colStarts[i]}
                         y={leafY - NODE_HEIGHT / 2}
-                        width={COL_WIDTH - 8}
+                        width={colWidth}
                         height={NODE_HEIGHT}
-                        rx={6}
+                        rx={7}
                         className={`fill-surface ${isSelected ? 'stroke-ink' : 'stroke-hairline'}`}
                         strokeWidth={isSelected ? 2 : 1.5}
                       />
                       <text
-                        x={branchX - COL_WIDTH / 2 + 12}
+                        x={colStarts[i] + NODE_H_PADDING}
                         y={leafY}
                         dominantBaseline="middle"
-                        className={bullish ? 'fill-bullish text-[11px]' : 'fill-bearish text-[11px]'}
+                        className={bullish ? 'fill-bullish text-[12px]' : 'fill-bearish text-[12px]'}
                       >
                         {bullish ? '▲' : '▼'}
                       </text>
-                      <text x={branchX - COL_WIDTH / 2 + 24} y={leafY} dominantBaseline="middle" className="fill-ink text-[10px]">
-                        {truncate(company.ticker.replace(/\.NS$/, ''), 10)}
+                      <text
+                        x={colStarts[i] + NODE_H_PADDING + 16}
+                        y={leafY}
+                        dominantBaseline="middle"
+                        className="fill-ink text-[11px]"
+                      >
+                        {fitText(leafLabel(company.ticker), LEAF_FONT, colWidth - NODE_H_PADDING * 2 - 16)}
                       </text>
                     </g>
                   );
