@@ -26,7 +26,7 @@ export default function HoldingsPage() {
 
   return (
     <main className="mx-auto max-w-feed px-4 py-8">
-      <h1 className="mb-6 font-display text-2xl font-bold text-ink">My Holdings</h1>
+      <h1 className="mb-6 font-display text-3xl font-bold text-ink">My Holdings</h1>
       <div className="flex flex-col gap-6">
         <HoldingsForm onAdded={refresh} />
         <HoldingsCsvUpload onUploaded={refresh} />

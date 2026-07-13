@@ -39,7 +39,7 @@ function renderAt(path: string) {
 describe('App routing', () => {
   it('renders the feed nav at /', () => {
     renderAt('/');
-    expect(screen.getByRole('link', { name: /^feed$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /^feed$/i }).length).toBeGreaterThan(0);
   });
 
   it('redirects /holdings to /login when logged out', () => {

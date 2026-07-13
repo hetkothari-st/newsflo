@@ -1,8 +1,17 @@
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+
+# Without this, every logger.info/logger.exception call in the app (e.g. the
+# scheduler's per-poll-cycle success/failure logging) is silently dropped --
+# Python's root logger defaults to WARNING, so INFO-level messages never
+# reach any handler. Confirmed the hard way in production: diagnosing the
+# ingestion pipeline required inferring behavior from side effects (alert
+# counts, HTTP request logs) because our own log lines were invisible.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from app.config import settings
 from app.db import init_db

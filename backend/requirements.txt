@@ -7,6 +7,7 @@ openai
 anthropic
 feedparser
 httpx
+beautifulsoup4
 pytest
 yfinance
 pandas
@@ -16,3 +17,4 @@ PyJWT
 python-multipart
 email-validator
 websockets
+psycopg2-binary

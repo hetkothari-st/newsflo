@@ -7,8 +7,8 @@ import * as api from '../lib/api';
 import type { Company, Watchlist } from '../lib/api';
 
 const companies: Company[] = [
-  { id: 1, ticker: 'AAPL', name: 'Apple', sector: 'it', index_tier: 'GLOBAL_LARGE_CAP', market: 'GLOBAL' },
-  { id: 2, ticker: 'RELIANCE.NS', name: 'Reliance', sector: 'oil_gas', index_tier: 'NIFTY50', market: 'IN' },
+  { id: 1, ticker: 'AAPL', name: 'Apple', sector: 'it', index_tier: 'GLOBAL_LARGE_CAP', market: 'GLOBAL', isin: null, logo_url: null },
+  { id: 2, ticker: 'RELIANCE.NS', name: 'Reliance', sector: 'oil_gas', index_tier: 'NIFTY50', market: 'IN', isin: null, logo_url: null },
 ];
 
 function setToken() {

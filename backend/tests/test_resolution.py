@@ -15,6 +15,7 @@ def test_resolve_direct_mention(db_session):
     mention = CompanyMention(
         name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
         direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        key_points=["Crude prices ease", "Refining margins widen"],
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -22,6 +23,7 @@ def test_resolve_direct_mention(db_session):
     assert len(resolved) == 1
     assert resolved[0]["company_id"] == company.id
     assert resolved[0]["basis"] == "direct_mention"
+    assert resolved[0]["key_points"] == ["Crude prices ease", "Refining margins widen"]
 
 
 def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
@@ -131,6 +133,20 @@ def test_resolve_dedupes_repeated_sector_inference_across_mentions(db_session):
 
     assert len(resolved) == 3
     assert len({r["company_id"] for r in resolved}) == 3
+
+
+def test_tier_rank_prefers_niftynext50_over_midcap150(db_session):
+    next50 = _make_company(db_session, "NEXT50CO.NS", "Next50 Co", "oil_gas", None, index_tier="NIFTYNEXT50")
+    midcap = _make_company(db_session, "MIDCO.NS", "Mid Co", "oil_gas", None, index_tier="NIFTYMIDCAP150")
+
+    mention = CompanyMention(
+        name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
+    )
+    resolved = resolve_companies(db_session, [mention])
+    resolved_ids = [r["company_id"] for r in resolved]
+
+    assert resolved_ids.index(next50.id) < resolved_ids.index(midcap.id)
 
 
 def test_resolve_dedupes_direct_mention_already_covered_by_sector_inference(db_session):

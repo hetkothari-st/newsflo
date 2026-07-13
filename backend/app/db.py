@@ -16,7 +16,47 @@ engine = get_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
+# (table, column, SQL type) for every column added to a model after the dev
+# DB file first existed. create_all only creates missing TABLES, never
+# missing columns on one that's already there -- there's no Alembic in this
+# project -- so each new column must be registered here or it raises "no
+# such column" the moment it's queried against an older DB file.
+_ADDED_COLUMNS = [
+    ("articles", "image_url", "VARCHAR"),
+    ("alert_companies", "key_points_json", "TEXT"),
+    ("companies", "isin", "VARCHAR"),
+]
+
+
+def _existing_columns(conn, table: str) -> set[str]:
+    if engine.dialect.name == "sqlite":
+        return {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+    # postgresql (production) and any other standard-information_schema backend
+    rows = conn.exec_driver_sql(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,)
+    )
+    return {row[0] for row in rows}
+
+
+def _add_missing_columns() -> None:
+    """Guarded ALTER TABLE for each entry in ``_ADDED_COLUMNS``. Runs against
+    SQLite (local dev) and PostgreSQL (production) -- create_all only creates
+    missing TABLES, never missing columns on one that's already there, and
+    there's no Alembic in this project, so each new column must be registered
+    here or it raises "no such column"/"column does not exist" the moment a
+    query touches it against a database whose companies table predates that
+    column.
+    """
+    with engine.connect() as conn:
+        for table, column, sql_type in _ADDED_COLUMNS:
+            existing = _existing_columns(conn, table)
+            if column not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+                conn.commit()
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  ensures models are registered on Base
 
     Base.metadata.create_all(engine)
+    _add_missing_columns()

@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Dark theme values -- identical to the hex this project has always used.
+     This is the default with NO class needed, so dark mode never flashes
+     anything else while React mounts. */
+  --color-page: 10 10 10;
+  --color-surface: 22 22 22;
+  --color-hairline: 38 38 38;
+  --color-ink: 242 242 242;
+  --color-muted: 142 142 147;
+  --color-bullish: 52 199 89;
+  --color-bearish: 255 69 58;
+  --color-accent: 242 242 242;      /* = ink: any accent-colored element looks identical to today */
+  --color-accent-secondary: 142 142 147; /* = muted */
+}
+
+.light {
+  --color-page: 228 232 241;
+  --color-surface: 237 240 247;
+  --color-hairline: 213 219 232;
+  --color-ink: 58 63 82;
+  --color-muted: 136 145 168;
+  --color-bullish: 52 199 89;
+  --color-bearish: 255 69 58;
+  --color-accent: 99 91 255;
+  --color-accent-secondary: 45 212 191;
+}
+
 body {
   @apply bg-page text-ink font-sans antialiased;
 }

@@ -20,6 +20,6 @@ def list_articles(db: Session = Depends(get_db)):
     articles = db.query(Article).order_by(Article.fetched_at.desc()).all()
     return [{
         "id": a.id, "source": a.source, "title": a.title, "url": a.url,
-        "status": a.status, "category": a.category,
+        "status": a.status, "category": a.category, "image_url": a.image_url,
         "fetched_at": a.fetched_at.isoformat() if a.fetched_at else None,
     } for a in articles]

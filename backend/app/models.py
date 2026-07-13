@@ -19,6 +19,19 @@ class Company(Base):
     sector = Column(String, nullable=False)
     index_tier = Column(String, nullable=False)  # NIFTY50 | NIFTY100 | NIFTY500 | OTHER
     market_cap = Column(Float, nullable=True)
+    isin = Column(String, nullable=True, unique=True)
+
+
+class CompanyIndexMembership(Base):
+    __tablename__ = "company_index_memberships"
+    __table_args__ = (UniqueConstraint("company_id", "index_code", name="uq_company_index"),)
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    index_code = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    company = relationship("Company")
 
 
 class Article(Base):
@@ -34,6 +47,7 @@ class Article(Base):
     fetched_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     status = Column(String, nullable=False, default="NEW")  # NEW|FILTERED|CATEGORIZED|ANALYZED|ANALYSIS_FAILED
     category = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)  # og:image / twitter:image scraped from the article page
 
     alerts = relationship("Alert", back_populates="article")
 
@@ -60,6 +74,7 @@ class AlertCompany(Base):
     magnitude_low = Column(Float, nullable=False)
     magnitude_high = Column(Float, nullable=False)
     rationale = Column(Text, nullable=False)
+    key_points_json = Column(Text, nullable=True)  # JSON-encoded list[str]; null for pre-existing rows
     basis = Column(String, nullable=False)  # direct_mention | sector_inference
     confidence = Column(String, nullable=False, default="llm_estimate")  # llm_estimate | calibrated
 

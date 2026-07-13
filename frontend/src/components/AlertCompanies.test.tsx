@@ -1,0 +1,63 @@
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
+import AlertCompanies from './AlertCompanies';
+import type { Alert } from '../lib/api';
+
+const alert: Alert = {
+  id: 1,
+  category: 'oil_energy',
+  created_at: '2026-07-09T10:00:00+00:00',
+  article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a', image_url: null },
+  companies: [
+    {
+      company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
+      direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner up.', key_points: [],
+      basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true, past_mentions: [],
+    },
+    {
+      company_id: 2, ticker: 'ONGC.NS', name: 'ONGC', index_tier: 'NIFTY100',
+      direction: 'bearish', magnitude_low: -3, magnitude_high: -1, rationale: 'Cost pressure.', key_points: [],
+      basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [],
+    },
+  ],
+};
+
+describe('AlertCompanies', () => {
+  it('shows Predicted companies grouped by tier by default', () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    expect(screen.getByText('Nifty 50')).toBeInTheDocument();
+    expect(screen.getByText('Nifty 100')).toBeInTheDocument();
+    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+    expect(screen.getByText('ONGC')).toBeInTheDocument();
+  });
+
+  it('filters to held companies on the My Portfolio tab', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
+    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+    expect(screen.queryByText('ONGC')).not.toBeInTheDocument();
+  });
+
+  it('shows a login prompt on My Portfolio when logged out with no matches', async () => {
+    const anon: Alert = { ...alert, companies: alert.companies.map((c) => ({ ...c, in_my_holdings: false })) };
+    render(<AlertCompanies alert={anon} isAuthenticated={false} />);
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
+    expect(screen.getByText(/log in to see holdings-matched alerts/i)).toBeInTheDocument();
+  });
+
+  it('renders tier headings in Nifty 50 -> Nifty 100 -> Nifty 500 -> Other order', async () => {
+    const tierAlert: Alert = {
+      ...alert,
+      companies: [
+        { ...alert.companies[1], company_id: 1, name: 'Other Co', index_tier: 'SMALLCAP' },
+        { ...alert.companies[1], company_id: 2, name: 'Five Hundred Co', index_tier: 'NIFTY500' },
+        { ...alert.companies[0], company_id: 3, name: 'Fifty Co', index_tier: 'NIFTY50' },
+        { ...alert.companies[1], company_id: 4, name: 'Hundred Co', index_tier: 'NIFTY100' },
+      ],
+    };
+    render(<AlertCompanies alert={tierAlert} isAuthenticated />);
+    const headings = screen.getAllByText(/^(Nifty 50|Nifty 100|Nifty 500|Other)$/);
+    expect(headings.map((el) => el.textContent)).toEqual(['Nifty 50', 'Nifty 100', 'Nifty 500', 'Other']);
+  });
+});
