@@ -136,13 +136,16 @@ export default function AlertCoverCard({
     );
   }
 
-  // carousel, not expanded: a fixed-height banner (object-cover fills it
-  // exactly -- no letterboxed dead space, no blur) with the category/time
-  // row in small pill chips rather than a full-width gradient wash, and the
-  // headline/sentiment flowing normally beneath the banner instead of
-  // overlaid on it -- nothing ever sits translucent in front of the photo
-  // or the text. Tapping expands this same card in place (see the
-  // `expanded` branch above), not a modal.
+  // carousel, not expanded: the headline/sentiment block sizes to its own
+  // content (shrink-0) and the photo banner absorbs all remaining height
+  // (flex-1) -- so the banner always fills the rest of the full-screen card
+  // exactly, with no leftover blank gap, regardless of device height or
+  // headline length. object-cover fills that banner with no letterboxed
+  // dead space and no blur; category/time sit in small pill chips over it
+  // rather than a full-width gradient wash. Headline/sentiment flow in
+  // normal document flow below the banner, not overlaid on it. Tapping
+  // expands this same card in place (see the `expanded` branch above), not
+  // a modal.
   return (
     <div
       role="button"
@@ -151,7 +154,7 @@ export default function AlertCoverCard({
       onKeyDown={onKeyDown}
       className="relative flex h-full w-full shrink-0 cursor-pointer flex-col overflow-hidden snap-start theme-light:shadow-neu"
     >
-      <div className="relative h-72 w-full shrink-0 overflow-hidden">
+      <div className="relative min-h-0 w-full flex-1 overflow-hidden">
         <AlertCover imageUrl={alert.article.image_url} category={alert.category} />
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3">
           <span className="inline-flex items-center rounded-full bg-page/85 px-2.5 py-1 backdrop-blur-sm">
@@ -162,7 +165,7 @@ export default function AlertCoverCard({
           </time>
         </div>
       </div>
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex shrink-0 flex-col gap-3 p-4">
         <h2 className="font-display text-2xl font-bold leading-snug text-ink line-clamp-4">
           {alert.article.title}
         </h2>
