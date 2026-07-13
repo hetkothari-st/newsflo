@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Alert, AlertCompany } from '../lib/api';
 import CompanyChip from './CompanyChip';
 import SentimentBar from '../features/visualize/SentimentBar';
@@ -28,9 +28,13 @@ function headerClass(mode: GroupMode, group: CompanyGroup): string {
 export default function AlertCompanies({
   alert,
   isAuthenticated,
+  headerRight,
 }: {
   alert: Alert;
   isAuthenticated: boolean;
+  // Slot for a control that belongs on the tabs/group row rather than below
+  // it -- e.g. the mobile expanded card's close button (see AlertCoverCard).
+  headerRight?: ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>('predicted');
   const [groupMode, setGroupMode] = useState<GroupMode>('tier');
@@ -61,20 +65,23 @@ export default function AlertCompanies({
             My Portfolio
           </button>
         </div>
-        <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
-          Group
-          <select
-            value={groupMode}
-            onChange={(e) => setGroupMode(e.target.value as GroupMode)}
-            className="rounded-md border border-hairline bg-surface px-1.5 py-0.5 text-xs text-ink theme-light:border-transparent theme-light:shadow-neu-sm"
-          >
-            {GROUP_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {GROUP_LABEL[mode]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+            Group
+            <select
+              value={groupMode}
+              onChange={(e) => setGroupMode(e.target.value as GroupMode)}
+              className="rounded-md border border-hairline bg-surface px-1.5 py-0.5 text-xs text-ink theme-light:border-transparent theme-light:shadow-neu-sm"
+            >
+              {GROUP_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {GROUP_LABEL[mode]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {headerRight}
+        </div>
       </div>
       <SentimentBar companies={visible} />
       {grouped.length === 0 ? (

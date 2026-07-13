@@ -69,16 +69,13 @@ export default function AlertCoverCard({
   }, [expanded, onClose]);
 
   if (expanded) {
+    // Bifurcated into two clearly distinct blocks: the news (cover banner +
+    // headline + sentiment, on `page`) and the affected companies (on
+    // `surface`, divided by a hairline). flex-1 on the companies block lets
+    // its background fill the rest of the scroll column even when the
+    // company list is short, so it never trails off into dead blank space.
     return (
-      <div className="relative h-full w-full shrink-0 snap-start overflow-y-auto">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-page/70 text-ink backdrop-blur-sm hover:text-muted"
-        >
-          ✕
-        </button>
+      <div className="relative flex h-full w-full shrink-0 snap-start flex-col overflow-y-auto">
         <div className="relative h-56 w-full shrink-0 overflow-hidden">
           <AlertCover imageUrl={alert.article.image_url} category={alert.category} />
           <div
@@ -94,8 +91,21 @@ export default function AlertCoverCard({
           <h2 className="font-display text-xl font-bold leading-snug text-ink">{alert.article.title}</h2>
           <SentimentPill companies={alert.companies} />
         </div>
-        <div className="p-4 pt-0">
-          <AlertCompanies alert={alert} isAuthenticated={isAuthenticated} />
+        <div className="flex-1 border-t border-hairline bg-surface p-4 theme-light:border-transparent theme-light:shadow-neu-inset">
+          <AlertCompanies
+            alert={alert}
+            isAuthenticated={isAuthenticated}
+            headerRight={
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="flex h-6 w-6 items-center justify-center text-muted hover:text-ink"
+              >
+                ✕
+              </button>
+            }
+          />
         </div>
       </div>
     );
