@@ -248,13 +248,14 @@ class _AnthropicCompletions:
     native Anthropic messages.create(...) call and translates the response
     back into the OpenAI response shape -- so analyze_article's parsing code
     (response.choices[0].message.tool_calls[...]) works unchanged for either
-    provider. The `model` kwarg passed in is ignored; this always calls
-    ANTHROPIC_MODEL, since callers pass Groq model names meant for the Groq
-    path.
+    provider. The `model` kwarg passed in is ignored; this always calls this
+    adapter's own configured model (ANTHROPIC_MODEL by default), since
+    callers pass Groq model names meant for the Groq path.
     """
 
-    def __init__(self, anthropic_client: Anthropic):
+    def __init__(self, anthropic_client: Anthropic, model: str = ANTHROPIC_MODEL):
         self._client = anthropic_client
+        self._model = model
 
     def create(self, *, max_tokens, tools, messages, **_ignored):
         system_content = None
@@ -273,7 +274,7 @@ class _AnthropicCompletions:
         }
 
         response = self._client.messages.create(
-            model=ANTHROPIC_MODEL,
+            model=self._model,
             max_tokens=max_tokens,
             system=system_content,
             tools=[anthropic_tool],
@@ -291,17 +292,19 @@ class _AnthropicCompletions:
 
 
 class _AnthropicChat:
-    def __init__(self, anthropic_client: Anthropic):
-        self.completions = _AnthropicCompletions(anthropic_client)
+    def __init__(self, anthropic_client: Anthropic, model: str = ANTHROPIC_MODEL):
+        self.completions = _AnthropicCompletions(anthropic_client, model)
 
 
 class AnthropicAdapter:
     """Duck-types the OpenAI client surface analyze_article uses, backed by
     the native Anthropic SDK, so the rest of the pipeline never needs to know
-    which provider actually served a given call."""
+    which provider actually served a given call. Accepts an optional
+    `model` override -- used by the translation path to call a cheaper/
+    faster model than the analysis pipeline's ANTHROPIC_MODEL."""
 
-    def __init__(self, api_key: str):
-        self.chat = _AnthropicChat(Anthropic(api_key=api_key))
+    def __init__(self, api_key: str, model: str = ANTHROPIC_MODEL):
+        self.chat = _AnthropicChat(Anthropic(api_key=api_key), model)
 
 
 class _FallbackCompletions:

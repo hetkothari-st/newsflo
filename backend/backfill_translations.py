@@ -31,7 +31,7 @@ THROTTLE_SECONDS = 3.0
 def main() -> None:
     init_db()
     session = SessionLocal()
-    client = build_translation_client(settings.groq_api_keys)
+    client = build_translation_client(settings.groq_api_keys, settings.anthropic_api_key or None)
     total_categories = 0
     total_alerts = 0
     try:

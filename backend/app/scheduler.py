@@ -51,18 +51,16 @@ def _run_ingestion_and_analysis() -> None:
 
 
 def _run_translation() -> None:
-    """Translate a small batch of alerts/categories lacking full 7-language
-    coverage. Runs on its own interval, its own Groq model quota bucket
-    (FALLBACK_MODEL, see translation/groq_translator.py), and a deliberately
-    small batch size + throttle -- isolated from _run_ingestion_and_analysis
-    so translation traffic can never compete with or degrade the analysis
-    pipeline's rate-limit headroom. Any failure is logged, never raised, same
-    as every other scheduler job."""
+    """Translate a small batch of alerts/categories lacking full language
+    coverage. Runs on its own interval, isolated from
+    _run_ingestion_and_analysis so translation traffic can never compete
+    with or degrade the analysis pipeline's rate-limit headroom. Any
+    failure is logged, never raised, same as every other scheduler job."""
     session = SessionLocal()
     try:
-        client = build_translation_client(settings.groq_api_keys)
-        translated_categories = translate_pending_categories(session, client)
-        translated_alerts = translate_pending_alerts(session, client, limit=15, throttle_seconds=3.0)
+        client = build_translation_client(settings.groq_api_keys, settings.anthropic_api_key or None)
+        translated_categories = translate_pending_categories(session, client, throttle_seconds=1.0)
+        translated_alerts = translate_pending_alerts(session, client, limit=15, throttle_seconds=1.0)
         logger.info(
             "Translation cycle: %s categories, %s alerts translated",
             translated_categories, translated_alerts,

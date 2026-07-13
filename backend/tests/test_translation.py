@@ -24,7 +24,7 @@ from app.translation.lookup import (
 )
 
 
-def _per_lang_payload(num_companies: int, suffix: str) -> dict:
+def _payload(num_companies: int, suffix: str) -> dict:
     return {
         "title": f"title-{suffix}",
         "content": f"content-{suffix}",
@@ -36,17 +36,46 @@ def _per_lang_payload(num_companies: int, suffix: str) -> dict:
 
 
 class FakeToolCallClient:
-    """Mirrors test_claude_client.py's FakeClient/FakeCompletions shape."""
+    """Mirrors test_claude_client.py's FakeClient/FakeCompletions shape.
+    Returns the SAME canned response for every call -- fine for most tests
+    since translate_alert/translate_categories now take an explicit `lang`
+    argument per call rather than returning a dict keyed by every language
+    at once."""
 
     def __init__(self, tool_name: str, arguments: dict):
         self._tool_name = tool_name
         self._arguments = arguments
         self.last_kwargs = None
+        self.call_count = 0
 
     def _create(self, **kwargs):
         self.last_kwargs = kwargs
+        self.call_count += 1
         tool_call = SimpleNamespace(
             function=SimpleNamespace(name=self._tool_name, arguments=json.dumps(self._arguments))
+        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))])
+
+    @property
+    def chat(self):
+        return SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+
+class SequentialToolCallClient:
+    """Returns a different canned response on each successive call, in
+    order -- for tests where per-call output must vary (e.g. one language
+    succeeds, the next is malformed)."""
+
+    def __init__(self, tool_name: str, responses: list[dict]):
+        self._tool_name = tool_name
+        self._responses = list(responses)
+        self.call_count = 0
+
+    def _create(self, **kwargs):
+        arguments = self._responses[self.call_count]
+        self.call_count += 1
+        tool_call = SimpleNamespace(
+            function=SimpleNamespace(name=self._tool_name, arguments=json.dumps(arguments))
         )
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))])
 
@@ -77,18 +106,16 @@ def test_normalize_lang_falls_back_to_english_for_unknown():
 
 # --- groq_translator.py ------------------------------------------------------
 
-def test_translate_alert_returns_all_target_languages():
-    arguments = {lang: _per_lang_payload(1, lang) for lang in TARGET_LANGS}
-    client = FakeToolCallClient("record_translations", arguments)
+def test_translate_alert_returns_one_language():
+    client = FakeToolCallClient("record_translation", _payload(1, "hi"))
 
     result = translate_alert(
-        client, title="US strikes Iran oil sites", content="crude reacts",
+        client, lang="hi", title="US strikes Iran oil sites", content="crude reacts",
         companies=[{"rationale": "refiner margin", "key_points": ["a"]}],
     )
 
-    assert set(result.keys()) == set(TARGET_LANGS)
-    assert result["hi"]["title"] == "title-hi"
-    assert result["hi"]["companies"][0]["rationale"] == "rationale-hi-0"
+    assert result["title"] == "title-hi"
+    assert result["companies"][0]["rationale"] == "rationale-hi-0"
 
 
 def test_translate_alert_raises_on_missing_tool_call():
@@ -96,19 +123,18 @@ def test_translate_alert_raises_on_missing_tool_call():
         create=lambda **kw: SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[]))])
     )))
     try:
-        translate_alert(client, title="t", content="c", companies=[])
+        translate_alert(client, lang="hi", title="t", content="c", companies=[])
         assert False, "expected ValueError"
     except ValueError as exc:
         assert "t" in str(exc)
 
 
-def test_translate_categories_returns_all_target_languages():
-    arguments = {lang: [f"label-{lang}-a", f"label-{lang}-b"] for lang in TARGET_LANGS}
-    client = FakeToolCallClient("record_category_translations", arguments)
+def test_translate_categories_returns_labels_for_one_language():
+    client = FakeToolCallClient("record_category_translations", {"labels": ["label-a", "label-b"]})
 
-    result = translate_categories(client, ["oil_energy", "banking"])
+    result = translate_categories(client, "hi", ["oil_energy", "banking"])
 
-    assert result["hi"] == ["label-hi-a", "label-hi-b"]
+    assert result == ["label-a", "label-b"]
 
 
 # --- lookup.py ----------------------------------------------------------------
@@ -163,12 +189,13 @@ def _seed_alert(db_session) -> Alert:
 
 def test_translate_pending_alerts_persists_all_languages(db_session):
     alert = _seed_alert(db_session)
-    arguments = {lang: _per_lang_payload(1, lang) for lang in TARGET_LANGS}
-    client = FakeToolCallClient("record_translations", arguments)
+    client = FakeToolCallClient("record_translation", _payload(1, "x"))
 
-    translated = translate_pending_alerts(db_session, client, limit=10)
+    # limit >= len(TARGET_LANGS) so every (alert, language) pair for this
+    # one alert fits in a single call.
+    completed = translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS))
 
-    assert translated == 1
+    assert completed == len(TARGET_LANGS)
     rows = db_session.query(ArticleTranslation).filter_by(article_id=alert.article_id).all()
     assert {r.lang for r in rows} == set(TARGET_LANGS)
     ac = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
@@ -176,31 +203,46 @@ def test_translate_pending_alerts_persists_all_languages(db_session):
     assert {r.lang for r in company_rows} == set(TARGET_LANGS)
 
 
-def test_translate_pending_alerts_skips_already_translated(db_session):
+def test_translate_pending_alerts_resumes_from_missing_languages_only(db_session):
     alert = _seed_alert(db_session)
-    arguments = {lang: _per_lang_payload(1, lang) for lang in TARGET_LANGS}
-    client = FakeToolCallClient("record_translations", arguments)
-    translate_pending_alerts(db_session, client, limit=10)
+    client = FakeToolCallClient("record_translation", _payload(1, "x"))
+
+    # Translate just one language first...
+    first = translate_pending_alerts(db_session, client, limit=1)
+    assert first == 1
+    assert client.call_count == 1
+
+    # ...then finish the rest -- only the remaining (len(TARGET_LANGS) - 1)
+    # languages should need a call, not all of them again.
+    second = translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS))
+    assert second == len(TARGET_LANGS) - 1
+    assert client.call_count == len(TARGET_LANGS)
+
+    rows = db_session.query(ArticleTranslation).filter_by(article_id=alert.article_id).all()
+    assert {r.lang for r in rows} == set(TARGET_LANGS)
+
+
+def test_translate_pending_alerts_skips_already_translated(db_session):
+    _seed_alert(db_session)
+    client = FakeToolCallClient("record_translation", _payload(1, "x"))
+    translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS))
 
     # Second run should find nothing pending -- article already has translations.
-    second_count = translate_pending_alerts(db_session, client, limit=10)
+    second_count = translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS))
 
     assert second_count == 0
-    assert not hasattr(alert, "_unused")  # no-op assertion just to use `alert`
 
 
 def test_translate_pending_alerts_records_failure_on_company_count_mismatch(db_session):
-    # A response whose per-language companies array doesn't match the input
-    # count must never be zipped positionally onto the wrong AlertCompany
-    # row -- it should be treated as a failure like any other malformed
-    # response, not silently persisted.
+    # A response whose companies array doesn't match the input count must
+    # never be zipped positionally onto the wrong AlertCompany row -- it
+    # should be treated as a failure like any other malformed response.
     _seed_alert(db_session)
-    arguments = {lang: _per_lang_payload(0, lang) for lang in TARGET_LANGS}  # 0 companies, expected 1
-    client = FakeToolCallClient("record_translations", arguments)
+    client = FakeToolCallClient("record_translation", _payload(0, "x"))  # 0 companies, expected 1
 
-    translated = translate_pending_alerts(db_session, client, limit=10)
+    completed = translate_pending_alerts(db_session, client, limit=1)
 
-    assert translated == 0
+    assert completed == 0
     assert db_session.query(ArticleTranslation).count() == 0
     assert db_session.query(AlertCompanyTranslation).count() == 0
     failure = db_session.query(TranslationFailure).one()
@@ -211,12 +253,14 @@ def test_translate_pending_alerts_records_failure_and_retries_next_run(db_sessio
     _seed_alert(db_session)
     client = BoomClient()
 
-    translated = translate_pending_alerts(db_session, client, limit=10)
-
-    assert translated == 0
+    translate_pending_alerts(db_session, client, limit=1)
     failure = db_session.query(TranslationFailure).one()
     assert failure.attempts == 1
     assert "groq down" in failure.last_error
+
+    translate_pending_alerts(db_session, client, limit=1)
+    db_session.refresh(failure)
+    assert failure.attempts == 2
 
 
 def test_translate_pending_alerts_stops_retrying_after_max_attempts(db_session):
@@ -225,9 +269,9 @@ def test_translate_pending_alerts_stops_retrying_after_max_attempts(db_session):
     db_session.commit()
     client = BoomClient()
 
-    translated = translate_pending_alerts(db_session, client, limit=10)
+    completed = translate_pending_alerts(db_session, client, limit=10)
 
-    assert translated == 0
+    assert completed == 0
     # BoomClient would have raised if it were called -- attempts unchanged
     # confirms the exhausted alert was excluded from the pending query, not
     # retried and re-failed.
@@ -235,43 +279,74 @@ def test_translate_pending_alerts_stops_retrying_after_max_attempts(db_session):
     assert failure.attempts == MAX_TRANSLATION_ATTEMPTS
 
 
-def test_translate_pending_categories_discards_batch_on_label_count_mismatch(db_session):
-    article = Article(source="test", url="https://example.com/cat-mismatch", title="t")
-    db_session.add(article)
-    db_session.commit()
-    db_session.add(Alert(article_id=article.id, category="oil_energy"))
-    db_session.commit()
+def test_translate_pending_alerts_can_restrict_to_one_language(db_session):
+    alert = _seed_alert(db_session)
+    client = FakeToolCallClient("record_translation", _payload(1, "x"))
 
-    # hi returns 1 label as expected, but mr returns 0 -- the whole batch
-    # must be discarded rather than persisting hi's labels alone (which
-    # would make _pending_categories's canary-lang check inconsistent with
-    # what's actually fully translated).
-    arguments = {lang: (["तेल"] if lang == "hi" else []) for lang in TARGET_LANGS}
-    client = FakeToolCallClient("record_category_translations", arguments)
+    completed = translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS), lang="hi")
 
-    count = translate_pending_categories(db_session, client, batch_size=10)
-
-    assert count == 0
-    assert db_session.query(CategoryTranslation).count() == 0
+    assert completed == 1
+    rows = db_session.query(ArticleTranslation).filter_by(article_id=alert.article_id).all()
+    assert {r.lang for r in rows} == {"hi"}
 
 
-def test_translate_pending_categories_persists_all_languages(db_session):
+def test_translate_pending_categories_persists_one_language_at_a_time(db_session):
     article = Article(source="test", url="https://example.com/cat-job", title="t")
     db_session.add(article)
     db_session.commit()
     db_session.add(Alert(article_id=article.id, category="oil_energy"))
     db_session.commit()
 
-    arguments = {lang: ["तेल"] for lang in TARGET_LANGS}
-    client = FakeToolCallClient("record_category_translations", arguments)
+    client = FakeToolCallClient("record_category_translations", {"labels": ["तेल"]})
+
+    # Default max_langs=2 -- only the first 2 pending languages get a call.
+    count = translate_pending_categories(db_session, client, batch_size=10)
+
+    assert count == 2
+    rows = db_session.query(CategoryTranslation).filter_by(category="oil_energy").all()
+    assert len(rows) == 2
+    assert {r.lang for r in rows} == set(TARGET_LANGS[:2])
+
+
+def test_translate_pending_categories_one_bad_language_does_not_block_a_good_one(db_session):
+    article = Article(source="test", url="https://example.com/cat-mismatch", title="t")
+    db_session.add(article)
+    db_session.commit()
+    db_session.add(Alert(article_id=article.id, category="oil_energy"))
+    db_session.commit()
+
+    # First pending language (TARGET_LANGS[0]) gets a correct single-label
+    # response; the second gets a malformed (wrong count) response.
+    client = SequentialToolCallClient(
+        "record_category_translations", [{"labels": ["तेल"]}, {"labels": []}]
+    )
 
     count = translate_pending_categories(db_session, client, batch_size=10)
 
+    # Only the first (good) language's row persists -- the failing language
+    # doesn't roll it back, and doesn't stop translate_pending_categories
+    # from having made progress.
     assert count == 1
     rows = db_session.query(CategoryTranslation).filter_by(category="oil_energy").all()
-    assert {r.lang for r in rows} == set(TARGET_LANGS)
+    assert [r.lang for r in rows] == [TARGET_LANGS[0]]
 
 
 def test_translate_pending_categories_no_op_when_nothing_pending(db_session):
     client = BoomClient()  # would raise if called -- proves it's never called
     assert translate_pending_categories(db_session, client, batch_size=10) == 0
+
+
+def test_translate_pending_categories_can_restrict_to_one_language(db_session):
+    article = Article(source="test", url="https://example.com/cat-restrict", title="t")
+    db_session.add(article)
+    db_session.commit()
+    db_session.add(Alert(article_id=article.id, category="oil_energy"))
+    db_session.commit()
+
+    client = FakeToolCallClient("record_category_translations", {"labels": ["तेल"]})
+
+    count = translate_pending_categories(db_session, client, batch_size=10, lang="mr")
+
+    assert count == 1
+    rows = db_session.query(CategoryTranslation).filter_by(category="oil_energy").all()
+    assert [r.lang for r in rows] == ["mr"]
