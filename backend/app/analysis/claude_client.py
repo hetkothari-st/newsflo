@@ -119,7 +119,17 @@ ANALYSIS_INSTRUCTIONS = (
     "sentences, no restating the company name, max ~12 words each) that "
     "compress `rationale` down to only the essential facts a reader would "
     "actually scan -- the specific number/event, the specific mechanism, "
-    "and the specific precedent, each as its own terse fragment.\n\n"
+    "and the specific precedent, each as its own terse fragment.\n"
+    "8. Close `rationale` with a concrete near-term catalyst or level the "
+    "reader can actually track -- a specific upcoming event (next earnings "
+    "date, an announced deadline, a scheduled decision), or a specific "
+    "price/data level that would confirm or invalidate the call. Never "
+    "vague filler like \"investors should monitor closely\" -- if you don't "
+    "know a real, specific catalyst, say what data point would change your "
+    "view instead of padding with a generic watch-this-space line. Do NOT "
+    "invent a precise number you are not actually confident in (a specific "
+    "earnings date, valuation multiple, or price target you're not sure of) "
+    "-- state the qualitative catalyst instead of a fabricated figure.\n\n"
 )
 
 RECORD_ANALYSIS_TOOL = {
@@ -360,7 +370,13 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     def _call(model: str):
         return client.chat.completions.create(
             model=model,
-            max_tokens=1024,
+            # 1024 was too tight: a real 5-company response with rich,
+            # specific per-company reasoning (confirmed live -- Claude's own
+            # richer output style, not Groq's terser one) runs past 1024 and
+            # gets cut off mid-JSON, failing to parse and burning a wasted
+            # retry. 4096 gives real headroom for the max 5 companies x rich
+            # rationale + key_points this schema asks for.
+            max_tokens=4096,
             tools=[RECORD_ANALYSIS_TOOL],
             tool_choice={"type": "function", "function": {"name": "record_analysis"}},
             messages=messages,
