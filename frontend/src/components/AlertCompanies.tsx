@@ -2,10 +2,17 @@ import { useState, type ReactNode } from 'react';
 import type { Alert, AlertCompany } from '../lib/api';
 import CompanyChip from './CompanyChip';
 import SentimentBar from '../features/visualize/SentimentBar';
-import { groupByTier, groupByImpact, groupBySector, type CompanyGroup } from '../features/visualize/transforms';
+import CompanyTree from '../features/visualize/CompanyTree';
+import {
+  groupByTier,
+  groupByImpact,
+  groupBySector,
+  type CompanyGroup,
+  type GroupMode,
+} from '../features/visualize/transforms';
 
 type Tab = 'predicted' | 'my_demat';
-type GroupMode = 'tier' | 'impact' | 'sector';
+type ViewMode = 'list' | 'chart';
 
 const GROUP_MODES: GroupMode[] = ['tier', 'impact', 'sector'];
 const GROUP_LABEL: Record<GroupMode, string> = {
@@ -38,6 +45,7 @@ export default function AlertCompanies({
 }) {
   const [tab, setTab] = useState<Tab>('predicted');
   const [groupMode, setGroupMode] = useState<GroupMode>('tier');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
   const grouped = groupCompanies(groupMode, visible);
@@ -87,26 +95,46 @@ export default function AlertCompanies({
       {grouped.length === 0 ? (
         <p className="text-xs text-muted">{emptyCopy}</p>
       ) : (
-        grouped.map((group) => (
-          <div key={group.key} className="flex flex-col gap-2">
-            <p className={`flex items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}>
-              {group.color && (
-                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
-              )}
-              {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
-            </p>
-            <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
-              {group.companies.map((company) => (
-                <div
-                  key={company.company_id}
-                  className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
-                >
-                  <CompanyChip company={company} />
-                </div>
-              ))}
-            </div>
+        <>
+          <div className="flex gap-1 self-start rounded-md border border-hairline bg-surface p-0.5 theme-light:border-transparent theme-light:shadow-neu-sm">
+            {(['list', 'chart'] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`rounded px-2 py-0.5 text-[11px] uppercase tracking-widest ${
+                  viewMode === mode ? 'bg-page text-ink' : 'text-muted'
+                }`}
+              >
+                {mode === 'list' ? 'List' : 'Chart'}
+              </button>
+            ))}
           </div>
-        ))
+          {viewMode === 'chart' ? (
+            <CompanyTree articleTitle={alert.article.title} groups={grouped} groupMode={groupMode} />
+          ) : (
+            grouped.map((group) => (
+              <div key={group.key} className="flex flex-col gap-2">
+                <p className={`flex items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}>
+                  {group.color && (
+                    <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
+                  )}
+                  {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
+                </p>
+                <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
+                  {group.companies.map((company) => (
+                    <div
+                      key={company.company_id}
+                      className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
+                    >
+                      <CompanyChip company={company} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </>
       )}
     </div>
   );

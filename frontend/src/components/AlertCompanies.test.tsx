@@ -109,4 +109,25 @@ describe('AlertCompanies', () => {
     expect(screen.getByText('1 Bullish')).toBeInTheDocument();
     expect(screen.getByText('0 Bearish')).toBeInTheDocument();
   });
+
+  it('defaults to List view, showing CompanyChip rows', () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    expect(screen.getByRole('button', { name: 'List' })).toBeInTheDocument();
+    expect(screen.getByText('RELIANCE.NS')).toBeInTheDocument();
+  });
+
+  it('switches to Chart view, rendering the tree instead of the list rows', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    await userEvent.click(screen.getByRole('button', { name: 'Chart' }));
+    expect(screen.getByRole('img', { name: /impact tree/i })).toBeInTheDocument();
+    expect(screen.queryByText('RELIANCE.NS')).not.toBeInTheDocument();
+  });
+
+  it('reflects the active Group mode in Chart view', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'sector');
+    await userEvent.click(screen.getByRole('button', { name: 'Chart' }));
+    expect(screen.getByText(/Energy · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Financials · 1/)).toBeInTheDocument();
+  });
 });

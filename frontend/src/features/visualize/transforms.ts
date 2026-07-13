@@ -1,6 +1,8 @@
 import type { AlertCompany } from '../../lib/api';
 import { sectorColor } from './colors';
 
+export type GroupMode = 'tier' | 'impact' | 'sector';
+
 export interface CompanyGroup {
   key: string;
   label: string;
