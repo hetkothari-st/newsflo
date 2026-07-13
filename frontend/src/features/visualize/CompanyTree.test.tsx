@@ -2,7 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import CompanyTree from './CompanyTree';
 import type { AlertCompany } from '../../lib/api';
-import { groupByImpact, groupByTier } from './transforms';
+import { groupByImpact, groupByTier, type CompanyGroup } from './transforms';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
@@ -83,5 +83,16 @@ describe('CompanyTree', () => {
     // First group is "Nifty 50", second is "Nifty Smallcap 250" -- the
     // longer label's column must be wider, not clipped to match the shorter one.
     expect(widths[1]).toBeGreaterThan(widths[0]);
+  });
+
+  it('truncates a label so long that even the widest column cap cannot fit it', () => {
+    const hugeGroup: CompanyGroup = {
+      key: 'huge',
+      label: 'A'.repeat(60),
+      companies: [company({ company_id: 99, ticker: 'ZZZ.NS', direction: 'bullish' })],
+    };
+    render(<CompanyTree articleTitle="Some event" groups={[hugeGroup]} groupMode="sector" />);
+    expect(screen.queryByText(`${'A'.repeat(60)} · 1`)).not.toBeInTheDocument();
+    expect(screen.getByText(/…$/)).toBeInTheDocument();
   });
 });

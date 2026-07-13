@@ -41,6 +41,24 @@ function leafLabel(ticker: string): string {
   return ticker.replace(/\.NS$/, '');
 }
 
+// Columns size themselves to fit their content, but MAX_COL_WIDTH still caps
+// how wide any single column can grow (so one long sector name/ticker can't
+// blow out the whole tree's width). SVG <text> isn't clipped by its sibling
+// <rect> the way HTML text-overflow would be, so anything that still doesn't
+// fit once the cap is hit must be truncated here, or it paints past its own
+// box and can be visually covered by the next column's rect.
+function fitText(text: string, font: string, maxWidth: number): string {
+  if (textWidth(text, font) <= maxWidth) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (textWidth(`${text.slice(0, mid)}…`, font) <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo > 0 ? `${text.slice(0, lo)}…` : '…';
+}
+
 function columnWidth(group: CompanyGroup): number {
   const branchWidth = textWidth(branchLabel(group), BRANCH_FONT);
   const leafWidth = Math.max(0, ...group.companies.map((c) => textWidth(leafLabel(c.ticker), LEAF_FONT)));
@@ -141,7 +159,7 @@ export default function CompanyTree({
                   dominantBaseline="middle"
                   className="fill-ink text-[11px] font-bold"
                 >
-                  {branchLabel(group)}
+                  {fitText(branchLabel(group), BRANCH_FONT, colWidth - NODE_H_PADDING * 2)}
                 </text>
 
                 {group.companies.map((company, j) => {
@@ -186,7 +204,7 @@ export default function CompanyTree({
                         dominantBaseline="middle"
                         className="fill-ink text-[11px]"
                       >
-                        {leafLabel(company.ticker)}
+                        {fitText(leafLabel(company.ticker), LEAF_FONT, colWidth - NODE_H_PADDING * 2 - 16)}
                       </text>
                     </g>
                   );
