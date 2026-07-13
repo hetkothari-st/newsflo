@@ -38,13 +38,32 @@ export default function AlertCover({ imageUrl, category }: { imageUrl: string | 
     return <CategoryCover category={category} />;
   }
 
+  // Scraped og:image thumbnails are often much smaller than the full-bleed
+  // hero space they fill here, especially on a tall mobile card at a high
+  // device pixel ratio -- stretching one straight across with object-cover
+  // upscales it well past its real detail, reading as blurry/pixelated. A
+  // blurred, cropped copy fills the backdrop (blur hides its own softness,
+  // reads as an intentional look rather than a quality bug), while the
+  // sharp foreground uses object-contain, which never scales past what's
+  // needed to fit -- for a landscape photo in a portrait card that's
+  // usually a downscale, not an upscale, so it stays crisp.
   return (
-    <img
-      src={imageUrl}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="h-full w-full object-cover"
-    />
+    <div className="relative h-full w-full overflow-hidden">
+      <img
+        src={imageUrl}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl motion-reduce:blur-md"
+      />
+      <img
+        src={imageUrl}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="relative h-full w-full object-contain"
+      />
+    </div>
   );
 }

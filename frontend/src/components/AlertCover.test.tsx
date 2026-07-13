@@ -21,4 +21,12 @@ describe('AlertCover', () => {
     if (img) fireEvent.error(img);
     expect(container.querySelector('img')).not.toBeInTheDocument();
   });
+
+  it('renders a blurred cover backdrop plus a sharp, non-cropped foreground image', () => {
+    const { container } = render(<AlertCover imageUrl="https://example.com/pic.jpg" category="oil_energy" />);
+    const imgs = container.querySelectorAll('img');
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0]).toHaveClass('blur-2xl');
+    expect(imgs[1]).toHaveClass('object-contain');
+  });
 });
