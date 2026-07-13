@@ -52,7 +52,7 @@ export default function AlertCompanies({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex gap-4">
           <button type="button" onClick={() => setTab('predicted')} className={tabClass(tab === 'predicted')}>
             Predicted
@@ -61,7 +61,7 @@ export default function AlertCompanies({
             My Portfolio
           </button>
         </div>
-        <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+        <label className="flex shrink-0 items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
           Group
           <select
             value={groupMode}
