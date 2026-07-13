@@ -70,26 +70,32 @@ export default function AlertCoverCard({
 
   if (expanded) {
     // Bifurcated into two clearly distinct blocks: the news (cover banner +
-    // headline + sentiment, on `page`) and the affected companies (on
-    // `surface`, divided by a hairline). flex-1 on the companies block lets
-    // its background fill the rest of the scroll column even when the
-    // company list is short, so it never trails off into dead blank space.
+    // headline + sentiment) and the affected companies (on `surface`,
+    // divided by a hairline). A translucent frosted veil over the news
+    // block -- image and headline both -- reads as "receded, context" next
+    // to the crisp, focused companies section below. flex-1 on the
+    // companies block lets its background fill the rest of the scroll
+    // column even when the company list is short, so it never trails off
+    // into dead blank space.
     return (
       <div className="relative flex h-full w-full shrink-0 snap-start flex-col overflow-y-auto">
-        <div className="relative h-56 w-full shrink-0 overflow-hidden">
-          <AlertCover imageUrl={alert.article.image_url} category={alert.category} />
-          <div
-            className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-page/90 via-page/50 to-transparent"
-            aria-hidden="true"
-          />
-          <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4">
-            <CategorySwatch category={alert.category} active />
-            <time className="text-xs uppercase tracking-widest text-ink/80">{formatTime(alert.created_at)}</time>
+        <div className="relative shrink-0">
+          <div className="relative h-56 w-full shrink-0 overflow-hidden">
+            <AlertCover imageUrl={alert.article.image_url} category={alert.category} />
+            <div
+              className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-page/90 via-page/50 to-transparent"
+              aria-hidden="true"
+            />
+            <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4">
+              <CategorySwatch category={alert.category} active />
+              <time className="text-xs uppercase tracking-widest text-ink/80">{formatTime(alert.created_at)}</time>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-col gap-3 p-4">
-          <h2 className="font-display text-xl font-bold leading-snug text-ink">{alert.article.title}</h2>
-          <SentimentPill companies={alert.companies} />
+          <div className="flex flex-col gap-3 p-4">
+            <h2 className="font-display text-xl font-bold leading-snug text-ink">{alert.article.title}</h2>
+            <SentimentPill companies={alert.companies} />
+          </div>
+          <div className="absolute inset-0 bg-page/70 backdrop-blur-[2px]" aria-hidden="true" />
         </div>
         <div className="flex-1 border-t border-hairline bg-surface p-4 theme-light:border-transparent theme-light:shadow-neu-inset">
           <AlertCompanies

@@ -33,29 +33,38 @@ function CategoryCover({ category }: { category: string }) {
 
 export default function AlertCover({ imageUrl, category }: { imageUrl: string | null; category: string }) {
   const [failed, setFailed] = useState(false);
-  const bgClass = COVER_BG[category] ?? COVER_BG_FALLBACK;
 
   if (!imageUrl || failed) {
     return <CategoryCover category={category} />;
   }
 
   // Scraped og:image thumbnails (typically ~600-1200px wide) are far lower
-  // resolution than the tall full-bleed mobile card they'd need to fill --
+  // resolution than the tall card they'd need to fill edge-to-edge --
   // stretching one edge-to-edge upscales it well past its real detail,
-  // reading as blurry/pixelated. A blurred duplicate as backdrop (the prior
-  // approach) traded that for a different complaint: a hazy, washed-out
-  // blob dominating most of the card. A flat category-tinted backdrop (the
-  // same one the no-image fallback uses) behind the untouched, natural-size
-  // photo keeps every pixel of the real photo crisp with no blur anywhere.
+  // reading as blurry/pixelated. A blurred duplicate of the same photo as
+  // full-bleed backdrop, behind the real photo shown crisp and untouched at
+  // its own natural size, gives every card a filled background with zero
+  // upscaling of the sharp copy. No tint/scrim on top of either layer -- a
+  // wash there is what read as a "whitish layer on the photo" before.
   return (
-    <div className={`flex h-full w-full items-center justify-center p-6 ${bgClass}`}>
+    <div className="relative h-full w-full overflow-hidden">
       <img
         src={imageUrl}
         alt=""
+        aria-hidden="true"
         loading="lazy"
         onError={() => setFailed(true)}
-        className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+        className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl motion-reduce:blur-md"
       />
+      <div className="relative flex h-full w-full items-center justify-center p-6">
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+        />
+      </div>
     </div>
   );
 }
