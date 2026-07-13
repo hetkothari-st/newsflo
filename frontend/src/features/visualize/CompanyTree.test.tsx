@@ -28,6 +28,11 @@ describe('CompanyTree', () => {
     expect(screen.getByText(/Bearish · 1/)).toBeInTheDocument();
   });
 
+  it('labels the tree with the article title and the active group mode', () => {
+    render(<CompanyTree articleTitle="Some event" groups={groups} groupMode="impact" />);
+    expect(screen.getByRole('group', { name: 'Some event impact tree' })).toBeInTheDocument();
+  });
+
   it('renders one leaf per company with its ticker', () => {
     render(<CompanyTree articleTitle="Some event" groups={groups} groupMode="impact" />);
     expect(screen.getByText('AAA')).toBeInTheDocument();
@@ -37,6 +42,12 @@ describe('CompanyTree', () => {
   it('reveals the reasoning panel for a company when its leaf is clicked', () => {
     render(<CompanyTree articleTitle="Some event" groups={groups} groupMode="impact" />);
     fireEvent.click(screen.getByRole('button', { name: /Alpha Co \(AAA.NS\)/ }));
+    expect(screen.getByText('Refiner up.')).toBeInTheDocument();
+  });
+
+  it('reveals the reasoning panel when a leaf is activated with the keyboard', () => {
+    render(<CompanyTree articleTitle="Some event" groups={groups} groupMode="impact" />);
+    fireEvent.keyDown(screen.getByRole('button', { name: /Beta Co \(BBB.NS\)/ }), { key: 'Enter' });
     expect(screen.getByText('Refiner up.')).toBeInTheDocument();
   });
 

@@ -119,7 +119,7 @@ describe('AlertCompanies', () => {
   it('switches to Chart view, rendering the tree instead of the list rows', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
     await userEvent.click(screen.getByRole('button', { name: 'Chart' }));
-    expect(screen.getByRole('img', { name: /impact tree/i })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /tier tree/i })).toBeInTheDocument();
     expect(screen.queryByText('RELIANCE.NS')).not.toBeInTheDocument();
   });
 

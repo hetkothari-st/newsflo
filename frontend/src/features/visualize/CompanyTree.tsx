@@ -50,7 +50,7 @@ export default function CompanyTree({
   return (
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto">
-        <svg width={width} height={height} role="img" aria-label={`${articleTitle} impact tree`}>
+        <svg width={width} height={height} role="group" aria-label={`${articleTitle} ${groupMode} tree`}>
           <text x={rootX} y={rootY} textAnchor="middle" dominantBaseline="middle" className="fill-muted text-[10px]">
             {truncate(articleTitle, 34)}
           </text>
