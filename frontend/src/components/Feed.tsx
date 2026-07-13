@@ -200,7 +200,14 @@ export default function Feed() {
   } else {
     body = (
       <>
-        <MobileFeedCarousel ref={carouselRef} alerts={visibleAlerts} onOpen={setOpenAlertId} />
+        <MobileFeedCarousel
+          ref={carouselRef}
+          alerts={visibleAlerts}
+          onOpen={setOpenAlertId}
+          openAlertId={openAlertId}
+          onClose={() => setOpenAlertId(null)}
+          isAuthenticated={token !== null}
+        />
         <DesktopFeedGrid alerts={visibleAlerts} onOpen={setOpenAlertId} />
       </>
     );
@@ -224,7 +231,7 @@ export default function Feed() {
         />
       </div>
       <div className="min-h-0 flex-1 md:mx-auto md:w-full md:max-w-6xl md:px-8">{body}</div>
-      <AlertDetail open={openAlertId !== null} onClose={() => setOpenAlertId(null)}>
+      <AlertDetail open={openAlertId !== null} onClose={() => setOpenAlertId(null)} hiddenOnMobile>
         {openAlert && <AlertCompanies alert={openAlert} isAuthenticated={token !== null} />}
       </AlertDetail>
       <AlertDetail open={settingsOpen} onClose={() => setSettingsOpen(false)}>

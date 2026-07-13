@@ -4,10 +4,15 @@ export default function AlertDetail({
   open,
   onClose,
   children,
+  hiddenOnMobile = false,
 }: {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
+  // The mobile feed carousel expands a card in place instead of using this
+  // modal (see AlertCoverCard) -- this instance stays desktop-only so the
+  // two behaviors don't both fire off one card tap.
+  hiddenOnMobile?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -23,8 +28,10 @@ export default function AlertDetail({
 
   if (!open) return null;
 
+  const displayClass = hiddenOnMobile ? 'hidden md:flex' : 'flex';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center">
+    <div className={`fixed inset-0 z-50 ${displayClass} items-end md:items-center md:justify-center`}>
       <div
         className="absolute inset-0 bg-page/70 motion-safe:transition-opacity"
         onClick={onClose}

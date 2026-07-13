@@ -100,17 +100,36 @@ describe('Feed', () => {
     expect(screen.queryAllByText('India oil headline')).toHaveLength(0);
   });
 
-  it('opens AlertDetail with the company breakdown when a card is clicked', async () => {
+  it('desktop: opens AlertDetail with the company breakdown when the grid card is clicked', async () => {
     vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
     renderFeed();
     await screen.findAllByText('India oil headline');
     // Both the mobile carousel and desktop grid render a card for this alert
-    // (CSS toggles which is visible; jsdom doesn't evaluate media queries),
-    // so there are two matching buttons -- click the first.
+    // (CSS toggles which is visible; jsdom doesn't evaluate media queries).
+    // Mobile is rendered first (see Feed.tsx's `body`), so index 1 is the grid card.
     const cards = screen.getAllByRole('button', { name: /india oil headline/i });
-    await userEvent.click(cards[0]);
+    await userEvent.click(cards[1]);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByText('Reliance')).toBeInTheDocument();
+    // openAlertId is shared state, so the mobile card (still mounted, CSS
+    // -hidden only in a real browser) expands inline too -- assert presence,
+    // not a single match.
+    expect(screen.getAllByText('Reliance').length).toBeGreaterThan(0);
+  });
+
+  it('mobile: expands the company breakdown inline in the card, with a close button', async () => {
+    vi.spyOn(api, 'getAlerts').mockResolvedValue([indiaAlert]);
+    renderFeed();
+    await screen.findAllByText('India oil headline');
+    const cards = screen.getAllByRole('button', { name: /india oil headline/i });
+    await userEvent.click(cards[0]); // mobile carousel card
+    // AlertDetail's desktop dialog is CSS-hidden on mobile (see
+    // hiddenOnMobile) but still mounted -- jsdom doesn't evaluate media
+    // queries, so this only asserts the inline copy the mobile card itself
+    // renders, not the absence of the desktop one.
+    expect(screen.getAllByText('Reliance').length).toBeGreaterThan(0);
+    // Two Close buttons mount: the mobile card's own, plus the (CSS-hidden
+    // on mobile, jsdom doesn't evaluate that) desktop AlertDetail's.
+    expect(screen.getAllByRole('button', { name: /close/i }).length).toBeGreaterThan(0);
   });
 
   it('Custom tab shows a login prompt when logged out', async () => {
