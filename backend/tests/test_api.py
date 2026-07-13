@@ -1,9 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from app.main import app
 from app.models import Alert, AlertCompany, Article, Company
+from app.routers.alerts import ALERTS_LIMIT
 from app.routers.articles import get_db
 
 
@@ -195,6 +197,89 @@ def test_list_alerts_includes_company_sector(db_session):
 
     assert response.status_code == 200
     assert response.json()[0]["companies"][0]["sector"] == "oil_gas"
+
+    app.dependency_overrides.clear()
+
+
+def _seed_alert_with_company(db_session, index: int) -> None:
+    company = Company(
+        ticker=f"CO{index}.NS", name=f"Company {index}", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1.0,
+    )
+    article = Article(
+        source="test", url=f"https://example.com/n-plus-one/{index}", title=f"Headline {index}",
+        status="ANALYZED", category="oil_energy",
+    )
+    db_session.add_all([company, article])
+    db_session.commit()
+    alert = Alert(
+        article_id=article.id, category="oil_energy",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=index),
+    )
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="x", basis="direct_mention",
+    ))
+    db_session.commit()
+
+
+def test_list_alerts_query_count_does_not_scale_with_alert_count(db_session):
+    # The regression this guards against: routers/alerts.py used to call
+    # get_past_mentions once per (alert, company) pair and lazy-load each
+    # alert's .companies/.article/.company relationship one row at a time,
+    # so query count grew linearly with the number of alerts returned --
+    # fast on same-process SQLite, but 569 queries measured locally for 248
+    # real alerts, which pays real network round-trip latency per query
+    # against a separate Postgres service in production.
+    for i in range(15):
+        _seed_alert_with_company(db_session, i)
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    query_count = 0
+
+    def _count(*args, **kwargs):
+        nonlocal query_count
+        query_count += 1
+
+    event.listen(db_session.get_bind(), "before_cursor_execute", _count)
+    try:
+        response = client.get("/api/alerts")
+    finally:
+        event.remove(db_session.get_bind(), "before_cursor_execute", _count)
+
+    assert response.status_code == 200
+    assert len(response.json()) == 15
+    # A small, roughly-constant number of bulk queries regardless of alert
+    # count -- not the 30+ a one-query-per-alert-per-company pattern would
+    # produce for 15 alerts (main query + companies + article + company +
+    # 4 bulk lookups, generously bounded well under 15).
+    assert query_count < 15
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_limits_to_the_most_recent_alerts(db_session):
+    for i in range(ALERTS_LIMIT + 5):
+        _seed_alert_with_company(db_session, i)
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == ALERTS_LIMIT
+    # The 5 oldest (lowest index -> earliest created_at) alerts are dropped;
+    # the most recent ALERTS_LIMIT survive.
+    titles = {a["article"]["title"] for a in body}
+    assert "Headline 0" not in titles
+    assert "Headline 4" not in titles
+    assert f"Headline {ALERTS_LIMIT + 4}" in titles
 
     app.dependency_overrides.clear()
 
