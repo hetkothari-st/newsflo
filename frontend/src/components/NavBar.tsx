@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import ThemeToggle from './ThemeToggle';
 
 export default function NavBar() {
   const { token, email, logout } = useAuth();
   return (
-    <nav className="border-b border-hairline bg-page">
+    <nav className="border-b border-hairline bg-page theme-light:border-none theme-light:shadow-neu-sm">
       <div className="mx-auto flex h-14 max-w-feed items-center px-4 md:h-auto md:justify-between md:py-4">
         <Link to="/" className="font-display text-lg font-bold text-ink">
           NewsFlo
@@ -18,6 +19,7 @@ export default function NavBar() {
           </Link>
         </div>
         <div className="hidden items-center gap-4 text-xs uppercase tracking-widest md:flex">
+          <ThemeToggle />
           {token ? (
             <>
               <span className="text-muted">{email}</span>

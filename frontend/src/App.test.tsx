@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { AuthProvider } from './lib/auth';
+import { ThemeProvider } from './lib/theme';
 
 // Minimal no-op WebSocket + empty fetch so the (later) live FeedPage mounts
 // cleanly inside these routing tests without touching the network.
@@ -29,9 +30,11 @@ afterEach(() => {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }

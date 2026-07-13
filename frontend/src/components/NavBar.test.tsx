@@ -3,18 +3,24 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import NavBar from './NavBar';
 import { AuthProvider } from '../lib/auth';
+import { ThemeProvider } from '../lib/theme';
 
 function renderNav() {
   return render(
     <MemoryRouter>
-      <AuthProvider>
-        <NavBar />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <NavBar />
+        </AuthProvider>
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }
 
-afterEach(() => localStorage.clear());
+afterEach(() => {
+  localStorage.clear();
+  document.documentElement.classList.remove('light');
+});
 
 describe('NavBar', () => {
   it('shows Login and Register when logged out', () => {
@@ -29,5 +35,10 @@ describe('NavBar', () => {
     renderNav();
     expect(screen.getByText('me@example.com')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
+  });
+
+  it('renders the theme toggle', () => {
+    renderNav();
+    expect(screen.getByRole('button', { name: /switch to light mode/i })).toBeInTheDocument();
   });
 });
