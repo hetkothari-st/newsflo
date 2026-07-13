@@ -8,7 +8,7 @@ from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.claude_client import analyze_article
 from app.calibration.blender import get_calibrated_magnitude
-from app.companies.history import get_past_mentions
+from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
@@ -38,6 +38,7 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
     ``GET /api/alerts`` refresh reconciles them — correct-eventually, and
     simpler than threading per-user state through the broadcast.
     """
+    mentions_index = bulk_past_mentions(session, {ac.company_id for ac in alert.companies})
     return {
         "id": alert.id,
         "category": alert.category,
@@ -70,7 +71,7 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
             "basis": ac.basis,
             "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
-            "past_mentions": get_past_mentions(session, ac.company_id, alert.created_at),
+            "past_mentions": mentions_before(mentions_index, ac.company_id, alert.created_at),
         } for ac in alert.companies],
     }
 
