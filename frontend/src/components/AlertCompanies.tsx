@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Alert, AlertCompany } from '../lib/api';
 import CompanyChip from './CompanyChip';
+import SentimentBar from '../features/visualize/SentimentBar';
 import { groupByTier, groupByImpact, groupBySector, type CompanyGroup } from '../features/visualize/transforms';
 
 type Tab = 'predicted' | 'my_demat';
@@ -75,6 +76,7 @@ export default function AlertCompanies({
           </select>
         </label>
       </div>
+      <SentimentBar companies={visible} />
       {grouped.length === 0 ? (
         <p className="text-xs text-muted">{emptyCopy}</p>
       ) : (
