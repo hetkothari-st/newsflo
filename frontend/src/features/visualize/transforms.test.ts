@@ -6,7 +6,8 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
     company_id: 1, ticker: 'AAA', name: 'Alpha Co', index_tier: 'NIFTY50',
     direction: 'bullish', magnitude_low: 1, magnitude_high: 2, rationale: 'because',
-    basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false,
+    key_points: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+    in_my_holdings: false, past_mentions: [],
     ...overrides,
   };
 }

@@ -275,6 +275,6 @@ def test_alert_broadcast_payload_includes_sector(db_session):
     db_session.commit()
     db_session.refresh(alert)
 
-    payload = pipeline_module._alert_broadcast_payload(alert)
+    payload = pipeline_module._alert_broadcast_payload(db_session, alert)
 
     assert payload["companies"][0]["sector"] == "oil_gas"

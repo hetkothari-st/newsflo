@@ -6,12 +6,13 @@ import type { Alert } from '../../lib/api';
 
 const alert: Alert = {
   id: 1, category: 'oil_energy', created_at: '2026-07-09T10:00:00+00:00',
-  article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a' },
+  article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a', image_url: null },
   companies: [
     {
       company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
       direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner up.',
-      basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true, sector: 'Energy',
+      key_points: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+      in_my_holdings: true, past_mentions: [], sector: 'Energy',
     },
   ],
 };

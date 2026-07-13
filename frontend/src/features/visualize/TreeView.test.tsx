@@ -7,8 +7,9 @@ import type { AlertCompany } from '../../lib/api';
 const companies: AlertCompany[] = [
   {
     company_id: 1, ticker: 'AAA', name: 'Alpha Co', index_tier: 'NIFTY50', direction: 'bullish',
-    magnitude_low: 1, magnitude_high: 2, rationale: 'Refiner up.', basis: 'direct_mention',
-    confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, sector: 'Energy',
+    magnitude_low: 1, magnitude_high: 2, rationale: 'Refiner up.', key_points: [],
+    basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false,
+    past_mentions: [], sector: 'Energy',
   },
 ];
 
