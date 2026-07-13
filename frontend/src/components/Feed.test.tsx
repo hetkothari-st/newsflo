@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Feed, { mergeAlerts } from './Feed';
+import Feed, { dedupeByTitle, mergeAlerts } from './Feed';
 import { AuthProvider } from '../lib/auth';
 import * as api from '../lib/api';
 import type { Alert, AlertCompany } from '../lib/api';
@@ -68,6 +68,15 @@ describe('mergeAlerts', () => {
     const merged = mergeAlerts([makeAlert(2, 'two-live', [])], [makeAlert(1, 'one', []), makeAlert(2, 'two', [])]);
     expect(merged.map((a) => a.id)).toEqual([2, 1]);
     expect(merged[0].article.title).toBe('two');
+  });
+});
+
+describe('dedupeByTitle', () => {
+  it('keeps only the first (newest) alert per normalized article title', () => {
+    const first = makeAlert(10, 'Q1 surprise sends jewellery stocks shining 40%', []);
+    const second = makeAlert(9, '  Q1 SURPRISE sends jewellery stocks shining 40%  ', []);
+    const other = makeAlert(8, 'Unrelated headline', []);
+    expect(dedupeByTitle([first, second, other]).map((a) => a.id)).toEqual([10, 8]);
   });
 });
 

@@ -30,6 +30,29 @@ export function mergeAlerts(live: Alert[], fetched: Alert[]): Alert[] {
   return merged;
 }
 
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// RSS sources frequently republish the identical wire story under a new
+// URL. The backend has its own republish-dedup (reuses one analysis instead
+// of re-running the LLM) but it doesn't catch every case, so distinct Alert
+// rows for the same story can still reach the client. Collapsing them here
+// by normalized title is the last line of defense against a feed showing
+// the same headline/photo twice -- keep the newest (`alerts` is already
+// newest-first).
+export function dedupeByTitle(alerts: Alert[]): Alert[] {
+  const seen = new Set<string>();
+  const result: Alert[] = [];
+  for (const alert of alerts) {
+    const key = normalizeTitle(alert.article.title);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(alert);
+  }
+  return result;
+}
+
 const EMPTY_WATCHLIST: Watchlist = { categories: [], companies: [] };
 
 export default function Feed() {
@@ -83,7 +106,7 @@ export default function Feed() {
     }
   }, [tab, token, refreshWatchlist]);
 
-  const alerts = useMemo(() => mergeAlerts(live, fetched), [live, fetched]);
+  const alerts = useMemo(() => dedupeByTitle(mergeAlerts(live, fetched)), [live, fetched]);
 
   // "New" and "visible" are both scoped to the ACTIVE tab -- otherwise a live
   // push on a tab the user isn't viewing would light up "N new" with nothing
