@@ -165,6 +165,40 @@ def test_list_alerts_flags_in_my_holdings_for_authenticated_holder(db_session):
     app.dependency_overrides.clear()
 
 
+def test_list_alerts_includes_company_sector(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(
+        source="test", url="https://example.com/sector", title="Sector test headline",
+        status="ANALYZED", category="oil_energy",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    assert response.json()[0]["companies"][0]["sector"] == "oil_gas"
+
+    app.dependency_overrides.clear()
+
+
 def test_list_articles_returns_all(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)

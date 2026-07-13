@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Alert, AlertCompany } from '../lib/api';
 import CompanyChip from './CompanyChip';
+import VisualizeModal from '../features/visualize/VisualizeModal';
 
 type Tab = 'predicted' | 'my_demat';
 
@@ -24,6 +25,7 @@ export default function AlertCompanies({
   isAuthenticated: boolean;
 }) {
   const [tab, setTab] = useState<Tab>('predicted');
+  const [visualizeOpen, setVisualizeOpen] = useState(false);
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
 
@@ -47,12 +49,21 @@ export default function AlertCompanies({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex gap-4">
-        <button type="button" onClick={() => setTab('predicted')} className={tabClass(tab === 'predicted')}>
-          Predicted
-        </button>
-        <button type="button" onClick={() => setTab('my_demat')} className={tabClass(tab === 'my_demat')}>
-          My Portfolio
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex gap-4">
+          <button type="button" onClick={() => setTab('predicted')} className={tabClass(tab === 'predicted')}>
+            Predicted
+          </button>
+          <button type="button" onClick={() => setTab('my_demat')} className={tabClass(tab === 'my_demat')}>
+            My Portfolio
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setVisualizeOpen(true)}
+          className="text-xs uppercase tracking-widest text-muted hover:text-ink"
+        >
+          Visualize →
         </button>
       </div>
       {visible.length === 0 ? (
@@ -69,6 +80,7 @@ export default function AlertCompanies({
           </div>
         ))
       )}
+      {visualizeOpen && <VisualizeModal alert={alert} onClose={() => setVisualizeOpen(false)} />}
     </div>
   );
 }
