@@ -39,7 +39,7 @@ export default function HoldingsForm({ onAdded }: { onAdded: (holding: Holding) 
           value={ticker}
           onChange={(e) => setTicker(e.target.value)}
           placeholder="RELIANCE.NS"
-          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink outline-none focus:border-muted"
+          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink outline-none focus:border-muted theme-light:border-transparent theme-light:shadow-neu-inset"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -48,14 +48,14 @@ export default function HoldingsForm({ onAdded }: { onAdded: (holding: Holding) 
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           inputMode="decimal"
-          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink tabular-nums outline-none focus:border-muted"
+          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink tabular-nums outline-none focus:border-muted theme-light:border-transparent theme-light:shadow-neu-inset"
         />
       </label>
       {error && <p role="alert" className="text-xs text-bearish">{error}</p>}
       <button
         type="submit"
         disabled={submitting}
-        className="rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50"
+        className="rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50 theme-light:border-transparent theme-light:bg-accent theme-light:text-page theme-light:shadow-neu"
       >
         Add
       </button>

@@ -42,4 +42,9 @@ describe('LoginForm', () => {
     await userEvent.click(screen.getByRole('button', { name: /log in/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email or password');
   });
+
+  it('gives the submit button the light-mode filled treatment', () => {
+    renderWithAuth(<LoginForm />);
+    expect(screen.getByRole('button', { name: /log in/i })).toHaveClass('theme-light:bg-accent');
+  });
 });

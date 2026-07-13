@@ -133,7 +133,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter by name or ticker"
           aria-label="Filter companies"
-          className="rounded-lg border border-hairline bg-page px-3 py-2 text-ink outline-none focus:border-muted"
+          className="rounded-lg border border-hairline bg-page px-3 py-2 text-ink outline-none focus:border-muted theme-light:border-transparent theme-light:shadow-neu-inset"
         />
         <div className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
           {filteredCompanies.map((company) => {
@@ -177,7 +177,7 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
       <button
         type="submit"
         disabled={saving}
-        className="self-start rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50"
+        className="self-start rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50 theme-light:border-transparent theme-light:bg-accent theme-light:text-page theme-light:shadow-neu"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>

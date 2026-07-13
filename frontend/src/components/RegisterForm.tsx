@@ -38,7 +38,7 @@ export default function RegisterForm({ onSuccess }: { onSuccess?: () => void }) 
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink outline-none focus:border-muted"
+          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink outline-none focus:border-muted theme-light:border-transparent theme-light:shadow-neu-inset"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -47,14 +47,14 @@ export default function RegisterForm({ onSuccess }: { onSuccess?: () => void }) 
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink outline-none focus:border-muted"
+          className="rounded-lg border border-hairline bg-surface px-3 py-2 text-ink outline-none focus:border-muted theme-light:border-transparent theme-light:shadow-neu-inset"
         />
       </label>
       {error && <p role="alert" className="text-xs text-bearish">{error}</p>}
       <button
         type="submit"
         disabled={submitting}
-        className="rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50"
+        className="rounded-lg border border-hairline bg-surface px-4 py-2 text-xs uppercase tracking-widest text-ink disabled:opacity-50 theme-light:border-transparent theme-light:bg-accent theme-light:text-page theme-light:shadow-neu"
       >
         {submitting ? 'Creating…' : 'Create account'}
       </button>
