@@ -22,6 +22,17 @@ const SIZE_CLASS: Record<'carousel' | 'grid', string> = {
   grid: 'aspect-[3/4] rounded-lg',
 };
 
+// The card's height is fixed (h-full / aspect-[3/4]) but headline length
+// isn't -- an unclamped h2 can grow taller than the card and, being
+// bottom-anchored, spill upward over the top category/time row. line-clamp
+// guarantees a bounded height regardless of headline length or tile width.
+// The grid tile is much narrower than a full-screen carousel card, so it
+// also gets a smaller headline size and a tighter clamp.
+const HEADLINE_CLASS: Record<'carousel' | 'grid', string> = {
+  carousel: 'text-2xl line-clamp-4',
+  grid: 'text-lg line-clamp-3',
+};
+
 export default function AlertCoverCard({
   alert,
   onOpen,
@@ -58,7 +69,7 @@ export default function AlertCoverCard({
         <time className="text-xs uppercase tracking-widest text-ink/80">{formatTime(alert.created_at)}</time>
       </div>
       <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3 p-4">
-        <h2 className="font-display text-2xl font-bold leading-snug text-ink drop-shadow-sm">
+        <h2 className={`font-display font-bold leading-snug text-ink drop-shadow-sm ${HEADLINE_CLASS[variant]}`}>
           {alert.article.title}
         </h2>
         <SentimentPill companies={alert.companies} />

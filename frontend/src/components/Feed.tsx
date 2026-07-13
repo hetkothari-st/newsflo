@@ -212,7 +212,7 @@ export default function Feed() {
     // carousel's flex-1 child can fill exactly the remaining space. Desktop
     // drops the fixed height entirely and scrolls normally with the page.
     <div className="flex h-[calc(100dvh-7rem)] flex-col overflow-hidden md:h-auto md:overflow-visible">
-      <div className="px-4 pt-4 md:mx-auto md:w-full md:max-w-feed md:px-4 md:pt-8">
+      <div className="px-4 pt-4 md:mx-auto md:w-full md:max-w-6xl md:px-8 md:pt-8">
         <CategoryTabs
           active={tab}
           onChange={setTab}
@@ -223,7 +223,7 @@ export default function Feed() {
           onOpenCustomSettings={() => setSettingsOpen(true)}
         />
       </div>
-      <div className="min-h-0 flex-1 md:mx-auto md:w-full md:max-w-feed md:px-4">{body}</div>
+      <div className="min-h-0 flex-1 md:mx-auto md:w-full md:max-w-6xl md:px-8">{body}</div>
       <AlertDetail open={openAlertId !== null} onClose={() => setOpenAlertId(null)}>
         {openAlert && <AlertCompanies alert={openAlert} isAuthenticated={token !== null} />}
       </AlertDetail>

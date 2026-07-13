@@ -41,4 +41,22 @@ describe('AlertCoverCard', () => {
     await userEvent.keyboard('{Enter}');
     expect(onOpen).toHaveBeenCalled();
   });
+
+  it('clamps the grid variant headline so a long title can never overflow the fixed-aspect tile', () => {
+    const longTitle =
+      'A very long headline that would otherwise wrap across many lines and grow taller than the narrow fixed-aspect grid tile can hold';
+    render(
+      <AlertCoverCard
+        alert={{ ...alert, article: { ...alert.article, title: longTitle } }}
+        onOpen={() => {}}
+        variant="grid"
+      />,
+    );
+    expect(screen.getByText(longTitle)).toHaveClass('line-clamp-3');
+  });
+
+  it('clamps the carousel variant headline too, with more room for a longer title', () => {
+    render(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
+    expect(screen.getByText('US strikes Iran oil export sites')).toHaveClass('line-clamp-4');
+  });
 });
