@@ -6,7 +6,7 @@ export default function NavBar() {
   const { token, email, logout } = useAuth();
   return (
     <nav className="border-b border-hairline bg-page theme-light:border-none theme-light:shadow-neu-sm">
-      <div className="mx-auto flex h-14 max-w-feed items-center px-4 md:h-auto md:justify-between md:py-4">
+      <div className="mx-auto flex h-14 max-w-feed items-center justify-between px-4 md:h-auto md:py-4">
         <Link to="/" className="font-display text-lg font-bold text-ink">
           NewsFlo
         </Link>
@@ -18,25 +18,27 @@ export default function NavBar() {
             Holdings
           </Link>
         </div>
-        <div className="hidden items-center gap-4 text-xs uppercase tracking-widest md:flex">
+        <div className="flex items-center gap-4 text-xs uppercase tracking-widest">
           <ThemeToggle />
-          {token ? (
-            <>
-              <span className="text-muted">{email}</span>
-              <button type="button" onClick={logout} className="text-ink hover:text-muted">
-                Logout
-              </button>
-            </>
-          ) : (
-            <>
-              <Link to="/login" className="text-ink hover:text-muted">
-                Login
-              </Link>
-              <Link to="/register" className="text-ink hover:text-muted">
-                Register
-              </Link>
-            </>
-          )}
+          <div className="hidden items-center gap-4 md:flex">
+            {token ? (
+              <>
+                <span className="text-muted">{email}</span>
+                <button type="button" onClick={logout} className="text-ink hover:text-muted">
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" className="text-ink hover:text-muted">
+                  Login
+                </Link>
+                <Link to="/register" className="text-ink hover:text-muted">
+                  Register
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </nav>

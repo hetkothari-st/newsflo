@@ -40,12 +40,11 @@ describe('BottomNav', () => {
     expect(screen.getByRole('link', { name: /account/i })).toHaveAttribute('href', '/login');
   });
 
-  it('opens an account sheet with email, the theme toggle, and Logout when logged in', async () => {
+  it('opens an account sheet with email and Logout when logged in', async () => {
     setToken();
     renderNav();
     await userEvent.click(screen.getByRole('button', { name: /account/i }));
     expect(screen.getByText('a@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /switch to light mode/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
   });
 

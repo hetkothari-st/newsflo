@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import AlertDetail from './AlertDetail';
-import ThemeToggle from './ThemeToggle';
 
 const LINKS = [
   { to: '/', label: 'Feed' },
@@ -40,7 +39,6 @@ export default function BottomNav() {
       <AlertDetail open={accountOpen} onClose={() => setAccountOpen(false)}>
         <div className="flex flex-col gap-4">
           <p className="text-xs uppercase tracking-widest text-muted">{email}</p>
-          <ThemeToggle />
           <button
             type="button"
             onClick={() => {
