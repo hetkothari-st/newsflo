@@ -99,4 +99,14 @@ describe('AlertCompanies', () => {
     await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
     expect(screen.getByText('No affected companies for this story.')).toBeInTheDocument();
   });
+
+  it('shows the sentiment bar reflecting the currently visible (tab-filtered) companies', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    expect(screen.getByText('1 Bullish')).toBeInTheDocument();
+    expect(screen.getByText('1 Bearish')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
+    expect(screen.getByText('1 Bullish')).toBeInTheDocument();
+    expect(screen.getByText('0 Bearish')).toBeInTheDocument();
+  });
 });
