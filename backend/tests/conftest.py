@@ -37,3 +37,17 @@ def _no_real_og_image_fetch(monkeypatch):
     # tests exercise the real function directly and are unaffected since
     # they don't go through app.pipeline.
     monkeypatch.setattr("app.pipeline.fetch_og_image", lambda url: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_feed_fetch(monkeypatch):
+    # fetch_new_articles fetches each RSS feed over a real HTTP GET (see
+    # app/ingestion/poller.py). Stub it everywhere by default so the suite
+    # never makes network calls -- individual tests that care about the
+    # fetch itself (test_poller.py) override this via their own
+    # monkeypatch.setattr, which takes precedence over this autouse default.
+    class _EmptyResponse:
+        content = b""
+        def raise_for_status(self):
+            pass
+    monkeypatch.setattr("app.ingestion.poller.httpx.get", lambda url, timeout=None, follow_redirects=None: _EmptyResponse())
