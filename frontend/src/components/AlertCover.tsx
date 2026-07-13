@@ -38,17 +38,16 @@ export default function AlertCover({ imageUrl, category }: { imageUrl: string | 
     return <CategoryCover category={category} />;
   }
 
-  // Scraped og:image thumbnails (typically ~600x315) are far lower-res than
-  // the tall mobile card they fill -- a single object-cover layer forces the
-  // browser to upscale the sharp image well past its real detail, reading as
-  // blurry/pixelated (confirmed: this is what a plain object-cover fill
-  // produced). A blurred object-cover backdrop fills the full bleed (blur
-  // hides its own upscale softness, reads as intentional rather than a
-  // quality bug), while the foreground uses the image's OWN natural size --
-  // max-width/max-height:100% with no explicit width/height means the
-  // browser never enlarges it past that size, only shrinks it if it doesn't
-  // fit, so it's mathematically guaranteed to stay sharp regardless of how
-  // tall the card is.
+  // Scraped og:image thumbnails (typically ~600-1200px wide) are far lower
+  // resolution than the tall full-bleed mobile card they'd need to fill --
+  // stretching one edge-to-edge upscales it well past its real detail,
+  // reading as blurry/pixelated. Framing it instead as a distinct photo
+  // (rounded corners, shadow, inset from the edges) over a blurred backdrop
+  // turns the same source into two clearly intentional layers -- a moody
+  // blurred fill behind a crisp, deliberately-bordered photo -- rather than
+  // one image quietly degrading. The foreground still caps at its own
+  // natural size (max-height/max-width, no explicit width/height), so it's
+  // never upscaled past real detail no matter how tall the card is.
   return (
     <div className="relative h-full w-full overflow-hidden">
       <img
@@ -59,8 +58,15 @@ export default function AlertCover({ imageUrl, category }: { imageUrl: string | 
         onError={() => setFailed(true)}
         className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl motion-reduce:blur-md"
       />
-      <div className="relative flex h-full w-full items-center justify-center">
-        <img src={imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} className="max-h-full max-w-full" />
+      <div className="absolute inset-0 bg-page/15" aria-hidden="true" />
+      <div className="relative flex h-full w-full items-center justify-center p-6">
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+        />
       </div>
     </div>
   );
