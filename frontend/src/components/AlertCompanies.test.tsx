@@ -16,7 +16,7 @@ const alert: Alert = {
       basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: true, past_mentions: [],
     },
     {
-      company_id: 2, ticker: 'ONGC.NS', name: 'ONGC', index_tier: 'NIFTY100',
+      company_id: 2, ticker: 'ONGC.NS', name: 'ONGC', index_tier: 'NIFTYNEXT50',
       direction: 'bearish', magnitude_low: -3, magnitude_high: -1, rationale: 'Cost pressure.', key_points: [],
       basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [],
     },
@@ -27,7 +27,7 @@ describe('AlertCompanies', () => {
   it('shows Predicted companies grouped by tier by default', () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
     expect(screen.getByText('Nifty 50')).toBeInTheDocument();
-    expect(screen.getByText('Nifty 100')).toBeInTheDocument();
+    expect(screen.getByText('Nifty Next 50')).toBeInTheDocument();
     expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
     expect(screen.getByText('ONGC')).toBeInTheDocument();
   });
@@ -46,19 +46,25 @@ describe('AlertCompanies', () => {
     expect(screen.getByText(/log in to see holdings-matched alerts/i)).toBeInTheDocument();
   });
 
-  it('renders tier headings in Nifty 50 -> Nifty 100 -> Nifty 500 -> Other order', async () => {
+  it('renders tier headings in Nifty 50 -> Next 50 -> Midcap 150 -> Smallcap 250 -> Global -> Other order', async () => {
     const tierAlert: Alert = {
       ...alert,
       companies: [
-        { ...alert.companies[1], company_id: 1, name: 'Other Co', index_tier: 'SMALLCAP' },
-        { ...alert.companies[1], company_id: 2, name: 'Five Hundred Co', index_tier: 'NIFTY500' },
+        { ...alert.companies[1], company_id: 1, name: 'Other Co', index_tier: 'OTHER' },
+        { ...alert.companies[1], company_id: 2, name: 'Global Co', index_tier: 'GLOBAL_LARGE_CAP' },
         { ...alert.companies[0], company_id: 3, name: 'Fifty Co', index_tier: 'NIFTY50' },
-        { ...alert.companies[1], company_id: 4, name: 'Hundred Co', index_tier: 'NIFTY100' },
+        { ...alert.companies[1], company_id: 4, name: 'Next Fifty Co', index_tier: 'NIFTYNEXT50' },
+        { ...alert.companies[1], company_id: 5, name: 'Midcap Co', index_tier: 'NIFTYMIDCAP150' },
+        { ...alert.companies[1], company_id: 6, name: 'Smallcap Co', index_tier: 'NIFTYSMALLCAP250' },
       ],
     };
     render(<AlertCompanies alert={tierAlert} isAuthenticated />);
-    const headings = screen.getAllByText(/^(Nifty 50|Nifty 100|Nifty 500|Other)$/);
-    expect(headings.map((el) => el.textContent)).toEqual(['Nifty 50', 'Nifty 100', 'Nifty 500', 'Other']);
+    const headings = screen.getAllByText(
+      /^(Nifty 50|Nifty Next 50|Nifty Midcap 150|Nifty Smallcap 250|Global|Other)$/,
+    );
+    expect(headings.map((el) => el.textContent)).toEqual([
+      'Nifty 50', 'Nifty Next 50', 'Nifty Midcap 150', 'Nifty Smallcap 250', 'Global', 'Other',
+    ]);
   });
 
   it('opens the visualize modal when the Visualize button is clicked', async () => {

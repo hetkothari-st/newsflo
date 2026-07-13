@@ -5,11 +5,20 @@ import VisualizeModal from '../features/visualize/VisualizeModal';
 
 type Tab = 'predicted' | 'my_demat';
 
-const TIER_ORDER = ['NIFTY50', 'NIFTY100', 'NIFTY500', 'OTHER'] as const;
+const TIER_ORDER = [
+  'NIFTY50',
+  'NIFTYNEXT50',
+  'NIFTYMIDCAP150',
+  'NIFTYSMALLCAP250',
+  'GLOBAL_LARGE_CAP',
+  'OTHER',
+] as const;
 const TIER_LABEL: Record<string, string> = {
   NIFTY50: 'Nifty 50',
-  NIFTY100: 'Nifty 100',
-  NIFTY500: 'Nifty 500',
+  NIFTYNEXT50: 'Nifty Next 50',
+  NIFTYMIDCAP150: 'Nifty Midcap 150',
+  NIFTYSMALLCAP250: 'Nifty Smallcap 250',
+  GLOBAL_LARGE_CAP: 'Global',
   OTHER: 'Other',
 };
 
