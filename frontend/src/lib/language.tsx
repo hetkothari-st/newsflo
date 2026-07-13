@@ -15,10 +15,16 @@ interface LanguageContextValue {
   t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
   // Whether an on-demand translation drain is in flight for the current
   // language switch, and its last-polled progress -- drives
-  // TranslationProgressOverlay. Both stay at their idle defaults for
+  // TranslationProgressBanner. Both stay at their idle defaults for
   // English (nothing to translate).
   translating: boolean;
   translationProgress: TranslationStatus | null;
+  // Bumped on every setLanguage call, including a re-switch to the language
+  // that's already selected -- lets the banner reset its own "dismissed"
+  // flag on a fresh switch even when `translating` itself never flips
+  // false in between (e.g. re-triggering the same language while a prior
+  // drain is still running).
+  translationRequestId: number;
 }
 
 const LANG_KEY = 'newsflo.lang';
@@ -36,16 +42,19 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(readStoredLanguage);
   const [translating, setTranslating] = useState(false);
   const [translationProgress, setTranslationProgress] = useState<TranslationStatus | null>(null);
-  // Bumped on every setLanguage call so a poll loop left over from a
-  // previous switch recognizes it's obsolete and stops touching state --
-  // otherwise a quick switch en -> hi -> mr could have hi's late-arriving
-  // poll response overwrite mr's progress.
+  const [translationRequestId, setTranslationRequestId] = useState(0);
+  // Mirrors translationRequestId in a ref so the async poll loop's closure
+  // can cheaply check "has a newer switch superseded me" without depending
+  // on React state -- a poll loop left over from a previous switch must
+  // stop touching state, otherwise a quick switch en -> hi -> mr could have
+  // hi's late-arriving poll response overwrite mr's progress.
   const pollGeneration = useRef(0);
 
   const setLanguage = useCallback((lang: Language) => {
     localStorage.setItem(LANG_KEY, lang);
     setLanguageState(lang);
     const generation = ++pollGeneration.current;
+    setTranslationRequestId(generation);
 
     if (lang === 'en') {
       setTranslating(false);
@@ -82,7 +91,9 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, t, translating, translationProgress }}>
+    <LanguageContext.Provider
+      value={{ language, setLanguage, t, translating, translationProgress, translationRequestId }}
+    >
       {children}
     </LanguageContext.Provider>
   );

@@ -43,8 +43,12 @@ def _drain_language(lang: str) -> None:
         # Categories first (cheap, unblocks category_label everywhere at
         # once) -- one call for this language's whole pending-category
         # batch, then a single bounded pass over the most recent alerts.
-        translate_pending_categories(session, client, batch_size=25, max_langs=1, throttle_seconds=0.3, lang=lang)
-        translate_pending_alerts(session, client, limit=ON_DEMAND_ALERT_LIMIT, throttle_seconds=0.3, lang=lang)
+        # No artificial throttle here -- translate_pending_alerts already
+        # runs its calls concurrently (MAX_CONCURRENT_TRANSLATIONS), and this
+        # is Anthropic (not Groq's free-tier per-minute wall), so there's no
+        # rate-limit reason to add serial delay on top on this path.
+        translate_pending_categories(session, client, batch_size=25, max_langs=1, lang=lang)
+        translate_pending_alerts(session, client, limit=ON_DEMAND_ALERT_LIMIT, lang=lang)
     except Exception:
         logger.exception("On-demand translation drain failed for lang=%s", lang)
     finally:

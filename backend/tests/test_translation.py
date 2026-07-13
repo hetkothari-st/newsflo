@@ -1,4 +1,5 @@
 import json
+import threading
 from types import SimpleNamespace
 
 from app.models import (
@@ -40,17 +41,25 @@ class FakeToolCallClient:
     Returns the SAME canned response for every call -- fine for most tests
     since translate_alert/translate_categories now take an explicit `lang`
     argument per call rather than returning a dict keyed by every language
-    at once."""
+    at once.
+
+    translate_pending_alerts now fans its calls out across a thread pool
+    (see MAX_CONCURRENT_TRANSLATIONS in job.py), so this fake's own state
+    must be thread-safe too -- a bare `self.call_count += 1` is a
+    read-modify-write that can lose increments under real concurrency.
+    """
 
     def __init__(self, tool_name: str, arguments: dict):
         self._tool_name = tool_name
         self._arguments = arguments
         self.last_kwargs = None
         self.call_count = 0
+        self._lock = threading.Lock()
 
     def _create(self, **kwargs):
-        self.last_kwargs = kwargs
-        self.call_count += 1
+        with self._lock:
+            self.last_kwargs = kwargs
+            self.call_count += 1
         tool_call = SimpleNamespace(
             function=SimpleNamespace(name=self._tool_name, arguments=json.dumps(self._arguments))
         )
