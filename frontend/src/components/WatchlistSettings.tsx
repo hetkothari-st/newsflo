@@ -142,7 +142,9 @@ export default function WatchlistSettings({ onSaved }: { onSaved?: () => void })
               <label
                 key={company.id}
                 className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 motion-safe:transition-colors ${
-                  selected ? 'border-accent bg-accent/10' : 'border-hairline bg-page hover:border-muted theme-light:shadow-neu-sm'
+                  selected
+                    ? 'border-accent bg-hairline/40 theme-light:bg-accent/10'
+                    : 'border-hairline bg-page hover:border-muted theme-light:shadow-neu-sm'
                 }`}
               >
                 <span className="flex items-center gap-2">

@@ -74,6 +74,18 @@ describe('WatchlistSettings', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/saved/i);
   });
 
+  it('keeps the selected company row\'s dark-mode background unchanged, tinting only in light mode', async () => {
+    setToken();
+    mockApis({ categories: [], companies: [{ company_id: 1, ticker: 'AAPL', name: 'Apple' }] });
+    render(
+      <AuthProvider>
+        <WatchlistSettings />
+      </AuthProvider>,
+    );
+    const row = (await screen.findByLabelText(/Apple/)).closest('label');
+    expect(row).toHaveClass('bg-hairline/40', 'theme-light:bg-accent/10');
+  });
+
   it('filters the company list by the text input', async () => {
     setToken();
     mockApis({ categories: [], companies: [] });
