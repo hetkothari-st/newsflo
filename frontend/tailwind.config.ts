@@ -2,11 +2,6 @@ import type { Config } from 'tailwindcss';
 
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
-  safelist: [
-    'theme-light:shadow-neu',
-    'theme-light:shadow-neu-inset',
-    'theme-light:shadow-neu-sm',
-  ],
   theme: {
     extend: {
       colors: {
