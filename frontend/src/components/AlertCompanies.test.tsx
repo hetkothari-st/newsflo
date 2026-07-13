@@ -60,4 +60,18 @@ describe('AlertCompanies', () => {
     const headings = screen.getAllByText(/^(Nifty 50|Nifty 100|Nifty 500|Other)$/);
     expect(headings.map((el) => el.textContent)).toEqual(['Nifty 50', 'Nifty 100', 'Nifty 500', 'Other']);
   });
+
+  it('opens the visualize modal when the Visualize button is clicked', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    await userEvent.click(screen.getByRole('button', { name: /visualize/i }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('closes the visualize modal on Close without affecting the company list', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    await userEvent.click(screen.getByRole('button', { name: /visualize/i }));
+    await userEvent.click(screen.getByLabelText('Close'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
+  });
 });

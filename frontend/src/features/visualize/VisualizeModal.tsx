@@ -9,7 +9,7 @@ export default function VisualizeModal({ alert, onClose }: { alert: Alert; onClo
   const build = view === 'impact' ? buildImpactTree : buildSectorTree;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-page/95 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-page/95 backdrop-blur-sm" role="dialog" aria-modal="true">
       <div className="flex items-center justify-between border-b border-hairline px-6 py-4">
         <h2 className="truncate font-display text-lg font-bold text-ink">{alert.article.title}</h2>
         <div className="flex items-center gap-4">
