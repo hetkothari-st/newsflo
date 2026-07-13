@@ -57,12 +57,21 @@ export default function AlertCoverCard({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [expanded, onClose]);
 
+  const cardRef = useRef<HTMLDivElement>(null);
   const companiesRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // Open straight to the companies section instead of the top of the
-    // news block -- otherwise it's below the fold and the user has to
-    // scroll down just to see what they tapped the card to see.
-    if (expanded) companiesRef.current?.scrollIntoView({ block: 'start' });
+    // Open straight to the companies section instead of the top of the news
+    // block -- otherwise it's below the fold and the user has to scroll
+    // down just to see what they tapped the card to see. Setting this
+    // card's own scrollTop directly (not scrollIntoView) matters: the card
+    // sits inside the outer vertical snap-carousel, and scrollIntoView
+    // walks up and scrolls EVERY scrollable ancestor needed to bring the
+    // target into the viewport -- including that outer carousel -- which
+    // was hijacking its snap position and looked like the tap had swiped to
+    // a different news card instead of opening this one.
+    if (expanded && cardRef.current && companiesRef.current) {
+      cardRef.current.scrollTop = companiesRef.current.offsetTop;
+    }
   }, [expanded]);
 
   if (expanded) {
@@ -75,7 +84,7 @@ export default function AlertCoverCard({
     // column even when the company list is short, so it never trails off
     // into dead blank space.
     return (
-      <div className="relative flex h-full w-full shrink-0 snap-start flex-col overflow-y-auto">
+      <div ref={cardRef} className="relative flex h-full w-full shrink-0 snap-start flex-col overflow-y-auto">
         <div className="relative shrink-0">
           <div className="relative h-56 w-full shrink-0 overflow-hidden">
             <AlertCover imageUrl={alert.article.image_url} category={alert.category} />

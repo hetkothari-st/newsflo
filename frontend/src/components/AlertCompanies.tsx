@@ -64,8 +64,8 @@ export default function AlertCompanies({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex gap-4">
+      <div className="no-scrollbar flex flex-nowrap items-center justify-between gap-x-4 overflow-x-auto">
+        <div className="flex shrink-0 gap-4">
           <button type="button" onClick={() => setTab('predicted')} className={tabClass(tab === 'predicted')}>
             Predicted
           </button>
