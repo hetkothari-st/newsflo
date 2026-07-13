@@ -26,7 +26,7 @@ export default function CategoryTabs({
   onOpenCustomSettings: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border-b border-hairline p-2 theme-light:border-none theme-light:shadow-neu-sm">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline theme-light:rounded-lg theme-light:border-none theme-light:p-2 theme-light:shadow-neu-sm">
       <div className="flex gap-6" role="tablist" aria-label="Feed markets">
         {TABS.map((t) => {
           const isActive = t.key === active;
