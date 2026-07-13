@@ -105,22 +105,24 @@ export default function AlertCoverCard({
         </div>
         <div
           ref={companiesRef}
-          className="flex-1 border-t border-hairline bg-surface p-4 theme-light:border-transparent theme-light:shadow-neu-inset"
+          className="relative flex-1 border-t border-hairline bg-surface theme-light:border-transparent theme-light:shadow-neu-inset"
         >
-          <AlertCompanies
-            alert={alert}
-            isAuthenticated={isAuthenticated}
-            headerRight={
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close"
-                className="flex h-6 w-6 items-center justify-center text-muted hover:text-ink"
-              >
-                ✕
-              </button>
-            }
-          />
+          {/* Positioned against this wrapper's own edge, not inside the
+              padded/scrollable tabs row below -- putting it there let a
+              horizontally-scrolling row clip it at the row's own boundary
+              instead of the screen edge, cutting it in half. pr-12 below
+              keeps the Group dropdown from running underneath it. */}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-surface text-muted hover:text-ink theme-light:shadow-neu-sm"
+          >
+            ✕
+          </button>
+          <div className="p-4 pr-12">
+            <AlertCompanies alert={alert} isAuthenticated={isAuthenticated} />
+          </div>
         </div>
       </div>
     );
