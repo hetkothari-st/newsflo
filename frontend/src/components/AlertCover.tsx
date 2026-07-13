@@ -38,13 +38,30 @@ export default function AlertCover({ imageUrl, category }: { imageUrl: string | 
     return <CategoryCover category={category} />;
   }
 
-  // Every place this renders now sizes its own box to a fixed, modest
-  // height (AlertCoverCard's banner) instead of letting it stretch across
-  // an entire viewport-height card -- so object-cover fills that box exactly
-  // from a typical og:image thumbnail's real resolution, with no upscale,
-  // no blur, no tinted backdrop standing in for missing pixels, and nothing
-  // layered on top of it.
+  // The banner box (AlertCoverCard) is now tall/portrait-ish, while most
+  // og:image thumbnails are landscape (~1.9:1) -- object-cover forced those
+  // to fill the box's height, cropping out most of the width and showing
+  // only a thin vertical sliver of the real photo. object-contain shows the
+  // whole photo, uncropped, at full quality; a blurred copy of the same
+  // photo fills the letterbox margins so the box still reads as filled
+  // rather than leaving flat empty bars.
   return (
-    <img src={imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+    <div className="relative h-full w-full overflow-hidden">
+      <img
+        src={imageUrl}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl motion-reduce:blur-md"
+      />
+      <img
+        src={imageUrl}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="relative h-full w-full object-contain"
+      />
+    </div>
   );
 }

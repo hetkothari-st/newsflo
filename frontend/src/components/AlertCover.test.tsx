@@ -22,13 +22,12 @@ describe('AlertCover', () => {
     expect(container.querySelector('img')).not.toBeInTheDocument();
   });
 
-  it('renders a single photo that fills its box with no letterboxing or blur', () => {
+  it('renders the full uncropped photo (object-contain) over a blurred fill', () => {
     const { container } = render(<AlertCover imageUrl="https://example.com/pic.jpg" category="oil_energy" />);
     const imgs = container.querySelectorAll('img');
-    expect(imgs).toHaveLength(1);
-    expect(imgs[0]).toHaveClass('h-full');
-    expect(imgs[0]).toHaveClass('w-full');
-    expect(imgs[0]).toHaveClass('object-cover');
-    expect(container.querySelector('.blur-2xl')).not.toBeInTheDocument();
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0]).toHaveClass('blur-2xl');
+    expect(imgs[1]).toHaveClass('object-contain');
+    expect(imgs[1]).not.toHaveClass('object-cover');
   });
 });
