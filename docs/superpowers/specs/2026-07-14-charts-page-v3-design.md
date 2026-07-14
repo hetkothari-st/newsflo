@@ -106,12 +106,21 @@ Layout, top to bottom:
   before shipping; fix any FAIL before merge.
 - No magnitude percentages are ever printed as raw numbers anywhere on the
   charts page — this already matches `ReasoningPanel`'s existing rule
-  ("frequently inaccurate and would overstate precision"). Where a chart
-  needs relative sizing (the Impact bar), bucket
-  `(magnitude_low + magnitude_high) / 2` into 5 discrete strength steps
-  (a new pure function in `transforms.ts`, e.g. `magnitudeBucket
-  (company): 1 | 2 | 3 | 4 | 5`) and size the mark from the bucket, never
-  from the raw float.
+  ("frequently inaccurate and would overstate precision"). Observed
+  `magnitude_low`/`magnitude_high` values span roughly 0-100 with no fixed
+  scale (the model self-estimates per-alert, not against a calibrated
+  global range), so a fixed global threshold bucket would produce
+  degenerate results within one 5-company chart (e.g. every company
+  landing in the same bucket, or one outlier swallowing the whole scale).
+  Instead, size bars **by relative rank within the alert's own company
+  list**: sort by `(magnitude_low + magnitude_high) / 2` descending and map
+  rank position to bar length (a new pure function in `transforms.ts`,
+  `rankByMagnitude(companies: AlertCompany[]): AlertCompany[]`, sorted
+  descending by that midpoint — bar length is then derived purely from
+  each company's index in the returned array, e.g. longest for index 0,
+  shortest for the last index). This is explicitly an ordinal encoding
+  ("stronger than the others in this story"), never a claim about an
+  absolute percentage scale.
 
 ### 1. Sector — treemap
 
@@ -137,13 +146,14 @@ max-per-tier), a net-sentiment arrow (▲ if bullish > bearish in that tier,
 ### 3. Impact — diverging bar (winners/losers)
 
 Data: all of the alert's companies, unGrouped, split at a center axis —
-bearish extends left, bullish extends right — sorted by `magnitudeBucket`
-descending on each side.
+bearish extends left, bullish extends right — each side independently
+ranked via `rankByMagnitude` (strongest nearest the center axis, weakest
+at the outer edge — reads as "how far this story's conviction reaches").
 
-Layout: horizontal bars, bar length quantized to the 5-step
-`magnitudeBucket` (not the raw float), 2px rounded bar ends, every bar
-direct-labeled with its ticker (≤5 total companies always fits without a
-legend). Tapping a bar expands that company's `ReasoningPanel` beneath it.
+Layout: horizontal bars, bar length derived from rank position (not the
+raw float), 2px rounded bar ends, every bar direct-labeled with its ticker
+(≤5 total companies always fits without a legend). Tapping a bar expands
+that company's `ReasoningPanel` beneath it.
 
 ### 4. Split — donut + ranked list
 
@@ -151,11 +161,12 @@ Data: same as Impact, but the story here is composition, not per-company
 magnitude: a 2-slice donut (bullish % vs. bearish % **by count**, matching
 how the existing `SentimentBar`/`SentimentPill` already compute
 proportions — no new counting logic), plus the full company list below the
-donut ranked by `magnitudeBucket` descending, bullish first.
+donut ordered by `rankByMagnitude`, bullish first then bearish.
 
 ## Testing
 
-- `magnitudeBucket()` unit tests (boundary values, both directions).
+- `rankByMagnitude()` unit tests (descending order, stable tie-break on
+  equal midpoints, empty/single-company input).
 - Fixed sector-palette assignment unit test (stable id → color, unknown
   sector fallback).
 - `useHorizontalSwipe` hook: simulated touch sequences (horizontal past
