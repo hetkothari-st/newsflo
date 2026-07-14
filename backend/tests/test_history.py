@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from app.companies.history import get_past_mentions
+from app.companies.history import get_company_history_page, get_past_mentions
 from app.models import Alert, AlertCompany, Article, Company, utcnow
 
 
@@ -72,3 +72,60 @@ def test_get_past_mentions_respects_limit(db_session):
     mentions = get_past_mentions(db_session, company.id, before=current.created_at, limit=3)
 
     assert len(mentions) == 3
+
+
+def test_get_company_history_page_returns_newest_first_not_anchored_to_any_alert(db_session):
+    company = _make_company(db_session)
+    now = utcnow()
+    _make_alert(db_session, company, now - timedelta(days=2), title="oldest")
+    _make_alert(db_session, company, now - timedelta(days=1), title="middle")
+    _make_alert(db_session, company, now, title="newest")
+
+    page = get_company_history_page(db_session, company.id, before=None, limit=20)
+
+    assert [m["article_title"] for m in page["items"]] == ["newest", "middle", "oldest"]
+    assert page["has_more"] is False
+
+
+def test_get_company_history_page_has_more_true_when_extra_rows_exist(db_session):
+    company = _make_company(db_session)
+    now = utcnow()
+    for i in range(3):
+        _make_alert(db_session, company, now - timedelta(days=i), title=f"story {i}")
+
+    page = get_company_history_page(db_session, company.id, before=None, limit=2)
+
+    assert len(page["items"]) == 2
+    assert page["has_more"] is True
+
+
+def test_get_company_history_page_second_page_via_cursor_excludes_first_page_items(db_session):
+    company = _make_company(db_session)
+    now = utcnow()
+    for i in range(3):
+        _make_alert(db_session, company, now - timedelta(days=i), title=f"story {i}")
+
+    first = get_company_history_page(db_session, company.id, before=None, limit=2)
+    last_item = first["items"][-1]
+    second = get_company_history_page(
+        db_session, company.id, before=last_item["created_at"], limit=2,
+    )
+
+    assert [m["article_title"] for m in second["items"]] == ["story 2"]
+    assert second["has_more"] is False
+    # no overlap between pages
+    first_titles = {m["article_title"] for m in first["items"]}
+    second_titles = {m["article_title"] for m in second["items"]}
+    assert first_titles.isdisjoint(second_titles)
+
+
+def test_get_company_history_page_excludes_other_companies(db_session):
+    company_a = _make_company(db_session, ticker="RELIANCE.NS", name="Reliance")
+    company_b = _make_company(db_session, ticker="ONGC.NS", name="ONGC")
+    now = utcnow()
+    _make_alert(db_session, company_b, now - timedelta(minutes=1), title="ONGC news")
+    _make_alert(db_session, company_a, now, title="Reliance news")
+
+    page = get_company_history_page(db_session, company_a.id, before=None, limit=20)
+
+    assert [m["article_title"] for m in page["items"]] == ["Reliance news"]

@@ -117,6 +117,50 @@ export interface Profile {
   email_alerts_enabled: boolean;
 }
 
+export interface LatestAlertSignal {
+  alert_id: number;
+  created_at: string;
+  direction: string; // bullish | bearish
+  rationale: string;
+  key_points: string[];
+  confidence: string; // llm_estimate | calibrated
+  category: string;
+  category_label: string;
+  article: AlertArticle;
+}
+
+export interface HorizonStats {
+  win_rate: number;
+  sample_size: number;
+}
+
+// Keyed by horizon_days as a string ("1" | "3" | "7"); a horizon is present
+// only once it has enough calibration samples (see backend WIN_RATE_SAMPLE_THRESHOLD).
+export type TrackRecord = Record<string, HorizonStats>;
+
+export interface CompanyProfile extends Company {
+  latest_alert: LatestAlertSignal | null;
+  track_record: TrackRecord | null;
+}
+
+export interface CompanyHistoryPage {
+  mentions: PastMention[];
+  has_more: boolean;
+}
+
+export interface PricePoint {
+  date: string;
+  close: number;
+}
+
+export type PricePeriod = '1mo' | '3mo' | '6mo' | '1y';
+
+export interface PriceSeries {
+  period: string;
+  points: PricePoint[];
+  available: boolean;
+}
+
 interface ApiError {
   detail: string;
 }
@@ -145,6 +189,29 @@ export async function getArticles(lang: Language = 'en'): Promise<Article[]> {
   const res = await fetch(`/api/articles?lang=${lang}`);
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as Article[];
+}
+
+export async function getCompanyProfile(id: number, lang: Language = 'en'): Promise<CompanyProfile | null> {
+  const res = await fetch(`/api/companies/${id}/profile?lang=${lang}`);
+  // 404 (unknown id, or a non-Indian company this page doesn't support yet)
+  // is an expected "not found" UI state here, not a thrown error.
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as CompanyProfile;
+}
+
+export async function getCompanyHistory(id: number, before?: string, limit = 20): Promise<CompanyHistoryPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set('before', before);
+  const res = await fetch(`/api/companies/${id}/history?${params}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as CompanyHistoryPage;
+}
+
+export async function getCompanyPrices(id: number, period: PricePeriod = '6mo'): Promise<PriceSeries> {
+  const res = await fetch(`/api/companies/${id}/prices?period=${period}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as PriceSeries;
 }
 
 export async function register(email: string, password: string): Promise<TokenResponse> {

@@ -1,7 +1,9 @@
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Company
+from app.models import Alert, AlertCompany, Article, ArticleTranslation, CalibrationSample, Company, utcnow
 from app.routers.articles import get_db
 
 
@@ -104,4 +106,216 @@ def test_list_companies_logo_url_uses_isin_when_client_id_set(db_session, monkey
 
     app.dependency_overrides.clear()
 
+    app.dependency_overrides.clear()
+
+
+def _make_alert_company(db_session, company, direction="bullish", url_suffix="a", created_at=None):
+    article = Article(source="test", url=f"https://example.com/{url_suffix}", title=f"headline {url_suffix}", status="ANALYZED")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy", created_at=created_at or utcnow())
+    db_session.add(alert)
+    db_session.commit()
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction=direction,
+        magnitude_low=1.0, magnitude_high=2.0, rationale="why it matters", basis="direct_mention",
+    )
+    db_session.add(ac)
+    db_session.commit()
+    return ac
+
+
+def test_get_company_profile_404_for_unknown_id(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    resp = client.get("/api/companies/999/profile")
+
+    assert resp.status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_get_company_profile_404_for_global_company(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market_cap=None)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/profile")
+
+    assert resp.status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_get_company_profile_includes_latest_alert(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    now = utcnow()
+    _make_alert_company(db_session, company, direction="bearish", url_suffix="old", created_at=now - timedelta(days=1))
+    _make_alert_company(db_session, company, direction="bullish", url_suffix="new", created_at=now)
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/profile").json()
+
+    assert body["ticker"] == "RELIANCE.NS"
+    assert body["latest_alert"]["direction"] == "bullish"
+    assert body["latest_alert"]["article"]["title"] == "headline new"
+    app.dependency_overrides.clear()
+
+
+def test_get_company_profile_translates_article_title(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    ac = _make_alert_company(db_session, company, url_suffix="translated")
+    db_session.add(ArticleTranslation(article_id=ac.alert.article_id, lang="hi", title="अनुवादित शीर्षक"))
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/profile?lang=hi").json()
+
+    assert body["latest_alert"]["article"]["title"] == "अनुवादित शीर्षक"
+    app.dependency_overrides.clear()
+
+
+def test_get_company_profile_latest_alert_null_when_never_mentioned(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/profile").json()
+
+    assert body["latest_alert"] is None
+    app.dependency_overrides.clear()
+
+
+def test_get_company_profile_track_record_null_below_threshold(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/profile").json()
+
+    assert body["track_record"] is None
+    app.dependency_overrides.clear()
+
+
+def test_get_company_profile_track_record_present_at_threshold(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    for i in range(5):
+        ac = _make_alert_company(db_session, company, direction="bullish", url_suffix=f"s{i}")
+        db_session.add(CalibrationSample(
+            alert_company_id=ac.id, category="oil_energy", company_id=company.id,
+            direction="bullish", magnitude_actual=2.0, horizon_days=1,
+        ))
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/profile").json()
+
+    assert body["track_record"]["1"]["sample_size"] == 5
+    assert body["track_record"]["1"]["win_rate"] == 1.0
+    app.dependency_overrides.clear()
+
+
+def test_get_company_history_404_for_global_company(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market_cap=None)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/history")
+
+    assert resp.status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_get_company_history_paginates(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    now = utcnow()
+    for i in range(3):
+        _make_alert_company(db_session, company, url_suffix=f"h{i}", created_at=now - timedelta(days=i))
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/history?limit=2").json()
+
+    assert len(body["mentions"]) == 2
+    assert body["has_more"] is True
+    app.dependency_overrides.clear()
+
+
+def test_get_company_history_invalid_before_returns_400(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/history?before=not-a-date")
+
+    assert resp.status_code == 400
+    app.dependency_overrides.clear()
+
+
+def test_get_company_prices_returns_points(db_session, monkeypatch):
+    from app.routers import companies as companies_router
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    monkeypatch.setattr(
+        companies_router, "fetch_price_series",
+        lambda ticker, period: [{"date": "2026-01-01", "close": 100.0}],
+    )
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/prices?period=1mo").json()
+
+    assert body == {"period": "1mo", "points": [{"date": "2026-01-01", "close": 100.0}], "available": True}
+    app.dependency_overrides.clear()
+
+
+def test_get_company_prices_degrades_to_empty_on_fetch_failure(db_session, monkeypatch):
+    from app.routers import companies as companies_router
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    monkeypatch.setattr(companies_router, "fetch_price_series", lambda ticker, period: None)
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/prices?period=1mo")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"period": "1mo", "points": [], "available": False}
+    app.dependency_overrides.clear()
+
+
+def test_get_company_prices_invalid_period_returns_400(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/prices?period=5y")
+
+    assert resp.status_code == 400
     app.dependency_overrides.clear()

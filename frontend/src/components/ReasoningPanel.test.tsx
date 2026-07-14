@@ -1,12 +1,17 @@
 import { render as rtlRender, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import ReasoningPanel, { precedentLine, splitRationaleIntoPoints } from './ReasoningPanel';
 import type { AlertCompany } from '../lib/api';
 import { LanguageProvider } from '../lib/language';
 
 function render(ui: ReactElement) {
-  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+  return rtlRender(
+    <MemoryRouter>
+      <LanguageProvider>{ui}</LanguageProvider>
+    </MemoryRouter>,
+  );
 }
 
 const base: AlertCompany = {
@@ -114,5 +119,16 @@ describe('ReasoningPanel', () => {
   it('omits the Previously section when there is no history', () => {
     render(<ReasoningPanel company={base} />);
     expect(screen.queryByText('Previously')).not.toBeInTheDocument();
+  });
+
+  it('links to the company detail page for an Indian company', () => {
+    render(<ReasoningPanel company={base} />);
+    const link = screen.getByRole('link', { name: /view full details/i });
+    expect(link).toHaveAttribute('href', '/company/1');
+  });
+
+  it('omits the detail-page link for a global company', () => {
+    render(<ReasoningPanel company={{ ...base, market: 'GLOBAL' }} />);
+    expect(screen.queryByRole('link', { name: /view full details/i })).not.toBeInTheDocument();
   });
 });

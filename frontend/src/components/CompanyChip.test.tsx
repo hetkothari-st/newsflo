@@ -2,12 +2,17 @@ import { render as rtlRender, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import CompanyChip from './CompanyChip';
 import type { AlertCompany } from '../lib/api';
 import { LanguageProvider } from '../lib/language';
 
 function render(ui: ReactElement) {
-  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+  return rtlRender(
+    <MemoryRouter>
+      <LanguageProvider>{ui}</LanguageProvider>
+    </MemoryRouter>,
+  );
 }
 
 const company: AlertCompany = {

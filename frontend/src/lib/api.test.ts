@@ -4,6 +4,9 @@ import {
   getAlerts,
   getCategories,
   getCompanies,
+  getCompanyHistory,
+  getCompanyPrices,
+  getCompanyProfile,
   getWatchlist,
   login,
   putWatchlist,
@@ -104,5 +107,41 @@ describe('api client', () => {
     expect(opts.method).toBe('PUT');
     expect((opts.headers as Record<string, string>).Authorization).toBe('Bearer tok');
     expect(JSON.parse(opts.body as string)).toEqual({ categories: ['oil_energy'], company_ids: [7] });
+  });
+
+  it('getCompanyProfile fetches the profile endpoint with lang', async () => {
+    const body = { id: 1, ticker: 'RELIANCE.NS', latest_alert: null, track_record: null };
+    const fetchMock = mockFetchOnce(body);
+    const result = await getCompanyProfile(1);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies/1/profile?lang=en');
+    expect(result).toEqual(body);
+  });
+
+  it('getCompanyProfile resolves null on a 404 instead of throwing', async () => {
+    mockFetchOnce({ detail: 'Company not found' }, false, 404);
+    const result = await getCompanyProfile(999);
+    expect(result).toBeNull();
+  });
+
+  it('getCompanyHistory fetches with default limit and no cursor', async () => {
+    const fetchMock = mockFetchOnce({ mentions: [], has_more: false });
+    await getCompanyHistory(1);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies/1/history?limit=20');
+  });
+
+  it('getCompanyHistory includes the before cursor when given', async () => {
+    const fetchMock = mockFetchOnce({ mentions: [], has_more: false });
+    await getCompanyHistory(1, '2026-01-01T00:00:00+00:00', 5);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies/1/history?limit=5&before=2026-01-01T00%3A00%3A00%2B00%3A00');
+  });
+
+  it('getCompanyPrices fetches with the given period', async () => {
+    const fetchMock = mockFetchOnce({ period: '1mo', points: [], available: true });
+    await getCompanyPrices(1, '1mo');
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies/1/prices?period=1mo');
   });
 });

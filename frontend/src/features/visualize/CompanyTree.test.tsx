@@ -1,13 +1,18 @@
 import { render as rtlRender, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import CompanyTree from './CompanyTree';
 import type { AlertCompany } from '../../lib/api';
 import { LanguageProvider } from '../../lib/language';
 import { groupByImpact, groupByTier, type CompanyGroup } from './transforms';
 
 function render(ui: ReactElement) {
-  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+  return rtlRender(
+    <MemoryRouter>
+      <LanguageProvider>{ui}</LanguageProvider>
+    </MemoryRouter>,
+  );
 }
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {

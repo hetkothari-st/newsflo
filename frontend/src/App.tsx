@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import BottomNav from './components/BottomNav';
 import NavBar from './components/NavBar';
 import AccountPage from './pages/AccountPage';
+import CompanyPage from './pages/CompanyPage';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
@@ -21,6 +22,7 @@ export default function App() {
       <NavBar />
       <Routes>
         <Route path="/" element={<FeedPage />} />
+        <Route path="/company/:id" element={<CompanyPage />} />
         <Route
           path="/holdings"
           element={
