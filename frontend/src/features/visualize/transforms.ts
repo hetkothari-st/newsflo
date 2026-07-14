@@ -27,6 +27,23 @@ const TIER_LABEL: Record<string, string> = {
   OTHER: 'Other',
 };
 
+const SECTOR_LABEL: Record<string, string> = {
+  oil_gas: 'Oil & Gas',
+  banking: 'Banking',
+  auto: 'Auto',
+  it: 'IT',
+  pharma: 'Pharma',
+  fmcg: 'FMCG',
+  metals: 'Metals',
+  telecom: 'Telecom',
+  infra: 'Infrastructure',
+  other: 'Other',
+};
+
+export function sectorLabel(sector: string): string {
+  return SECTOR_LABEL[sector] ?? sector;
+}
+
 function tierKey(company: AlertCompany): string {
   return TIER_LABEL[company.index_tier] ? company.index_tier : 'OTHER';
 }
@@ -60,5 +77,10 @@ export function groupBySector(companies: AlertCompany[]): CompanyGroup[] {
 
   return [...bySector.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([sector, group]) => ({ key: sector, label: sector, color: sectorColor(sector), companies: group }));
+    .map(([sector, group]) => ({
+      key: sector,
+      label: sectorLabel(sector),
+      color: sectorColor(sector),
+      companies: group,
+    }));
 }

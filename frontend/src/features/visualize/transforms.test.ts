@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByTier, groupByImpact, groupBySector } from './transforms';
+import { groupByTier, groupByImpact, groupBySector, sectorLabel } from './transforms';
 import type { AlertCompany } from '../../lib/api';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
@@ -101,5 +101,16 @@ describe('groupBySector', () => {
   it('assigns each sector group a deterministic color', () => {
     const groups = groupBySector([company({ sector: 'Energy' })]);
     expect(groups[0].color).toMatch(/^#[0-9A-Fa-f]{6}$/);
+  });
+});
+
+describe('sectorLabel', () => {
+  it('maps known sector slugs to a human-readable label', () => {
+    expect(sectorLabel('oil_gas')).toBe('Oil & Gas');
+    expect(sectorLabel('it')).toBe('IT');
+  });
+
+  it('falls back to the raw string for an unrecognized sector', () => {
+    expect(sectorLabel('some_future_sector')).toBe('some_future_sector');
   });
 });
