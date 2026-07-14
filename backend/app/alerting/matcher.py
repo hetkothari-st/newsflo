@@ -20,7 +20,7 @@ def match_alert_to_holdings(session: Session, alert: Alert) -> list[EmailNotific
             session.query(Holding)
             .join(User, Holding.user_id == User.id)
             .filter(Holding.company_id == alert_company.company_id)
-            .filter(User.email_alerts_enabled.is_(True))
+            .filter(User.email_alerts_enabled == 1)
             .all()
         )
         for holding in holdings:

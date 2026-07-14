@@ -5,7 +5,7 @@ import LanguagePicker from './LanguagePicker';
 import ThemeToggle from './ThemeToggle';
 
 export default function NavBar() {
-  const { token, email, logout } = useAuth();
+  const { token } = useAuth();
   const { t } = useLanguage();
   return (
     <nav className="border-b border-hairline bg-page">
@@ -26,12 +26,9 @@ export default function NavBar() {
           <ThemeToggle />
           <div className="hidden items-center gap-4 md:flex">
             {token ? (
-              <>
-                <span className="text-muted">{email}</span>
-                <button type="button" onClick={logout} className="text-ink hover:text-muted">
-                  {t('nav.logout')}
-                </button>
-              </>
+              <Link to="/account" className="text-ink hover:text-muted">
+                {t('nav.account')}
+              </Link>
             ) : (
               <>
                 <Link to="/login" className="text-ink hover:text-muted">

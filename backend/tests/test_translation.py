@@ -2,6 +2,8 @@ import json
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from app.models import (
     Alert,
     AlertCompany,
@@ -11,6 +13,7 @@ from app.models import (
     CategoryTranslation,
     TranslationFailure,
 )
+from app.translation import groq_translator, nllb_translator
 from app.translation.groq_translator import translate_alert, translate_categories
 from app.translation.job import (
     MAX_TRANSLATION_ATTEMPTS,
@@ -23,6 +26,16 @@ from app.translation.lookup import (
     bulk_article_titles,
     bulk_category_labels,
 )
+
+
+@pytest.fixture(autouse=True)
+def _force_groq_provider(monkeypatch):
+    """Every test in this file below exercises the Groq/Anthropic
+    tool-calling mechanics via a fake client -- force TRANSLATION_PROVIDER
+    back to "groq" for the duration of each test regardless of the
+    production default (see nllb dispatch tests further down, which
+    explicitly set it to "nllb" themselves)."""
+    monkeypatch.setattr(groq_translator, "TRANSLATION_PROVIDER", "groq")
 
 # One sample character from every target language's native script, so a
 # single canned fake-client payload passes job.py's has_expected_script
@@ -432,3 +445,100 @@ def test_translate_pending_categories_can_restrict_to_one_language(db_session):
     assert count == 1
     rows = db_session.query(CategoryTranslation).filter_by(category="oil_energy").all()
     assert [r.lang for r in rows] == ["mr"]
+
+
+# --- nllb provider dispatch (groq_translator.py) -----------------------------
+
+def test_translate_alert_dispatches_to_nllb_when_provider_is_nllb(monkeypatch):
+    monkeypatch.setattr(groq_translator, "TRANSLATION_PROVIDER", "nllb")
+    captured = {}
+
+    def fake_translate_alert(*, lang, title, content, companies):
+        captured["kwargs"] = dict(lang=lang, title=title, content=content, companies=companies)
+        return {"title": "translated", "content": "translated", "companies": []}
+
+    monkeypatch.setattr(nllb_translator, "translate_alert", fake_translate_alert)
+
+    result = translate_alert(
+        None, lang="hi", title="T", content="C", companies=[{"rationale": "r", "key_points": ["k"]}]
+    )
+
+    assert result == {"title": "translated", "content": "translated", "companies": []}
+    assert captured["kwargs"] == {
+        "lang": "hi", "title": "T", "content": "C",
+        "companies": [{"rationale": "r", "key_points": ["k"]}],
+    }
+
+
+def test_translate_categories_dispatches_to_nllb_and_expands_underscores(monkeypatch):
+    monkeypatch.setattr(groq_translator, "TRANSLATION_PROVIDER", "nllb")
+    captured = {}
+
+    def fake_translate_categories(phrases, lang):
+        captured["phrases"] = phrases
+        captured["lang"] = lang
+        return ["translated-a", "translated-b"]
+
+    monkeypatch.setattr(nllb_translator, "translate_categories", fake_translate_categories)
+
+    result = translate_categories(None, "hi", ["oil_energy", "banking"])
+
+    assert result == ["translated-a", "translated-b"]
+    assert captured["phrases"] == ["Oil Energy", "Banking"]
+    assert captured["lang"] == "hi"
+
+
+# --- nllb_translator.py -------------------------------------------------------
+
+def test_nllb_split_sentences_splits_on_boundary_before_capital():
+    text = "HDFC Bank posted 18% growth. Kotak Mahindra Bank also gained 3.5%."
+    assert nllb_translator._split_sentences(text) == [
+        "HDFC Bank posted 18% growth.", "Kotak Mahindra Bank also gained 3.5%.",
+    ]
+
+
+def test_nllb_split_sentences_returns_empty_for_blank_text():
+    assert nllb_translator._split_sentences("") == []
+    assert nllb_translator._split_sentences("   ") == []
+
+
+def test_nllb_translate_alert_reassembles_fields_in_flattened_order(monkeypatch):
+    # Stub out the actual model call and just echo back a marker for every
+    # input sentence, in order -- this test is about translate_alert's
+    # flatten/take bookkeeping (title, content, each company's rationale
+    # sentences, each company's key_points) being sliced back onto the
+    # right field in the right order, not about real translation quality.
+    def fake_translate_sentences(sentences, lang_code):
+        assert lang_code == "hin_Deva"
+        return [f"[{s}]" for s in sentences]
+
+    monkeypatch.setattr(nllb_translator, "_translate_sentences", fake_translate_sentences)
+
+    result = nllb_translator.translate_alert(
+        lang="hi",
+        title="Title sentence.",
+        content="First content sentence. Second content sentence.",
+        companies=[
+            {"rationale": "Rationale one. Rationale two.", "key_points": ["kp1", "kp2"]},
+            {"rationale": "Only rationale.", "key_points": ["kp3"]},
+        ],
+    )
+
+    assert result["title"] == "[Title sentence.]"
+    assert result["content"] == "[First content sentence.] [Second content sentence.]"
+    assert result["companies"][0]["rationale"] == "[Rationale one.] [Rationale two.]"
+    assert result["companies"][0]["key_points"] == ["[kp1]", "[kp2]"]
+    assert result["companies"][1]["rationale"] == "[Only rationale.]"
+    assert result["companies"][1]["key_points"] == ["[kp3]"]
+
+
+def test_nllb_translate_categories_translates_batch_without_splitting(monkeypatch):
+    def fake_translate_sentences(sentences, lang_code):
+        assert lang_code == "mar_Deva"
+        return [f"[{s}]" for s in sentences]
+
+    monkeypatch.setattr(nllb_translator, "_translate_sentences", fake_translate_sentences)
+
+    result = nllb_translator.translate_categories(["Oil Energy", "Banking"], "mr")
+
+    assert result == ["[Oil Energy]", "[Banking]"]

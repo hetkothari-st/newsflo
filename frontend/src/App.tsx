@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import BottomNav from './components/BottomNav';
 import NavBar from './components/NavBar';
 import TranslationProgressBanner from './components/TranslationProgressBanner';
+import AccountPage from './pages/AccountPage';
 import AlertChartsPage from './pages/AlertChartsPage';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
@@ -29,6 +30,14 @@ export default function App() {
           element={
             <RequireAuth>
               <HoldingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/account"
+          element={
+            <RequireAuth>
+              <AccountPage />
             </RequireAuth>
           }
         />

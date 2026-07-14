@@ -52,3 +52,13 @@ def test_article_url_is_unique(db_session):
     db_session.add(Article(source="moneycontrol", url="https://example.com/a", title="Duplicate"))
     with pytest.raises(Exception):
         db_session.commit()
+
+
+def test_user_email_alerts_enabled_defaults_true(db_session):
+    from app.models import User
+    user = User(email="prefs@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    # Integer column (1/0), not Boolean -- see models.py's comment on why.
+    assert user.email_alerts_enabled == 1

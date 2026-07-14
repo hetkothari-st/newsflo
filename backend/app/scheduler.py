@@ -11,10 +11,17 @@ from app.outcomes.tracker import check_pending_outcomes
 from app.pipeline import process_new_articles
 from app.translation.groq_translator import (
     RECOMMENDED_THROTTLE_SECONDS,
+    TRANSLATION_PROVIDER,
     build_translation_client,
     build_translation_clients,
 )
 from app.translation.job import translate_pending_alerts, translate_pending_categories
+
+# NLLB has no per-minute token cap to respect (local model, no API cost), so
+# each scheduler cycle can push through a much bigger batch than the
+# throttled Groq/Anthropic path could -- the whole point of self-hosting is
+# no longer having to trickle the historical backlog through slowly.
+_TRANSLATION_BATCH_LIMIT = 200 if TRANSLATION_PROVIDER == "nllb" else 15
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +77,7 @@ def _run_translation() -> None:
             settings.translation_groq_api_keys, settings.anthropic_api_key or None
         )
         translated_alerts = translate_pending_alerts(
-            session, clients, limit=15, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS
+            session, clients, limit=_TRANSLATION_BATCH_LIMIT, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS
         )
         logger.info(
             "Translation cycle: %s categories, %s alerts translated",
