@@ -84,3 +84,15 @@ export function groupBySector(companies: AlertCompany[]): CompanyGroup[] {
       companies: group,
     }));
 }
+
+function magnitudeMidpoint(company: AlertCompany): number {
+  return (company.magnitude_low + company.magnitude_high) / 2;
+}
+
+// Ordinal ranking, not a claim about absolute scale -- magnitude_low/high
+// values span roughly 0-100 with no fixed calibration, so this only ever
+// answers "stronger than the others in THIS alert's company list," never
+// "this company moved N%." See docs/superpowers/specs/2026-07-14-charts-page-v3-design.md.
+export function rankByMagnitude(companies: AlertCompany[]): AlertCompany[] {
+  return [...companies].sort((a, b) => magnitudeMidpoint(b) - magnitudeMidpoint(a));
+}

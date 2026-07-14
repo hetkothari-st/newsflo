@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByTier, groupByImpact, groupBySector, sectorLabel } from './transforms';
+import { groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude } from './transforms';
 import type { AlertCompany } from '../../lib/api';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
@@ -112,5 +112,31 @@ describe('sectorLabel', () => {
 
   it('falls back to the raw string for an unrecognized sector', () => {
     expect(sectorLabel('some_future_sector')).toBe('some_future_sector');
+  });
+});
+
+describe('rankByMagnitude', () => {
+  it('sorts descending by the midpoint of magnitude_low and magnitude_high', () => {
+    const weak = company({ company_id: 1, magnitude_low: 0, magnitude_high: 1 });
+    const strong = company({ company_id: 2, magnitude_low: 8, magnitude_high: 12 });
+    const mid = company({ company_id: 3, magnitude_low: 2, magnitude_high: 4 });
+
+    expect(rankByMagnitude([weak, strong, mid]).map((c) => c.company_id)).toEqual([2, 3, 1]);
+  });
+
+  it('keeps input order for equal midpoints (stable sort)', () => {
+    const a = company({ company_id: 1, magnitude_low: 1, magnitude_high: 3 });
+    const b = company({ company_id: 2, magnitude_low: 0, magnitude_high: 4 });
+
+    expect(rankByMagnitude([a, b]).map((c) => c.company_id)).toEqual([1, 2]);
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(rankByMagnitude([])).toEqual([]);
+  });
+
+  it('returns a single-element array unchanged', () => {
+    const only = company({ company_id: 1 });
+    expect(rankByMagnitude([only])).toEqual([only]);
   });
 });
