@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sectorColor } from './colors';
+import { confidenceColor, sectorColor } from './colors';
 
 describe('sectorColor', () => {
   it('assigns a fixed color to each known sector, not a hash', () => {
@@ -23,5 +23,23 @@ describe('sectorColor', () => {
   it('falls back to a defined color for an unrecognized sector string', () => {
     expect(sectorColor('some_future_sector')).toMatch(/^#[0-9A-Fa-f]{6}$/);
     expect(sectorColor('some_future_sector')).toBe(sectorColor('another_unknown'));
+  });
+});
+
+describe('confidenceColor', () => {
+  it('returns a hex color string for any score 0-100', () => {
+    for (const score of [0, 20, 40, 55, 80, 100]) {
+      expect(confidenceColor(score)).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    }
+  });
+
+  it('is monotonic: higher scores map to later (darker) ramp steps, never an earlier one', () => {
+    const RAMP_ORDER = ['#6F9EE4', '#5C8ACE', '#4976B9', '#3763A4', '#25508F'];
+    let lastIndex = -1;
+    for (const score of [0, 25, 50, 75, 100]) {
+      const idx = RAMP_ORDER.indexOf(confidenceColor(score));
+      expect(idx).toBeGreaterThanOrEqual(lastIndex);
+      lastIndex = idx;
+    }
   });
 });
