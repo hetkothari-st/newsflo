@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Alert, AlertCompany } from '../lib/api';
 import type { TranslationKey } from '../lib/i18n';
