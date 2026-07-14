@@ -8,7 +8,11 @@ from app.config import settings
 from app.i18n import get_lang
 from app.models import Alert, Article, ArticleTranslation
 from app.routers.articles import get_db
-from app.translation.groq_translator import build_translation_client
+from app.translation.groq_translator import (
+    RECOMMENDED_THROTTLE_SECONDS,
+    TRANSLATION_PROVIDER,
+    build_translation_client,
+)
 from app.translation.job import translate_pending_alerts, translate_pending_categories
 
 logger = logging.getLogger(__name__)
@@ -26,12 +30,17 @@ _lock = threading.Lock()
 # On-demand translation targets only the most recent ON_DEMAND_ALERT_LIMIT
 # alerts (newest-first, same ordering translate_pending_alerts already
 # uses) rather than draining the entire historical backlog synchronously --
-# a full backlog is hundreds of alerts, which even on Anthropic would take
-# minutes, defeating the point of an "instant" on-demand switch. The rest
-# of the backlog keeps getting covered by the periodic scheduler job at its
-# own pace. /status reports progress against this same bounded count so the
-# progress bar can actually reach 100%.
-ON_DEMAND_ALERT_LIMIT = 40
+# a full backlog is hundreds of alerts, which would take way too long,
+# defeating the point of an on-demand switch. The rest of the backlog keeps
+# getting covered by the periodic scheduler job at its own pace. /status
+# reports progress against this same bounded count so the progress bar can
+# actually reach 100%.
+#
+# Bounded much lower on Groq: sequential + a ~20s throttle between calls
+# (see MAX_CONCURRENT_TRANSLATIONS / RECOMMENDED_THROTTLE_SECONDS) means 40
+# alerts would take 13+ minutes; Anthropic's real concurrency affords a
+# bigger on-demand batch.
+ON_DEMAND_ALERT_LIMIT = 10 if TRANSLATION_PROVIDER == "groq" else 40
 
 
 def _drain_language(lang: str) -> None:
@@ -43,12 +52,15 @@ def _drain_language(lang: str) -> None:
         # Categories first (cheap, unblocks category_label everywhere at
         # once) -- one call for this language's whole pending-category
         # batch, then a single bounded pass over the most recent alerts.
-        # No artificial throttle here -- translate_pending_alerts already
-        # runs its calls concurrently (MAX_CONCURRENT_TRANSLATIONS), and this
-        # is Anthropic (not Groq's free-tier per-minute wall), so there's no
-        # rate-limit reason to add serial delay on top on this path.
-        translate_pending_categories(session, client, batch_size=25, max_langs=1, lang=lang)
-        translate_pending_alerts(session, client, limit=ON_DEMAND_ALERT_LIMIT, lang=lang)
+        # RECOMMENDED_THROTTLE_SECONDS is 0 on Anthropic (real concurrency
+        # already caps the rate) and a real per-call delay on Groq (its
+        # free-tier per-minute cap can't tolerate a burst).
+        translate_pending_categories(
+            session, client, batch_size=25, max_langs=1, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS, lang=lang
+        )
+        translate_pending_alerts(
+            session, client, limit=ON_DEMAND_ALERT_LIMIT, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS, lang=lang
+        )
     except Exception:
         logger.exception("On-demand translation drain failed for lang=%s", lang)
     finally:

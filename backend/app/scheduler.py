@@ -9,7 +9,7 @@ from app.ingestion.poller import fetch_new_articles
 from app.ingestion.sources import RSS_FEEDS
 from app.outcomes.tracker import check_pending_outcomes
 from app.pipeline import process_new_articles
-from app.translation.groq_translator import build_translation_client
+from app.translation.groq_translator import RECOMMENDED_THROTTLE_SECONDS, build_translation_client
 from app.translation.job import translate_pending_alerts, translate_pending_categories
 
 logger = logging.getLogger(__name__)
@@ -59,8 +59,12 @@ def _run_translation() -> None:
     session = SessionLocal()
     try:
         client = build_translation_client(settings.groq_api_keys, settings.anthropic_api_key or None)
-        translated_categories = translate_pending_categories(session, client, throttle_seconds=1.0)
-        translated_alerts = translate_pending_alerts(session, client, limit=15, throttle_seconds=1.0)
+        translated_categories = translate_pending_categories(
+            session, client, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS
+        )
+        translated_alerts = translate_pending_alerts(
+            session, client, limit=15, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS
+        )
         logger.info(
             "Translation cycle: %s categories, %s alerts translated",
             translated_categories, translated_alerts,

@@ -17,18 +17,26 @@ from app.translation.job import (
     translate_pending_alerts,
     translate_pending_categories,
 )
-from app.translation.languages import TARGET_LANGS, normalize_lang
+from app.translation.languages import SCRIPT_RANGES, TARGET_LANGS, normalize_lang
 from app.translation.lookup import (
     bulk_alert_company_translations,
     bulk_article_titles,
     bulk_category_labels,
 )
 
+# One sample character from every target language's native script, so a
+# single canned fake-client payload passes job.py's has_expected_script
+# guard no matter which of the 9 languages it's used to "translate" into --
+# tests here care about persistence/resumption/failure-handling logic, not
+# script-content realism (that's exercised for real in production, not with
+# a fake client returning the same string for every call).
+_ALL_SCRIPTS_MARKER = "".join(chr(lo + 1) for lo, _hi in SCRIPT_RANGES.values())
+
 
 def _payload(num_companies: int, suffix: str) -> dict:
     return {
-        "title": f"title-{suffix}",
-        "content": f"content-{suffix}",
+        "title": f"title-{suffix} {_ALL_SCRIPTS_MARKER}",
+        "content": f"content-{suffix} {_ALL_SCRIPTS_MARKER}",
         "companies": [
             {"rationale": f"rationale-{suffix}-{i}", "key_points": [f"kp-{suffix}-{i}"]}
             for i in range(num_companies)
@@ -123,7 +131,7 @@ def test_translate_alert_returns_one_language():
         companies=[{"rationale": "refiner margin", "key_points": ["a"]}],
     )
 
-    assert result["title"] == "title-hi"
+    assert result["title"] == f"title-hi {_ALL_SCRIPTS_MARKER}"
     assert result["companies"][0]["rationale"] == "rationale-hi-0"
 
 
@@ -210,6 +218,54 @@ def test_translate_pending_alerts_persists_all_languages(db_session):
     ac = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
     company_rows = db_session.query(AlertCompanyTranslation).filter_by(alert_company_id=ac.id).all()
     assert {r.lang for r in company_rows} == set(TARGET_LANGS)
+
+
+def test_translate_pending_alerts_handles_two_alerts_sharing_one_article(db_session):
+    # Article.alerts is a list relationship -- the schema allows more than
+    # one Alert row to point at the same article_id (confirmed in
+    # production). Both alerts' own AlertCompany rows must still get
+    # translated, and persisting the (identical) article title/content
+    # twice must not raise a unique-constraint error.
+    article = Article(source="test", url="https://example.com/shared", title="English title", content="body")
+    db_session.add(article)
+    db_session.commit()
+
+    first_alert = Alert(article_id=article.id, category="oil_energy")
+    second_alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add_all([first_alert, second_alert])
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=first_alert.id, company_id=1, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="first alert rationale",
+        key_points_json='["a"]', basis="direct_mention",
+    ))
+    db_session.add(AlertCompany(
+        alert_id=second_alert.id, company_id=2, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="second alert rationale",
+        key_points_json='["b"]', basis="direct_mention",
+    ))
+    db_session.commit()
+
+    client = FakeToolCallClient("record_translation", _payload(1, "x"))
+    # limit big enough to cover both alerts' full language sets in one call.
+    completed = translate_pending_alerts(db_session, client, limit=2 * len(TARGET_LANGS))
+
+    assert completed == 2 * len(TARGET_LANGS)
+    # Only ever one ArticleTranslation row per (article, lang) -- no
+    # IntegrityError, no duplicate.
+    article_rows = db_session.query(ArticleTranslation).filter_by(article_id=article.id).all()
+    assert len(article_rows) == len(TARGET_LANGS)
+
+    first_ac = db_session.query(AlertCompany).filter_by(alert_id=first_alert.id).one()
+    second_ac = db_session.query(AlertCompany).filter_by(alert_id=second_alert.id).one()
+    first_company_langs = {
+        r.lang for r in db_session.query(AlertCompanyTranslation).filter_by(alert_company_id=first_ac.id)
+    }
+    second_company_langs = {
+        r.lang for r in db_session.query(AlertCompanyTranslation).filter_by(alert_company_id=second_ac.id)
+    }
+    assert first_company_langs == set(TARGET_LANGS)
+    assert second_company_langs == set(TARGET_LANGS)
 
 
 def test_translate_pending_alerts_resumes_from_missing_languages_only(db_session):

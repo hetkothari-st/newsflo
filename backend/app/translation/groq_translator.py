@@ -2,20 +2,40 @@ import json
 
 from openai import OpenAI
 
-from app.analysis.claude_client import FALLBACK_MODEL, GROQ_BASE_URL, AnthropicAdapter, RotatingClient
+from app.analysis.claude_client import MODEL, GROQ_BASE_URL, AnthropicAdapter, RotatingClient
 from app.translation.languages import LANG_NAMES, TARGET_LANGS
 
-# TEMPORARY, for testing only -- set back to "groq" once done testing (the
-# original Groq-only design still applies then: see the comment that used to
-# live here about keeping translation off Anthropic's credit). While "on",
-# every translation call goes through Anthropic instead of Groq, using the
-# cheapest current model to keep token cost down; this sidesteps Groq's free-
-# tier per-minute token cap (confirmed in production to reject even a single
-# per-language alert-translation call) while testing the feature end-to-end.
-TRANSLATION_PROVIDER = "anthropic"  # "anthropic" | "groq"
+# Anthropic hit this account's usage cap (confirmed in production: every
+# call started failing with "You have reached your specified API usage
+# limits", not resetting until 2026-08-01) -- back on Groq, whose free-tier
+# limit is a continuously-renewing per-MINUTE cap rather than an exhausted
+# account-wide one. Flip to "anthropic" again once that cap resets or a
+# funded/higher-limit key is available.
+TRANSLATION_PROVIDER = "groq"  # "anthropic" | "groq"
 TRANSLATION_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
-TRANSLATION_MODEL = FALLBACK_MODEL
+# Deliberately MODEL (llama-3.3-70b-versatile), not FALLBACK_MODEL, despite
+# the analysis pipeline's own preference for keeping translation off MODEL's
+# shared quota bucket (see claude_client.py). Confirmed in production:
+# FALLBACK_MODEL's structured-output reliability on this multi-field
+# translation schema was bad enough to be unusable -- most calls either
+# failed the tool call outright ("Failed to call a function") or, worse,
+# silently returned garbage (Romanized Hinglish, or once literal Japanese,
+# instead of the requested language). MODEL was reliable across repeated
+# trials. Translation's call volume stays low (throttled, small batches),
+# so the contention risk with the analysis pipeline's own MODEL usage is
+# accepted as the lesser problem.
+TRANSLATION_MODEL = MODEL
+
+# Groq's free tier caps translation calls at a small tokens-per-minute
+# budget (confirmed in production: a single combined multi-language call was
+# rejected outright at ~17000 requested tokens against FALLBACK_MODEL's 6000
+# TPM limit) -- concurrent calls would each eat into that same shared budget
+# within the same rolling minute, so Groq gets throttled down to fully
+# sequential with real spacing between calls. Anthropic has no such
+# per-minute wall at this account's scale, so it runs several calls at once
+# with no artificial delay. See job.py's MAX_CONCURRENT_TRANSLATIONS.
+RECOMMENDED_THROTTLE_SECONDS = 20.0 if TRANSLATION_PROVIDER == "groq" else 0.0
 
 SYSTEM_PROMPT = (
     "You are a professional financial-news translator working across English "
@@ -124,16 +144,14 @@ def translate_alert(client, *, lang: str, title: str, content: str, companies: l
 
     response = client.chat.completions.create(
         model=TRANSLATION_MODEL,
-        # Groq's TPM limit is checked against REQUESTED tokens (prompt +
-        # max_tokens), not actual usage -- so max_tokens directly eats into
-        # the per-minute budget whether or not the model uses it all. One
-        # language's title/content/rationale/key_points for up to 5
-        # companies is realistically well under 2048 output tokens; keeping
-        # the ceiling here (rather than reusing the 4096 the single-language
-        # ANALYSIS call needs, which reasons from scratch rather than
-        # translating existing text) leaves headroom to fit multiple calls
-        # inside this account's 6000 TPM cap on FALLBACK_MODEL.
-        max_tokens=2048,
+        # Matches the single-language ANALYSIS call's budget on this same
+        # model (claude_client.py) -- that value was tuned up from 1024
+        # after real truncation/parse failures on a similarly-shaped
+        # multi-company response, and translation output is comparable in
+        # size to the source it's translating. A truncated response fails
+        # here anyway (missing/malformed JSON -> caught, retried), so
+        # there's no cost to erring generous.
+        max_tokens=4096,
         tools=[_alert_translation_schema(len(companies))],
         tool_choice={"type": "function", "function": {"name": "record_translation"}},
         messages=[

@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -16,8 +17,8 @@ from app.models import (
     utcnow,
 )
 from app.pipeline import decode_key_points
-from app.translation.groq_translator import translate_alert, translate_categories
-from app.translation.languages import TARGET_LANGS
+from app.translation.groq_translator import TRANSLATION_PROVIDER, translate_alert, translate_categories
+from app.translation.languages import TARGET_LANGS, has_expected_script
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,20 @@ logger = logging.getLogger(__name__)
 MAX_TRANSLATION_ATTEMPTS = 5
 
 # Each translation call is a slow network round-trip (observed 2-20s per
-# call against Anthropic) with no dependency on any other call -- running
-# them one at a time serially (confirmed in production: ~40 alerts took
-# close to 10 minutes) wastes almost all of that time waiting on I/O rather
-# than doing anything. A small thread pool overlaps those waits; ORM objects
-# are NOT thread-safe to touch from worker threads, so every worker gets a
-# plain-data snapshot (see _AlertSnapshot) instead of the SQLAlchemy Alert,
-# and all DB writes still happen back on the calling thread as each future
-# completes.
-MAX_CONCURRENT_TRANSLATIONS = 6
+# call) with no dependency on any other call -- running them one at a time
+# serially (confirmed in production: ~40 alerts took close to 10 minutes)
+# wastes almost all of that time waiting on I/O rather than doing anything.
+# A thread pool overlaps those waits; ORM objects are NOT thread-safe to
+# touch from worker threads, so every worker gets a plain-data snapshot (see
+# _AlertSnapshot) instead of the SQLAlchemy Alert, and all DB writes still
+# happen back on the calling thread as each future completes.
+#
+# Concurrency is capped at 1 (i.e. sequential) on Groq -- its free tier caps
+# FALLBACK_MODEL at 6000 tokens/minute shared across the whole account, so
+# concurrent calls would just fight over the same per-minute budget instead
+# of actually finishing faster. Anthropic has no such per-minute wall at
+# this account's scale, so it gets real concurrency.
+MAX_CONCURRENT_TRANSLATIONS = 1 if TRANSLATION_PROVIDER == "groq" else 6
 
 
 @dataclass
@@ -60,11 +66,33 @@ def _snapshot_alert(alert: Alert) -> _AlertSnapshot:
     )
 
 
-def _missing_langs(session: Session, article_id: int) -> list[str]:
-    existing = {
-        row[0] for row in session.query(ArticleTranslation.lang).filter_by(article_id=article_id)
+def _missing_langs(session: Session, alert: Alert) -> list[str]:
+    """Languages this specific alert still needs. Checked per-ALERT, not
+    per-article: `Article.alerts` is a list relationship, so the schema
+    allows more than one Alert row to share the same article_id (confirmed
+    in production: two distinct alerts pointing at article_id=410, each
+    with their own AlertCompany rows). Checking only "does the article have
+    a translation" would let one alert's translation count as done for a
+    sibling alert's entirely different AlertCompany rows, permanently
+    skipping their company translations since this function is the sole
+    definition of "pending"."""
+    article_translated_langs = {
+        row[0] for row in session.query(ArticleTranslation.lang).filter_by(article_id=alert.article_id)
     }
-    return [lang for lang in TARGET_LANGS if lang not in existing]
+    company_ids = [ac.id for ac in alert.companies]
+    if not company_ids:
+        return [lang for lang in TARGET_LANGS if lang not in article_translated_langs]
+    fully_translated_company_langs = {
+        row[0]
+        for row in (
+            session.query(AlertCompanyTranslation.lang)
+            .filter(AlertCompanyTranslation.alert_company_id.in_(company_ids))
+            .group_by(AlertCompanyTranslation.lang)
+            .having(func.count(AlertCompanyTranslation.alert_company_id) >= len(company_ids))
+        )
+    }
+    fully_done_langs = article_translated_langs & fully_translated_company_langs
+    return [lang for lang in TARGET_LANGS if lang not in fully_done_langs]
 
 
 def _pending_alert_lang_pairs(
@@ -103,7 +131,7 @@ def _pending_alert_lang_pairs(
     for alert in alerts:
         missing = [
             missing_lang
-            for missing_lang in _missing_langs(session, alert.article_id)
+            for missing_lang in _missing_langs(session, alert)
             if lang is None or missing_lang == lang
         ]
         if not missing:
@@ -153,6 +181,14 @@ def _validate_and_persist(session: Session, snapshot: _AlertSnapshot, lang: str,
         raise ValueError(f"lang={lang} response missing required field(s): {translated.keys()}")
     if len(title.strip()) > 3 and translated["title"].strip() == title.strip():
         raise ValueError(f"lang={lang} returned an untranslated (English-identical) title")
+    # A response that isn't byte-identical to the English source can still be
+    # wrong in a different way -- confirmed in production the model
+    # sometimes returns Romanized/Hinglish transliteration (no native-script
+    # characters at all) or, once, an entirely different language (Japanese)
+    # when asked for Hindi. Both pass the identity check above but are not a
+    # real translation into the requested language either.
+    if len(title.strip()) > 3 and not has_expected_script(lang, translated["title"]):
+        raise ValueError(f"lang={lang} returned text with no characters in the expected script")
     translated_companies = translated["companies"]
     # The model is only asked (via prompt + schema minItems/maxItems) to
     # keep this array the same length/order as the input -- that is not
@@ -166,12 +202,25 @@ def _validate_and_persist(session: Session, snapshot: _AlertSnapshot, lang: str,
         raise ValueError(
             f"lang={lang} returned {len(translated_companies)} companies, expected {len(snapshot.companies)}"
         )
-    session.add(ArticleTranslation(
-        article_id=snapshot.article_id,
-        lang=lang,
-        title=translated["title"],
-        content=translated["content"],
-    ))
+    # Two Alert rows can share one article_id (see _missing_langs) and both
+    # be queued for the same lang in the same batch -- each independently
+    # translates the (identical) article title/content, but only the first
+    # to commit should persist it; a second INSERT would violate the
+    # (article_id, lang) unique constraint. Company translations are always
+    # alert-specific and always persisted regardless.
+    already_has_article_translation = (
+        session.query(ArticleTranslation.id)
+        .filter_by(article_id=snapshot.article_id, lang=lang)
+        .first()
+        is not None
+    )
+    if not already_has_article_translation:
+        session.add(ArticleTranslation(
+            article_id=snapshot.article_id,
+            lang=lang,
+            title=translated["title"],
+            content=translated["content"],
+        ))
     for company, tc in zip(snapshot.companies, translated_companies):
         session.add(AlertCompanyTranslation(
             alert_company_id=company["id"],
