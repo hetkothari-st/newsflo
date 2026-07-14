@@ -149,4 +149,36 @@ describe('AlertCompanies', () => {
     expect(screen.queryByRole('button', { name: 'Chart' })).not.toBeInTheDocument();
     expect(screen.getByText('RELIANCE.NS')).toBeInTheDocument();
   });
+
+  it('ArrowRight navigates to charts when no input has focus', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    mockNavigate.mockClear();
+
+    // Simulate ArrowRight keypress with no focused element
+    const event = new KeyboardEvent('keydown', { key: 'ArrowRight' });
+    document.dispatchEvent(event);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/alerts/1/charts');
+  });
+
+  it('ArrowRight does NOT navigate when an input element has focus', async () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    mockNavigate.mockClear();
+
+    // Create and focus an input element
+    const input = document.createElement('input');
+    input.type = 'text';
+    document.body.appendChild(input);
+    input.focus();
+
+    // Simulate ArrowRight keypress with input focused
+    const event = new KeyboardEvent('keydown', { key: 'ArrowRight' });
+    document.dispatchEvent(event);
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    // Cleanup
+    document.body.removeChild(input);
+  });
+
 });

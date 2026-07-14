@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Alert, AlertCompany } from '../lib/api';
 import type { TranslationKey } from '../lib/i18n';
@@ -50,7 +50,18 @@ export default function AlertCompanies({
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'ArrowRight' && visible.length > 0) navigate(`/alerts/${alert.id}/charts`);
+      if (e.key === 'ArrowRight' && visible.length > 0) {
+        const activeElement = document.activeElement as HTMLElement;
+        const isEditingControl =
+          activeElement?.tagName === 'INPUT' ||
+          activeElement?.tagName === 'TEXTAREA' ||
+          activeElement?.tagName === 'SELECT' ||
+          activeElement?.isContentEditable;
+
+        if (!isEditingControl) {
+          navigate(`/alerts/${alert.id}/charts`);
+        }
+      }
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -101,7 +112,7 @@ export default function AlertCompanies({
               className="flex items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-xs uppercase tracking-widest text-ink theme-light:border-transparent theme-light:shadow-neu-sm"
             >
               {t('companies.charts')}
-              <span aria-hidden="true">→</span>
+              <span aria-hidden="true">â†’</span>
             </button>
           )}
         </div>
@@ -116,7 +127,7 @@ export default function AlertCompanies({
               {group.color && (
                 <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
               )}
-              {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
+              {groupMode === 'tier' ? group.label : `${group.label} Â· ${group.companies.length}`}
             </p>
             <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
               {group.companies.map((company) => (
@@ -134,3 +145,4 @@ export default function AlertCompanies({
     </div>
   );
 }
+
