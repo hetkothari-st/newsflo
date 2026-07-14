@@ -1,6 +1,5 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { confidenceColor } from '../colors';
 import { rankByConfidence } from '../transforms';
 import { TreeRoot, TreeLeaf } from './tree/Tree';
 import { useCompanySelection } from './useCompanySelection';
