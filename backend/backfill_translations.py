@@ -21,7 +21,7 @@ Usage (from the backend/ directory, so `app` is importable):
 """
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.translation.groq_translator import build_translation_client
+from app.translation.groq_translator import build_translation_client, build_translation_clients
 from app.translation.job import translate_pending_alerts, translate_pending_categories
 
 BATCH_SIZE = 25
@@ -32,6 +32,7 @@ def main() -> None:
     init_db()
     session = SessionLocal()
     client = build_translation_client(settings.groq_api_keys, settings.anthropic_api_key or None)
+    clients = build_translation_clients(settings.translation_groq_api_keys, settings.anthropic_api_key or None)
     total_categories = 0
     total_alerts = 0
     try:
@@ -44,7 +45,7 @@ def main() -> None:
 
         while True:
             n = translate_pending_alerts(
-                session, client, limit=BATCH_SIZE, throttle_seconds=THROTTLE_SECONDS
+                session, clients, limit=BATCH_SIZE, throttle_seconds=THROTTLE_SECONDS
             )
             total_alerts += n
             if n == 0:

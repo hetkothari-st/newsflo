@@ -58,7 +58,7 @@ const EMPTY_WATCHLIST: Watchlist = { categories: [], companies: [] };
 
 export default function Feed() {
   const { token } = useAuth();
-  const { language, t } = useLanguage();
+  const { language, t, translating } = useLanguage();
   const [tab, setTab] = useState<FeedTab>('india');
   const [fetched, setFetched] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +94,34 @@ export default function Feed() {
       active = false;
     };
   }, [token, language]);
+
+  // The on-demand translation drain finishes some time after the fetch
+  // above already ran (it just triggered the drain and moved on) -- without
+  // this, newly-translated content only ever shows up after a manual page
+  // reload. Refetches silently (no loading spinner, no revealedIds reset)
+  // so already-visible cards just update their text in place. Keyed on the
+  // true->false transition specifically, via the ref below, so this never
+  // fires on mount (translating starts false) or on the switch itself
+  // (translating starts true) -- only once the drain actually completes.
+  const wasTranslating = useRef(translating);
+  useEffect(() => {
+    const justFinished = wasTranslating.current && !translating;
+    wasTranslating.current = translating;
+    if (!justFinished) return;
+
+    let active = true;
+    getAlerts(token, language)
+      .then((data) => {
+        if (active) setFetched(data);
+      })
+      .catch(() => {
+        // Best-effort refresh -- the existing feed content stays as-is if
+        // this fails, no need to surface a separate error for it.
+      });
+    return () => {
+      active = false;
+    };
+  }, [translating, token, language]);
 
   const refreshWatchlist = useCallback(() => {
     if (!token) return;

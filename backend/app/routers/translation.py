@@ -12,6 +12,7 @@ from app.translation.groq_translator import (
     RECOMMENDED_THROTTLE_SECONDS,
     TRANSLATION_PROVIDER,
     build_translation_client,
+    build_translation_clients,
 )
 from app.translation.job import translate_pending_alerts, translate_pending_categories
 
@@ -36,11 +37,15 @@ _lock = threading.Lock()
 # reports progress against this same bounded count so the progress bar can
 # actually reach 100%.
 #
-# Bounded much lower on Groq: sequential + a ~20s throttle between calls
-# (see MAX_CONCURRENT_TRANSLATIONS / RECOMMENDED_THROTTLE_SECONDS) means 40
-# alerts would take 13+ minutes; Anthropic's real concurrency affords a
-# bigger on-demand batch.
-ON_DEMAND_ALERT_LIMIT = 10 if TRANSLATION_PROVIDER == "groq" else 40
+# Bounded much lower on Groq: each lane is sequential with a ~20s throttle
+# between calls (see RECOMMENDED_THROTTLE_SECONDS) -- 40 alerts on ONE lane
+# would take 13+ minutes. Scales with the number of independent-account
+# lanes available (see translate_pending_alerts/build_translation_clients),
+# so adding another separate-account Groq key raises this bound too.
+# Anthropic's real single-account concurrency affords a bigger batch outright.
+ON_DEMAND_ALERT_LIMIT = (
+    10 * max(1, len(settings.translation_groq_api_keys)) if TRANSLATION_PROVIDER == "groq" else 40
+)
 
 
 def _drain_language(lang: str) -> None:
@@ -58,8 +63,11 @@ def _drain_language(lang: str) -> None:
         translate_pending_categories(
             session, client, batch_size=25, max_langs=1, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS, lang=lang
         )
+        clients = build_translation_clients(
+            settings.translation_groq_api_keys, settings.anthropic_api_key or None
+        )
         translate_pending_alerts(
-            session, client, limit=ON_DEMAND_ALERT_LIMIT, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS, lang=lang
+            session, clients, limit=ON_DEMAND_ALERT_LIMIT, throttle_seconds=RECOMMENDED_THROTTLE_SECONDS, lang=lang
         )
     except Exception:
         logger.exception("On-demand translation drain failed for lang=%s", lang)

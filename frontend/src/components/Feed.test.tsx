@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Feed, { dedupeByTitle, mergeAlerts } from './Feed';
 import { AuthProvider } from '../lib/auth';
-import { LanguageProvider } from '../lib/language';
+import { LanguageProvider, useLanguage } from '../lib/language';
 import * as api from '../lib/api';
 import type { Alert, AlertCompany } from '../lib/api';
 
@@ -50,6 +50,30 @@ function renderFeed() {
       <LanguageProvider>
         <AuthProvider>
           <Feed />
+        </AuthProvider>
+      </LanguageProvider>
+    </MemoryRouter>,
+  );
+}
+
+function LanguageSwitchHarness() {
+  const { setLanguage } = useLanguage();
+  return (
+    <>
+      <button type="button" onClick={() => setLanguage('hi')}>
+        switch language
+      </button>
+      <Feed />
+    </>
+  );
+}
+
+function renderFeedWithLanguageControl() {
+  return render(
+    <MemoryRouter>
+      <LanguageProvider>
+        <AuthProvider>
+          <LanguageSwitchHarness />
         </AuthProvider>
       </LanguageProvider>
     </MemoryRouter>,
@@ -102,6 +126,27 @@ describe('Feed', () => {
     await userEvent.click(screen.getByRole('tab', { name: /global/i }));
     expect((await screen.findAllByText('Global tech headline')).length).toBeGreaterThan(0);
     expect(screen.queryAllByText('India oil headline')).toHaveLength(0);
+  });
+
+  it('automatically refetches once a language-switch translation drain finishes, without a page reload', async () => {
+    const englishAlert = makeAlert(1, 'English title', [company({ market: 'IN' })]);
+    const translatedAlert = makeAlert(1, 'हिन्दी शीर्षक', [company({ market: 'IN' })]);
+    const getAlertsSpy = vi
+      .spyOn(api, 'getAlerts')
+      .mockResolvedValueOnce([englishAlert]) // initial mount fetch (lang=en)
+      .mockResolvedValueOnce([englishAlert]) // fetch the language switch itself already triggers -- translation isn't ready yet
+      .mockResolvedValueOnce([translatedAlert]); // the silent refetch once the drain completes -- what this test targets
+    vi.spyOn(api, 'triggerTranslation').mockResolvedValue({ started: true });
+    vi.spyOn(api, 'getTranslationStatus').mockResolvedValue({ total: 1, translated: 1, running: false });
+
+    renderFeedWithLanguageControl();
+    await screen.findAllByText('English title');
+
+    await userEvent.click(screen.getByRole('button', { name: 'switch language' }));
+
+    expect((await screen.findAllByText('हिन्दी शीर्षक')).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('English title')).toHaveLength(0);
+    expect(getAlertsSpy).toHaveBeenCalledTimes(3);
   });
 
   it('desktop: opens AlertDetail with the company breakdown when the grid card is clicked', async () => {

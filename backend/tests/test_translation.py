@@ -220,6 +220,23 @@ def test_translate_pending_alerts_persists_all_languages(db_session):
     assert {r.lang for r in company_rows} == set(TARGET_LANGS)
 
 
+def test_translate_pending_alerts_splits_work_across_multiple_clients(db_session):
+    # Passing a list of clients (e.g. one per independent-account Groq key)
+    # must round-robin pending pairs across all of them, not just use the
+    # first -- this is how a second account's quota bucket actually gets
+    # used instead of sitting idle.
+    _seed_alert(db_session)
+    client_a = FakeToolCallClient("record_translation", _payload(1, "a"))
+    client_b = FakeToolCallClient("record_translation", _payload(1, "b"))
+
+    completed = translate_pending_alerts(db_session, [client_a, client_b], limit=len(TARGET_LANGS))
+
+    assert completed == len(TARGET_LANGS)
+    assert client_a.call_count > 0
+    assert client_b.call_count > 0
+    assert client_a.call_count + client_b.call_count == len(TARGET_LANGS)
+
+
 def test_translate_pending_alerts_handles_two_alerts_sharing_one_article(db_session):
     # Article.alerts is a list relationship -- the schema allows more than
     # one Alert row to point at the same article_id (confirmed in

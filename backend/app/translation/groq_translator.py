@@ -60,6 +60,9 @@ SYSTEM_PROMPT = (
 def build_translation_client(
     groq_api_keys: list[str], anthropic_api_key: str | None = None
 ) -> RotatingClient | OpenAI | AnthropicAdapter:
+    """A single client -- used for the low-volume category-translation path,
+    which doesn't need per-lane parallelism (see build_translation_clients
+    for the alert-translation path, which does)."""
     if TRANSLATION_PROVIDER == "anthropic":
         if not anthropic_api_key:
             raise ValueError("TRANSLATION_PROVIDER is 'anthropic' but no anthropic_api_key was given")
@@ -67,6 +70,37 @@ def build_translation_client(
     if len(groq_api_keys) > 1:
         return RotatingClient(groq_api_keys, base_url=GROQ_BASE_URL)
     return OpenAI(api_key=groq_api_keys[0], base_url=GROQ_BASE_URL)
+
+
+# On Anthropic (no per-minute wall at this account's scale), this many
+# concurrent requests share ONE client/key safely -- there's only one
+# account, so "lanes" don't map to distinct quota buckets the way they do
+# on Groq.
+ANTHROPIC_CONCURRENCY = 6
+
+
+def build_translation_clients(
+    groq_api_keys: list[str], anthropic_api_key: str | None = None
+) -> list[RotatingClient | OpenAI | AnthropicAdapter]:
+    """One entry per independent lane translate_pending_alerts should run
+    concurrently (see job.py). For Groq, `groq_api_keys` must be keys from
+    genuinely SEPARATE accounts (separate per-minute quota buckets) -- pass
+    Settings.translation_groq_api_keys here, not groq_api_keys_extra, which
+    are same-org rotation keys sharing ONE bucket and wouldn't add real
+    parallel throughput (they'd just have two lanes racing for the same
+    budget). Each key gets its own client/lane, throttled independently
+    within that lane. For Anthropic, returns the SAME client repeated
+    ANTHROPIC_CONCURRENCY times -- true concurrent requests on one client,
+    no per-lane throttling needed.
+    """
+    if TRANSLATION_PROVIDER == "anthropic":
+        if not anthropic_api_key:
+            raise ValueError("TRANSLATION_PROVIDER is 'anthropic' but no anthropic_api_key was given")
+        client = AnthropicAdapter(anthropic_api_key, model=TRANSLATION_ANTHROPIC_MODEL)
+        return [client] * ANTHROPIC_CONCURRENCY
+    if not groq_api_keys:
+        raise ValueError("TRANSLATION_PROVIDER is 'groq' but no groq_api_keys were given")
+    return [OpenAI(api_key=key, base_url=GROQ_BASE_URL) for key in groq_api_keys]
 
 
 def _alert_translation_schema(num_companies: int) -> dict:

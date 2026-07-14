@@ -1,7 +1,8 @@
 import json
 import logging
+import queue
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from sqlalchemy import func
@@ -17,7 +18,7 @@ from app.models import (
     utcnow,
 )
 from app.pipeline import decode_key_points
-from app.translation.groq_translator import TRANSLATION_PROVIDER, translate_alert, translate_categories
+from app.translation.groq_translator import translate_alert, translate_categories
 from app.translation.languages import TARGET_LANGS, has_expected_script
 
 logger = logging.getLogger(__name__)
@@ -26,22 +27,6 @@ logger = logging.getLogger(__name__)
 # stops being retried after this many attempts -- the silent English
 # fallback in app/translation/lookup.py serves it indefinitely regardless.
 MAX_TRANSLATION_ATTEMPTS = 5
-
-# Each translation call is a slow network round-trip (observed 2-20s per
-# call) with no dependency on any other call -- running them one at a time
-# serially (confirmed in production: ~40 alerts took close to 10 minutes)
-# wastes almost all of that time waiting on I/O rather than doing anything.
-# A thread pool overlaps those waits; ORM objects are NOT thread-safe to
-# touch from worker threads, so every worker gets a plain-data snapshot (see
-# _AlertSnapshot) instead of the SQLAlchemy Alert, and all DB writes still
-# happen back on the calling thread as each future completes.
-#
-# Concurrency is capped at 1 (i.e. sequential) on Groq -- its free tier caps
-# FALLBACK_MODEL at 6000 tokens/minute shared across the whole account, so
-# concurrent calls would just fight over the same per-minute budget instead
-# of actually finishing faster. Anthropic has no such per-minute wall at
-# this account's scale, so it gets real concurrency.
-MAX_CONCURRENT_TRANSLATIONS = 1 if TRANSLATION_PROVIDER == "groq" else 6
 
 
 @dataclass
@@ -108,7 +93,7 @@ def _pending_alert_lang_pairs(
 
     Alerts are snapshotted into plain data here, on the caller's thread,
     while the ORM objects are still safe to touch -- callers must never pass
-    a raw `Alert` into a worker thread (see MAX_CONCURRENT_TRANSLATIONS).
+    a raw `Alert` into a worker thread (see translate_pending_alerts).
 
     Capped at `max_pairs` TRANSLATION CALLS, not alerts -- translation is one
     call per (alert, language) (see groq_translator.translate_alert's
@@ -232,7 +217,11 @@ def _validate_and_persist(session: Session, snapshot: _AlertSnapshot, lang: str,
 
 
 def translate_pending_alerts(
-    session: Session, client, limit: int = 15, throttle_seconds: float = 0, lang: str | None = None
+    session: Session,
+    clients,
+    limit: int = 15,
+    throttle_seconds: float = 0,
+    lang: str | None = None,
 ) -> int:
     """Make up to `limit` (alert, language) translation calls, resuming each
     alert from whichever languages it's still missing. Used by the
@@ -244,41 +233,67 @@ def translate_pending_alerts(
     8) -- "pending" is defined identically in every case, so there is no
     separate code path for "new" vs "historical" vs "on-demand" alerts.
 
-    The actual translation calls run concurrently (see
-    MAX_CONCURRENT_TRANSLATIONS) since they're independent network I/O with
-    nothing to serialize; only the resulting DB write for each one happens
-    back on this thread as its call finishes, so the SQLAlchemy session is
-    never touched from more than one thread. Each (alert, language) call
-    commits independently, so a failure on one language never discards
-    progress already made on that alert's other languages -- the next run
-    picks up exactly where this one left off. `throttle_seconds`, if set,
-    is a small pause after each completed call (still meaningful for a
-    rate-limited provider even with concurrency).
+    `clients` is a single client OR a list -- see
+    groq_translator.build_translation_clients. Each entry becomes its own
+    LANE: pending pairs are split round-robin across lanes, and each lane
+    runs its share sequentially in its own thread (with `throttle_seconds`
+    slept between that lane's own calls, so a rate-limited provider's
+    per-minute budget is respected PER LANE). Lanes run concurrently with
+    each other. On Groq, pass one key per lane from a genuinely SEPARATE
+    account (separate quota bucket) or lanes just fight over the same
+    budget instead of adding real throughput. On Anthropic, all lanes share
+    one client/account safely (no per-minute wall at this scale).
+
+    Every lane only performs the network call (translate_alert) -- ORM
+    objects and the SQLAlchemy session are NOT thread-safe, so DB writes for
+    every lane's results happen back on THIS thread only, consumed off a
+    shared queue as they arrive. Each (alert, language) call commits
+    independently, so a failure on one language never discards progress
+    already made on that alert's other languages -- the next run picks up
+    exactly where this one left off.
     """
+    if not isinstance(clients, list):
+        clients = [clients]
     pairs = _pending_alert_lang_pairs(session, limit, lang=lang)
     if not pairs:
         return 0
 
-    completed = 0
-    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_TRANSLATIONS, len(pairs))) as executor:
-        future_to_pair = {
-            executor.submit(_fetch_translation, client, snapshot, alert_lang): (snapshot, alert_lang)
-            for snapshot, alert_lang in pairs
-        }
-        for future in as_completed(future_to_pair):
-            snapshot, alert_lang = future_to_pair[future]
+    lanes = [pairs[i::len(clients)] for i in range(len(clients))]
+    results: queue.Queue = queue.Queue()
+
+    def _run_lane(client, lane_pairs):
+        for snapshot, alert_lang in lane_pairs:
             try:
-                translated = future.result()
-                _validate_and_persist(session, snapshot, alert_lang, translated)
-                completed += 1
+                translated = _fetch_translation(client, snapshot, alert_lang)
+                results.put((snapshot, alert_lang, translated, None))
             except Exception as exc:
-                session.rollback()
-                _record_failure(session, snapshot.alert_id, exc)
-                logger.exception(
-                    "Translation failed for alert_id=%s lang=%s", snapshot.alert_id, alert_lang
-                )
+                results.put((snapshot, alert_lang, None, exc))
             if throttle_seconds:
                 time.sleep(throttle_seconds)
+
+    threads = [
+        threading.Thread(target=_run_lane, args=(clients[i], lane_pairs), daemon=True)
+        for i, lane_pairs in enumerate(lanes)
+        if lane_pairs
+    ]
+    for t in threads:
+        t.start()
+
+    completed = 0
+    for _ in range(len(pairs)):
+        snapshot, alert_lang, translated, fetch_error = results.get()
+        try:
+            if fetch_error is not None:
+                raise fetch_error
+            _validate_and_persist(session, snapshot, alert_lang, translated)
+            completed += 1
+        except Exception as exc:
+            session.rollback()
+            _record_failure(session, snapshot.alert_id, exc)
+            logger.exception("Translation failed for alert_id=%s lang=%s", snapshot.alert_id, alert_lang)
+
+    for t in threads:
+        t.join()
     return completed
 
 

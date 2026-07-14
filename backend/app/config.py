@@ -22,6 +22,20 @@ class Settings(BaseSettings):
         keys = [self.groq_api_key] if self.groq_api_key else []
         keys += [k.strip() for k in self.groq_api_keys_extra.split(",") if k.strip()]
         return keys
+    # A Groq key from a SEPARATE account (its own, independent per-minute
+    # token quota bucket) -- unlike groq_api_keys_extra above, which are
+    # same-org keys that share ONE bucket with groq_api_key and only help
+    # with failover, not real parallel throughput. Used specifically to run
+    # translation across two independent quota buckets at once (see
+    # translation/groq_translator.py's build_translation_clients).
+    translation_groq_api_key_2: str = os.environ.get("TRANSLATION_GROQ_API_KEY_2", "")
+
+    @property
+    def translation_groq_api_keys(self) -> list[str]:
+        keys = [self.groq_api_key] if self.groq_api_key else []
+        if self.translation_groq_api_key_2:
+            keys.append(self.translation_groq_api_key_2)
+        return keys
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
     poll_interval_minutes: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "2"))
     translation_interval_minutes: int = int(os.environ.get("TRANSLATION_INTERVAL_MINUTES", "5"))
