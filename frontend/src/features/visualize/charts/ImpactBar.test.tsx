@@ -108,4 +108,18 @@ describe('ImpactBar', () => {
     expect(bearishLabel).toHaveClass('shrink-0');
     expect(bullishLabel).toHaveClass('shrink-0');
   });
+
+  it('renders correctly with more than 5 companies (the cap was removed in this plan)', () => {
+    const eight = Array.from({ length: 8 }, (_, i) =>
+      company({
+        company_id: i + 1,
+        ticker: `CO${i}`,
+        direction: i % 2 === 0 ? 'bullish' : 'bearish',
+        magnitude_low: i,
+        magnitude_high: i + 1,
+      }),
+    );
+    render(<ImpactBar companies={eight} />);
+    eight.forEach((c) => expect(screen.getByText(c.ticker)).toBeInTheDocument());
+  });
 });
