@@ -134,6 +134,12 @@ export async function getAlerts(token: string | null = null, lang: Language = 'e
   return (await res.json()) as Alert[];
 }
 
+export async function getAlert(id: number, token: string | null = null, lang: Language = 'en'): Promise<Alert> {
+  const res = await fetch(`/api/alerts/${id}?lang=${lang}`, { headers: authHeaders(token) });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Alert;
+}
+
 export async function getArticles(lang: Language = 'en'): Promise<Article[]> {
   const res = await fetch(`/api/articles?lang=${lang}`);
   if (!res.ok) throw new Error(await parseError(res));
