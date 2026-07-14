@@ -32,12 +32,11 @@ describe('NavBar', () => {
     expect(screen.getByRole('link', { name: /register/i })).toBeInTheDocument();
   });
 
-  it('shows the user email and a Logout button when logged in', () => {
+  it('links to /account when logged in', () => {
     localStorage.setItem('newsflo.token', 'tok');
     localStorage.setItem('newsflo.email', 'me@example.com');
     renderNav();
-    expect(screen.getByText('me@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /account/i })).toHaveAttribute('href', '/account');
   });
 
   it('renders the theme toggle', () => {
