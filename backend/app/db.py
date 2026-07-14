@@ -26,6 +26,8 @@ _ADDED_COLUMNS = [
     ("alert_companies", "key_points_json", "TEXT"),
     ("companies", "isin", "VARCHAR"),
     ("users", "email_alerts_enabled", "INTEGER DEFAULT 1"),
+    ("alert_companies", "confidence_score", "INTEGER DEFAULT 50"),
+    ("alert_companies", "time_horizon", "VARCHAR DEFAULT 'Short-Term'"),
 ]
 
 

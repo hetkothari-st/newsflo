@@ -59,6 +59,7 @@ def test_analyze_article_parses_direct_mention():
             "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
             "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
             "rationale": "Top refiner benefits from crude price spike.",
+            "confidence_score": 85, "time_horizon": "Short-Term",
         }],
     }
     client = FakeClient(fake_output)
@@ -77,6 +78,7 @@ def test_analyze_article_parses_sector_mention():
             "name": "oil refiners", "ticker": None, "is_direct": False, "sector": "oil_gas",
             "direction": "bullish", "magnitude_low": 1.0, "magnitude_high": 2.0,
             "rationale": "Sector-wide margin expansion.",
+            "confidence_score": 55, "time_horizon": "Medium-Term",
         }],
     }
     client = FakeClient(fake_output)
@@ -202,6 +204,7 @@ def test_analyze_article_falls_back_to_secondary_model_on_rate_limit():
             "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
             "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
             "rationale": "Top refiner benefits from crude price spike.",
+            "confidence_score": 85, "time_horizon": "Short-Term",
         }],
     }
     completions = FakeCompletionsModelFallback(fake_output)
@@ -371,6 +374,7 @@ def test_analyze_article_works_end_to_end_via_anthropic_adapter():
             "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
             "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
             "rationale": "Refiner margins expand.",
+            "confidence_score": 85, "time_horizon": "Short-Term",
         }],
     }
     fake_messages = _FakeAnthropicMessages(tool_input)

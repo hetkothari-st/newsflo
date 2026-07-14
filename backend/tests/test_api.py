@@ -33,6 +33,7 @@ def test_list_alerts_returns_nested_companies(db_session):
         magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
         key_points_json='["Crude prices ease", "Refining margins widen"]',
         basis="direct_mention", confidence="llm_estimate",
+        confidence_score=85, time_horizon="Short-Term",
     ))
     db_session.commit()
 
@@ -45,6 +46,8 @@ def test_list_alerts_returns_nested_companies(db_session):
     assert body[0]["companies"][0]["market"] == "IN"
     assert body[0]["companies"][0]["confidence"] == "llm_estimate"
     assert body[0]["companies"][0]["key_points"] == ["Crude prices ease", "Refining margins widen"]
+    assert body[0]["companies"][0]["confidence_score"] == 85
+    assert body[0]["companies"][0]["time_horizon"] == "Short-Term"
     # Anonymous request (no Authorization header) -> in_my_holdings is present and False.
     assert body[0]["companies"][0]["in_my_holdings"] is False
     assert body[0]["article"]["title"] == "Test headline"

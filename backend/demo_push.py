@@ -41,6 +41,7 @@ def _fake_analysis(client, title, content):
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0,
             rationale="Top refiner benefits from a crude price spike.",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
 
