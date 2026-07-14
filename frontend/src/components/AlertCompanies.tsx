@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Alert, AlertCompany } from '../lib/api';
 import type { TranslationKey } from '../lib/i18n';
 import { useLanguage } from '../lib/language';
 import CompanyChip from './CompanyChip';
 import SentimentBar from '../features/visualize/SentimentBar';
-import CompanyTree from '../features/visualize/CompanyTree';
 import {
   groupByTier,
   groupByImpact,
@@ -14,7 +14,6 @@ import {
 } from '../features/visualize/transforms';
 
 type Tab = 'predicted' | 'my_demat';
-type ViewMode = 'list' | 'chart';
 
 const GROUP_MODES: GroupMode[] = ['tier', 'impact', 'sector'];
 const GROUP_LABEL_KEY: Record<GroupMode, TranslationKey> = {
@@ -42,12 +41,20 @@ export default function AlertCompanies({
   isAuthenticated: boolean;
 }) {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('predicted');
   const [groupMode, setGroupMode] = useState<GroupMode>('tier');
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
   const grouped = groupCompanies(groupMode, visible);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'ArrowRight' && visible.length > 0) navigate(`/alerts/${alert.id}/charts`);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [alert.id, visible.length, navigate]);
 
   const tabClass = (active: boolean) =>
     `pb-1 text-xs uppercase tracking-widest border-b-2 ${
@@ -87,52 +94,42 @@ export default function AlertCompanies({
               ))}
             </select>
           </label>
+          {visible.length > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate(`/alerts/${alert.id}/charts`)}
+              className="flex items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-xs uppercase tracking-widest text-ink theme-light:border-transparent theme-light:shadow-neu-sm"
+            >
+              {t('companies.charts')}
+              <span aria-hidden="true">→</span>
+            </button>
+          )}
         </div>
       </div>
       <SentimentBar companies={visible} />
       {grouped.length === 0 ? (
         <p className="text-xs text-muted">{emptyCopy}</p>
       ) : (
-        <>
-          <div className="flex gap-1 self-start rounded-md border border-hairline bg-surface p-0.5 theme-light:border-transparent theme-light:shadow-neu-sm">
-            {(['list', 'chart'] as ViewMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setViewMode(mode)}
-                className={`rounded px-2 py-0.5 text-[11px] uppercase tracking-widest ${
-                  viewMode === mode ? 'bg-page text-ink' : 'text-muted'
-                }`}
-              >
-                {mode === 'list' ? t('companies.list') : t('companies.chart')}
-              </button>
-            ))}
-          </div>
-          {viewMode === 'chart' ? (
-            <CompanyTree articleTitle={alert.article.title} groups={grouped} groupMode={groupMode} />
-          ) : (
-            grouped.map((group) => (
-              <div key={group.key} className="flex flex-col gap-2">
-                <p className={`flex items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}>
-                  {group.color && (
-                    <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
-                  )}
-                  {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
-                </p>
-                <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
-                  {group.companies.map((company) => (
-                    <div
-                      key={company.company_id}
-                      className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
-                    >
-                      <CompanyChip company={company} />
-                    </div>
-                  ))}
+        grouped.map((group) => (
+          <div key={group.key} className="flex flex-col gap-2">
+            <p className={`flex items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}>
+              {group.color && (
+                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
+              )}
+              {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
+            </p>
+            <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
+              {group.companies.map((company) => (
+                <div
+                  key={company.company_id}
+                  className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
+                >
+                  <CompanyChip company={company} />
                 </div>
-              </div>
-            ))
-          )}
-        </>
+              ))}
+            </div>
+          </div>
+        ))
       )}
     </div>
   );
