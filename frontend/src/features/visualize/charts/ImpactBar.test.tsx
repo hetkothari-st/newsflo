@@ -76,4 +76,36 @@ describe('ImpactBar', () => {
     // renders a clearly longer bar than the weaker rank (index 1).
     expect(widths[0]).toBeGreaterThan(widths[1]);
   });
+
+  it('marks both the bar segment and the ticker label as flex-shrink: 0', () => {
+    // jsdom doesn't do real flex layout, so an inline pixel width alone
+    // can't be trusted as a regression test -- a real browser can still
+    // shrink a `style.width` flex item toward its content-size floor when
+    // its sibling (the ticker label, whose text can't wrap) resists
+    // shrinking and the row is too narrow for both. `shrink-0` on BOTH
+    // elements is what turns the pixel width into a genuine floor. Assert
+    // the class itself is present, since that's the real mechanism.
+    const { container } = render(
+      <ImpactBar
+        companies={[
+          company({ company_id: 1, ticker: 'HDFCBANK.NS', direction: 'bearish', magnitude_low: 9, magnitude_high: 10 }),
+          company({ company_id: 2, ticker: 'SUNPHARMA.NS', direction: 'bullish', magnitude_low: 3, magnitude_high: 4 }),
+        ]}
+      />,
+    );
+
+    const bearishBar = container.querySelector('.bg-bearish');
+    const bullishBar = container.querySelector('.bg-bullish');
+    expect(bearishBar).not.toBeNull();
+    expect(bullishBar).not.toBeNull();
+    expect(bearishBar).toHaveClass('shrink-0');
+    expect(bullishBar).toHaveClass('shrink-0');
+
+    const bearishLabel = screen.getByText('HDFCBANK.NS').closest('button');
+    const bullishLabel = screen.getByText('SUNPHARMA.NS').closest('button');
+    expect(bearishLabel).not.toBeNull();
+    expect(bullishLabel).not.toBeNull();
+    expect(bearishLabel).toHaveClass('shrink-0');
+    expect(bullishLabel).toHaveClass('shrink-0');
+  });
 });

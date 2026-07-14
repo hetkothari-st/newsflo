@@ -27,7 +27,7 @@ function Bar({ company, side, onSelect }: { company: AlertCompany; side: 'left' 
     <button
       type="button"
       onClick={onSelect}
-      className={`flex items-center gap-2 text-xs ${side === 'left' ? 'flex-row-reverse' : ''}`}
+      className={`flex shrink-0 items-center gap-2 text-xs ${side === 'left' ? 'flex-row-reverse' : ''}`}
     >
       <span className={bullish ? 'text-bullish' : 'text-bearish'} aria-hidden="true">
         {bullish ? '▲' : '▼'}
@@ -49,17 +49,23 @@ export default function ImpactBar({ companies }: { companies: AlertCompany[] }) 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col items-end gap-2">
           {bearish.map((company, i) => (
-            <div key={company.company_id} className="flex w-full items-center justify-end gap-2">
-              <div className="h-2 rounded-l-full bg-bearish" style={{ width: `${barWidthPx(i, bearish.length)}px` }} />
+            <div key={company.company_id} className="flex w-full items-center justify-end gap-2 overflow-x-auto">
+              <div
+                className="h-2 shrink-0 rounded-l-full bg-bearish"
+                style={{ width: `${barWidthPx(i, bearish.length)}px` }}
+              />
               <Bar company={company} side="left" onSelect={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))} />
             </div>
           ))}
         </div>
         <div className="flex flex-col items-start gap-2">
           {bullish.map((company, i) => (
-            <div key={company.company_id} className="flex w-full items-center gap-2">
+            <div key={company.company_id} className="flex w-full items-center gap-2 overflow-x-auto">
               <Bar company={company} side="right" onSelect={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))} />
-              <div className="h-2 rounded-r-full bg-bullish" style={{ width: `${barWidthPx(i, bullish.length)}px` }} />
+              <div
+                className="h-2 shrink-0 rounded-r-full bg-bullish"
+                style={{ width: `${barWidthPx(i, bullish.length)}px` }}
+              />
             </div>
           ))}
         </div>
