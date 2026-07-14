@@ -4,17 +4,23 @@ import { getAlert, type Alert } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import { useHorizontalSwipe } from '../lib/useHorizontalSwipe';
-import SectorTreemap from '../features/visualize/charts/SectorTreemap';
+import SectorTree from '../features/visualize/charts/SectorTree';
 import TierRows from '../features/visualize/charts/TierRows';
 import ImpactBar from '../features/visualize/charts/ImpactBar';
-import SplitDonut from '../features/visualize/charts/SplitDonut';
+import SplitTree from '../features/visualize/charts/SplitTree';
+import ConfidenceTree from '../features/visualize/charts/ConfidenceTree';
+import TimelineTree from '../features/visualize/charts/TimelineTree';
 
 const CHARTS = [
-  { key: 'sector', label: 'Sector', Component: SectorTreemap },
+  { key: 'sector', label: 'Sector', Component: SectorTree },
   { key: 'tier', label: 'Tier', Component: TierRows },
   { key: 'impact', label: 'Impact', Component: ImpactBar },
-  { key: 'split', label: 'Split', Component: SplitDonut },
+  { key: 'split', label: 'Split', Component: SplitTree },
+  { key: 'confidence', label: 'Confidence', Component: ConfidenceTree },
+  { key: 'timeline', label: 'Timeline', Component: TimelineTree },
 ] as const;
+
+type Breadth = 'normal' | 'drilldown';
 
 export default function AlertChartsPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +30,7 @@ export default function AlertChartsPage() {
   const [alert, setAlert] = useState<Alert | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
+  const [breadth, setBreadth] = useState<Breadth>('normal');
 
   useEffect(() => {
     if (!id) return;
@@ -53,6 +60,8 @@ export default function AlertChartsPage() {
   }
 
   const { Component } = CHARTS[index];
+  const visibleCompanies =
+    breadth === 'normal' ? alert.companies.filter((c) => c.basis === 'direct_mention') : alert.companies;
 
   return (
     <div className="flex min-h-screen flex-col bg-page" {...swipeHandlers}>
@@ -61,6 +70,20 @@ export default function AlertChartsPage() {
           ←
         </button>
         <h1 className="truncate text-sm text-ink">{alert.article.title}</h1>
+        <div className="ml-auto flex gap-1 self-start rounded-md border border-hairline bg-surface p-0.5">
+          {(['normal', 'drilldown'] as Breadth[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setBreadth(mode)}
+              className={`rounded px-2 py-0.5 text-[11px] uppercase tracking-widest ${
+                breadth === mode ? 'bg-page text-ink' : 'text-muted'
+              }`}
+            >
+              {mode === 'normal' ? 'Normal' : 'Drilldown'}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="flex gap-4 border-b border-hairline px-4 py-2">
         {CHARTS.map((chart, i) => (
@@ -75,7 +98,13 @@ export default function AlertChartsPage() {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
-        <Component companies={alert.companies} />
+        {visibleCompanies.length === 0 ? (
+          <p className="p-4 text-xs uppercase tracking-widest text-muted">
+            No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.
+          </p>
+        ) : (
+          <Component companies={visibleCompanies} />
+        )}
       </div>
     </div>
   );
