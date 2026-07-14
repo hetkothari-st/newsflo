@@ -1,10 +1,10 @@
-import { useState } from 'react';
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { groupBySector } from '../transforms';
+import { useCompanySelection } from './useCompanySelection';
 
 export default function SectorTreemap({ companies }: { companies: AlertCompany[] }) {
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { toggle, selected } = useCompanySelection(companies);
   const groups = groupBySector(companies);
 
   if (groups.length === 0) return null;
@@ -26,7 +26,7 @@ export default function SectorTreemap({ companies }: { companies: AlertCompany[]
                   <button
                     key={company.company_id}
                     type="button"
-                    onClick={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))}
+                    onClick={() => toggle(company.company_id)}
                     className="flex items-center gap-1 rounded-md bg-page px-2 py-1 text-xs text-ink hover:border-muted"
                   >
                     <span className={bullish ? 'text-bullish' : 'text-bearish'} aria-hidden="true">
@@ -40,11 +40,7 @@ export default function SectorTreemap({ companies }: { companies: AlertCompany[]
           </div>
         ))}
       </div>
-      {selectedId !== null &&
-        (() => {
-          const selected = companies.find((c) => c.company_id === selectedId);
-          return selected ? <ReasoningPanel company={selected} /> : null;
-        })()}
+      {selected && <ReasoningPanel company={selected} />}
     </div>
   );
 }

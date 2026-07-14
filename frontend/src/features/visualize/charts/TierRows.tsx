@@ -1,7 +1,7 @@
-import { useState } from 'react';
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { groupByTier } from '../transforms';
+import { useCompanySelection } from './useCompanySelection';
 
 function netSentiment(companies: AlertCompany[]): 'bullish' | 'bearish' | 'even' {
   const bullish = companies.filter((c) => c.direction === 'bullish').length;
@@ -11,7 +11,7 @@ function netSentiment(companies: AlertCompany[]): 'bullish' | 'bearish' | 'even'
 }
 
 export default function TierRows({ companies }: { companies: AlertCompany[] }) {
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { toggle, selected } = useCompanySelection(companies);
   const groups = groupByTier(companies);
 
   if (groups.length === 0) return null;
@@ -44,7 +44,7 @@ export default function TierRows({ companies }: { companies: AlertCompany[] }) {
                   <button
                     key={company.company_id}
                     type="button"
-                    onClick={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))}
+                    onClick={() => toggle(company.company_id)}
                     className="flex items-center gap-1 rounded-md bg-page px-2 py-1 text-xs text-ink hover:border-muted"
                   >
                     <span className={bullish ? 'text-bullish' : 'text-bearish'} aria-hidden="true">
@@ -58,11 +58,7 @@ export default function TierRows({ companies }: { companies: AlertCompany[] }) {
           </div>
         );
       })}
-      {selectedId !== null &&
-        (() => {
-          const selected = companies.find((c) => c.company_id === selectedId);
-          return selected ? <ReasoningPanel company={selected} /> : null;
-        })()}
+      {selected && <ReasoningPanel company={selected} />}
     </div>
   );
 }

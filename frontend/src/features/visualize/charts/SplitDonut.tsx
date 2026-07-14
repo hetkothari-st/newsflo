@@ -1,13 +1,13 @@
-import { useState } from 'react';
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { rankByMagnitude } from '../transforms';
+import { useCompanySelection } from './useCompanySelection';
 
 const RADIUS = 40;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export default function SplitDonut({ companies }: { companies: AlertCompany[] }) {
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { toggle, selected } = useCompanySelection(companies);
   const bullish = companies.filter((c) => c.direction === 'bullish');
   const bearish = companies.filter((c) => c.direction === 'bearish');
   const total = bullish.length + bearish.length;
@@ -47,7 +47,7 @@ export default function SplitDonut({ companies }: { companies: AlertCompany[] })
             <button
               key={company.company_id}
               type="button"
-              onClick={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))}
+              onClick={() => toggle(company.company_id)}
               className="flex items-center gap-2 rounded-md border border-hairline bg-page px-2 py-1.5 text-left text-xs text-ink"
             >
               <span className={isBullish ? 'text-bullish' : 'text-bearish'} aria-hidden="true">
@@ -58,11 +58,7 @@ export default function SplitDonut({ companies }: { companies: AlertCompany[] })
           );
         })}
       </div>
-      {selectedId !== null &&
-        (() => {
-          const selected = companies.find((c) => c.company_id === selectedId);
-          return selected ? <ReasoningPanel company={selected} /> : null;
-        })()}
+      {selected && <ReasoningPanel company={selected} />}
     </div>
   );
 }

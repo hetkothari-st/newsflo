@@ -1,7 +1,7 @@
-import { useState } from 'react';
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { rankByMagnitude } from '../transforms';
+import { useCompanySelection } from './useCompanySelection';
 
 // Bar length comes from rank position within this side only (index 0 =
 // nearest the axis = strongest in this alert), never from the raw
@@ -47,7 +47,7 @@ function Bar({ company, side, onSelect }: { company: AlertCompany; side: 'left' 
 }
 
 export default function ImpactBar({ companies }: { companies: AlertCompany[] }) {
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { toggle, selected } = useCompanySelection(companies);
   const bullish = rankByMagnitude(companies.filter((c) => c.direction === 'bullish'));
   const bearish = rankByMagnitude(companies.filter((c) => c.direction === 'bearish'));
 
@@ -63,14 +63,14 @@ export default function ImpactBar({ companies }: { companies: AlertCompany[] }) 
                 className="h-2 shrink-0 rounded-l-full bg-bearish"
                 style={{ width: `${barWidthPx(i, bearish.length)}px` }}
               />
-              <Bar company={company} side="left" onSelect={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))} />
+              <Bar company={company} side="left" onSelect={() => toggle(company.company_id)} />
             </div>
           ))}
         </div>
         <div className="flex flex-col items-start gap-2">
           {bullish.map((company, i) => (
             <div key={company.company_id} className="flex w-full items-center gap-2 overflow-x-auto">
-              <Bar company={company} side="right" onSelect={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))} />
+              <Bar company={company} side="right" onSelect={() => toggle(company.company_id)} />
               <div
                 className="h-2 shrink-0 rounded-r-full bg-bullish"
                 style={{ width: `${barWidthPx(i, bullish.length)}px` }}
@@ -79,11 +79,7 @@ export default function ImpactBar({ companies }: { companies: AlertCompany[] }) 
           ))}
         </div>
       </div>
-      {selectedId !== null &&
-        (() => {
-          const selected = companies.find((c) => c.company_id === selectedId);
-          return selected ? <ReasoningPanel company={selected} /> : null;
-        })()}
+      {selected && <ReasoningPanel company={selected} />}
     </div>
   );
 }
