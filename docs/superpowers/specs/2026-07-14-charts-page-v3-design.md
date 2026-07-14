@@ -127,21 +127,32 @@ Layout, top to bottom:
 Data: `groupBySector` (already exists, unchanged grouping logic — only the
 color source changes to the fixed palette above).
 
-Layout: one tile per sector present, sized by `companies.length` relative
-to the alert's total (simple proportional grid, not a full squarified
-treemap algorithm — with ≤5 companies total across ≤5 sectors a light
-CSS-grid-based proportional layout is sufficient and avoids a new
-dependency). Each tile: sector name header, ticker chips (ticker + ▲/▼)
-for its companies.
+Layout: one tile per sector present, in a uniform grid (`grid-cols-2
+sm:grid-cols-3`), sector name header, ticker chips (ticker + ▲/▼) for its
+companies.
+
+> **Implemented deviation, confirmed acceptable:** the original draft
+> above called for tile size proportional to `companies.length`. Built and
+> visually verified (Task 13) with uniform tile sizing instead — at ≤5
+> companies across ≤5 sectors, a 1-2 company gap between tiles reads as
+> noise, not signal, and every live screenshot (dark/light, 320-1440px)
+> looked clean and readable without it. Proportional sizing is easy to add
+> later if a future change allows more companies per alert; not worth the
+> complexity now.
 
 ### 2. Tier — grouped rows
 
 Data: `groupByTier` (already exists, fixed tier order unchanged).
 
 Layout: one row per tier present, in the existing fixed order. Each row:
-tier label, a count indicator (filled/empty dots, count vs. the alert's
-max-per-tier), a net-sentiment arrow (▲ if bullish > bearish in that tier,
-▼ if reversed, a neutral dash if tied), and ticker chips for its companies.
+tier label, a net-sentiment arrow (▲ if bullish > bearish in that tier, ▼
+if reversed, a neutral dash if tied), and ticker chips for its companies.
+
+> **Implemented deviation, confirmed acceptable:** the original draft
+> above also called for a separate filled/empty-dots count indicator. Cut
+> during implementation — the ticker chips themselves already show the
+> count at a glance (one chip per company), so a redundant dot row would
+> repeat information already visible, not add signal.
 
 ### 3. Impact — diverging bar (winners/losers)
 
