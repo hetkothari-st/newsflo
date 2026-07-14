@@ -14,8 +14,17 @@ function widthForRank(index: number, total: number): number {
 // The bar segment gets a fixed pixel width scaled by rank, independent of
 // the row/label width, so a long ticker name can never squeeze it to 0px.
 // MIN_BAR_PX keeps even the weakest rank visibly present.
-const MAX_BAR_PX = 80;
-const MIN_BAR_PX = 8;
+//
+// Sizing measured directly in a real 390px-wide mobile viewport (the app's
+// primary test width): the grid-cols-2 column is 165.6px wide, gap-2
+// between label and bar is 8px, and the longest observed realistic ticker
+// label (TATAMOTORS.NS, incl. arrow glyph) is ~109.5px. That leaves only
+// ~48px for the bar before the row overflows and the overflow-x-auto
+// fallback kicks in with a visible scrollbar. MAX_BAR_PX is kept safely
+// under that hard limit; MIN_BAR_PX is scaled down proportionally so the
+// weakest rank still reads as clearly shorter, not identical.
+const MAX_BAR_PX = 40;
+const MIN_BAR_PX = 4;
 
 function barWidthPx(index: number, total: number): number {
   return Math.max(MIN_BAR_PX, (widthForRank(index, total) / 100) * MAX_BAR_PX);
