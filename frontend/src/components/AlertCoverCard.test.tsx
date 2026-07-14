@@ -43,6 +43,7 @@ const alert: Alert = {
     {
       company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
       direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'x', key_points: [],
+      confidence_score: 50, time_horizon: 'Short-Term',
       basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [],
     },
   ],

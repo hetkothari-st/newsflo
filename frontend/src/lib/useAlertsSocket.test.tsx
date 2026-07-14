@@ -40,6 +40,7 @@ function makeWsAlert(id: number): WsAlert {
       {
         company_id: id, ticker: 'RELIANCE.NS', name: 'Reliance', index_tier: 'NIFTY50',
         direction: 'bullish', magnitude_low: 1, magnitude_high: 2, rationale: 'x', key_points: [],
+        confidence_score: 50, time_horizon: 'Short-Term',
         past_mentions: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
       },
     ],

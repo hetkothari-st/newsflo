@@ -96,3 +96,17 @@ function magnitudeMidpoint(company: AlertCompany): number {
 export function rankByMagnitude(companies: AlertCompany[]): AlertCompany[] {
   return [...companies].sort((a, b) => magnitudeMidpoint(b) - magnitudeMidpoint(a));
 }
+
+export function rankByConfidence(companies: AlertCompany[]): AlertCompany[] {
+  return [...companies].sort((a, b) => b.confidence_score - a.confidence_score);
+}
+
+export const TIME_HORIZON_ORDER = ['Immediate', 'Short-Term', 'Medium-Term', 'Long-Term'] as const;
+
+export function groupByTimeHorizon(companies: AlertCompany[]): CompanyGroup[] {
+  return TIME_HORIZON_ORDER.map((horizon) => ({
+    key: horizon,
+    label: horizon,
+    companies: companies.filter((c) => c.time_horizon === horizon),
+  })).filter((g) => g.companies.length > 0);
+}
