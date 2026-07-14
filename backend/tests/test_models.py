@@ -60,4 +60,5 @@ def test_user_email_alerts_enabled_defaults_true(db_session):
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
-    assert user.email_alerts_enabled is True
+    # Integer column (1/0), not Boolean -- see models.py's comment on why.
+    assert user.email_alerts_enabled == 1

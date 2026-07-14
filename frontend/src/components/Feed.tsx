@@ -58,7 +58,7 @@ const EMPTY_WATCHLIST: Watchlist = { categories: [], companies: [] };
 
 export default function Feed() {
   const { token } = useAuth();
-  const { language, t } = useLanguage();
+  const { language, t, translating } = useLanguage();
   const [tab, setTab] = useState<FeedTab>('india');
   const [fetched, setFetched] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +94,57 @@ export default function Feed() {
       active = false;
     };
   }, [token, language]);
+
+  // The on-demand translation drain finishes some time after the fetch
+  // above already ran (it just triggered the drain and moved on) -- without
+  // this, newly-translated content only ever shows up after a manual page
+  // reload. Refetches silently (no loading spinner, no revealedIds reset)
+  // so already-visible cards just update their text in place. Keyed on the
+  // true->false transition specifically, via the ref below, so this never
+  // fires on mount (translating starts false) or on the switch itself
+  // (translating starts true) -- only once the drain actually completes.
+  const wasTranslating = useRef(translating);
+  useEffect(() => {
+    const justFinished = wasTranslating.current && !translating;
+    wasTranslating.current = translating;
+    if (!justFinished) return;
+
+    let active = true;
+    getAlerts(token, language)
+      .then((data) => {
+        if (active) setFetched(data);
+      })
+      .catch(() => {
+        // Best-effort refresh -- the existing feed content stays as-is if
+        // this fails, no need to surface a separate error for it.
+      });
+    return () => {
+      active = false;
+    };
+  }, [translating, token, language]);
+
+  // New alerts keep streaming in via WebSocket in raw English (translation
+  // happens later, on the backend's own schedule -- see
+  // _alert_broadcast_payload's docstring) and mergeAlerts keeps an id's
+  // `live` (English) copy until `fetched` is refetched with a translated
+  // one for that same id. The drain-complete effect above only refetches
+  // after a drain THIS tab triggered -- it does nothing while the viewer
+  // just sits on a non-English language as unrelated new alerts arrive and
+  // translate in the background over the following minutes, so those never
+  // update without a manual reload. Poll for it instead: silent, same
+  // in-place-update behavior as the drain-complete refetch, off whenever
+  // viewing English (nothing to catch up on, no reason to poll).
+  useEffect(() => {
+    if (language === 'en') return;
+    const interval = setInterval(() => {
+      getAlerts(token, language)
+        .then(setFetched)
+        .catch(() => {
+          // Best-effort refresh -- keep whatever is already on screen.
+        });
+    }, 45_000);
+    return () => clearInterval(interval);
+  }, [language, token]);
 
   const refreshWatchlist = useCallback(() => {
     if (!token) return;
@@ -215,7 +266,7 @@ export default function Feed() {
     // carousel's flex-1 child can fill exactly the remaining space. Desktop
     // drops the fixed height entirely and scrolls normally with the page.
     <div className="flex h-[calc(100dvh-7rem)] flex-col overflow-hidden md:h-auto md:overflow-visible">
-      <div className="px-4 pt-4 md:mx-auto md:w-full md:max-w-6xl md:px-8 md:pt-8">
+      <div className="px-4 md:mx-auto md:w-full md:max-w-6xl md:px-8 md:pt-8">
         <CategoryTabs
           active={tab}
           onChange={setTab}

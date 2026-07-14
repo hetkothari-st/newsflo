@@ -2,7 +2,9 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import BottomNav from './components/BottomNav';
 import NavBar from './components/NavBar';
+import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
+import AlertChartsPage from './pages/AlertChartsPage';
 import CompanyPage from './pages/CompanyPage';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
@@ -19,10 +21,12 @@ function RequireAuth({ children }: { children: ReactElement }) {
 export default function App() {
   return (
     <div className="min-h-screen bg-page pb-14 font-sans text-ink md:pb-0">
+      <TranslationProgressBanner />
       <NavBar />
       <Routes>
         <Route path="/" element={<FeedPage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
+        <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
         <Route
           path="/holdings"
           element={

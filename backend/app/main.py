@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 from app.config import settings
 from app.db import init_db
-from app.routers import alerts, articles, auth, categories, companies, holdings, watchlist, ws
+from app.routers import alerts, articles, auth, categories, companies, holdings, translation, watchlist, ws
 from app.scheduler import start_scheduler
 from app.ws.manager import manager
 
@@ -28,6 +28,7 @@ app.include_router(holdings.router)
 app.include_router(companies.router)
 app.include_router(categories.router)
 app.include_router(watchlist.router)
+app.include_router(translation.router)
 app.include_router(ws.router)
 
 init_db()

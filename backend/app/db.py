@@ -25,7 +25,7 @@ _ADDED_COLUMNS = [
     ("articles", "image_url", "VARCHAR"),
     ("alert_companies", "key_points_json", "TEXT"),
     ("companies", "isin", "VARCHAR"),
-    ("users", "email_alerts_enabled", "BOOLEAN DEFAULT true"),
+    ("users", "email_alerts_enabled", "INTEGER DEFAULT 1"),
 ]
 
 

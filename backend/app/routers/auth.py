@@ -46,7 +46,7 @@ def _serialize_profile(user: User) -> ProfileResponse:
         id=user.id,
         email=user.email,
         created_at=user.created_at.isoformat(),
-        email_alerts_enabled=user.email_alerts_enabled,
+        email_alerts_enabled=bool(user.email_alerts_enabled),
     )
 
 
@@ -83,7 +83,12 @@ def patch_me(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user.email_alerts_enabled = payload.email_alerts_enabled
+    # int(), not the raw bool: psycopg2 adapts a Python bool to a SQL boolean
+    # literal regardless of the target column's declared type, and this
+    # column is INTEGER in Postgres (see models.py) -- binding a bool here
+    # would raise "column is of type integer but expression is of type
+    # boolean" against production.
+    current_user.email_alerts_enabled = int(payload.email_alerts_enabled)
     db.commit()
     db.refresh(current_user)
     return _serialize_profile(current_user)

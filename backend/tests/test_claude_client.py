@@ -7,6 +7,7 @@ from anthropic import RateLimitError as AnthropicRateLimitError
 from openai import RateLimitError
 
 from app.analysis.claude_client import (
+    ANTHROPIC_MODEL,
     AnthropicAdapter,
     FallbackClient,
     RotatingClient,
@@ -359,6 +360,7 @@ def _translate_via_fake(fake_messages, **kwargs):
     from app.analysis.claude_client import _AnthropicCompletions
     completions = _AnthropicCompletions.__new__(_AnthropicCompletions)
     completions._client = SimpleNamespace(messages=fake_messages)
+    completions._model = ANTHROPIC_MODEL
     return completions.create(**kwargs)
 
 

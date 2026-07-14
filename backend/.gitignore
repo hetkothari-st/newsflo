@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 *.db
 .env
+
+# Self-hosted NLLB model weights (~1-2GB per model) -- provisioned locally
+# by scripts/download_translation_model.py, never committed.
+models/

@@ -9,7 +9,7 @@ export default function NavBar() {
   const { t } = useLanguage();
   return (
     <nav className="border-b border-hairline bg-page">
-      <div className="mx-auto flex h-14 max-w-feed items-center justify-between px-4 md:h-auto md:py-4">
+      <div className="mx-auto flex min-h-14 max-w-feed items-center justify-between px-4 py-3 md:h-auto md:py-4">
         <Link to="/" className="font-display text-lg font-bold text-ink">
           NewsFlo
         </Link>

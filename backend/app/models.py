@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -105,7 +105,10 @@ class User(Base):
     email = Column(String, nullable=False, unique=True)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
-    email_alerts_enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+    # Integer, not Boolean: production Postgres already has this column as
+    # INTEGER (see db.py's _ADDED_COLUMNS) -- matching it here avoids a second
+    # schema migration. 1/0, not True/False, at every read/write site.
+    email_alerts_enabled = Column(Integer, nullable=False, default=1, server_default="1")
 
 
 class Holding(Base):

@@ -1,5 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Alert } from '../lib/api';
+import { useHorizontalSwipe } from '../lib/useHorizontalSwipe';
 import { useLanguage } from '../lib/language';
 import AlertCompanies from './AlertCompanies';
 import AlertCover from './AlertCover';
@@ -43,6 +45,14 @@ export default function AlertCoverCard({
   isAuthenticated?: boolean;
 }) {
   const { language, t } = useLanguage();
+  const navigate = useNavigate();
+  // Same entry point as the Charts button/ArrowRight shortcut in
+  // AlertCompanies -- a right swipe on the card itself is the mobile
+  // equivalent gesture, wired directly onto the touch-only variants below
+  // (not the desktop-only grid variant, which has no touch entry).
+  const swipeHandlers = useHorizontalSwipe({
+    onSwipeRight: () => navigate(`/alerts/${alert.id}/charts`),
+  });
   // The client-side CATEGORY_LABEL map inside CategorySwatch is still
   // correct for English (no CategoryTranslation row is ever written for
   // "en") -- only override it with the server-translated label once the
@@ -92,7 +102,11 @@ export default function AlertCoverCard({
     // column even when the company list is short, so it never trails off
     // into dead blank space.
     return (
-      <div ref={cardRef} className="relative flex h-full w-full shrink-0 snap-start flex-col overflow-y-auto">
+      <div
+        ref={cardRef}
+        className="relative flex h-full w-full shrink-0 snap-start flex-col overflow-y-auto"
+        {...swipeHandlers}
+      >
         <div className="relative shrink-0">
           <div className="relative h-56 w-full shrink-0 overflow-hidden">
             <AlertCover imageUrl={alert.article.image_url} category={alert.category} />
@@ -113,7 +127,7 @@ export default function AlertCoverCard({
         </div>
         <div
           ref={companiesRef}
-          className="relative flex-1 border-t border-hairline bg-surface theme-light:border-transparent theme-light:shadow-neu-inset"
+          className="relative flex-1 border-t border-hairline bg-surface theme-light:border-transparent"
         >
           {/* Positioned against this wrapper's own edge, not inside the
               padded/scrollable tabs row below -- putting it there let a
@@ -183,6 +197,7 @@ export default function AlertCoverCard({
       onClick={onOpen}
       onKeyDown={onKeyDown}
       className="relative flex h-full w-full shrink-0 cursor-pointer flex-col overflow-hidden snap-start theme-light:shadow-neu"
+      {...swipeHandlers}
     >
       <div className="relative min-h-0 w-full flex-1 overflow-hidden">
         <AlertCover imageUrl={alert.article.image_url} category={alert.category} />

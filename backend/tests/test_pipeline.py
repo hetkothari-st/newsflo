@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import event
 
 import app.pipeline as pipeline_module
 from app.analysis.schemas import AnalysisOutput, CompanyMention
@@ -278,3 +279,48 @@ def test_alert_broadcast_payload_includes_sector(db_session):
     payload = pipeline_module._alert_broadcast_payload(db_session, alert)
 
     assert payload["companies"][0]["sector"] == "oil_gas"
+
+
+def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_companies(db_session):
+    companies = [
+        Company(ticker=f"CO{i}.NS", name=f"Company {i}", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+        for i in range(4)
+    ]
+    db_session.add_all(companies)
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/broadcast-query-count", title="Query count test")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+
+    for company in companies:
+        db_session.add(AlertCompany(
+            alert_id=alert.id, company_id=company.id, direction="bullish",
+            magnitude_low=2.0, magnitude_high=4.0, rationale="x",
+            basis="direct_mention", confidence="llm_estimate",
+        ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    past_mentions_queries = 0
+
+    def _count(conn, cursor, statement, params, context, executemany):
+        nonlocal past_mentions_queries
+        if "alert_companies" in statement and "alerts" in statement and "articles" in statement:
+            past_mentions_queries += 1
+
+    event.listen(db_session.get_bind(), "before_cursor_execute", _count)
+    try:
+        payload = pipeline_module._alert_broadcast_payload(db_session, alert)
+    finally:
+        event.remove(db_session.get_bind(), "before_cursor_execute", _count)
+
+    assert len(payload["companies"]) == 4
+    # One bulk query for all 4 companies' past-mentions history, not one
+    # query per company (the get_past_mentions-per-company pattern this
+    # replaces).
+    assert past_mentions_queries == 1
