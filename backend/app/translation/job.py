@@ -191,8 +191,7 @@ def _validate_and_persist(session: Session, snapshot: _AlertSnapshot, lang: str,
     # be queued for the same lang in the same batch -- each independently
     # translates the (identical) article title/content, but only the first
     # to commit should persist it; a second INSERT would violate the
-    # (article_id, lang) unique constraint. Company translations are always
-    # alert-specific and always persisted regardless.
+    # (article_id, lang) unique constraint.
     already_has_article_translation = (
         session.query(ArticleTranslation.id)
         .filter_by(article_id=snapshot.article_id, lang=lang)
@@ -206,7 +205,24 @@ def _validate_and_persist(session: Session, snapshot: _AlertSnapshot, lang: str,
             title=translated["title"],
             content=translated["content"],
         ))
+    # Company translations need the same check-before-insert guard: the
+    # on-demand translate-now endpoint (routers/translation.py) and the
+    # periodic scheduler job can both decide this (alert_company_id, lang)
+    # pair is still missing and race to insert it -- confirmed in
+    # production (a UniqueViolation on uq_alert_company_translation_lang
+    # aborted the whole pair's commit, including the article title/content
+    # that would otherwise have persisted fine, permanently stalling that
+    # alert's translation until TranslationFailure attempts ran out).
+    existing_company_langs = {
+        row[0]
+        for row in session.query(AlertCompanyTranslation.alert_company_id).filter(
+            AlertCompanyTranslation.alert_company_id.in_([c["id"] for c in snapshot.companies]),
+            AlertCompanyTranslation.lang == lang,
+        )
+    }
     for company, tc in zip(snapshot.companies, translated_companies):
+        if company["id"] in existing_company_langs:
+            continue
         session.add(AlertCompanyTranslation(
             alert_company_id=company["id"],
             lang=lang,
