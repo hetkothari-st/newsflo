@@ -1,5 +1,4 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import BottomNav from './BottomNav';
@@ -43,19 +42,9 @@ describe('BottomNav', () => {
     expect(screen.getByRole('link', { name: /account/i })).toHaveAttribute('href', '/login');
   });
 
-  it('opens an account sheet with email and Logout when logged in', async () => {
+  it('links Account to /account when logged in', () => {
     setToken();
     renderNav();
-    await userEvent.click(screen.getByRole('button', { name: /account/i }));
-    expect(screen.getByText('a@example.com')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
-  });
-
-  it('calls logout and closes the sheet when Logout is clicked', async () => {
-    setToken();
-    renderNav();
-    await userEvent.click(screen.getByRole('button', { name: /account/i }));
-    await userEvent.click(screen.getByRole('button', { name: /logout/i }));
-    expect(screen.queryByText('a@example.com')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /account/i })).toHaveAttribute('href', '/account');
   });
 });

@@ -110,6 +110,13 @@ export interface Watchlist {
   companies: WatchlistCompany[];
 }
 
+export interface Profile {
+  id: number;
+  email: string;
+  created_at: string;
+  email_alerts_enabled: boolean;
+}
+
 interface ApiError {
   detail: string;
 }
@@ -241,4 +248,42 @@ export async function getTranslationStatus(lang: Language): Promise<TranslationS
   const res = await fetch(`/api/translation/status?lang=${lang}`);
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as TranslationStatus;
+}
+
+export async function getMe(token: string): Promise<Profile> {
+  const res = await fetch('/api/auth/me', { headers: authHeaders(token) });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Profile;
+}
+
+export async function updatePreferences(token: string, emailAlertsEnabled: boolean): Promise<Profile> {
+  const res = await fetch('/api/auth/me', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ email_alerts_enabled: emailAlertsEnabled }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Profile;
+}
+
+export async function changePassword(
+  token: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const res = await fetch('/api/auth/me/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+export async function deleteAccount(token: string, password: string): Promise<void> {
+  const res = await fetch('/api/auth/me', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
 }
