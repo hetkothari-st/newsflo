@@ -113,7 +113,7 @@ export default function AlertCoverCard({
         </div>
         <div
           ref={companiesRef}
-          className="relative flex-1 border-t border-hairline bg-surface theme-light:border-transparent theme-light:shadow-neu-inset"
+          className="relative flex-1 border-t border-hairline bg-surface theme-light:border-transparent"
         >
           {/* Positioned against this wrapper's own edge, not inside the
               padded/scrollable tabs row below -- putting it there let a
