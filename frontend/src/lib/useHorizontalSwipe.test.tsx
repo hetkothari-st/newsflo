@@ -7,10 +7,6 @@ function Swipeable({ onSwipeLeft, onSwipeRight }: { onSwipeLeft?: () => void; on
   return <div data-testid="target" {...handlers} />;
 }
 
-function touch(clientX: number, clientY: number) {
-  return { touches: [{ clientX, clientY }] } as unknown as React.TouchEvent;
-}
-
 describe('useHorizontalSwipe', () => {
   it('fires onSwipeRight when the horizontal drag exceeds the threshold, moving right', () => {
     const onSwipeRight = vi.fn();
