@@ -147,7 +147,9 @@ export default function AccountPage() {
 
       <section className="flex flex-col gap-4 rounded-lg border border-hairline bg-surface p-6">
         <h2 className="text-xs uppercase tracking-widest text-muted">{t('account.watchlistHeading')}</h2>
-        <WatchlistSettings />
+        <div className="max-h-[28rem] overflow-y-auto pr-1">
+          <WatchlistSettings />
+        </div>
       </section>
 
       <section className="flex items-center justify-between rounded-lg border border-hairline bg-surface p-6">
