@@ -26,6 +26,8 @@ def _to_resolved(company: Company, mention: CompanyMention, basis: str) -> dict:
         "magnitude_high": mention.magnitude_high,
         "rationale": mention.rationale,
         "key_points": mention.key_points,
+        "confidence_score": mention.confidence_score,
+        "time_horizon": mention.time_horizon,
         "basis": basis,
     }
 

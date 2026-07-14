@@ -34,6 +34,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
             key_points=["Crude eases", "Refining margins widen"],
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -52,6 +53,8 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert alert_companies[0].magnitude_low == 2.0
     assert alert_companies[0].magnitude_high == 4.0
     assert pipeline_module.decode_key_points(alert_companies[0]) == ["Crude eases", "Refining margins widen"]
+    assert alert_companies[0].confidence_score == 85
+    assert alert_companies[0].time_horizon == "Short-Term"
 
     # No holdings exist, so no email notifications were created (matcher no-op).
     assert db_session.query(EmailNotification).count() == 0
@@ -85,6 +88,7 @@ def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_s
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -122,6 +126,7 @@ def test_process_new_articles_sends_email_notification_for_holder(db_session, mo
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -180,6 +185,7 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
             key_points=["Crude eases", "Refining margins widen"],
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     call_count = {"n": 0}
@@ -229,6 +235,7 @@ def test_process_new_articles_sets_image_url_from_og_image_fetch(db_session, mon
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -324,3 +331,31 @@ def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_com
     # query per company (the get_past_mentions-per-company pattern this
     # replaces).
     assert past_mentions_queries == 1
+
+
+def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_session, monkeypatch):
+    for ticker, tier in [("A.NS", "NIFTY50"), ("B.NS", "NIFTYNEXT50")]:
+        db_session.add(Company(ticker=ticker, name=ticker, sector="oil_gas", index_tier=tier, market_cap=1.0))
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/b", title="Oil sector news", content="x")
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy",
+        companies=[CompanyMention(
+            name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="sector-wide tailwind",
+            key_points=[], confidence_score=55, time_horizon="Medium-Term",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    process_new_articles(db_session, claude_client=object())
+
+    alert = db_session.query(Alert).one()
+    rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
+    assert len(rows) == 2
+    assert all(r.confidence_score == 55 for r in rows)
+    assert all(r.time_horizon == "Medium-Term" for r in rows)

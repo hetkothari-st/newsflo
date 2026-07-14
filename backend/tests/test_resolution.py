@@ -16,6 +16,7 @@ def test_resolve_direct_mention(db_session):
         name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
         direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
         key_points=["Crude prices ease", "Refining margins widen"],
+        confidence_score=85, time_horizon="Short-Term",
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -39,6 +40,7 @@ def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
     mention = CompanyMention(
         name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
+        confidence_score=55, time_horizon="Medium-Term",
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -58,6 +60,7 @@ def test_resolve_direct_mention_with_unknown_ticker_is_skipped(db_session):
     mention = CompanyMention(
         name="Unknown Corp", ticker="UNKNOWN.NS", is_direct=True, sector=None,
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="n/a",
+        confidence_score=50, time_horizon="Short-Term",
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -73,6 +76,7 @@ def test_resolve_direct_mention_falls_back_to_name_when_ticker_missing(db_sessio
     mention = CompanyMention(
         name="State Bank of India", ticker=None, is_direct=True, sector="banking",
         direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="higher funding costs",
+        confidence_score=75, time_horizon="Medium-Term",
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -90,6 +94,7 @@ def test_resolve_direct_mention_name_fallback_skips_ambiguous_matches(db_session
     mention = CompanyMention(
         name="Bank", ticker=None, is_direct=True, sector="banking",
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="vague",
+        confidence_score=40, time_horizon="Short-Term",
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -102,6 +107,7 @@ def test_resolve_direct_mention_name_fallback_is_case_insensitive(db_session):
     mention = CompanyMention(
         name="tata consultancy services", ticker=None, is_direct=True, sector="it",
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="strong order book",
+        confidence_score=80, time_horizon="Short-Term",
     )
 
     resolved = resolve_companies(db_session, [mention])
@@ -122,10 +128,12 @@ def test_resolve_dedupes_repeated_sector_inference_across_mentions(db_session):
         CompanyMention(
             name="Indian Oil Corporation", ticker="IOC.NS", is_direct=False, sector="oil_gas",
             direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="easing crude prices",
+            confidence_score=60, time_horizon="Medium-Term",
         ),
         CompanyMention(
             name="Bharat Petroleum", ticker="BPCL.NS", is_direct=False, sector="oil_gas",
             direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="easing crude prices",
+            confidence_score=60, time_horizon="Medium-Term",
         ),
     ]
 
@@ -142,6 +150,7 @@ def test_tier_rank_prefers_niftynext50_over_midcap150(db_session):
     mention = CompanyMention(
         name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
+        confidence_score=55, time_horizon="Medium-Term",
     )
     resolved = resolve_companies(db_session, [mention])
     resolved_ids = [r["company_id"] for r in resolved]
@@ -157,10 +166,12 @@ def test_resolve_dedupes_direct_mention_already_covered_by_sector_inference(db_s
         CompanyMention(
             name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
             direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
+            confidence_score=55, time_horizon="Medium-Term",
         ),
         CompanyMention(
             name="Oil Co 0", ticker="OIL_0.NS", is_direct=True, sector="oil_gas",
             direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="named directly",
+            confidence_score=85, time_horizon="Short-Term",
         ),
     ]
 

@@ -38,6 +38,7 @@ def _serialize_alert(
             "index_tier": ac.company.index_tier, "sector": ac.company.sector, "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": rationale, "key_points": key_points,
+            "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
             "basis": ac.basis, "confidence": ac.confidence,
             "market": infer_market(ac.company.ticker),
             "in_my_holdings": ac.company_id in held_company_ids,
