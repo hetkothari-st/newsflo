@@ -123,6 +123,29 @@ export default function Feed() {
     };
   }, [translating, token, language]);
 
+  // New alerts keep streaming in via WebSocket in raw English (translation
+  // happens later, on the backend's own schedule -- see
+  // _alert_broadcast_payload's docstring) and mergeAlerts keeps an id's
+  // `live` (English) copy until `fetched` is refetched with a translated
+  // one for that same id. The drain-complete effect above only refetches
+  // after a drain THIS tab triggered -- it does nothing while the viewer
+  // just sits on a non-English language as unrelated new alerts arrive and
+  // translate in the background over the following minutes, so those never
+  // update without a manual reload. Poll for it instead: silent, same
+  // in-place-update behavior as the drain-complete refetch, off whenever
+  // viewing English (nothing to catch up on, no reason to poll).
+  useEffect(() => {
+    if (language === 'en') return;
+    const interval = setInterval(() => {
+      getAlerts(token, language)
+        .then(setFetched)
+        .catch(() => {
+          // Best-effort refresh -- keep whatever is already on screen.
+        });
+    }, 45_000);
+    return () => clearInterval(interval);
+  }, [language, token]);
+
   const refreshWatchlist = useCallback(() => {
     if (!token) return;
     getWatchlist(token)
