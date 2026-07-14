@@ -23,7 +23,7 @@ function alert(overrides: Partial<Alert> = {}): Alert {
       {
         company_id: 1, ticker: 'RIL', name: 'Reliance Industries', index_tier: 'NIFTY50', sector: 'oil_gas',
         direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner margins widen.',
-        key_points: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+        key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
         in_my_holdings: false, past_mentions: [],
       },
     ],
