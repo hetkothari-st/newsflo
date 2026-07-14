@@ -3,15 +3,15 @@ import json
 from openai import OpenAI
 
 from app.analysis.claude_client import MODEL, GROQ_BASE_URL, AnthropicAdapter, RotatingClient
+from app.translation import nllb_translator
 from app.translation.languages import LANG_NAMES, TARGET_LANGS
 
-# Anthropic hit this account's usage cap (confirmed in production: every
-# call started failing with "You have reached your specified API usage
-# limits", not resetting until 2026-08-01) -- back on Groq, whose free-tier
-# limit is a continuously-renewing per-MINUTE cap rather than an exhausted
-# account-wide one. Flip to "anthropic" again once that cap resets or a
-# funded/higher-limit key is available.
-TRANSLATION_PROVIDER = "groq"  # "anthropic" | "groq"
+# Self-hosted (NLLB via CTranslate2, see nllb_translator.py) replaces the
+# paid/rate-limited API providers as the default: no per-minute token cap,
+# no cost, no cross-account key juggling. "anthropic"/"groq" stay wired up
+# as fallbacks -- flip back if the local model becomes unavailable in some
+# environment (e.g. a deploy target too small to hold the model in memory).
+TRANSLATION_PROVIDER = "nllb"  # "nllb" | "anthropic" | "groq"
 TRANSLATION_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 # Deliberately MODEL (llama-3.3-70b-versatile), not FALLBACK_MODEL, despite
@@ -59,10 +59,13 @@ SYSTEM_PROMPT = (
 
 def build_translation_client(
     groq_api_keys: list[str], anthropic_api_key: str | None = None
-) -> RotatingClient | OpenAI | AnthropicAdapter:
+) -> RotatingClient | OpenAI | AnthropicAdapter | None:
     """A single client -- used for the low-volume category-translation path,
     which doesn't need per-lane parallelism (see build_translation_clients
-    for the alert-translation path, which does)."""
+    for the alert-translation path, which does). NLLB needs no client at
+    all (no API key, local model) -- translate_categories ignores it."""
+    if TRANSLATION_PROVIDER == "nllb":
+        return None
     if TRANSLATION_PROVIDER == "anthropic":
         if not anthropic_api_key:
             raise ValueError("TRANSLATION_PROVIDER is 'anthropic' but no anthropic_api_key was given")
@@ -81,7 +84,7 @@ ANTHROPIC_CONCURRENCY = 6
 
 def build_translation_clients(
     groq_api_keys: list[str], anthropic_api_key: str | None = None
-) -> list[RotatingClient | OpenAI | AnthropicAdapter]:
+) -> list[RotatingClient | OpenAI | AnthropicAdapter | None]:
     """One entry per independent lane translate_pending_alerts should run
     concurrently (see job.py). For Groq, `groq_api_keys` must be keys from
     genuinely SEPARATE accounts (separate per-minute quota buckets) -- pass
@@ -91,8 +94,14 @@ def build_translation_clients(
     budget). Each key gets its own client/lane, throttled independently
     within that lane. For Anthropic, returns the SAME client repeated
     ANTHROPIC_CONCURRENCY times -- true concurrent requests on one client,
-    no per-lane throttling needed.
+    no per-lane throttling needed. For NLLB, always a single `[None]` lane
+    -- it's one local model instance, not a per-account quota; CTranslate2
+    already parallelizes internally (nllb_translator.py's inter_threads),
+    so extra Python-level lanes would just have threads fight over the same
+    CPU cores and model handle for no real throughput gain.
     """
+    if TRANSLATION_PROVIDER == "nllb":
+        return [None]
     if TRANSLATION_PROVIDER == "anthropic":
         if not anthropic_api_key:
             raise ValueError("TRANSLATION_PROVIDER is 'anthropic' but no anthropic_api_key was given")
@@ -164,6 +173,8 @@ def translate_alert(client, *, lang: str, title: str, content: str, companies: l
     Returns `{"title": ..., "content": ..., "companies": [...]}` for the
     requested language.
     """
+    if TRANSLATION_PROVIDER == "nllb":
+        return nllb_translator.translate_alert(lang=lang, title=title, content=content, companies=companies)
     companies_text = "\n".join(
         f"{i + 1}. Rationale: {c['rationale']}\n   Key points: {c['key_points']}"
         for i, c in enumerate(companies)
@@ -231,6 +242,14 @@ def translate_categories(client, lang: str, categories: list[str]) -> list[str]:
     call stays comfortably under the TPM cap. Returns translated labels in
     the same order as `categories`.
     """
+    if TRANSLATION_PROVIDER == "nllb":
+        # NLLB is a pure translation model, not instruction-following -- it
+        # has no prompt to tell it "oil_energy" means "Oil & Energy", so
+        # underscore-joined category strings must be turned into an actual
+        # English phrase before translation, same substitution the LLM
+        # prompt spells out in words for itself below.
+        phrases = [c.replace("_", " ").title() for c in categories]
+        return nllb_translator.translate_categories(phrases, lang)
     numbered = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(categories))
     response = client.chat.completions.create(
         model=TRANSLATION_MODEL,

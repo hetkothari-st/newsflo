@@ -18,3 +18,13 @@ python-multipart
 email-validator
 websockets
 psycopg2-binary
+
+# Self-hosted translation (see app/translation/nllb_translator.py). torch is
+# CPU-only -- pulled from PyTorch's own CPU wheel index (the default PyPI
+# wheel is CUDA-bundled and multiple GB larger for no benefit on a server
+# with no GPU).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0
+transformers==5.13.1
+ctranslate2==4.8.1
+sentencepiece==0.2.2

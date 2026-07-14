@@ -21,11 +21,19 @@ Usage (from the backend/ directory, so `app` is importable):
 """
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.translation.groq_translator import build_translation_client, build_translation_clients
+from app.translation.groq_translator import (
+    RECOMMENDED_THROTTLE_SECONDS,
+    TRANSLATION_PROVIDER,
+    build_translation_client,
+    build_translation_clients,
+)
 from app.translation.job import translate_pending_alerts, translate_pending_categories
 
-BATCH_SIZE = 25
-THROTTLE_SECONDS = 3.0
+# NLLB has no per-minute cap to pace against -- a much bigger batch per call
+# and zero throttle finishes the historical backlog in minutes instead of
+# hours. Groq/Anthropic keep the original conservative pacing.
+BATCH_SIZE = 200 if TRANSLATION_PROVIDER == "nllb" else 25
+THROTTLE_SECONDS = RECOMMENDED_THROTTLE_SECONDS if TRANSLATION_PROVIDER == "nllb" else 3.0
 
 
 def main() -> None:

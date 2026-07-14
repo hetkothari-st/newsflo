@@ -43,9 +43,16 @@ _lock = threading.Lock()
 # lanes available (see translate_pending_alerts/build_translation_clients),
 # so adding another separate-account Groq key raises this bound too.
 # Anthropic's real single-account concurrency affords a bigger batch outright.
-ON_DEMAND_ALERT_LIMIT = (
-    10 * max(1, len(settings.translation_groq_api_keys)) if TRANSLATION_PROVIDER == "groq" else 40
-)
+# NLLB has no per-minute cap and each (alert, lang) call completes in a few
+# seconds on CPU, so a viewer switching languages can wait for a much
+# bigger slice of the backlog to finish without the progress bar taking
+# unreasonably long.
+if TRANSLATION_PROVIDER == "nllb":
+    ON_DEMAND_ALERT_LIMIT = 150
+elif TRANSLATION_PROVIDER == "groq":
+    ON_DEMAND_ALERT_LIMIT = 10 * max(1, len(settings.translation_groq_api_keys))
+else:
+    ON_DEMAND_ALERT_LIMIT = 40
 
 
 def _drain_language(lang: str) -> None:
