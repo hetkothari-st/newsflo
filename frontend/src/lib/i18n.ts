@@ -352,13 +352,9 @@ const CATALOG = {
     en: 'Sector', hi: 'क्षेत्र', mr: 'क्षेत्र', gu: 'ક્ષેત્ર', ml: 'മേഖല', te: 'రంగం', ta: 'துறை', kn: 'ವಲಯ',
     pa: 'ਖੇਤਰ', bn: 'খাত',
   },
-  'companies.list': {
-    en: 'List', hi: 'सूची', mr: 'यादी', gu: 'યાદી', ml: 'ലിസ്റ്റ്', te: 'జాబితా', ta: 'பட்டியல்', kn: 'ಪಟ್ಟಿ',
-    pa: 'ਸੂਚੀ', bn: 'তালিকা',
-  },
-  'companies.chart': {
-    en: 'Chart', hi: 'चार्ट', mr: 'चार्ट', gu: 'ચાર્ટ', ml: 'ചാർട്ട്', te: 'చార్ట్', ta: 'விளக்கப்படம்', kn: 'ಚಾರ್ಟ್',
-    pa: 'ਚਾਰਟ', bn: 'চার্ট',
+  'companies.charts': {
+    en: 'Charts', hi: 'चार्ट्स', mr: 'चार्ट्स', gu: 'ચાર્ટ્સ', ml: 'ചാർട്ടുകൾ', te: 'చార్ట్‌లు', ta: 'விளக்கப்படங்கள்',
+    kn: 'ಚಾರ್ಟ್‌ಗಳು', pa: 'ਚਾਰਟਸ', bn: 'চার্টসমূহ',
   },
   'companies.emptyMyDematAuthed': {
     en: 'None of your holdings are affected by this story.', hi: 'इस खबर से आपकी कोई होल्डिंग प्रभावित नहीं है।',

@@ -1,13 +1,24 @@
 import { render as rtlRender, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import AlertCompanies from './AlertCompanies';
 import type { Alert } from '../lib/api';
 import { LanguageProvider } from '../lib/language';
 
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 function render(ui: ReactElement) {
-  return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
+  return rtlRender(
+    <MemoryRouter>
+      <LanguageProvider>{ui}</LanguageProvider>
+    </MemoryRouter>,
+  );
 }
 
 const alert: Alert = {
@@ -117,24 +128,57 @@ describe('AlertCompanies', () => {
     expect(screen.getByText('0 Bearish')).toBeInTheDocument();
   });
 
-  it('defaults to List view, showing CompanyChip rows', () => {
+  it('shows a Charts button that navigates to the charts page when companies are visible', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
-    expect(screen.getByRole('button', { name: 'List' })).toBeInTheDocument();
+    const chartsButton = screen.getByRole('button', { name: /charts/i });
+    expect(chartsButton).toBeInTheDocument();
+    await userEvent.click(chartsButton);
+    expect(mockNavigate).toHaveBeenCalledWith('/alerts/1/charts');
+  });
+
+  it('hides the Charts button when the active tab has no visible companies', async () => {
+    const anon: Alert = { ...alert, companies: alert.companies.map((c) => ({ ...c, in_my_holdings: false })) };
+    render(<AlertCompanies alert={anon} isAuthenticated={false} />);
+    await userEvent.click(screen.getByRole('button', { name: /my portfolio/i }));
+    expect(screen.queryByRole('button', { name: /charts/i })).not.toBeInTheDocument();
+  });
+
+  it('does not render a List/Chart toggle anymore', () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    expect(screen.queryByRole('button', { name: 'List' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chart' })).not.toBeInTheDocument();
     expect(screen.getByText('RELIANCE.NS')).toBeInTheDocument();
   });
 
-  it('switches to Chart view, rendering the tree instead of the list rows', async () => {
+  it('ArrowRight navigates to charts when no input has focus', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
-    await userEvent.click(screen.getByRole('button', { name: 'Chart' }));
-    expect(screen.getByRole('group', { name: /tier tree/i })).toBeInTheDocument();
-    expect(screen.queryByText('RELIANCE.NS')).not.toBeInTheDocument();
+    mockNavigate.mockClear();
+
+    // Simulate ArrowRight keypress with no focused element
+    const event = new KeyboardEvent('keydown', { key: 'ArrowRight' });
+    document.dispatchEvent(event);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/alerts/1/charts');
   });
 
-  it('reflects the active Group mode in Chart view', async () => {
+  it('ArrowRight does NOT navigate when an input element has focus', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'sector');
-    await userEvent.click(screen.getByRole('button', { name: 'Chart' }));
-    expect(screen.getByText(/Energy · 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Financials · 1/)).toBeInTheDocument();
+    mockNavigate.mockClear();
+
+    // Create and focus an input element
+    const input = document.createElement('input');
+    input.type = 'text';
+    document.body.appendChild(input);
+    input.focus();
+
+    // Simulate ArrowRight keypress with input focused
+    const event = new KeyboardEvent('keydown', { key: 'ArrowRight' });
+    document.dispatchEvent(event);
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    // Cleanup
+    document.body.removeChild(input);
   });
+
 });

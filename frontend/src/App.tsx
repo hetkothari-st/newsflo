@@ -4,6 +4,7 @@ import BottomNav from './components/BottomNav';
 import NavBar from './components/NavBar';
 import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
+import AlertChartsPage from './pages/AlertChartsPage';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
@@ -23,6 +24,7 @@ export default function App() {
       <NavBar />
       <Routes>
         <Route path="/" element={<FeedPage />} />
+        <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
         <Route
           path="/holdings"
           element={

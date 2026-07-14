@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import MobileFeedCarousel from './MobileFeedCarousel';
 import type { Alert } from '../lib/api';
 import { LanguageProvider } from '../lib/language';
@@ -19,9 +20,11 @@ function makeAlert(id: number, title: string): Alert {
 describe('MobileFeedCarousel', () => {
   it('renders one card per alert', () => {
     render(
-      <LanguageProvider>
-        <MobileFeedCarousel alerts={[makeAlert(1, 'First'), makeAlert(2, 'Second')]} onOpen={() => {}} />
-      </LanguageProvider>,
+      <MemoryRouter>
+        <LanguageProvider>
+          <MobileFeedCarousel alerts={[makeAlert(1, 'First'), makeAlert(2, 'Second')]} onOpen={() => {}} />
+        </LanguageProvider>
+      </MemoryRouter>,
     );
     expect(screen.getByText('First')).toBeInTheDocument();
     expect(screen.getByText('Second')).toBeInTheDocument();
@@ -30,9 +33,11 @@ describe('MobileFeedCarousel', () => {
   it('calls onOpen with the alert id when a card is clicked', async () => {
     const onOpen = vi.fn();
     render(
-      <LanguageProvider>
-        <MobileFeedCarousel alerts={[makeAlert(7, 'Seventh')]} onOpen={onOpen} />
-      </LanguageProvider>,
+      <MemoryRouter>
+        <LanguageProvider>
+          <MobileFeedCarousel alerts={[makeAlert(7, 'Seventh')]} onOpen={onOpen} />
+        </LanguageProvider>
+      </MemoryRouter>,
     );
     await userEvent.click(screen.getByRole('button', { name: /seventh/i }));
     expect(onOpen).toHaveBeenCalledWith(7);
