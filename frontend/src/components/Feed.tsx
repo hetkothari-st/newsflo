@@ -243,7 +243,7 @@ export default function Feed() {
     // carousel's flex-1 child can fill exactly the remaining space. Desktop
     // drops the fixed height entirely and scrolls normally with the page.
     <div className="flex h-[calc(100dvh-7rem)] flex-col overflow-hidden md:h-auto md:overflow-visible">
-      <div className="px-4 pt-4 md:mx-auto md:w-full md:max-w-6xl md:px-8 md:pt-8">
+      <div className="px-4 pt-4 theme-light:pt-0 md:mx-auto md:w-full md:max-w-6xl md:px-8 md:pt-8">
         <CategoryTabs
           active={tab}
           onChange={setTab}
