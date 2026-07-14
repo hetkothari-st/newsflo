@@ -1,4 +1,5 @@
 import { render as rtlRender, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import TierRows from './TierRows';
@@ -54,6 +55,12 @@ describe('TierRows', () => {
       />,
     );
     expect(screen.getByLabelText('Evenly split')).toBeInTheDocument();
+  });
+
+  it('expands a ReasoningPanel when a company is tapped', async () => {
+    render(<TierRows companies={[company({ company_id: 1, rationale: 'Resilient earnings growth expected here.' })]} />);
+    await userEvent.click(screen.getByText('AAA'));
+    expect(screen.getByText(/Resilient earnings growth/)).toBeInTheDocument();
   });
 
   it('renders nothing for an empty company list', () => {
