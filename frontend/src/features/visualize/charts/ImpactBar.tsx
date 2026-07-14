@@ -11,6 +11,16 @@ function widthForRank(index: number, total: number): number {
   return 100 - (index / total) * 60;
 }
 
+// The bar segment gets a fixed pixel width scaled by rank, independent of
+// the row/label width, so a long ticker name can never squeeze it to 0px.
+// MIN_BAR_PX keeps even the weakest rank visibly present.
+const MAX_BAR_PX = 80;
+const MIN_BAR_PX = 8;
+
+function barWidthPx(index: number, total: number): number {
+  return Math.max(MIN_BAR_PX, (widthForRank(index, total) / 100) * MAX_BAR_PX);
+}
+
 function Bar({ company, side, onSelect }: { company: AlertCompany; side: 'left' | 'right'; onSelect: () => void }) {
   const bullish = company.direction === 'bullish';
   return (
@@ -39,17 +49,17 @@ export default function ImpactBar({ companies }: { companies: AlertCompany[] }) 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col items-end gap-2">
           {bearish.map((company, i) => (
-            <div key={company.company_id} className="flex items-center justify-end gap-2" style={{ width: `${widthForRank(i, bearish.length)}%` }}>
-              <div className="h-2 flex-1 rounded-l-full bg-bearish" />
+            <div key={company.company_id} className="flex w-full items-center justify-end gap-2">
+              <div className="h-2 rounded-l-full bg-bearish" style={{ width: `${barWidthPx(i, bearish.length)}px` }} />
               <Bar company={company} side="left" onSelect={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))} />
             </div>
           ))}
         </div>
         <div className="flex flex-col items-start gap-2">
           {bullish.map((company, i) => (
-            <div key={company.company_id} className="flex items-center gap-2" style={{ width: `${widthForRank(i, bullish.length)}%` }}>
+            <div key={company.company_id} className="flex w-full items-center gap-2">
               <Bar company={company} side="right" onSelect={() => setSelectedId((id) => (id === company.company_id ? null : company.company_id))} />
-              <div className="h-2 flex-1 rounded-r-full bg-bullish" />
+              <div className="h-2 rounded-r-full bg-bullish" style={{ width: `${barWidthPx(i, bullish.length)}px` }} />
             </div>
           ))}
         </div>

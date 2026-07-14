@@ -51,4 +51,29 @@ describe('ImpactBar', () => {
     const { container } = render(<ImpactBar companies={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('keeps the bar visibly non-zero for a lower-ranked company even with a long ticker name', () => {
+    // Regression test for the bug where the OUTER row's width shrank per
+    // rank, and a long ticker label at a low rank could squeeze the
+    // flex-1 bar div down to 0px. jsdom doesn't do real layout, so we
+    // can't measure rendered pixels -- instead we assert on the inline
+    // style width we set directly on the bar segment, which is the
+    // mechanism the fix relies on to guarantee visibility.
+    const { container } = render(
+      <ImpactBar
+        companies={[
+          company({ company_id: 1, ticker: 'HDFCBANK.NS', direction: 'bearish', magnitude_low: 9, magnitude_high: 10 }),
+          company({ company_id: 2, ticker: 'SUNPHARMA.NS', direction: 'bearish', magnitude_low: 3, magnitude_high: 4 }),
+        ]}
+      />,
+    );
+    const bars = container.querySelectorAll('.bg-bearish');
+    expect(bars).toHaveLength(2);
+    const widths = Array.from(bars).map((el) => parseFloat((el as HTMLElement).style.width));
+    // The bar for the lower-ranked (index 1) company must never be 0/NaN.
+    expect(widths[1]).toBeGreaterThan(0);
+    // Rank must still be visually distinguishable: stronger rank (index 0)
+    // renders a clearly longer bar than the weaker rank (index 1).
+    expect(widths[0]).toBeGreaterThan(widths[1]);
+  });
 });
