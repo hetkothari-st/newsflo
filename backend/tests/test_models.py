@@ -86,3 +86,63 @@ def test_company_instrument_token_defaults_to_none(db_session):
 
     fetched = db_session.query(Company).filter_by(ticker="TCS.NS").one()
     assert fetched.instrument_token is None
+
+
+def test_alert_has_reasoning_engine_columns(db_session):
+    from app.models import Alert
+    article = Article(source="test", url="https://example.com/models-1", title="t")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(
+        article_id=article.id, category="oil_energy",
+        event_type="crude_oil", prompt_version="v1", knowledge_version="v1",
+    )
+    db_session.add(alert)
+    db_session.commit()
+    db_session.refresh(alert)
+
+    assert alert.event_type == "crude_oil"
+    assert alert.prompt_version == "v1"
+    assert alert.knowledge_version == "v1"
+
+
+def test_alert_reasoning_engine_columns_are_nullable(db_session):
+    from app.models import Alert
+    article = Article(source="test", url="https://example.com/models-2", title="t")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()  # must not raise
+
+    assert alert.event_type is None
+
+
+def test_alert_company_has_evidence_discipline_and_confidence_engine_columns(db_session):
+    from app.models import Alert, AlertCompany
+    article = Article(source="test", url="https://example.com/models-3", title="t")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    company = Company(ticker="X.NS", name="X", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="x", basis="direct_mention",
+        reasons_json='["a"]', evidence_refs_json='["RULE_X"]', risks_json='[]',
+        assumptions_json='[]', unknowns_json='[]', alternative_hypothesis="alt",
+        confidence_band="HIGH", confidence_contributors_json='["c"]',
+        confidence_penalties_json='[]', rulebook_ids_json='["RULE_X"]',
+    )
+    db_session.add(ac)
+    db_session.commit()  # must not raise
+    db_session.refresh(ac)
+
+    assert ac.reasons_json == '["a"]'
+    assert ac.confidence_band == "HIGH"
