@@ -133,6 +133,8 @@ def _persist_alert(session: Session, article: Article, category: str, entries: l
             magnitude_high=magnitude_high,
             rationale=entry["rationale"],
             key_points_json=json.dumps(entry.get("key_points") or []),
+            confidence_score=entry["confidence_score"],
+            time_horizon=entry["time_horizon"],
             basis=entry["basis"],
             confidence=confidence,
         ))
@@ -180,6 +182,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "company_id": ac.company_id, "direction": ac.direction,
                 "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
                 "rationale": ac.rationale, "key_points": decode_key_points(ac), "basis": ac.basis,
+                "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
             } for ac in reusable_alert.companies]
             _persist_alert(session, article, reusable_alert.category, entries)
             alerts_created += 1

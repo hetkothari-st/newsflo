@@ -30,6 +30,8 @@ export interface AlertCompany {
   magnitude_high: number;
   rationale: string;
   key_points: string[]; // short, scannable version of `rationale` -- empty for legacy alerts
+  confidence_score: number; // 0-100, how directly evidenced this company's call is
+  time_horizon: string; // Immediate | Short-Term | Medium-Term | Long-Term
   basis: string; // direct_mention | sector_inference
   confidence: string; // llm_estimate | calibrated
   market: 'IN' | 'GLOBAL';

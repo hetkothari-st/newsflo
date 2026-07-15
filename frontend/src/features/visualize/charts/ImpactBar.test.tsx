@@ -19,7 +19,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
     company_id: 1, ticker: 'AAA', name: 'Alpha Co', index_tier: 'NIFTY50',
     direction: 'bullish', magnitude_low: 1, magnitude_high: 2, rationale: 'because it matters here',
-    key_points: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+    key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
     in_my_holdings: false, past_mentions: [],
     ...overrides,
   };
@@ -112,5 +112,19 @@ describe('ImpactBar', () => {
     expect(bullishLabel).not.toBeNull();
     expect(bearishLabel).toHaveClass('shrink-0');
     expect(bullishLabel).toHaveClass('shrink-0');
+  });
+
+  it('renders correctly with more than 5 companies (the cap was removed in this plan)', () => {
+    const eight = Array.from({ length: 8 }, (_, i) =>
+      company({
+        company_id: i + 1,
+        ticker: `CO${i}`,
+        direction: i % 2 === 0 ? 'bullish' : 'bearish',
+        magnitude_low: i,
+        magnitude_high: i + 1,
+      }),
+    );
+    render(<ImpactBar companies={eight} />);
+    eight.forEach((c) => expect(screen.getByText(c.ticker)).toBeInTheDocument());
   });
 });

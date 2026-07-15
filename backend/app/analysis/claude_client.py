@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
 
-from app.analysis.schemas import SECTORS, AnalysisOutput
+from app.analysis.schemas import SECTORS, TIME_HORIZONS, AnalysisOutput
 
 # Anthropic is the primary provider when a real (funded) key is configured --
 # best quality, native forced tool-use. Groq is the fallback so a real,
@@ -80,7 +80,7 @@ ANALYSIS_INSTRUCTIONS = (
     "OR companies you are specifically, confidently thinking of even if not named "
     "verbatim -- set is_direct=true and put the real company name, with "
     "ticker=null if you are not sure of the exact symbol. This applies EVEN for a "
-    "sector-wide catalyst -- if you can name the 3-5 specific companies you know "
+    "sector-wide catalyst -- if you can name the specific companies you know "
     "are most exposed, name them individually with is_direct=true rather than "
     "reaching for sector=<value>. Do NOT drop down to sector-level inference just "
     "because you lack the ticker, and do NOT drop down to it just because "
@@ -103,10 +103,12 @@ ANALYSIS_INSTRUCTIONS = (
     "(e.g. do not infer both an oil-sector effect AND an IT-sector effect from "
     "one macro/rates story unless the article is genuinely, specifically about "
     "both).\n"
-    "5. List at most 5 companies total, fewer if you are not genuinely confident "
-    "in more. If nothing in the article has a specific, defensible link to a "
-    "real company or one of the sectors above, return an empty companies list -- "
-    "that is a correct answer, not a failure.\n"
+    "5. List every company with a genuine, specific, defensible link to this "
+    "article -- there is no fixed cap on how many. Do not pad the list to "
+    "reach a target count, and do not omit a real one to stay under an old "
+    "limit. If nothing in the article has a specific, defensible link to a "
+    "real company or one of the sectors above, return an empty companies "
+    "list -- that is a correct answer, not a failure.\n"
     "6. Each rationale must name the specific mechanism for THAT company, grounded "
     "in what you actually know about it -- its specific role (e.g. upstream "
     "producer vs refiner vs distributor vs miner: never assume every company in a "
@@ -129,7 +131,20 @@ ANALYSIS_INSTRUCTIONS = (
     "view instead of padding with a generic watch-this-space line. Do NOT "
     "invent a precise number you are not actually confident in (a specific "
     "earnings date, valuation multiple, or price target you're not sure of) "
-    "-- state the qualitative catalyst instead of a fabricated figure.\n\n"
+    "-- state the qualitative catalyst instead of a fabricated figure.\n"
+    "9. Also set confidence_score: an integer 0-100 reflecting how directly "
+    "evidenced THIS SPECIFIC company's call is -- a named company with a "
+    "clear, specific stated mechanism should score high (80-100); a company "
+    "reached only through sector-level inference, or where the link is "
+    "plausible but not strongly evidenced, should score lower (40-70). "
+    "Actually differentiate between your strongest and weakest picks in this "
+    "same list -- do not default to a fixed number for every company.\n"
+    "10. Also set time_horizon to exactly one of: Immediate (already priced "
+    "in, or resolves within days), Short-Term (plays out over the next few "
+    "weeks to a quarter), Medium-Term (multi-quarter), or Long-Term "
+    "(structural, multi-year). Base it on when the mechanism you described "
+    "in the rationale actually plays out, not on how recently the news was "
+    "published.\n\n"
 )
 
 RECORD_ANALYSIS_TOOL = {
@@ -182,10 +197,12 @@ RECORD_ANALYSIS_TOOL = {
                                     "full paragraph per company."
                                 ),
                             },
+                            "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100},
+                            "time_horizon": {"type": "string", "enum": TIME_HORIZONS},
                         },
                         "required": [
                             "name", "is_direct", "direction", "magnitude_low", "magnitude_high",
-                            "rationale", "key_points",
+                            "rationale", "key_points", "confidence_score", "time_horizon",
                         ],
                     },
                 },

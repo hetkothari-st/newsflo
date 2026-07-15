@@ -23,13 +23,27 @@ function alert(overrides: Partial<Alert> = {}): Alert {
       {
         company_id: 1, ticker: 'RIL', name: 'Reliance Industries', index_tier: 'NIFTY50', sector: 'oil_gas',
         direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner margins widen.',
-        key_points: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+        key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
         in_my_holdings: false, past_mentions: [],
       },
     ],
     ...overrides,
   };
 }
+
+const directCompany = {
+  company_id: 1, ticker: 'RIL', name: 'Reliance Industries', index_tier: 'NIFTY50', sector: 'oil_gas',
+  direction: 'bullish' as const, magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner margins widen.',
+  key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN' as const,
+  in_my_holdings: false, past_mentions: [],
+};
+
+const inferredCompany = {
+  company_id: 2, ticker: 'ONGC', name: 'Oil and Natural Gas Corporation', index_tier: 'NIFTY50', sector: 'oil_gas',
+  direction: 'bearish' as const, magnitude_low: 1, magnitude_high: 2, rationale: 'Sector-wide pressure on crude producers.',
+  key_points: [], confidence_score: 30, time_horizon: 'Short-Term', basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN' as const,
+  in_my_holdings: false, past_mentions: [],
+};
 
 function renderPage(id = '1') {
   return render(
@@ -52,13 +66,15 @@ describe('AlertChartsPage', () => {
     await waitFor(() => expect(screen.getByText('Crude prices ease on supply news')).toBeInTheDocument());
   });
 
-  it('shows the pager labels for all four chart types', async () => {
+  it('shows the pager labels for all six chart types', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
     await waitFor(() => expect(screen.getByText('Sector')).toBeInTheDocument());
     expect(screen.getByText('Tier')).toBeInTheDocument();
     expect(screen.getByText('Impact')).toBeInTheDocument();
     expect(screen.getByText('Split')).toBeInTheDocument();
+    expect(screen.getByText('Confidence')).toBeInTheDocument();
+    expect(screen.getByText('Timeline')).toBeInTheDocument();
   });
 
   it('advances to the next chart type when the pager control is clicked', async () => {
@@ -74,5 +90,26 @@ describe('AlertChartsPage', () => {
     vi.spyOn(api, 'getAlert').mockRejectedValue(new Error('Alert not found'));
     renderPage('999');
     await waitFor(() => expect(screen.getByText('Alert not found')).toBeInTheDocument());
+  });
+
+  it('Normal view shows only direct-mention companies; Drilldown reveals sector-inferred ones too', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, inferredCompany] }));
+    renderPage('1');
+    await waitFor(() => expect(screen.getByText('RIL')).toBeInTheDocument());
+    expect(screen.queryByText('ONGC')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Drilldown'));
+    await waitFor(() => expect(screen.getByText('ONGC')).toBeInTheDocument());
+    expect(screen.getByText('RIL')).toBeInTheDocument();
+  });
+
+  it('shows the no-direct-companies message in Normal view when every company is sector-inferred', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [inferredCompany] }));
+    renderPage('1');
+    await waitFor(() =>
+      expect(
+        screen.getByText('No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.'),
+      ).toBeInTheDocument(),
+    );
   });
 });

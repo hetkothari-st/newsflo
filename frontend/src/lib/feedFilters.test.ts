@@ -13,6 +13,8 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
     magnitude_high: 2,
     rationale: 'x',
     key_points: [],
+    confidence_score: 50,
+    time_horizon: 'Short-Term',
     past_mentions: [],
     basis: 'direct_mention',
     confidence: 'llm_estimate',
