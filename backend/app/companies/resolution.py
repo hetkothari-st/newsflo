@@ -26,9 +26,18 @@ def _to_resolved(company: Company, mention: CompanyMention, basis: str) -> dict:
         "magnitude_high": mention.magnitude_high,
         "rationale": mention.rationale,
         "key_points": mention.key_points,
+        # Raw LLM value if present, otherwise None -- always overwritten by
+        # app.reasoning.confidence.compute_confidence before persistence
+        # (see app/pipeline.py::_persist_alert).
         "confidence_score": mention.confidence_score,
         "time_horizon": mention.time_horizon,
         "basis": basis,
+        "reasons": mention.reasons,
+        "evidence_refs": mention.evidence_refs,
+        "risks": mention.risks,
+        "assumptions": mention.assumptions,
+        "unknowns": mention.unknowns,
+        "alternative_hypothesis": mention.alternative_hypothesis,
     }
 
 
