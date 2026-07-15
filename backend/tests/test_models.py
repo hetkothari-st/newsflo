@@ -62,3 +62,27 @@ def test_user_email_alerts_enabled_defaults_true(db_session):
     db_session.refresh(user)
     # Integer column (1/0), not Boolean -- see models.py's comment on why.
     assert user.email_alerts_enabled == 1
+
+
+def test_company_instrument_token_column(db_session):
+    company = Company(
+        ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1_800_000.0, instrument_token=738561,
+    )
+    db_session.add(company)
+    db_session.commit()
+
+    fetched = db_session.query(Company).filter_by(ticker="RELIANCE.NS").one()
+    assert fetched.instrument_token == 738561
+
+
+def test_company_instrument_token_defaults_to_none(db_session):
+    company = Company(
+        ticker="TCS.NS", name="TCS", sector="it",
+        index_tier="NIFTY50", market_cap=1_500_000.0,
+    )
+    db_session.add(company)
+    db_session.commit()
+
+    fetched = db_session.query(Company).filter_by(ticker="TCS.NS").one()
+    assert fetched.instrument_token is None

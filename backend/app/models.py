@@ -20,6 +20,7 @@ class Company(Base):
     index_tier = Column(String, nullable=False)  # NIFTY50 | NIFTY100 | NIFTY500 | OTHER
     market_cap = Column(Float, nullable=True)
     isin = Column(String, nullable=True, unique=True)
+    instrument_token = Column(Integer, nullable=True)  # Zerodha Kite instrument ID; null until matched
 
 
 class CompanyIndexMembership(Base):
