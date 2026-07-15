@@ -9,7 +9,7 @@ const PADDING_Y = 8; // keeps the line off the top/bottom edge of the viewBox
 function formatTooltipDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 export default function PriceChart({
