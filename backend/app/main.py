@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Without this, every logger.info/logger.exception call in the app (e.g. the
 # scheduler's per-poll-cycle success/failure logging) is silently dropped --
@@ -71,4 +72,22 @@ async def _capture_event_loop() -> None:
     _start_hub_client_if_configured()
 
 
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles(html=True) only auto-serves index.html for a directory
+    request -- a client-side route with no matching file on disk (e.g.
+    /alerts/262/charts, /company/22) 404s instead of loading the SPA shell.
+    Confirmed in production: any deep link, bookmark, or browser refresh on
+    a non-root route returned a raw 404. Fall back to index.html for any
+    404 whose path has no file extension (a real missing asset like
+    /nonexistent.js still 404s normally)."""
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
+                return await super().get_response("index.html", scope)
+            raise
+
+
+app.mount("/", SPAStaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
