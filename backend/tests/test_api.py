@@ -348,3 +348,86 @@ def test_get_alert_by_id_404s_for_missing_alert(db_session):
     assert response.status_code == 404
 
     app.dependency_overrides.clear()
+
+
+def test_list_alerts_includes_reasoning_engine_fields(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/reasoning-fields", title="Test headline", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy", event_type="crude_oil")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+        confidence_score=72, confidence_band="HIGH",
+        reasons_json='["Refining margins widen."]',
+        evidence_refs_json='["RULE_CRUDE_OIL_UP"]',
+        risks_json='["Margin reversal."]',
+        assumptions_json='["Crude stays elevated."]',
+        unknowns_json='["Duration of the spike."]',
+        alternative_hypothesis="Already priced in.",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["event_type"] == "crude_oil"
+    company_payload = body[0]["companies"][0]
+    assert company_payload["confidence_band"] == "HIGH"
+    assert company_payload["reasons"] == ["Refining margins widen."]
+    assert company_payload["evidence_refs"] == ["RULE_CRUDE_OIL_UP"]
+    assert company_payload["risks"] == ["Margin reversal."]
+    assert company_payload["assumptions"] == ["Crude stays elevated."]
+    assert company_payload["unknowns"] == ["Duration of the spike."]
+    assert company_payload["alternative_hypothesis"] == "Already priced in."
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_defaults_reasoning_engine_fields_for_legacy_rows(db_session):
+    # Rows persisted before this feature shipped have NULL in every new
+    # column -- the API must degrade to empty lists/None, never 500.
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/legacy-reasoning", title="Legacy", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="LEGACY.NS", name="Legacy Co", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="legacy row",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["event_type"] is None
+    company_payload = body[0]["companies"][0]
+    assert company_payload["reasons"] == []
+    assert company_payload["evidence_refs"] == []
+    assert company_payload["confidence_band"] is None
+    assert company_payload["alternative_hypothesis"] is None
+
+    app.dependency_overrides.clear()
