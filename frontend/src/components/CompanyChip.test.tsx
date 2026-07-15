@@ -25,6 +25,8 @@ const company: AlertCompany = {
   magnitude_high: 4,
   rationale: 'Refiner margins expand.',
   key_points: [],
+  confidence_score: 50,
+  time_horizon: 'Short-Term',
   basis: 'direct_mention',
   confidence: 'llm_estimate',
   market: 'IN',

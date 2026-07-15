@@ -36,6 +36,7 @@ def test_full_pipeline_from_rss_entry_to_alert(db_session, monkeypatch):
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -100,6 +101,7 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -166,6 +168,7 @@ def test_full_pipeline_notifies_holder_end_to_end(db_session, monkeypatch):
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -235,6 +238,7 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude } from './transforms';
+import { groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude, rankByConfidence, groupByTimeHorizon } from './transforms';
 import type { AlertCompany } from '../../lib/api';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
     company_id: 1, ticker: 'AAA', name: 'Alpha Co', index_tier: 'NIFTY50',
     direction: 'bullish', magnitude_low: 1, magnitude_high: 2, rationale: 'because',
-    key_points: [], basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+    key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
     in_my_holdings: false, past_mentions: [],
     ...overrides,
   };
@@ -138,5 +138,43 @@ describe('rankByMagnitude', () => {
   it('returns a single-element array unchanged', () => {
     const only = company({ company_id: 1 });
     expect(rankByMagnitude([only])).toEqual([only]);
+  });
+});
+
+describe('rankByConfidence', () => {
+  it('sorts descending by confidence_score', () => {
+    const weak = company({ company_id: 1, confidence_score: 40 });
+    const strong = company({ company_id: 2, confidence_score: 95 });
+    const mid = company({ company_id: 3, confidence_score: 70 });
+
+    expect(rankByConfidence([weak, strong, mid]).map((c) => c.company_id)).toEqual([2, 3, 1]);
+  });
+
+  it('keeps input order for equal scores (stable sort)', () => {
+    const a = company({ company_id: 1, confidence_score: 80 });
+    const b = company({ company_id: 2, confidence_score: 80 });
+
+    expect(rankByConfidence([a, b]).map((c) => c.company_id)).toEqual([1, 2]);
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(rankByConfidence([])).toEqual([]);
+  });
+});
+
+describe('groupByTimeHorizon', () => {
+  it('groups companies into fixed-order horizon buckets, dropping empty ones', () => {
+    const groups = groupByTimeHorizon([
+      company({ company_id: 1, time_horizon: 'Long-Term' }),
+      company({ company_id: 2, time_horizon: 'Immediate' }),
+      company({ company_id: 3, time_horizon: 'Immediate' }),
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(['Immediate', 'Long-Term']);
+    expect(groups[0].companies).toHaveLength(2);
+    expect(groups[1].companies).toHaveLength(1);
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(groupByTimeHorizon([])).toEqual([]);
   });
 });

@@ -24,6 +24,8 @@ const base: AlertCompany = {
   magnitude_high: 4,
   rationale: 'Margins up.',
   key_points: [],
+  confidence_score: 50,
+  time_horizon: 'Short-Term',
   past_mentions: [],
   basis: 'direct_mention',
   confidence: 'llm_estimate',

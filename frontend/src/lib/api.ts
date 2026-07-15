@@ -30,6 +30,8 @@ export interface AlertCompany {
   magnitude_high: number;
   rationale: string;
   key_points: string[]; // short, scannable version of `rationale` -- empty for legacy alerts
+  confidence_score: number; // 0-100, how directly evidenced this company's call is
+  time_horizon: string; // Immediate | Short-Term | Medium-Term | Long-Term
   basis: string; // direct_mention | sector_inference
   confidence: string; // llm_estimate | calibrated
   market: 'IN' | 'GLOBAL';
@@ -161,6 +163,13 @@ export interface PriceSeries {
   available: boolean;
 }
 
+export interface LivePrice {
+  ltp: number | null;
+  change_pct: number | null;
+  as_of: string | null;
+  available: boolean;
+}
+
 interface ApiError {
   detail: string;
 }
@@ -218,6 +227,12 @@ export async function getCompanyPrices(id: number, period: PricePeriod = '6mo'):
   const res = await fetch(`/api/companies/${id}/prices?period=${period}`);
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as PriceSeries;
+}
+
+export async function getCompanyLivePrice(id: number): Promise<LivePrice> {
+  const res = await fetch(`/api/companies/${id}/live-price`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as LivePrice;
 }
 
 export async function register(email: string, password: string): Promise<TokenResponse> {

@@ -47,6 +47,7 @@ def test_pipeline_broadcasts_new_alert_to_connected_client(db_session, monkeypat
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            confidence_score=85, time_horizon="Short-Term",
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)

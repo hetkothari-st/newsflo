@@ -26,6 +26,8 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
     magnitude_high: 2,
     rationale: 'because it matters here',
     key_points: [],
+    confidence_score: 50,
+    time_horizon: 'Short-Term',
     basis: 'direct_mention',
     confidence: 'llm_estimate',
     market: 'IN',
@@ -71,5 +73,14 @@ describe('TierRows', () => {
   it('renders nothing for an empty company list', () => {
     const { container } = render(<TierRows companies={[]} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders correctly with more than 5 companies across tiers (the cap was removed in this plan)', () => {
+    const tiers = ['NIFTY50', 'NIFTYNEXT50', 'NIFTYMIDCAP150', 'NIFTYSMALLCAP250'];
+    const eight = Array.from({ length: 8 }, (_, i) =>
+      company({ company_id: i + 1, ticker: `CO${i}`, index_tier: tiers[i % tiers.length] }),
+    );
+    render(<TierRows companies={eight} />);
+    eight.forEach((c) => expect(screen.getByText(c.ticker)).toBeInTheDocument());
   });
 });
