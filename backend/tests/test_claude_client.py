@@ -441,6 +441,12 @@ def test_analyze_article_parses_new_evidence_fields_when_present():
 
 
 def test_analysis_instructions_contains_rulebook_and_playbook_content():
+    # CASA (an earlier choice here) is NOT playbook-unique -- it also
+    # appears in RULEBOOK_TEXT via RULE_BANKING_METRICS's "credit growth,
+    # deposit growth, CASA, NIM, ..." text, so it wouldn't actually catch a
+    # dropped PLAYBOOKS_TEXT interpolation. ARPU appears only in the
+    # telecom playbook entry -- verified absent from RULEBOOK_TEXT,
+    # SECTOR_DEFINITIONS, and every rule's example text.
     from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
     assert "RULE_CRUDE_OIL_UP" in ANALYSIS_INSTRUCTIONS
-    assert "CASA" in ANALYSIS_INSTRUCTIONS
+    assert "ARPU" in ANALYSIS_INSTRUCTIONS
