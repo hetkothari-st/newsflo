@@ -5,7 +5,9 @@ from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
 
-from app.analysis.schemas import SECTORS, TIME_HORIZONS, AnalysisOutput
+from app.analysis.schemas import EVENT_TYPES, SECTORS, TIME_HORIZONS, AnalysisOutput
+from app.reasoning.playbooks import PLAYBOOKS_TEXT
+from app.reasoning.rulebook import RULEBOOK_TEXT
 
 # Anthropic is the primary provider when a real (funded) key is configured --
 # best quality, native forced tool-use. Groq is the fallback so a real,
@@ -132,19 +134,48 @@ ANALYSIS_INSTRUCTIONS = (
     "invent a precise number you are not actually confident in (a specific "
     "earnings date, valuation multiple, or price target you're not sure of) "
     "-- state the qualitative catalyst instead of a fabricated figure.\n"
-    "9. Also set confidence_score: an integer 0-100 reflecting how directly "
-    "evidenced THIS SPECIFIC company's call is -- a named company with a "
-    "clear, specific stated mechanism should score high (80-100); a company "
-    "reached only through sector-level inference, or where the link is "
-    "plausible but not strongly evidenced, should score lower (40-70). "
-    "Actually differentiate between your strongest and weakest picks in this "
-    "same list -- do not default to a fixed number for every company.\n"
+    "9. Classify this article's overall event_type as exactly one of the "
+    "values listed below -- lowercase-with-underscores, exact spelling. If "
+    "nothing matches, use \"other\":\n"
+    f"{', '.join(EVENT_TYPES)}\n"
     "10. Also set time_horizon to exactly one of: Immediate (already priced "
     "in, or resolves within days), Short-Term (plays out over the next few "
     "weeks to a quarter), Medium-Term (multi-quarter), or Long-Term "
     "(structural, multi-year). Base it on when the mechanism you described "
     "in the rationale actually plays out, not on how recently the news was "
-    "published.\n\n"
+    "published.\n"
+    "11. Consult the ECONOMIC REASONING RULES and SECTOR PLAYBOOKS reference "
+    "blocks below. If a rule genuinely applies to a company's situation, use "
+    "it to strengthen your rationale -- and include its rule id (e.g. "
+    "RULE_REPO_RATE_CUT) verbatim as one entry in that company's "
+    "evidence_refs. Do not force-fit a rule that doesn't actually apply just "
+    "to have one.\n"
+    f"ECONOMIC REASONING RULES:\n{RULEBOOK_TEXT}\n\n"
+    f"SECTOR PLAYBOOKS:\n{PLAYBOOKS_TEXT}\n"
+    "12. For each company, fill in reasons: a list of 1-4 short, distinct "
+    "reasons (each a full but concise sentence) supporting your direction "
+    "call -- this decomposes `rationale` into discrete, individually-"
+    "citable claims rather than one paragraph.\n"
+    "13. Fill in evidence_refs: for EACH entry in `reasons`, cite what "
+    "supports it -- either a rule id from ECONOMIC REASONING RULES above "
+    "(e.g. \"RULE_REPO_RATE_CUT\"), a quoted or closely paraphrased fact "
+    "from the article text (prefix with \"article: \"), or a specific "
+    "historical precedent you actually know (prefix with \"historical: \", "
+    "e.g. \"historical: 2019 repo rate cut lifted HDFC Bank credit "
+    "growth\"). Every claim in `reasons` should be traceable to at least one "
+    "entry here -- do not state a reason you cannot support this way.\n"
+    "14. Fill in risks: 0-3 short, specific risks that could invalidate "
+    "this call (empty list only if you genuinely cannot think of a real "
+    "one -- rare). And assumptions: 0-3 things you are assuming to be true "
+    "that, if wrong, would change the call. And unknowns: 0-3 pieces of "
+    "information you don't have that would make this call more reliable if "
+    "you did (empty is fine when the picture is genuinely complete).\n"
+    "15. Fill in alternative_hypothesis: one sentence describing a "
+    "plausible competing interpretation of this same event for this "
+    "company -- even a weaker one you ultimately reject. Required even when "
+    "you're confident in the primary call; if you truly see no credible "
+    "alternative, state why (e.g. \"No credible alternative -- the "
+    "mechanism is direct and well-precedented.\").\n\n"
 )
 
 RECORD_ANALYSIS_TOOL = {
@@ -156,6 +187,7 @@ RECORD_ANALYSIS_TOOL = {
             "type": "object",
             "properties": {
                 "category": {"type": "string"},
+                "event_type": {"type": ["string", "null"], "enum": EVENT_TYPES + [None]},
                 "companies": {
                     "type": "array",
                     "items": {
@@ -197,17 +229,50 @@ RECORD_ANALYSIS_TOOL = {
                                     "full paragraph per company."
                                 ),
                             },
-                            "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100},
                             "time_horizon": {"type": "string", "enum": TIME_HORIZONS},
+                            "reasons": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "1-4 short, distinct, individually-citable reasons supporting the direction call.",
+                            },
+                            "evidence_refs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "One entry per `reasons` item: a RULE_ id from ECONOMIC "
+                                    "REASONING RULES, an \"article: ...\" quote/paraphrase, or a "
+                                    "\"historical: ...\" precedent."
+                                ),
+                            },
+                            "risks": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "0-3 specific risks that could invalidate this call.",
+                            },
+                            "assumptions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "0-3 things assumed true that, if wrong, would change the call.",
+                            },
+                            "unknowns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "0-3 pieces of missing information that would make this call more reliable.",
+                            },
+                            "alternative_hypothesis": {
+                                "type": "string",
+                                "description": "One sentence describing a plausible competing interpretation, or why none is credible.",
+                            },
                         },
                         "required": [
                             "name", "is_direct", "direction", "magnitude_low", "magnitude_high",
-                            "rationale", "key_points", "confidence_score", "time_horizon",
+                            "rationale", "key_points", "time_horizon", "reasons", "evidence_refs",
+                            "risks", "assumptions", "unknowns", "alternative_hypothesis",
                         ],
                     },
                 },
             },
-            "required": ["category", "companies"],
+            "required": ["category", "event_type", "companies"],
         },
     },
 }
