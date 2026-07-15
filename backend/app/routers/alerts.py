@@ -41,6 +41,8 @@ def _serialize_alert(
             "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
             "basis": ac.basis, "confidence": ac.confidence,
             "confidence_band": ac.confidence_band,
+            "confidence_contributors": _decode_json_list(ac.confidence_contributors_json),
+            "confidence_penalties": _decode_json_list(ac.confidence_penalties_json),
             "reasons": _decode_json_list(ac.reasons_json),
             "evidence_refs": _decode_json_list(ac.evidence_refs_json),
             "risks": _decode_json_list(ac.risks_json),

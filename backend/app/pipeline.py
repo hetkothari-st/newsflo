@@ -61,6 +61,7 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
     mentions_index = bulk_past_mentions(session, {ac.company_id for ac in alert.companies})
     return {
         "id": alert.id,
+        "event_type": alert.event_type,
         "category": alert.category,
         # Translation happens on a separate, later scheduler tick (see
         # app/translation/job.py) -- it can never exist yet at broadcast
@@ -92,6 +93,8 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
             "confidence": ac.confidence,
             "confidence_score": ac.confidence_score,
             "confidence_band": ac.confidence_band,
+            "confidence_contributors": _decode_json_list(ac.confidence_contributors_json),
+            "confidence_penalties": _decode_json_list(ac.confidence_penalties_json),
             "reasons": _decode_json_list(ac.reasons_json),
             "evidence_refs": _decode_json_list(ac.evidence_refs_json),
             "risks": _decode_json_list(ac.risks_json),

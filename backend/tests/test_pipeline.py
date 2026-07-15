@@ -275,7 +275,7 @@ def test_alert_broadcast_payload_includes_sector(db_session):
     db_session.add(article)
     db_session.commit()
 
-    alert = Alert(article_id=article.id, category="oil_energy")
+    alert = Alert(article_id=article.id, category="oil_energy", event_type="crude_oil")
     db_session.add(alert)
     db_session.commit()
 
@@ -283,13 +283,18 @@ def test_alert_broadcast_payload_includes_sector(db_session):
         alert_id=alert.id, company_id=company.id, direction="bullish",
         magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
         basis="direct_mention", confidence="llm_estimate",
+        confidence_contributors_json='["c"]',
+        confidence_penalties_json='[]',
     ))
     db_session.commit()
     db_session.refresh(alert)
 
     payload = pipeline_module._alert_broadcast_payload(db_session, alert)
 
+    assert payload["event_type"] == "crude_oil"
     assert payload["companies"][0]["sector"] == "oil_gas"
+    assert payload["companies"][0]["confidence_contributors"] == ["c"]
+    assert payload["companies"][0]["confidence_penalties"] == []
 
 
 def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_companies(db_session):

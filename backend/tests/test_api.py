@@ -371,6 +371,8 @@ def test_list_alerts_includes_reasoning_engine_fields(db_session):
         magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
         basis="direct_mention", confidence="llm_estimate",
         confidence_score=72, confidence_band="HIGH",
+        confidence_contributors_json='["c"]',
+        confidence_penalties_json='[]',
         reasons_json='["Refining margins widen."]',
         evidence_refs_json='["RULE_CRUDE_OIL_UP"]',
         risks_json='["Margin reversal."]',
@@ -387,6 +389,8 @@ def test_list_alerts_includes_reasoning_engine_fields(db_session):
     assert body[0]["event_type"] == "crude_oil"
     company_payload = body[0]["companies"][0]
     assert company_payload["confidence_band"] == "HIGH"
+    assert company_payload["confidence_contributors"] == ["c"]
+    assert company_payload["confidence_penalties"] == []
     assert company_payload["reasons"] == ["Refining margins widen."]
     assert company_payload["evidence_refs"] == ["RULE_CRUDE_OIL_UP"]
     assert company_payload["risks"] == ["Margin reversal."]
