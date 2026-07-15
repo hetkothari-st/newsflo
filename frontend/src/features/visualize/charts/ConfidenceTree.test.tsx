@@ -5,6 +5,7 @@ import type { ReactElement } from 'react';
 import ConfidenceTree from './ConfidenceTree';
 import type { AlertCompany } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+import { confidenceColor } from '../colors';
 
 function render(ui: ReactElement) {
   return rtlRender(<LanguageProvider>{ui}</LanguageProvider>);
@@ -51,6 +52,11 @@ describe('ConfidenceTree', () => {
     render(<ConfidenceTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} />);
     await userEvent.click(screen.getByText('AAA'));
     expect(screen.getByText(/Refiner margins widen/)).toBeInTheDocument();
+  });
+
+  it('colors each badge via the validated confidence ramp', () => {
+    render(<ConfidenceTree companies={[company({ company_id: 1, ticker: 'NVDA', confidence_score: 98 })]} />);
+    expect(screen.getByText('98%')).toHaveStyle({ color: confidenceColor(98) });
   });
 
   it('renders nothing for an empty company list', () => {

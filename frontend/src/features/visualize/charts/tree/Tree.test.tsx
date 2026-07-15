@@ -50,6 +50,20 @@ describe('TreeBranch', () => {
     );
     expect(container.querySelector('[style*="background-color"]')).toBeNull();
   });
+
+  it('tints the connector line (child ul border-color) with the branch color', () => {
+    const { container } = render(
+      <TreeRoot>
+        <TreeBranch label="Oil & Gas" color="#E85D4C">
+          <TreeLeaf ticker="RIL" direction="bullish" onClick={vi.fn()} />
+        </TreeBranch>
+      </TreeRoot>,
+    );
+    const list = container.querySelector('ul ul');
+    expect(list).not.toBeNull();
+    expect(list?.getAttribute('style')).toContain('E85D4C');
+    expect(list?.getAttribute('style')).toMatch(/border-?color/i);
+  });
 });
 
 describe('TreeLeaf', () => {
@@ -73,5 +87,14 @@ describe('TreeLeaf', () => {
     );
     await userEvent.click(screen.getByText('RIL'));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('colors the badge when badgeColor is given', () => {
+    render(
+      <TreeRoot>
+        <TreeLeaf ticker="RIL" direction="bullish" badge="91%" badgeColor="#5C8ACE" onClick={vi.fn()} />
+      </TreeRoot>,
+    );
+    expect(screen.getByText('91%')).toHaveStyle({ color: '#5C8ACE' });
   });
 });
