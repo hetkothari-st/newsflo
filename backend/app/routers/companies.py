@@ -11,6 +11,7 @@ from app.config import settings
 from app.i18n import get_lang
 from app.models import Alert, AlertCompany, Article, Company
 from app.pipeline import decode_key_points
+from app.prices.live_price import LIVE_PRICE_CACHE, compute_change_pct, get_previous_close
 from app.routers.articles import get_db
 from app.translation.lookup import bulk_alert_company_translations, bulk_article_titles, bulk_category_labels
 
@@ -115,3 +116,20 @@ def get_company_prices(company_id: int, period: str = "6mo", db: Session = Depen
         raise HTTPException(400, f"Invalid period, must be one of {sorted(PRICE_SERIES_PERIODS)}")
     points = fetch_price_series(company.ticker, period)
     return {"period": period, "points": points or [], "available": points is not None}
+
+
+@router.get("/{company_id}/live-price")
+def get_company_live_price(company_id: int, db: Session = Depends(get_db)):
+    company = _get_indian_company_or_404(db, company_id)
+    entry = LIVE_PRICE_CACHE.get(company.instrument_token) if company.instrument_token else None
+    if entry is None:
+        return {"ltp": None, "change_pct": None, "as_of": None, "available": False}
+
+    points = fetch_price_series(company.ticker, "5d") or []
+    previous_close = get_previous_close(points)
+    return {
+        "ltp": entry["ltp"],
+        "change_pct": compute_change_pct(entry["ltp"], previous_close),
+        "as_of": entry["as_of"].isoformat(),
+        "available": True,
+    }
