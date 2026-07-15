@@ -527,10 +527,9 @@ git commit -m "feat: add Kite binary tick decoder and in-memory price cache upda
 Create `backend/tests/test_kite_ws_client.py`:
 
 ```python
+import asyncio
 import json
 import struct
-
-import pytest
 
 from app.prices.kite_ws_client import handle_message, run_hub_client
 
@@ -583,18 +582,16 @@ def _fake_connect(messages_per_connection):
     return connect
 
 
-@pytest.mark.asyncio
-async def test_run_hub_client_subscribes_and_updates_cache():
+def test_run_hub_client_subscribes_and_updates_cache():
     cache: dict[int, dict] = {}
     fake_connect = _fake_connect([[_ltp_message(738561, 2500.50)]])
 
-    await run_hub_client("wss://fake-hub", [738561], cache, connect=fake_connect)
+    asyncio.run(run_hub_client("wss://fake-hub", [738561], cache, connect=fake_connect))
 
     assert cache[738561]["ltp"] == 2500.50
 
 
-@pytest.mark.asyncio
-async def test_run_hub_client_sends_subscribe_message_on_connect():
+def test_run_hub_client_sends_subscribe_message_on_connect():
     cache: dict[int, dict] = {}
     sent_messages = []
 
@@ -603,13 +600,12 @@ async def test_run_hub_client_sends_subscribe_message_on_connect():
         yield ws
         sent_messages.extend(ws.sent)
 
-    await run_hub_client("wss://fake-hub", [738561, 5633], cache, connect=connect)
+    asyncio.run(run_hub_client("wss://fake-hub", [738561, 5633], cache, connect=connect))
 
     assert json.loads(sent_messages[0]) == {"a": "subscribe", "v": [738561, 5633]}
 
 
-@pytest.mark.asyncio
-async def test_run_hub_client_survives_a_connection_that_raises():
+def test_run_hub_client_survives_a_connection_that_raises():
     cache: dict[int, dict] = {}
 
     async def connect(url):
@@ -625,28 +621,12 @@ async def test_run_hub_client_survives_a_connection_that_raises():
         yield _BoomWebSocket()
         yield _FakeWebSocket([_ltp_message(5633, 150.25)])
 
-    await run_hub_client("wss://fake-hub", [738561], cache, connect=connect)
+    asyncio.run(run_hub_client("wss://fake-hub", [738561], cache, connect=connect))
 
     assert cache[5633]["ltp"] == 150.25
 ```
 
-This needs `pytest-asyncio` for the `@pytest.mark.asyncio` marker. Check first whether it's already installed:
-
-Run: `.venv/Scripts/python.exe -c "import pytest_asyncio"` (from `backend/`)
-
-If that raises `ModuleNotFoundError`, add it:
-
-```bash
-echo "pytest-asyncio" >> requirements.txt
-.venv/Scripts/python.exe -m pip install pytest-asyncio
-```
-
-Then add asyncio mode to `backend/pytest.ini` (check its current contents first — if it already has an `[pytest]` section, add the line inside it rather than creating a second section):
-
-```ini
-[pytest]
-asyncio_mode = auto
-```
+These are plain sync `def test_...` functions — no `pytest-asyncio`, no `pytest.ini` change, no new dependency. Each wraps its one `await run_hub_client(...)` call in a bare `asyncio.run(...)`, which needs nothing beyond the standard library.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -726,7 +706,7 @@ Expected: all tests pass (the pre-existing count plus the new ones)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/prices/kite_ws_client.py backend/tests/test_kite_ws_client.py backend/requirements.txt backend/pytest.ini
+git add backend/app/prices/kite_ws_client.py backend/tests/test_kite_ws_client.py
 git commit -m "feat: add persistent Kite hub WebSocket client with auto-reconnect"
 ```
 
