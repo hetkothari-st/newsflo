@@ -442,5 +442,5 @@ def test_analyze_article_parses_new_evidence_fields_when_present():
 
 def test_analysis_instructions_contains_rulebook_and_playbook_content():
     from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
-    assert "RULE_REPO_RATE_CUT" in ANALYSIS_INSTRUCTIONS
-    assert "banking" in ANALYSIS_INSTRUCTIONS
+    assert "RULE_CRUDE_OIL_UP" in ANALYSIS_INSTRUCTIONS
+    assert "CASA" in ANALYSIS_INSTRUCTIONS
