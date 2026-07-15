@@ -34,6 +34,11 @@ app.include_router(watchlist.router)
 app.include_router(translation.router)
 app.include_router(ws.router)
 
+# Holds a strong reference to the background hub-client task for the app's
+# lifetime -- asyncio's event loop only keeps a *weak* reference to tasks, so
+# an unreferenced task is eligible for garbage collection mid-flight.
+_hub_task: asyncio.Task | None = None
+
 init_db()
 
 if settings.enable_scheduler:
@@ -46,6 +51,7 @@ def _start_hub_client_if_configured() -> None:
     without spinning up the whole ASGI lifespan."""
     if not settings.zerodha_hub_url:
         return
+    global _hub_task
     db = SessionLocal()
     try:
         instrument_tokens = [
@@ -54,7 +60,7 @@ def _start_hub_client_if_configured() -> None:
         ]
     finally:
         db.close()
-    asyncio.create_task(run_hub_client(settings.zerodha_hub_url, instrument_tokens, LIVE_PRICE_CACHE))
+    _hub_task = asyncio.create_task(run_hub_client(settings.zerodha_hub_url, instrument_tokens, LIVE_PRICE_CACHE))
 
 
 @app.on_event("startup")
