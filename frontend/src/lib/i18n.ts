@@ -647,6 +647,10 @@ const CATALOG = {
     ta: 'இப்போது விலை கிடைக்கவில்லை.', kn: 'ಈಗ ಬೆಲೆ ಲಭ್ಯವಿಲ್ಲ.', pa: 'ਹੁਣ ਕੀਮਤ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।',
     bn: 'এখন মূল্য পাওয়া যাচ্ছে না।',
   },
+  'company.asOfLabel': {
+    en: 'As of {time}', hi: 'समय: {time}', mr: 'वेळ: {time}', gu: 'સમય: {time}', ml: 'സമയം: {time}',
+    te: 'సమయం: {time}', ta: 'நேரம்: {time}', kn: 'ಸಮಯ: {time}', pa: 'ਸਮਾਂ: {time}', bn: 'সময়: {time}',
+  },
   'company.period1mo': {
     en: '1M', hi: '1म', mr: '1म', gu: '1મ', ml: '1മാ', te: '1నె', ta: '1மா', kn: '1ತಿಂ', pa: '1ਮ', bn: '1মা',
   },

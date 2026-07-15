@@ -24,6 +24,11 @@ describe('LivePriceReadout', () => {
     expect(screen.getByText('-1.20%')).toHaveClass('text-bearish');
   });
 
+  it('shows an "as of HH:MM:SS" timestamp derived from as_of', () => {
+    renderWithLanguage({ ltp: 2530.5, change_pct: 1.2, as_of: '2026-07-15T09:30:00+00:00', available: true });
+    expect(screen.getByText(/\d{1,2}:\d{2}/)).toBeInTheDocument();
+  });
+
   it('shows an unavailable message when available is false', () => {
     renderWithLanguage({ ltp: null, change_pct: null, as_of: null, available: false });
     expect(screen.getByText('Price unavailable right now.')).toBeInTheDocument();
