@@ -57,11 +57,13 @@ export function TreeLeaf({
   ticker,
   direction,
   badge,
+  badgeColor,
   onClick,
 }: {
   ticker: string;
   direction: string;
   badge?: string;
+  badgeColor?: string;
   onClick: () => void;
 }) {
   const bullish = direction === 'bullish';
@@ -80,7 +82,14 @@ export function TreeLeaf({
             or labels elsewhere, so it reads as a deliberate nod to the
             subject matter rather than a global typographic shift. */}
         <span className="truncate font-mono text-[13px] tracking-tight">{ticker}</span>
-        {badge && <span className="ml-auto shrink-0 text-xs text-muted">{badge}</span>}
+        {badge && (
+          <span
+            className={`ml-auto shrink-0 text-xs ${badgeColor ? '' : 'text-muted'}`}
+            style={badgeColor ? { color: badgeColor } : undefined}
+          >
+            {badge}
+          </span>
+        )}
       </button>
     </li>
   );
