@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -318,4 +319,76 @@ def test_get_company_prices_invalid_period_returns_400(db_session):
     resp = client.get(f"/api/companies/{company.id}/prices?period=5y")
 
     assert resp.status_code == 400
+    app.dependency_overrides.clear()
+
+
+def test_get_company_live_price_unavailable_when_no_instrument_token(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/live-price").json()
+
+    assert body == {"ltp": None, "change_pct": None, "as_of": None, "available": False}
+    app.dependency_overrides.clear()
+
+
+def test_get_company_live_price_unavailable_when_no_tick_cached_yet(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(
+        ticker="RELIANCE.NS", name="Reliance", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1.0, instrument_token=738561,
+    )
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/live-price").json()
+
+    assert body == {"ltp": None, "change_pct": None, "as_of": None, "available": False}
+    app.dependency_overrides.clear()
+
+
+def test_get_company_live_price_returns_cached_tick_with_change_pct(db_session, monkeypatch):
+    from datetime import datetime, timezone
+    from app.prices.live_price import LIVE_PRICE_CACHE
+    from app.routers import companies as companies_router
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(
+        ticker="RELIANCE.NS", name="Reliance", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1.0, instrument_token=738561,
+    )
+    db_session.add(company)
+    db_session.commit()
+    as_of = datetime(2026, 7, 15, 9, 30, tzinfo=timezone.utc)
+    LIVE_PRICE_CACHE[738561] = {"ltp": 2530.0, "as_of": as_of}
+    monkeypatch.setattr(
+        companies_router, "fetch_price_series",
+        lambda ticker, period: [{"date": "2026-07-14", "close": 2500.0}],
+    )
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/live-price").json()
+
+    assert body["ltp"] == 2530.0
+    assert body["available"] is True
+    assert body["as_of"] == as_of.isoformat()
+    assert body["change_pct"] == pytest.approx(1.2)
+    LIVE_PRICE_CACHE.clear()
+    app.dependency_overrides.clear()
+
+
+def test_get_company_live_price_404_for_global_company(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market_cap=None)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/live-price")
+
+    assert resp.status_code == 404
     app.dependency_overrides.clear()

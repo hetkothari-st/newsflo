@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "dev-insecure-secret-change-in-production")
     resend_api_key: str = os.environ.get("RESEND_API_KEY", "")
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
+    # Empty disables the live-price feature entirely (same convention as
+    # brandfetch_client_id) -- local dev/CI never opens an outbound
+    # WebSocket connection unless this is explicitly set.
+    zerodha_hub_url: str = os.environ.get("ZERODHA_HUB_URL", "")
 
 
 settings = Settings()

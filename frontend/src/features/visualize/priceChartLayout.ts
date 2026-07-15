@@ -34,3 +34,17 @@ export function layoutPriceChart(points: PricePoint[], width: number, height: nu
     trend: closes[closes.length - 1] >= closes[0] ? 'bullish' : 'bearish',
   };
 }
+
+export function nearestPointIndex(points: ChartCoord[], x: number): number {
+  if (points.length === 0) return 0;
+  let closestIndex = 0;
+  let closestDistance = Infinity;
+  points.forEach((point, i) => {
+    const distance = Math.abs(point.x - x);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = i;
+    }
+  });
+  return closestIndex;
+}

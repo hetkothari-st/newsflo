@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getCompanyHistory,
+  getCompanyLivePrice,
   getCompanyPrices,
   getCompanyProfile,
   type CompanyHistoryPage,
   type CompanyProfile,
+  type LivePrice,
   type PricePeriod,
   type PriceSeries,
 } from '../lib/api';
@@ -14,6 +16,7 @@ import { useLanguage } from '../lib/language';
 import { splitRationaleIntoPoints } from '../lib/reasoning';
 import CompanyAvatar from '../components/CompanyAvatar';
 import DirectionArrow from '../components/DirectionArrow';
+import LivePriceReadout from '../components/LivePriceReadout';
 import MentionRow from '../components/MentionRow';
 import PriceChart from '../features/visualize/PriceChart';
 
@@ -24,6 +27,16 @@ const PERIOD_LABEL_KEY: Record<PricePeriod, TranslationKey> = {
   '6mo': 'company.period6mo',
   '1y': 'company.period1y',
 };
+const LIVE_PRICE_POLL_INTERVAL_MS = 20000;
+
+function withLivePoint(points: { date: string; close: number }[], live: LivePrice): { date: string; close: number }[] {
+  if (live.ltp === null) return points;
+  const today = new Date().toISOString().slice(0, 10);
+  if (points.length > 0 && points[points.length - 1].date === today) {
+    return [...points.slice(0, -1), { date: today, close: live.ltp }];
+  }
+  return [...points, { date: today, close: live.ltp }];
+}
 
 export default function CompanyPage() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +53,30 @@ export default function CompanyPage() {
   const [prices, setPrices] = useState<PriceSeries | null>(null);
   const [pricesError, setPricesError] = useState(false);
   const [period, setPeriod] = useState<PricePeriod>('6mo');
+  const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLivePrice(null);
+
+    function poll() {
+      // Deliberately no error state: a single missed poll shouldn't flip a
+      // working readout to "unavailable" -- just keep the last known value
+      // and let the next interval tick retry.
+      getCompanyLivePrice(companyId)
+        .then((price) => {
+          if (active) setLivePrice(price);
+        })
+        .catch(() => {});
+    }
+
+    poll();
+    const interval = setInterval(poll, LIVE_PRICE_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [companyId]);
 
   useEffect(() => {
     let active = true;
@@ -143,10 +180,14 @@ export default function CompanyPage() {
             </button>
           ))}
         </div>
+        <LivePriceReadout price={livePrice ?? { ltp: null, change_pct: null, as_of: null, available: false }} />
         {pricesError ? (
           <p className="text-xs text-muted">{t('company.chartLoadFailed')}</p>
         ) : (
-          <PriceChart points={prices?.points ?? []} unavailableLabel={t('company.chartUnavailable')} />
+          <PriceChart
+            points={livePrice ? withLivePoint(prices?.points ?? [], livePrice) : (prices?.points ?? [])}
+            unavailableLabel={t('company.chartUnavailable')}
+          />
         )}
       </section>
 

@@ -6,7 +6,7 @@ from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.i18n import get_lang
 from app.models import Alert, AlertCompany, Holding, User
-from app.pipeline import decode_key_points
+from app.pipeline import _decode_json_list, decode_key_points
 from app.routers.articles import get_db
 from app.translation.lookup import (
     bulk_alert_company_translations,
@@ -40,6 +40,15 @@ def _serialize_alert(
             "rationale": rationale, "key_points": key_points,
             "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
             "basis": ac.basis, "confidence": ac.confidence,
+            "confidence_band": ac.confidence_band,
+            "confidence_contributors": _decode_json_list(ac.confidence_contributors_json),
+            "confidence_penalties": _decode_json_list(ac.confidence_penalties_json),
+            "reasons": _decode_json_list(ac.reasons_json),
+            "evidence_refs": _decode_json_list(ac.evidence_refs_json),
+            "risks": _decode_json_list(ac.risks_json),
+            "assumptions": _decode_json_list(ac.assumptions_json),
+            "unknowns": _decode_json_list(ac.unknowns_json),
+            "alternative_hypothesis": ac.alternative_hypothesis,
             "market": infer_market(ac.company.ticker),
             "in_my_holdings": ac.company_id in held_company_ids,
             "past_mentions": mentions_before(mentions_index, ac.company_id, alert.created_at),
@@ -52,6 +61,7 @@ def _serialize_alert(
         # additive, purely-for-display translated field.
         "category": alert.category,
         "category_label": category_labels.get(alert.category, alert.category),
+        "event_type": alert.event_type,
         "created_at": alert.created_at.isoformat(),
         "article": {
             "id": alert.article.id,

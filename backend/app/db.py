@@ -26,8 +26,22 @@ _ADDED_COLUMNS = [
     ("alert_companies", "key_points_json", "TEXT"),
     ("companies", "isin", "VARCHAR"),
     ("users", "email_alerts_enabled", "INTEGER DEFAULT 1"),
+    ("companies", "instrument_token", "INTEGER"),
     ("alert_companies", "confidence_score", "INTEGER DEFAULT 50"),
     ("alert_companies", "time_horizon", "VARCHAR DEFAULT 'Short-Term'"),
+    ("alerts", "event_type", "VARCHAR"),
+    ("alerts", "prompt_version", "VARCHAR"),
+    ("alerts", "knowledge_version", "VARCHAR"),
+    ("alert_companies", "reasons_json", "TEXT"),
+    ("alert_companies", "evidence_refs_json", "TEXT"),
+    ("alert_companies", "risks_json", "TEXT"),
+    ("alert_companies", "assumptions_json", "TEXT"),
+    ("alert_companies", "unknowns_json", "TEXT"),
+    ("alert_companies", "alternative_hypothesis", "TEXT"),
+    ("alert_companies", "confidence_band", "VARCHAR"),
+    ("alert_companies", "confidence_contributors_json", "TEXT"),
+    ("alert_companies", "confidence_penalties_json", "TEXT"),
+    ("alert_companies", "rulebook_ids_json", "TEXT"),
 ]
 
 

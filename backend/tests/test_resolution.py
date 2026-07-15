@@ -178,3 +178,27 @@ def test_resolve_dedupes_direct_mention_already_covered_by_sector_inference(db_s
     resolved = resolve_companies(db_session, mentions)
 
     assert len([r for r in resolved if r["company_id"] == company.id]) == 1
+
+
+def test_resolve_carries_evidence_discipline_fields_through(db_session):
+    company = _make_company(db_session, "RELIANCE.NS", "Reliance Industries", "oil_gas", 1.0)
+    mention = CompanyMention(
+        name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+        direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        time_horizon="Short-Term",
+        reasons=["Refining margins widen."],
+        evidence_refs=["RULE_CRUDE_OIL_UP"],
+        risks=["Margin reversal."],
+        assumptions=["Crude stays elevated."],
+        unknowns=["Duration of the spike."],
+        alternative_hypothesis="Already priced in.",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved[0]["reasons"] == ["Refining margins widen."]
+    assert resolved[0]["evidence_refs"] == ["RULE_CRUDE_OIL_UP"]
+    assert resolved[0]["risks"] == ["Margin reversal."]
+    assert resolved[0]["assumptions"] == ["Crude stays elevated."]
+    assert resolved[0]["unknowns"] == ["Duration of the spike."]
+    assert resolved[0]["alternative_hypothesis"] == "Already priced in."
