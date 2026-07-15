@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,7 @@ function renderPage(path = '/company/1') {
 function mockHistoryAndPrices() {
   vi.spyOn(api, 'getCompanyHistory').mockResolvedValue({ mentions: [], has_more: false });
   vi.spyOn(api, 'getCompanyPrices').mockResolvedValue({ period: '6mo', points: [], available: false });
+  vi.spyOn(api, 'getCompanyLivePrice').mockResolvedValue({ ltp: null, change_pct: null, as_of: null, available: false });
 }
 
 afterEach(() => {
@@ -154,5 +155,65 @@ describe('CompanyPage', () => {
     await screen.findByText('Reliance Industries');
     await userEvent.click(screen.getByRole('button', { name: '1Y' }));
     expect(pricesSpy).toHaveBeenLastCalledWith(1, '1y');
+  });
+
+  it('shows the live price readout once it loads, and polls again after 20s', async () => {
+    vi.spyOn(api, 'getCompanyProfile').mockResolvedValue(baseProfile);
+    vi.spyOn(api, 'getCompanyHistory').mockResolvedValue({ mentions: [], has_more: false });
+    vi.spyOn(api, 'getCompanyPrices').mockResolvedValue({ period: '6mo', points: [{ date: '2026-07-14', close: 2500 }], available: true });
+    const liveSpy = vi.spyOn(api, 'getCompanyLivePrice').mockResolvedValue({
+      ltp: 2530, change_pct: 1.2, as_of: '2026-07-15T09:30:00+00:00', available: true,
+    });
+
+    // Fake timers are installed *before* rendering so the effect's
+    // setInterval is itself a fake timer -- a real setInterval created
+    // before vi.useFakeTimers() is never adopted by the fake clock, so
+    // advancing later would silently never fire it (confirmed by hand).
+    vi.useFakeTimers();
+    renderPage();
+    // Flush the initial mount's pending promises without relying on
+    // findByText/waitFor, which poll via setTimeout and would hang under
+    // fake timers -- advancing by 0ms still drains the microtask queue.
+    // Wrapped in act() so the resulting setState is treated as part of a
+    // tracked React update rather than firing a "not wrapped in act" warning.
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(screen.getByText('₹2530.00')).toBeInTheDocument();
+    expect(liveSpy).toHaveBeenCalledTimes(1);
+
+    // advanceTimersByTimeAsync also flushes the microtask queue as it
+    // advances, so the mocked promise from the second poll() call resolves
+    // within this same await instead of needing a separate waitFor.
+    await act(() => vi.advanceTimersByTimeAsync(20000));
+    expect(liveSpy).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it("appends today's live price as the chart's last point when the historical series ends before today", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T10:00:00Z'));
+    vi.spyOn(api, 'getCompanyProfile').mockResolvedValue(baseProfile);
+    vi.spyOn(api, 'getCompanyHistory').mockResolvedValue({ mentions: [], has_more: false });
+    vi.spyOn(api, 'getCompanyPrices').mockResolvedValue({ period: '6mo', points: [{ date: '2026-07-14', close: 2500 }], available: true });
+    vi.spyOn(api, 'getCompanyLivePrice').mockResolvedValue({
+      ltp: 2530, change_pct: 1.2, as_of: '2026-07-15T09:30:00+00:00', available: true,
+    });
+
+    renderPage();
+    // Flush the initial mount's pending promises without relying on
+    // findByText/waitFor, which poll via setTimeout and would hang under
+    // fake timers -- advancing by 0ms still drains the microtask queue.
+    // Wrapped in act() so the resulting setState is treated as part of a
+    // tracked React update rather than firing a "not wrapped in act" warning.
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(screen.getByText('₹2530.00')).toBeInTheDocument();
+    // Historical series ends 2026-07-14; system time is 2026-07-15, so
+    // withLivePoint must have appended (not replaced) a new point --
+    // 2500 -> 2530 reads as bullish only if that append happened.
+    expect(screen.getByRole('img', { name: /price chart, bullish/i })).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });
