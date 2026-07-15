@@ -5,6 +5,7 @@ import {
   getCategories,
   getCompanies,
   getCompanyHistory,
+  getCompanyLivePrice,
   getCompanyPrices,
   getCompanyProfile,
   getWatchlist,
@@ -143,5 +144,13 @@ describe('api client', () => {
     await getCompanyPrices(1, '1mo');
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/companies/1/prices?period=1mo');
+  });
+
+  it('getCompanyLivePrice fetches the live-price endpoint', async () => {
+    const fetchMock = mockFetchOnce({ ltp: 2530.0, change_pct: 1.2, as_of: '2026-07-15T09:30:00+00:00', available: true });
+    const result = await getCompanyLivePrice(1);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/companies/1/live-price');
+    expect(result.ltp).toBe(2530.0);
   });
 });

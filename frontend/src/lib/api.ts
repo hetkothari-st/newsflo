@@ -163,6 +163,13 @@ export interface PriceSeries {
   available: boolean;
 }
 
+export interface LivePrice {
+  ltp: number | null;
+  change_pct: number | null;
+  as_of: string | null;
+  available: boolean;
+}
+
 interface ApiError {
   detail: string;
 }
@@ -220,6 +227,12 @@ export async function getCompanyPrices(id: number, period: PricePeriod = '6mo'):
   const res = await fetch(`/api/companies/${id}/prices?period=${period}`);
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as PriceSeries;
+}
+
+export async function getCompanyLivePrice(id: number): Promise<LivePrice> {
+  const res = await fetch(`/api/companies/${id}/live-price`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as LivePrice;
 }
 
 export async function register(email: string, password: string): Promise<TokenResponse> {
