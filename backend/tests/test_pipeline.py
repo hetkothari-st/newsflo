@@ -53,7 +53,11 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert alert_companies[0].magnitude_low == 2.0
     assert alert_companies[0].magnitude_high == 4.0
     assert pipeline_module.decode_key_points(alert_companies[0]) == ["Crude eases", "Refining margins widen"]
-    assert alert_companies[0].confidence_score == 85
+    # confidence_score is now computed by the deterministic Confidence
+    # Engine (app.reasoning.confidence), not the mocked LLM's old value of
+    # 85 -- exact formula behavior is covered by test_confidence.py.
+    assert 0 <= alert_companies[0].confidence_score <= 100
+    assert alert_companies[0].confidence_band in {"LOW", "MODERATE", "HIGH", "VERY_HIGH"}
     assert alert_companies[0].time_horizon == "Short-Term"
 
     # No holdings exist, so no email notifications were created (matcher no-op).
@@ -357,5 +361,83 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
     alert = db_session.query(Alert).one()
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
     assert len(rows) == 2
-    assert all(r.confidence_score == 55 for r in rows)
+    # Same reasoning as above -- the Confidence Engine, not the LLM,
+    # produces confidence_score now.
+    assert all(0 <= r.confidence_score <= 100 for r in rows)
     assert all(r.time_horizon == "Medium-Term" for r in rows)
+
+
+def test_process_new_articles_persists_evidence_discipline_fields(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/evidence",
+        title="Oil prices spike", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy", event_type="crude_oil",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            time_horizon="Short-Term",
+            reasons=["Refining margins widen on crude spike."],
+            evidence_refs=["RULE_CRUDE_OIL_UP"],
+            risks=["Margin reversal if crude falls back."],
+            assumptions=["Crude stays elevated."],
+            unknowns=["Duration of the spike."],
+            alternative_hypothesis="Already priced in.",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    alert = db_session.query(Alert).one()
+    assert alert.event_type == "crude_oil"
+    assert alert.prompt_version is not None
+    assert alert.knowledge_version is not None
+
+    ac = db_session.query(AlertCompany).one()
+    assert pipeline_module._decode_json_list(ac.reasons_json) == ["Refining margins widen on crude spike."]
+    assert pipeline_module._decode_json_list(ac.evidence_refs_json) == ["RULE_CRUDE_OIL_UP"]
+    assert pipeline_module._decode_json_list(ac.rulebook_ids_json) == ["RULE_CRUDE_OIL_UP"]
+    assert ac.alternative_hypothesis == "Already priced in."
+    assert ac.confidence_band in {"LOW", "MODERATE", "HIGH", "VERY_HIGH"}
+    assert pipeline_module._decode_json_list(ac.confidence_contributors_json) != [] or pipeline_module._decode_json_list(ac.confidence_penalties_json) != []
+
+
+def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    first = Article(source="source-a", url="https://example.com/reuse-first", title="Oil prices spike", content="x")
+    second = Article(source="source-b", url="https://example.com/reuse-second", title="  OIL PRICES   spike  ", content="x, wire copy")
+    db_session.add_all([first, second])
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy", event_type="crude_oil",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            time_horizon="Short-Term",
+            reasons=["Refining margins widen."], evidence_refs=["RULE_CRUDE_OIL_UP"],
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 2
+
+    alerts = db_session.query(Alert).order_by(Alert.id).all()
+    assert alerts[0].event_type == alerts[1].event_type == "crude_oil"
+
+    acs = db_session.query(AlertCompany).order_by(AlertCompany.id).all()
+    assert pipeline_module._decode_json_list(acs[0].reasons_json) == pipeline_module._decode_json_list(acs[1].reasons_json)

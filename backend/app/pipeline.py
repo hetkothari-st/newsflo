@@ -1,19 +1,22 @@
 import json
 import time
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.claude_client import analyze_article
-from app.calibration.blender import get_calibrated_magnitude
+from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, Article, utcnow
+from app.reasoning.confidence import compute_confidence, source_credibility
+from app.reasoning.rulebook import get_rule
+from app.reasoning.versions import KNOWLEDGE_VERSION, PROMPT_VERSION
 from app.ws.manager import manager
 
 # How far back to look for a reusable analysis of a duplicate/republished
@@ -22,10 +25,27 @@ from app.ws.manager import manager
 DEDUP_LOOKBACK_HOURS = 24
 
 
-def decode_key_points(alert_company: AlertCompany) -> list[str]:
-    if not alert_company.key_points_json:
+def _decode_json_list(value: str | None) -> list[str]:
+    if not value:
         return []
-    return json.loads(alert_company.key_points_json)
+    return json.loads(value)
+
+
+def decode_key_points(alert_company: AlertCompany) -> list[str]:
+    return _decode_json_list(alert_company.key_points_json)
+
+
+def _as_aware_utc(dt):
+    """SQLite (used by the test suite) silently drops tzinfo on
+    ``DateTime(timezone=True)`` columns when a row is reloaded after commit
+    -- Postgres (production) does not have this quirk. Normalize so
+    subtracting from ``utcnow()`` (always aware) never raises
+    ``TypeError: can't subtract offset-naive and offset-aware datetimes``
+    regardless of which backend produced the value.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
@@ -70,6 +90,14 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
             "key_points": decode_key_points(ac),
             "basis": ac.basis,
             "confidence": ac.confidence,
+            "confidence_score": ac.confidence_score,
+            "confidence_band": ac.confidence_band,
+            "reasons": _decode_json_list(ac.reasons_json),
+            "evidence_refs": _decode_json_list(ac.evidence_refs_json),
+            "risks": _decode_json_list(ac.risks_json),
+            "assumptions": _decode_json_list(ac.assumptions_json),
+            "unknowns": _decode_json_list(ac.unknowns_json),
+            "alternative_hypothesis": ac.alternative_hypothesis,
             "market": infer_market(ac.company.ticker),
             "past_mentions": mentions_before(mentions_index, ac.company_id, alert.created_at),
         } for ac in alert.companies],
@@ -106,16 +134,26 @@ def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
     return None
 
 
-def _persist_alert(session: Session, article: Article, category: str, entries: list[dict]) -> Alert:
+def _persist_alert(
+    session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
+) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
-    dedup-reuse path -- calibration is always looked up fresh here (not
-    copied from a reused analysis) so a reused alert reflects the current
-    calibration state exactly like a brand new analysis would.
+    dedup-reuse path -- calibration AND confidence are always looked up/
+    computed fresh here (not copied from a reused analysis) so a reused
+    alert reflects the current calibration state exactly like a brand new
+    analysis would.
     """
-    alert = Alert(article_id=article.id, category=category)
+    alert = Alert(
+        article_id=article.id, category=category, event_type=event_type,
+        prompt_version=PROMPT_VERSION, knowledge_version=KNOWLEDGE_VERSION,
+    )
     session.add(alert)
     session.flush()
+
+    article_age_hours = (
+        utcnow() - _as_aware_utc(article.published_at or article.fetched_at)
+    ).total_seconds() / 3600
 
     for entry in entries:
         calibrated = get_calibrated_magnitude(session, category=category, company_id=entry["company_id"])
@@ -125,6 +163,25 @@ def _persist_alert(session: Session, article: Article, category: str, entries: l
         else:
             magnitude_low, magnitude_high = entry["magnitude_low"], entry["magnitude_high"]
             confidence = "llm_estimate"
+
+        reasons = entry.get("reasons") or []
+        evidence_refs = entry.get("evidence_refs") or []
+        matched_rule_ids = [ref for ref in evidence_refs if get_rule(ref) is not None]
+        health = get_calibration_health(session, category=category, company_id=entry["company_id"])
+
+        result = compute_confidence(
+            calibration_sample_count=health["sample_count"],
+            calibration_hit_rate=health["hit_rate"],
+            claim_count=len(reasons),
+            evidence_ref_count=len(evidence_refs),
+            rule_matched=bool(matched_rule_ids),
+            source_credibility=source_credibility(article.source),
+            # No contradiction-detection stage exists yet -- always True
+            # until one is built (see the design doc's deferred-work list).
+            reasoning_consistent=True,
+            article_age_hours=article_age_hours,
+        )
+
         session.add(AlertCompany(
             alert_id=alert.id,
             company_id=entry["company_id"],
@@ -133,10 +190,20 @@ def _persist_alert(session: Session, article: Article, category: str, entries: l
             magnitude_high=magnitude_high,
             rationale=entry["rationale"],
             key_points_json=json.dumps(entry.get("key_points") or []),
-            confidence_score=entry["confidence_score"],
+            confidence_score=result.score,
             time_horizon=entry["time_horizon"],
             basis=entry["basis"],
             confidence=confidence,
+            reasons_json=json.dumps(reasons),
+            evidence_refs_json=json.dumps(evidence_refs),
+            risks_json=json.dumps(entry.get("risks") or []),
+            assumptions_json=json.dumps(entry.get("assumptions") or []),
+            unknowns_json=json.dumps(entry.get("unknowns") or []),
+            alternative_hypothesis=entry.get("alternative_hypothesis"),
+            confidence_band=result.band,
+            confidence_contributors_json=json.dumps(result.contributors),
+            confidence_penalties_json=json.dumps(result.penalties),
+            rulebook_ids_json=json.dumps(matched_rule_ids),
         ))
 
     if article.image_url is None:
@@ -182,9 +249,15 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "company_id": ac.company_id, "direction": ac.direction,
                 "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
                 "rationale": ac.rationale, "key_points": decode_key_points(ac), "basis": ac.basis,
-                "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
+                "time_horizon": ac.time_horizon,
+                "reasons": _decode_json_list(ac.reasons_json),
+                "evidence_refs": _decode_json_list(ac.evidence_refs_json),
+                "risks": _decode_json_list(ac.risks_json),
+                "assumptions": _decode_json_list(ac.assumptions_json),
+                "unknowns": _decode_json_list(ac.unknowns_json),
+                "alternative_hypothesis": ac.alternative_hypothesis,
             } for ac in reusable_alert.companies]
-            _persist_alert(session, article, reusable_alert.category, entries)
+            _persist_alert(session, article, reusable_alert.category, entries, event_type=reusable_alert.event_type)
             alerts_created += 1
             continue
 
@@ -205,7 +278,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             continue
 
         resolved = resolve_companies(session, analysis.companies)
-        _persist_alert(session, article, analysis.category, resolved)
+        _persist_alert(session, article, analysis.category, resolved, event_type=analysis.event_type)
         alerts_created += 1
 
     return alerts_created
