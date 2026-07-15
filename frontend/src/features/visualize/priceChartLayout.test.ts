@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutPriceChart } from './priceChartLayout';
+import { layoutPriceChart, nearestPointIndex } from './priceChartLayout';
 import type { PricePoint } from '../../lib/api';
 
 const points: PricePoint[] = [
@@ -48,5 +48,31 @@ describe('layoutPriceChart', () => {
     expect(layoutPriceChart(points, 100, 50)?.trend).toBe('bearish'); // 95 < 100
     const rising = [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 110 }];
     expect(layoutPriceChart(rising, 100, 50)?.trend).toBe('bullish');
+  });
+});
+
+describe('nearestPointIndex', () => {
+  const coords = [{ x: 0, y: 10 }, { x: 50, y: 20 }, { x: 100, y: 30 }];
+
+  it('returns the index of the closest point to x', () => {
+    expect(nearestPointIndex(coords, 5)).toBe(0);
+    expect(nearestPointIndex(coords, 48)).toBe(1);
+    expect(nearestPointIndex(coords, 96)).toBe(2);
+  });
+
+  it('picks the earlier index on an exact tie', () => {
+    expect(nearestPointIndex(coords, 25)).toBe(0);
+  });
+
+  it('clamps to the last index for an x beyond the final point', () => {
+    expect(nearestPointIndex(coords, 500)).toBe(2);
+  });
+
+  it('clamps to the first index for a negative x', () => {
+    expect(nearestPointIndex(coords, -50)).toBe(0);
+  });
+
+  it('returns 0 for an empty points array', () => {
+    expect(nearestPointIndex([], 10)).toBe(0);
   });
 });
