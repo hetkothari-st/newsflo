@@ -105,6 +105,14 @@ class AlertCompany(Base):
     # (app.reasoning.rulebook.get_rule(ref) is not None) -- stored separately
     # for easy future querying of which rules are well-calibrated.
     rulebook_ids_json = Column(Text, nullable=True)
+    # Financial grounding + contradiction detection (see docs/superpowers/
+    # specs/2026-07-16-financial-grounding-contradiction-detection-design.md).
+    # Null for rows persisted before this feature shipped, or when the
+    # underlying yfinance fetch failed for this company.
+    price_at_analysis = Column(Float, nullable=True)
+    return_1m = Column(Float, nullable=True)
+    return_3m = Column(Float, nullable=True)
+    contradiction_note = Column(Text, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company")
@@ -124,6 +132,22 @@ class CalibrationSample(Base):
     magnitude_actual = Column(Float, nullable=False)  # actual % price move over the horizon
     horizon_days = Column(Integer, nullable=False)  # 1 | 3 | 7
     sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class FinancialSnapshot(Base):
+    """Cached price/return data for a ticker, refreshed on a TTL by
+    app.reasoning.financial_context.get_or_fetch_financial_snapshot -- avoids
+    re-hitting yfinance for the same company across multiple alerts in a
+    short window."""
+    __tablename__ = "financial_snapshots"
+    __table_args__ = (UniqueConstraint("ticker", name="uq_financial_snapshot_ticker"),)
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    return_1m = Column(Float, nullable=True)
+    return_3m = Column(Float, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class User(Base):
