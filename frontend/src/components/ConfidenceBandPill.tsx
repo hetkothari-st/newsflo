@@ -2,7 +2,7 @@ import { confidenceBandColor } from '../features/visualize/colors';
 import { useLanguage } from '../lib/language';
 import type { TranslationKey } from '../lib/i18n';
 
-const BAND_LABEL_KEY: Record<string, TranslationKey> = {
+export const BAND_LABEL_KEY: Record<string, TranslationKey> = {
   LOW: 'reasoning.confidenceLow',
   MODERATE: 'reasoning.confidenceModerate',
   HIGH: 'reasoning.confidenceHigh',

@@ -75,3 +75,14 @@ export function confidenceBandColor(band: string): string {
   const score = BAND_REPRESENTATIVE_SCORE[band] ?? BAND_REPRESENTATIVE_SCORE.MODERATE;
   return confidenceColor(score);
 }
+
+// Mirrors backend/app/reasoning/confidence.py's _band() thresholds exactly --
+// computed client-side from confidence_score (always present) rather than
+// trusting the confidence_band field (nullable, absent on legacy rows), so
+// every company always lands in a real band bucket, never "unclassified".
+export function confidenceBandFromScore(score: number): 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH' {
+  if (score < 40) return 'LOW';
+  if (score < 70) return 'MODERATE';
+  if (score < 90) return 'HIGH';
+  return 'VERY_HIGH';
+}

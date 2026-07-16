@@ -68,4 +68,26 @@ describe('ConfidenceTree', () => {
     const { container } = render(<ConfidenceTree companies={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('groups companies into confidence-band branches, highest band first', () => {
+    render(
+      <ConfidenceTree
+        companies={[
+          company({ company_id: 1, ticker: 'LOWCO', confidence_score: 20 }), // LOW
+          company({ company_id: 2, ticker: 'HICO', confidence_score: 95 }), // VERY_HIGH
+        ]}
+      />,
+    );
+    expect(screen.getByText('Very High')).toBeInTheDocument();
+    expect(screen.getByText('Low')).toBeInTheDocument();
+    const items = screen.getAllByRole('button').map((el) => el.textContent || '');
+    expect(items.findIndex((t) => t.includes('Very High'))).toBeLessThan(items.findIndex((t) => t.includes('Low')));
+  });
+
+  it('omits a band branch entirely when no company falls in it', () => {
+    render(<ConfidenceTree companies={[company({ company_id: 1, confidence_score: 50 })]} />); // MODERATE only
+    expect(screen.getByText('Moderate')).toBeInTheDocument();
+    expect(screen.queryByText('Very High')).not.toBeInTheDocument();
+    expect(screen.queryByText('Low')).not.toBeInTheDocument();
+  });
 });

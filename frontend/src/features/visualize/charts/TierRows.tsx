@@ -18,7 +18,8 @@ export default function TierRows({
   return (
     <div className="flex flex-col gap-3 p-4">
       {groups.map((group) => {
-        const net = computeNetSignal(group.companies).direction;
+        const signal = computeNetSignal(group.companies);
+        const net = signal.direction;
         return (
           <div
             key={group.key}
@@ -28,11 +29,11 @@ export default function TierRows({
               <p className="text-xs uppercase tracking-widest text-muted">{group.label}</p>
               {net === 'even' ? (
                 <span aria-label="Evenly split" className="text-xs text-muted">
-                  ▬
+                  ▬ {signal.avgConfidence}%
                 </span>
               ) : (
                 <span aria-label={net === 'bullish' ? 'Net bullish' : 'Net bearish'} className={net === 'bullish' ? 'text-bullish' : 'text-bearish'}>
-                  {net === 'bullish' ? '▲' : '▼'}
+                  {net === 'bullish' ? '▲' : '▼'} {signal.avgConfidence}%
                 </span>
               )}
             </div>
