@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import CalendarModal from './CalendarModal';
 import * as api from '../lib/api';
-import type { Alert } from '../lib/api';
+import type { Alert, AlertCompany } from '../lib/api';
 import { AuthProvider } from '../lib/auth';
 import { LanguageProvider } from '../lib/language';
 
@@ -23,14 +23,36 @@ function currentIstMonthFirstDay(): string {
   return `${year}-${month}-01`;
 }
 
-function makeAlert(id: number, title: string): Alert {
+function makeAlert(id: number, title: string, companies: AlertCompany[] = []): Alert {
   return {
     id,
     category: 'oil_energy',
     category_label: 'oil_energy',
     created_at: '2026-07-01T10:00:00+00:00',
     article: { id, title, url: `https://example.com/${id}`, image_url: null },
-    companies: [],
+    companies,
+  };
+}
+
+function makeCompany(companyId: number, name: string, sector: string): AlertCompany {
+  return {
+    company_id: companyId,
+    ticker: `${name.toUpperCase()}.NS`,
+    name,
+    index_tier: 'NIFTY50',
+    sector,
+    direction: 'bullish',
+    magnitude_low: 1,
+    magnitude_high: 2,
+    rationale: 'test',
+    key_points: [],
+    confidence_score: 50,
+    time_horizon: 'Short-Term',
+    basis: 'direct_mention',
+    confidence: 'llm_estimate',
+    market: 'IN',
+    in_my_holdings: false,
+    past_mentions: [],
   };
 }
 
@@ -96,6 +118,51 @@ describe('CalendarModal', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /first headline/i }));
     expect(await screen.findByText(/no affected companies/i)).toBeInTheDocument();
+  });
+
+  it('filters the day by sector, then by company, mutually exclusively', async () => {
+    const dayKey = currentIstMonthFirstDay();
+    vi.spyOn(api, 'getCalendarCounts').mockResolvedValue({ [dayKey]: 3 });
+    vi.spyOn(api, 'getCalendarDay').mockResolvedValue([
+      makeAlert(1, 'Banking headline', [makeCompany(1, 'HDFC Bank', 'banking')]),
+      makeAlert(2, 'Oil headline', [makeCompany(2, 'Reliance', 'oil_gas')]),
+      // Names HDFC Bank again (a different alert affecting the same
+      // company), plus a second banking company -- exercises both the
+      // "company" filter (id 1 should match this one too) and the
+      // "sector" filter (banking should match this one too).
+      makeAlert(3, 'Second banking headline', [
+        makeCompany(1, 'HDFC Bank', 'banking'),
+        makeCompany(3, 'ICICI Bank', 'banking'),
+      ]),
+    ]);
+
+    renderModal();
+
+    await userEvent.click(await screen.findByRole('button', { name: '1 3' }));
+    expect(await screen.findByText('Banking headline')).toBeInTheDocument();
+    expect(screen.getByText('Oil headline')).toBeInTheDocument();
+    expect(screen.getByText('Second banking headline')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText(/sector/i), 'banking');
+    expect(screen.getByText('Banking headline')).toBeInTheDocument();
+    expect(screen.getByText('Second banking headline')).toBeInTheDocument();
+    expect(screen.queryByText('Oil headline')).not.toBeInTheDocument();
+
+    // Picking a company resets the sector filter back to "all" -- the two
+    // are mutually exclusive, not ANDed together.
+    await userEvent.selectOptions(screen.getByLabelText(/company/i), '2');
+    expect(screen.getByLabelText(/sector/i)).toHaveValue('all');
+    expect(screen.getByText('Oil headline')).toBeInTheDocument();
+    expect(screen.queryByText('Banking headline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Second banking headline')).not.toBeInTheDocument();
+
+    // Company 1 (HDFC Bank) is named by two distinct alerts -- both, and
+    // only those, must show up ("this company's news and news where it's
+    // shown as affected" collapses to one membership check).
+    await userEvent.selectOptions(screen.getByLabelText(/company/i), '1');
+    expect(screen.getByText('Banking headline')).toBeInTheDocument();
+    expect(screen.getByText('Second banking headline')).toBeInTheDocument();
+    expect(screen.queryByText('Oil headline')).not.toBeInTheDocument();
   });
 
   it('Escape closes only the topmost alert popup, not the whole calendar', async () => {

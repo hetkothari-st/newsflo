@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getCalendarCounts, getCalendarDay, type Alert, type CalendarCounts } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
@@ -40,6 +40,8 @@ function firstWeekday(year: number, month: number): number {
 }
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const SELECT_CLASS =
+  'rounded-md border border-hairline bg-surface px-1.5 py-0.5 text-xs text-ink theme-light:border-transparent theme-light:shadow-neu-sm';
 
 export default function CalendarModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { token } = useAuth();
@@ -56,6 +58,11 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
   const [dayAlerts, setDayAlerts] = useState<Alert[]>([]);
   const [dayLoading, setDayLoading] = useState(false);
   const [openAlertId, setOpenAlertId] = useState<number | null>(null);
+  // 'all' or a sector name / company_id (as a string, to match <select>
+  // values). Mutually exclusive -- picking one resets the other, since the
+  // ask is "show just this sector" OR "show just this company", not both.
+  const [sectorFilter, setSectorFilter] = useState('all');
+  const [companyFilter, setCompanyFilter] = useState('all');
 
   // Reset to the current month and month view every time the modal is reopened.
   useEffect(() => {
@@ -64,6 +71,8 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
       setToday(t);
       setCursor({ year: t.year, month: t.month });
       setSelectedDate(null);
+      setSectorFilter('all');
+      setCompanyFilter('all');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -113,6 +122,12 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
     });
   }
 
+  function openDay(key: string) {
+    setSectorFilter('all');
+    setCompanyFilter('all');
+    setSelectedDate(key);
+  }
+
   // AlertDetail's Escape handling is a plain `document` keydown listener with
   // no notion of other open modals -- with two AlertDetail instances open at
   // once (this one, and the nested one below for the alert popup), pressing
@@ -140,6 +155,36 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
   const total = daysInMonth(cursor.year, cursor.month);
   for (let i = 0; i < firstWeekday(cursor.year, cursor.month); i++) cells.push(null);
   for (let day = 1; day <= total; day++) cells.push(day);
+
+  // Built from the day's already-fetched alerts -- no extra API call. Every
+  // AlertCompany entry (direct_mention or sector_inference) counts as "this
+  // company's news", so filtering by company_id membership already covers
+  // both "the company's own story" and "news where it's shown as affected".
+  const sectorOptions = useMemo(() => {
+    const set = new Set<string>();
+    dayAlerts.forEach((a) => a.companies.forEach((c) => {
+      if (c.sector) set.add(c.sector);
+    }));
+    return Array.from(set).sort();
+  }, [dayAlerts]);
+
+  const companyOptions = useMemo(() => {
+    const map = new Map<number, { id: number; name: string }>();
+    dayAlerts.forEach((a) => a.companies.forEach((c) => {
+      if (!map.has(c.company_id)) map.set(c.company_id, { id: c.company_id, name: c.name });
+    }));
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [dayAlerts]);
+
+  const filteredDayAlerts = useMemo(() => {
+    if (sectorFilter !== 'all') {
+      return dayAlerts.filter((a) => a.companies.some((c) => c.sector === sectorFilter));
+    }
+    if (companyFilter !== 'all') {
+      return dayAlerts.filter((a) => a.companies.some((c) => String(c.company_id) === companyFilter));
+    }
+    return dayAlerts;
+  }, [dayAlerts, sectorFilter, companyFilter]);
 
   return (
     <AlertDetail open={open} onClose={closeOuter}>
@@ -181,7 +226,7 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
                   key={key}
                   type="button"
                   disabled={!clickable}
-                  onClick={() => setSelectedDate(key)}
+                  onClick={() => openDay(key)}
                   className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-lg text-sm ${
                     clickable
                       ? 'cursor-pointer text-ink hover:bg-surface theme-light:hover:shadow-neu-sm'
@@ -201,28 +246,80 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3 pr-8">
-            <button
-              type="button"
-              onClick={() => setSelectedDate(null)}
-              className="text-xs uppercase tracking-widest text-muted hover:text-ink"
-            >
-              ‹ {t('calendar.back')}
-            </button>
-            <h2 className="font-display text-lg font-bold text-ink">{selectedDate}</h2>
-          </div>
-          {dayLoading ? (
-            <p className="text-xs uppercase tracking-widest text-muted">{t('feed.loading')}</p>
-          ) : dayAlerts.length === 0 ? (
-            <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.dayEmpty')}</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {dayAlerts.map((alert) => (
-                <AlertCoverCard key={alert.id} alert={alert} variant="grid" onOpen={() => setOpenAlertId(alert.id)} />
-              ))}
+        <div className="flex flex-col">
+          {/* Sticky within AlertDetail's own scrolling panel -- negative
+              margins cancel the panel's p-6 so this bar spans flush edge to
+              edge and lines up exactly with `top-0`, instead of sticking
+              with a padding-sized gap above it. z-10 keeps it under the
+              panel's absolute close button (z-20) so that stays clickable
+              once the bar's opaque background is scrolled underneath it. */}
+          <div className="sticky top-0 z-10 -mx-6 -mt-6 flex flex-col gap-3 border-b border-hairline bg-surface px-6 pb-3 pt-6 pr-8 theme-light:border-transparent">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedDate(null)}
+                className="text-xs uppercase tracking-widest text-muted hover:text-ink"
+              >
+                ‹ {t('calendar.back')}
+              </button>
+              <h2 className="font-display text-lg font-bold text-ink">{selectedDate}</h2>
             </div>
-          )}
+            {dayAlerts.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+                  {t('calendar.filterSector')}
+                  <select
+                    value={sectorFilter}
+                    onChange={(e) => {
+                      setSectorFilter(e.target.value);
+                      setCompanyFilter('all');
+                    }}
+                    className={SELECT_CLASS}
+                  >
+                    <option value="all">{t('calendar.filterAll')}</option>
+                    {sectorOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+                  {t('calendar.filterCompany')}
+                  <select
+                    value={companyFilter}
+                    onChange={(e) => {
+                      setCompanyFilter(e.target.value);
+                      setSectorFilter('all');
+                    }}
+                    className={SELECT_CLASS}
+                  >
+                    <option value="all">{t('calendar.filterAll')}</option>
+                    {companyOptions.map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-4 pt-4">
+            {dayLoading ? (
+              <p className="text-xs uppercase tracking-widest text-muted">{t('feed.loading')}</p>
+            ) : dayAlerts.length === 0 ? (
+              <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.dayEmpty')}</p>
+            ) : filteredDayAlerts.length === 0 ? (
+              <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.filterNoMatch')}</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {filteredDayAlerts.map((alert) => (
+                  <AlertCoverCard key={alert.id} alert={alert} variant="grid" onOpen={() => setOpenAlertId(alert.id)} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
       <AlertDetail open={openAlertId !== null} onClose={() => setOpenAlertId(null)}>

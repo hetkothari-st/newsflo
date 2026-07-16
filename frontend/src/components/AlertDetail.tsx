@@ -48,7 +48,9 @@ export default function AlertDetail({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-4 top-4 text-muted hover:text-ink"
+          // z-20, above z-10 sticky content (e.g. CalendarModal's day-view
+          // header bar) that a scrolled child might otherwise paint over.
+          className="absolute right-4 top-4 z-20 text-muted hover:text-ink"
         >
           ✕
         </button>
