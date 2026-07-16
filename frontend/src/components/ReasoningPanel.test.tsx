@@ -1,4 +1,5 @@
 import { render as rtlRender, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
@@ -132,5 +133,70 @@ describe('ReasoningPanel', () => {
   it('omits the detail-page link for a global company', () => {
     render(<ReasoningPanel company={{ ...base, market: 'GLOBAL' }} />);
     expect(screen.queryByRole('link', { name: /view full details/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ReasoningPanel evidence section', () => {
+  const withEvidence: AlertCompany = {
+    ...base,
+    confidence_band: 'HIGH',
+    reasons: ['Refining margins widen on crude spike.'],
+    evidence_refs: ['RULE_CRUDE_OIL_UP', 'article: crude jumped 8% overnight'],
+    risks: ['Margin reversal if crude falls back.'],
+    assumptions: ['Crude stays elevated for the quarter.'],
+    unknowns: ['Whether this is a durable shock or a spike.'],
+    alternative_hypothesis: 'Market has already priced this in.',
+    confidence_contributors: ['Matched a known rulebook rule'],
+    confidence_penalties: ['No historical calibration yet'],
+  };
+
+  it('renders no evidence section and no confidence badge for a legacy alert (reasons empty)', () => {
+    render(<ReasoningPanel company={base} />);
+    expect(screen.queryByText('Why this call')).not.toBeInTheDocument();
+    expect(screen.queryByText('High')).not.toBeInTheDocument();
+  });
+
+  it('renders the confidence band badge when confidence_band is set', () => {
+    render(<ReasoningPanel company={withEvidence} />);
+    expect(screen.getByText('High')).toBeInTheDocument();
+  });
+
+  it('shows a "Why this call" toggle that is collapsed by default', () => {
+    render(<ReasoningPanel company={withEvidence} />);
+    expect(screen.getByText('Why this call')).toBeInTheDocument();
+    expect(screen.queryByText('Refining margins widen on crude spike.')).not.toBeInTheDocument();
+  });
+
+  it('expands to show reasons, evidence, alternative view, risks, and confidence breakdown', async () => {
+    render(<ReasoningPanel company={withEvidence} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
+
+    expect(screen.getByText('Refining margins widen on crude spike.')).toBeInTheDocument();
+    expect(screen.getByText('Crude oil up')).toBeInTheDocument(); // RULE_CRUDE_OIL_UP label
+    expect(screen.getByText('crude jumped 8% overnight')).toBeInTheDocument(); // article: prefix stripped
+    expect(screen.getByText('Market has already priced this in.')).toBeInTheDocument();
+    expect(screen.getByText('Margin reversal if crude falls back.')).toBeInTheDocument();
+    expect(screen.getByText('Crude stays elevated for the quarter.')).toBeInTheDocument();
+    expect(screen.getByText('Whether this is a durable shock or a spike.')).toBeInTheDocument();
+    expect(screen.getByText('Matched a known rulebook rule')).toBeInTheDocument();
+    expect(screen.getByText('No historical calibration yet')).toBeInTheDocument();
+  });
+
+  it('shows the event type line when eventType is passed', async () => {
+    render(<ReasoningPanel company={withEvidence} eventType="crude_oil" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
+    expect(screen.getByText('Event: Crude oil')).toBeInTheDocument();
+  });
+
+  it('omits the event type line when eventType is not passed', async () => {
+    render(<ReasoningPanel company={withEvidence} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
+    expect(screen.queryByText(/^Event:/)).not.toBeInTheDocument();
+  });
+
+  it('omits the alternative view line when alternative_hypothesis is null', async () => {
+    render(<ReasoningPanel company={{ ...withEvidence, alternative_hypothesis: null }} eventType={null} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
+    expect(screen.queryByText('Alternative view')).not.toBeInTheDocument();
   });
 });
