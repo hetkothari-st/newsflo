@@ -17,6 +17,10 @@ class Company(Base):
     ticker = Column(String, nullable=False, unique=True)
     name = Column(String, nullable=False)
     sector = Column(String, nullable=False)
+    # One of app.companies.sub_sectors.SUB_SECTOR_TAXONOMY[sector], or NULL
+    # until backend/backfill_subsectors.py classifies it. See that module for
+    # the closed vocabulary and the one-time enrichment job.
+    sub_sector = Column(String, nullable=True)
     index_tier = Column(String, nullable=False)  # NIFTY50 | NIFTY100 | NIFTY500 | OTHER
     market_cap = Column(Float, nullable=True)
     isin = Column(String, nullable=True, unique=True)
@@ -60,6 +64,11 @@ class Alert(Base):
     article_id = Column(Integer, ForeignKey("articles.id"), nullable=False)
     category = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    # Article-level event classification, parallel to `category`. See
+    # docs/superpowers/specs/2026-07-15-reasoning-engine-upgrade-design.md.
+    event_type = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    knowledge_version = Column(String, nullable=True)
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -80,6 +89,22 @@ class AlertCompany(Base):
     time_horizon = Column(String, nullable=False, default="Short-Term")
     basis = Column(String, nullable=False)  # direct_mention | sector_inference
     confidence = Column(String, nullable=False, default="llm_estimate")  # llm_estimate | calibrated
+    # Evidence-discipline + Confidence Engine fields, all JSON-encoded
+    # list[str] in *_json columns (same pattern as key_points_json), null for
+    # rows created before this feature shipped.
+    reasons_json = Column(Text, nullable=True)
+    evidence_refs_json = Column(Text, nullable=True)
+    risks_json = Column(Text, nullable=True)
+    assumptions_json = Column(Text, nullable=True)
+    unknowns_json = Column(Text, nullable=True)
+    alternative_hypothesis = Column(Text, nullable=True)
+    confidence_band = Column(String, nullable=True)  # LOW | MODERATE | HIGH | VERY_HIGH
+    confidence_contributors_json = Column(Text, nullable=True)
+    confidence_penalties_json = Column(Text, nullable=True)
+    # Subset of evidence_refs_json that are real, known rulebook rule ids
+    # (app.reasoning.rulebook.get_rule(ref) is not None) -- stored separately
+    # for easy future querying of which rules are well-calibrated.
+    rulebook_ids_json = Column(Text, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company")

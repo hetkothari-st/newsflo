@@ -60,3 +60,18 @@ export function confidenceColor(score: number): string {
   const index = Math.min(CONFIDENCE_RAMP.length - 1, Math.floor(Math.max(0, score) / 20));
   return CONFIDENCE_RAMP[index];
 }
+
+// Reuses the same validated CONFIDENCE_RAMP as confidenceColor -- rather
+// than validating a second palette for the 4-value band enum, each band
+// maps to one representative point on the already-validated 0-100 ramp.
+const BAND_REPRESENTATIVE_SCORE: Record<string, number> = {
+  LOW: 10,
+  MODERATE: 50,
+  HIGH: 75,
+  VERY_HIGH: 95,
+};
+
+export function confidenceBandColor(band: string): string {
+  const score = BAND_REPRESENTATIVE_SCORE[band] ?? BAND_REPRESENTATIVE_SCORE.MODERATE;
+  return confidenceColor(score);
+}

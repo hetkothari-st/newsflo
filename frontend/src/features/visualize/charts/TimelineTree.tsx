@@ -4,7 +4,13 @@ import { groupByTimeHorizon } from '../transforms';
 import { TreeRoot, TreeBranch, TreeLeaf } from './tree/Tree';
 import { useCompanySelection } from './useCompanySelection';
 
-export default function TimelineTree({ companies }: { companies: AlertCompany[] }) {
+export default function TimelineTree({
+  companies,
+  eventType,
+}: {
+  companies: AlertCompany[];
+  eventType?: string | null;
+}) {
   const { toggle, selected } = useCompanySelection(companies);
   const groups = groupByTimeHorizon(companies);
 
@@ -21,7 +27,7 @@ export default function TimelineTree({ companies }: { companies: AlertCompany[] 
           </TreeBranch>
         ))}
       </TreeRoot>
-      {selected && <ReasoningPanel company={selected} />}
+      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );
 }

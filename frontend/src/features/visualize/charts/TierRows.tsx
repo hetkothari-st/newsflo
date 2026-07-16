@@ -1,16 +1,15 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { groupByTier } from '../transforms';
+import { groupByTier, computeNetSignal } from '../transforms';
 import { useCompanySelection } from './useCompanySelection';
 
-function netSentiment(companies: AlertCompany[]): 'bullish' | 'bearish' | 'even' {
-  const bullish = companies.filter((c) => c.direction === 'bullish').length;
-  const bearish = companies.filter((c) => c.direction === 'bearish').length;
-  if (bullish === bearish) return 'even';
-  return bullish > bearish ? 'bullish' : 'bearish';
-}
-
-export default function TierRows({ companies }: { companies: AlertCompany[] }) {
+export default function TierRows({
+  companies,
+  eventType,
+}: {
+  companies: AlertCompany[];
+  eventType?: string | null;
+}) {
   const { toggle, selected } = useCompanySelection(companies);
   const groups = groupByTier(companies);
 
@@ -19,7 +18,7 @@ export default function TierRows({ companies }: { companies: AlertCompany[] }) {
   return (
     <div className="flex flex-col gap-3 p-4">
       {groups.map((group) => {
-        const net = netSentiment(group.companies);
+        const net = computeNetSignal(group.companies).direction;
         return (
           <div
             key={group.key}
@@ -58,7 +57,7 @@ export default function TierRows({ companies }: { companies: AlertCompany[] }) {
           </div>
         );
       })}
-      {selected && <ReasoningPanel company={selected} />}
+      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );
 }

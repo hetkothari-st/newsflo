@@ -25,6 +25,11 @@ export interface AlertCompany {
   name: string;
   index_tier: string; // NIFTY50 | NIFTY100 | NIFTY500 | GLOBAL_LARGE_CAP | OTHER
   sector?: string;
+  // One of backend app.companies.sub_sectors.SUB_SECTOR_TAXONOMY[sector], or
+  // null until the one-time enrichment backfill classifies it (or forever,
+  // for sector === 'other'). Render null as an "Unclassified" bucket, never
+  // filter it out silently.
+  sub_sector?: string | null;
   direction: string; // bullish | bearish
   magnitude_low: number;
   magnitude_high: number;
@@ -37,6 +42,20 @@ export interface AlertCompany {
   market: 'IN' | 'GLOBAL';
   in_my_holdings: boolean;
   past_mentions: PastMention[]; // this company's prior alerts, most recent first
+  // Reasoning-engine fields (see docs/superpowers/specs/2026-07-15-
+  // reasoning-engine-upgrade-design.md). Optional because ~27 existing test
+  // fixtures construct AlertCompany literals without them -- a legacy alert
+  // (persisted before this feature shipped) also genuinely has none of
+  // these, degrading to undefined/null exactly like a pre-feature alert.
+  confidence_band?: string | null; // LOW | MODERATE | HIGH | VERY_HIGH | null
+  reasons?: string[];
+  evidence_refs?: string[];
+  risks?: string[];
+  assumptions?: string[];
+  unknowns?: string[];
+  alternative_hypothesis?: string | null;
+  confidence_contributors?: string[];
+  confidence_penalties?: string[];
 }
 
 export interface Alert {
@@ -49,6 +68,9 @@ export interface Alert {
   created_at: string;
   article: AlertArticle;
   companies: AlertCompany[];
+  // Optional: legacy alerts (persisted before this feature shipped) have
+  // no event_type.
+  event_type?: string | null;
 }
 
 // The WebSocket live-push payload is one alert entry MINUS the per-viewer
@@ -95,6 +117,7 @@ export interface Company {
   ticker: string;
   name: string;
   sector: string;
+  sub_sector?: string | null;
   index_tier: string;
   market: 'IN' | 'GLOBAL';
   isin: string | null;
@@ -204,6 +227,22 @@ export async function getArticles(lang: Language = 'en'): Promise<Article[]> {
   const res = await fetch(`/api/articles?lang=${lang}`);
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as Article[];
+}
+
+// Keyed by ISO date ("YYYY-MM-DD", IST calendar day) -> alert count that day.
+// Zero-count days are simply absent from the map.
+export type CalendarCounts = Record<string, number>;
+
+export async function getCalendarCounts(year: number, month: number): Promise<CalendarCounts> {
+  const res = await fetch(`/api/calendar/counts?year=${year}&month=${month}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as CalendarCounts;
+}
+
+export async function getCalendarDay(date: string, lang: Language = 'en'): Promise<Alert[]> {
+  const res = await fetch(`/api/calendar/day?date=${date}&lang=${lang}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Alert[];
 }
 
 export async function getCompanyProfile(id: number, lang: Language = 'en'): Promise<CompanyProfile | null> {

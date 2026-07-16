@@ -12,7 +12,7 @@ function renderNav() {
       <ThemeProvider>
         <LanguageProvider>
           <AuthProvider>
-            <NavBar />
+            <NavBar onOpenCalendar={() => {}} />
           </AuthProvider>
         </LanguageProvider>
       </ThemeProvider>

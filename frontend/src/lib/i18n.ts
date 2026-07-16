@@ -51,6 +51,47 @@ const CATALOG = {
     en: 'Account', hi: 'खाता', mr: 'खाते', gu: 'ખાતું', ml: 'അക്കൗണ്ട്', te: 'ఖాతా', ta: 'கணக்கு', kn: 'ಖಾತೆ',
     pa: 'ਖਾਤਾ', bn: 'অ্যাকাউন্ট',
   },
+  'nav.calendar': {
+    en: 'Calendar', hi: 'कैलेंडर', mr: 'कॅलेंडर', gu: 'કેલેન્ડર', ml: 'കലണ്ടർ', te: 'క్యాలెండర్',
+    ta: 'நாள்காட்டி', kn: 'ಕ್ಯಾಲೆಂಡರ್', pa: 'ਕੈਲੰਡਰ', bn: 'ক্যালেন্ডার',
+  },
+  'calendar.back': {
+    en: 'Back', hi: 'वापस', mr: 'मागे', gu: 'પાછળ', ml: 'തിരികെ', te: 'వెనుకకు', ta: 'பின்', kn: 'ಹಿಂದೆ',
+    pa: 'ਵਾਪਸ', bn: 'পিছনে',
+  },
+  'calendar.prevMonth': {
+    en: 'Previous month', hi: 'पिछला महीना', mr: 'मागील महिना', gu: 'પાછલો મહિનો', ml: 'മുൻ മാസം',
+    te: 'మునుపటి నెల', ta: 'முந்தைய மாதம்', kn: 'ಹಿಂದಿನ ತಿಂಗಳು', pa: 'ਪਿਛਲਾ ਮਹੀਨਾ', bn: 'আগের মাস',
+  },
+  'calendar.nextMonth': {
+    en: 'Next month', hi: 'अगला महीना', mr: 'पुढील महिना', gu: 'આગલો મહિનો', ml: 'അടുത്ത മാസം',
+    te: 'తదుపరి నెల', ta: 'அடுத்த மாதம்', kn: 'ಮುಂದಿನ ತಿಂಗಳು', pa: 'ਅਗਲਾ ਮਹੀਨਾ', bn: 'পরের মাস',
+  },
+  'calendar.dayEmpty': {
+    en: 'No news that day.', hi: 'उस दिन कोई खबर नहीं।', mr: 'त्या दिवशी बातमी नाही.',
+    gu: 'તે દિવસે કોઈ સમાચાર નથી.', ml: 'ആ ദിവസം വാർത്തകളില്ല.', te: 'ఆ రోజు వార్తలు లేవు.',
+    ta: 'அன்று செய்திகள் இல்லை.', kn: 'ಆ ದಿನ ಸುದ್ದಿ ಇಲ್ಲ.', pa: 'ਉਸ ਦਿਨ ਕੋਈ ਖ਼ਬਰ ਨਹੀਂ।',
+    bn: 'সেদিন কোনো খবর নেই।',
+  },
+  'calendar.filterSector': {
+    en: 'Sector', hi: 'क्षेत्र', mr: 'क्षेत्र', gu: 'ક્ષેત્ર', ml: 'മേഖല', te: 'రంగం', ta: 'துறை',
+    kn: 'ವಲಯ', pa: 'ਖੇਤਰ', bn: 'খাত',
+  },
+  'calendar.filterCompany': {
+    en: 'Company', hi: 'कंपनी', mr: 'कंपनी', gu: 'કંપની', ml: 'കമ്പനി', te: 'కంపెనీ', ta: 'நிறுவனம்',
+    kn: 'ಕಂಪನಿ', pa: 'ਕੰਪਨੀ', bn: 'কোম্পানি',
+  },
+  'calendar.filterAll': {
+    en: 'All', hi: 'सभी', mr: 'सर्व', gu: 'બધા', ml: 'എല്ലാം', te: 'అన్నీ', ta: 'அனைத்தும்', kn: 'ಎಲ್ಲಾ',
+    pa: 'ਸਾਰੇ', bn: 'সব',
+  },
+  'calendar.filterNoMatch': {
+    en: 'No news matches this filter.', hi: 'इस फ़िल्टर से कोई खबर मेल नहीं खाती।',
+    mr: 'या फिल्टरशी कोणतीही बातमी जुळत नाही.', gu: 'આ ફિલ્ટર સાથે કોઈ સમાચાર મેળ ખાતા નથી.',
+    ml: 'ഈ ഫിൽട്ടറുമായി വാർത്തകളൊന്നും പൊരുത്തപ്പെടുന്നില്ല.', te: 'ఈ ఫిల్టర్‌కు ఏ వార్తలు సరిపోలడం లేదు.',
+    ta: 'இந்த வடிகட்டிக்கு செய்திகள் பொருந்தவில்லை.', kn: 'ಈ ಫಿಲ್ಟರ್‌ಗೆ ಯಾವುದೇ ಸುದ್ದಿ ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.',
+    pa: 'ਇਸ ਫਿਲਟਰ ਨਾਲ ਕੋਈ ਖ਼ਬਰ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ।', bn: 'এই ফিল্টারের সাথে কোনো খবর মেলে না।',
+  },
   'tabs.india': {
     en: 'India', hi: 'भारत', mr: 'भारत', gu: 'ભારત', ml: 'ഇന്ത്യ', te: 'భారత్', ta: 'இந்தியா', kn: 'ಭಾರತ',
     pa: 'ਭਾਰਤ', bn: 'ভারত',
@@ -418,6 +459,72 @@ const CATALOG = {
     en: 'View full details', hi: 'पूरा विवरण देखें', mr: 'संपूर्ण तपशील पहा', gu: 'સંપૂર્ણ વિગતો જુઓ',
     ml: 'പൂർണ്ണ വിവരങ്ങൾ കാണുക', te: 'పూర్తి వివరాలు చూడండి', ta: 'முழு விவரங்களைப் பார்க்கவும்',
     kn: 'ಪೂರ್ಣ ವಿವರಗಳನ್ನು ವೀಕ್ಷಿಸಿ', pa: 'ਪੂਰੀ ਜਾਣਕਾਰੀ ਵੇਖੋ', bn: 'সম্পূর্ণ বিবরণ দেখুন',
+  },
+  // English shown for every language slot below -- these are new keys with
+  // no native-speaker review yet (see docs/superpowers/plans/2026-07-16-
+  // reasoning-panel-evidence-ui.md's "Deviations" section). translate()'s
+  // own fallback (entry?.[lang] ?? entry?.en ?? key) would produce the same
+  // visible result if these per-language keys were simply omitted; they're
+  // spelled out explicitly here so the catalog's shape stays consistent
+  // with every other entry. Replace with real translations once reviewed.
+  'reasoning.whyThisCall': {
+    en: 'Why this call', hi: 'Why this call', mr: 'Why this call', gu: 'Why this call',
+    ml: 'Why this call', te: 'Why this call', ta: 'Why this call', kn: 'Why this call',
+    pa: 'Why this call', bn: 'Why this call',
+  },
+  'reasoning.reasoningHeading': {
+    en: 'Reasoning', hi: 'Reasoning', mr: 'Reasoning', gu: 'Reasoning',
+    ml: 'Reasoning', te: 'Reasoning', ta: 'Reasoning', kn: 'Reasoning',
+    pa: 'Reasoning', bn: 'Reasoning',
+  },
+  'reasoning.evidenceHeading': {
+    en: 'Evidence', hi: 'Evidence', mr: 'Evidence', gu: 'Evidence',
+    ml: 'Evidence', te: 'Evidence', ta: 'Evidence', kn: 'Evidence',
+    pa: 'Evidence', bn: 'Evidence',
+  },
+  'reasoning.alternativeView': {
+    en: 'Alternative view', hi: 'Alternative view', mr: 'Alternative view', gu: 'Alternative view',
+    ml: 'Alternative view', te: 'Alternative view', ta: 'Alternative view', kn: 'Alternative view',
+    pa: 'Alternative view', bn: 'Alternative view',
+  },
+  'reasoning.risksAndUnknowns': {
+    en: 'Risks & unknowns', hi: 'Risks & unknowns', mr: 'Risks & unknowns', gu: 'Risks & unknowns',
+    ml: 'Risks & unknowns', te: 'Risks & unknowns', ta: 'Risks & unknowns', kn: 'Risks & unknowns',
+    pa: 'Risks & unknowns', bn: 'Risks & unknowns',
+  },
+  'reasoning.confidenceBreakdown': {
+    en: 'Confidence breakdown', hi: 'Confidence breakdown', mr: 'Confidence breakdown', gu: 'Confidence breakdown',
+    ml: 'Confidence breakdown', te: 'Confidence breakdown', ta: 'Confidence breakdown', kn: 'Confidence breakdown',
+    pa: 'Confidence breakdown', bn: 'Confidence breakdown',
+  },
+  'reasoning.eventType': {
+    en: 'Event: {type}', hi: 'Event: {type}', mr: 'Event: {type}', gu: 'Event: {type}',
+    ml: 'Event: {type}', te: 'Event: {type}', ta: 'Event: {type}', kn: 'Event: {type}',
+    pa: 'Event: {type}', bn: 'Event: {type}',
+  },
+  'reasoning.confidenceLow': {
+    en: 'Low', hi: 'Low', mr: 'Low', gu: 'Low', ml: 'Low', te: 'Low', ta: 'Low', kn: 'Low',
+    pa: 'Low', bn: 'Low',
+  },
+  'reasoning.confidenceModerate': {
+    en: 'Moderate', hi: 'Moderate', mr: 'Moderate', gu: 'Moderate', ml: 'Moderate', te: 'Moderate',
+    ta: 'Moderate', kn: 'Moderate', pa: 'Moderate', bn: 'Moderate',
+  },
+  'reasoning.confidenceHigh': {
+    en: 'High', hi: 'High', mr: 'High', gu: 'High', ml: 'High', te: 'High', ta: 'High', kn: 'High',
+    pa: 'High', bn: 'High',
+  },
+  'reasoning.confidenceVeryHigh': {
+    en: 'Very High', hi: 'Very High', mr: 'Very High', gu: 'Very High', ml: 'Very High', te: 'Very High',
+    ta: 'Very High', kn: 'Very High', pa: 'Very High', bn: 'Very High',
+  },
+  'reasoning.evidenceArticle': {
+    en: 'Article', hi: 'Article', mr: 'Article', gu: 'Article', ml: 'Article', te: 'Article', ta: 'Article',
+    kn: 'Article', pa: 'Article', bn: 'Article',
+  },
+  'reasoning.evidenceHistorical': {
+    en: 'Historical', hi: 'Historical', mr: 'Historical', gu: 'Historical', ml: 'Historical', te: 'Historical',
+    ta: 'Historical', kn: 'Historical', pa: 'Historical', bn: 'Historical',
   },
   'common.close': {
     en: 'Close', hi: 'बंद करें', mr: 'बंद करा', gu: 'બંધ કરો', ml: 'അടയ്ക്കുക', te: 'మూసివేయండి', ta: 'மூடு', kn: 'ಮುಚ್ಚಿ',

@@ -387,3 +387,66 @@ def test_analyze_article_works_end_to_end_via_anthropic_adapter():
 
     assert result.category == "oil_energy"
     assert result.companies[0].ticker == "RELIANCE.NS"
+
+
+def test_record_analysis_tool_no_longer_requires_confidence_score():
+    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
+    company_props = RECORD_ANALYSIS_TOOL["function"]["parameters"]["properties"]["companies"]["items"]
+    assert "confidence_score" not in company_props["properties"]
+    assert "confidence_score" not in company_props["required"]
+
+
+def test_record_analysis_tool_requires_evidence_discipline_fields():
+    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
+    company_props = RECORD_ANALYSIS_TOOL["function"]["parameters"]["properties"]["companies"]["items"]
+    for field in ["reasons", "evidence_refs", "risks", "assumptions", "unknowns", "alternative_hypothesis"]:
+        assert field in company_props["properties"]
+        assert field in company_props["required"]
+
+
+def test_record_analysis_tool_requires_event_type_at_top_level():
+    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
+    top_level = RECORD_ANALYSIS_TOOL["function"]["parameters"]
+    assert "event_type" in top_level["properties"]
+    assert "event_type" in top_level["required"]
+
+
+def test_analyze_article_parses_new_evidence_fields_when_present():
+    fake_output = {
+        "category": "oil_energy",
+        "event_type": "crude_oil",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "Top refiner benefits from crude price spike.",
+            "key_points": ["Crude spikes"], "time_horizon": "Short-Term",
+            "reasons": ["Refining margins widen on crude spike."],
+            "evidence_refs": ["RULE_CRUDE_OIL_UP"],
+            "risks": ["Margin reversal if crude falls back."],
+            "assumptions": ["Crude stays elevated for the quarter."],
+            "unknowns": ["Whether this is a durable supply shock or a spike."],
+            "alternative_hypothesis": "Market has already priced this in.",
+        }],
+    }
+    client = FakeClient(fake_output)
+
+    result = analyze_article(client, title="Oil prices spike", content="crude oil markets react")
+
+    assert result.event_type == "crude_oil"
+    company = result.companies[0]
+    assert company.reasons == ["Refining margins widen on crude spike."]
+    assert company.evidence_refs == ["RULE_CRUDE_OIL_UP"]
+    assert company.risks == ["Margin reversal if crude falls back."]
+    assert company.confidence_score is None  # no longer LLM-provided
+
+
+def test_analysis_instructions_contains_rulebook_and_playbook_content():
+    # CASA (an earlier choice here) is NOT playbook-unique -- it also
+    # appears in RULEBOOK_TEXT via RULE_BANKING_METRICS's "credit growth,
+    # deposit growth, CASA, NIM, ..." text, so it wouldn't actually catch a
+    # dropped PLAYBOOKS_TEXT interpolation. ARPU appears only in the
+    # telecom playbook entry -- verified absent from RULEBOOK_TEXT,
+    # SECTOR_DEFINITIONS, and every rule's example text.
+    from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
+    assert "RULE_CRUDE_OIL_UP" in ANALYSIS_INSTRUCTIONS
+    assert "ARPU" in ANALYSIS_INSTRUCTIONS

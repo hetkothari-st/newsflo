@@ -46,7 +46,13 @@ function Bar({ company, side, onSelect }: { company: AlertCompany; side: 'left' 
   );
 }
 
-export default function ImpactBar({ companies }: { companies: AlertCompany[] }) {
+export default function ImpactBar({
+  companies,
+  eventType,
+}: {
+  companies: AlertCompany[];
+  eventType?: string | null;
+}) {
   const { toggle, selected } = useCompanySelection(companies);
   const bullish = rankByMagnitude(companies.filter((c) => c.direction === 'bullish'));
   const bearish = rankByMagnitude(companies.filter((c) => c.direction === 'bearish'));
@@ -79,7 +85,7 @@ export default function ImpactBar({ companies }: { companies: AlertCompany[] }) 
           ))}
         </div>
       </div>
-      {selected && <ReasoningPanel company={selected} />}
+      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );
 }

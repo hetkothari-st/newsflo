@@ -7,10 +7,14 @@ export function TreeRoot({ children }: { children: ReactNode }) {
 export function TreeBranch({
   label,
   color,
+  badge,
+  badgeColor,
   children,
 }: {
   label: string;
   color?: string;
+  badge?: string;
+  badgeColor?: string;
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -22,7 +26,7 @@ export function TreeBranch({
         type="button"
         onClick={() => setCollapsed((v) => !v)}
         aria-expanded={!collapsed}
-        className="flex items-center gap-2 py-1 text-xs uppercase tracking-widest text-muted"
+        className="flex w-full items-center gap-2 py-1 text-xs uppercase tracking-widest text-muted"
       >
         {color && (
           <span
@@ -32,6 +36,14 @@ export function TreeBranch({
           />
         )}
         <span>{label}</span>
+        {badge && (
+          <span
+            className="ml-auto shrink-0 normal-case tracking-normal"
+            style={badgeColor ? { color: badgeColor } : undefined}
+          >
+            {badge}
+          </span>
+        )}
         <span aria-hidden="true" className="text-[10px]">
           {collapsed ? '▸' : '▾'}
         </span>

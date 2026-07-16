@@ -73,4 +73,12 @@ describe('CompanyChip', () => {
     render(<CompanyChip company={company} />);
     expect(screen.getByRole('button', { name: /reliance/i })).toHaveClass('theme-light:shadow-neu-sm');
   });
+
+  it('passes eventType through to the expanded ReasoningPanel', async () => {
+    const withEvidence = { ...company, reasons: ['x'], evidence_refs: [] };
+    render(<CompanyChip company={withEvidence} eventType="crude_oil" />);
+    await userEvent.click(screen.getByRole('button', { name: /reliance/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
+    expect(screen.getByText('Event: Crude oil')).toBeInTheDocument();
+  });
 });

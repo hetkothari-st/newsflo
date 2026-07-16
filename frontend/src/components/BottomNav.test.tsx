@@ -12,7 +12,7 @@ function renderNav(path = '/') {
       <ThemeProvider>
         <LanguageProvider>
           <AuthProvider>
-            <BottomNav />
+            <BottomNav onOpenCalendar={() => {}} />
           </AuthProvider>
         </LanguageProvider>
       </ThemeProvider>
