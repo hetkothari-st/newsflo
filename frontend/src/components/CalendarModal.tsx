@@ -186,8 +186,63 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
     return dayAlerts;
   }, [dayAlerts, sectorFilter, companyFilter]);
 
+  const dayHeader = selectedDate === null ? undefined : (
+    <div className="flex flex-col gap-3 pr-8">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setSelectedDate(null)}
+          className="text-xs uppercase tracking-widest text-muted hover:text-ink"
+        >
+          ‹ {t('calendar.back')}
+        </button>
+        <h2 className="font-display text-lg font-bold text-ink">{selectedDate}</h2>
+      </div>
+      {dayAlerts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+            {t('calendar.filterSector')}
+            <select
+              value={sectorFilter}
+              onChange={(e) => {
+                setSectorFilter(e.target.value);
+                setCompanyFilter('all');
+              }}
+              className={SELECT_CLASS}
+            >
+              <option value="all">{t('calendar.filterAll')}</option>
+              {sectorOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
+            {t('calendar.filterCompany')}
+            <select
+              value={companyFilter}
+              onChange={(e) => {
+                setCompanyFilter(e.target.value);
+                setSectorFilter('all');
+              }}
+              className={SELECT_CLASS}
+            >
+              <option value="all">{t('calendar.filterAll')}</option>
+              {companyOptions.map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <AlertDetail open={open} onClose={closeOuter} fullScreenMobile>
+    <AlertDetail open={open} onClose={closeOuter} fullScreenMobile header={dayHeader}>
       {selectedDate === null ? (
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between pr-8">
@@ -246,80 +301,20 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
           )}
         </div>
       ) : (
-        <div className="flex flex-col">
-          {/* Sticky within AlertDetail's own scrolling panel -- negative
-              margins cancel the panel's p-6 so this bar spans flush edge to
-              edge and lines up exactly with `top-0`, instead of sticking
-              with a padding-sized gap above it. z-10 keeps it under the
-              panel's absolute close button (z-20) so that stays clickable
-              once the bar's opaque background is scrolled underneath it. */}
-          <div className="sticky top-0 z-10 -mx-6 -mt-6 flex flex-col gap-3 border-b border-hairline bg-surface px-6 pb-3 pt-6 pr-8 theme-light:border-transparent">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setSelectedDate(null)}
-                className="text-xs uppercase tracking-widest text-muted hover:text-ink"
-              >
-                ‹ {t('calendar.back')}
-              </button>
-              <h2 className="font-display text-lg font-bold text-ink">{selectedDate}</h2>
+        <div className="flex flex-col gap-4">
+          {dayLoading ? (
+            <p className="text-xs uppercase tracking-widest text-muted">{t('feed.loading')}</p>
+          ) : dayAlerts.length === 0 ? (
+            <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.dayEmpty')}</p>
+          ) : filteredDayAlerts.length === 0 ? (
+            <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.filterNoMatch')}</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {filteredDayAlerts.map((alert) => (
+                <AlertCoverCard key={alert.id} alert={alert} variant="grid" onOpen={() => setOpenAlertId(alert.id)} />
+              ))}
             </div>
-            {dayAlerts.length > 0 && (
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
-                  {t('calendar.filterSector')}
-                  <select
-                    value={sectorFilter}
-                    onChange={(e) => {
-                      setSectorFilter(e.target.value);
-                      setCompanyFilter('all');
-                    }}
-                    className={SELECT_CLASS}
-                  >
-                    <option value="all">{t('calendar.filterAll')}</option>
-                    {sectorOptions.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
-                  {t('calendar.filterCompany')}
-                  <select
-                    value={companyFilter}
-                    onChange={(e) => {
-                      setCompanyFilter(e.target.value);
-                      setSectorFilter('all');
-                    }}
-                    className={SELECT_CLASS}
-                  >
-                    <option value="all">{t('calendar.filterAll')}</option>
-                    {companyOptions.map((c) => (
-                      <option key={c.id} value={String(c.id)}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col gap-4 pt-4">
-            {dayLoading ? (
-              <p className="text-xs uppercase tracking-widest text-muted">{t('feed.loading')}</p>
-            ) : dayAlerts.length === 0 ? (
-              <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.dayEmpty')}</p>
-            ) : filteredDayAlerts.length === 0 ? (
-              <p className="text-xs uppercase tracking-widest text-muted">{t('calendar.filterNoMatch')}</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {filteredDayAlerts.map((alert) => (
-                  <AlertCoverCard key={alert.id} alert={alert} variant="grid" onOpen={() => setOpenAlertId(alert.id)} />
-                ))}
-              </div>
-            )}
-          </div>
+          )}
         </div>
       )}
       <AlertDetail open={openAlertId !== null} onClose={() => setOpenAlertId(null)}>
