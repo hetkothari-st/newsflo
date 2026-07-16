@@ -392,3 +392,21 @@ def test_get_company_live_price_404_for_global_company(db_session):
 
     assert resp.status_code == 404
     app.dependency_overrides.clear()
+
+
+def test_get_company_live_price_response_is_never_cached(db_session):
+    # This is a polling endpoint (frontend refetches it every few seconds) --
+    # without an explicit no-store directive, browsers can silently serve a
+    # stale cached response on repeat fetch() calls to the same URL, making
+    # the live price look frozen until a hard page reload. Regression test
+    # for that exact bug.
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    resp = client.get(f"/api/companies/{company.id}/live-price")
+
+    assert resp.headers["cache-control"] == "no-store"
+    app.dependency_overrides.clear()

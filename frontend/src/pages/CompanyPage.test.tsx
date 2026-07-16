@@ -157,7 +157,7 @@ describe('CompanyPage', () => {
     expect(pricesSpy).toHaveBeenLastCalledWith(1, '1y');
   });
 
-  it('shows the live price readout once it loads, and polls again after 20s', async () => {
+  it('shows the live price readout once it loads, and polls again after 3s', async () => {
     vi.spyOn(api, 'getCompanyProfile').mockResolvedValue(baseProfile);
     vi.spyOn(api, 'getCompanyHistory').mockResolvedValue({ mentions: [], has_more: false });
     vi.spyOn(api, 'getCompanyPrices').mockResolvedValue({ period: '6mo', points: [{ date: '2026-07-14', close: 2500 }], available: true });
@@ -184,7 +184,7 @@ describe('CompanyPage', () => {
     // advanceTimersByTimeAsync also flushes the microtask queue as it
     // advances, so the mocked promise from the second poll() call resolves
     // within this same await instead of needing a separate waitFor.
-    await act(() => vi.advanceTimersByTimeAsync(20000));
+    await act(() => vi.advanceTimersByTimeAsync(3000));
     expect(liveSpy).toHaveBeenCalledTimes(2);
 
     vi.useRealTimers();

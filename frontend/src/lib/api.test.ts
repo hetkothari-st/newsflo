@@ -153,4 +153,14 @@ describe('api client', () => {
     expect(url).toBe('/api/companies/1/live-price');
     expect(result.ltp).toBe(2530.0);
   });
+
+  it('getCompanyLivePrice bypasses the HTTP cache so polling sees fresh prices', async () => {
+    // Regression test: without this, repeat fetch() calls to the same URL
+    // within one page session can be served from the browser's HTTP cache,
+    // freezing the displayed price until a hard reload.
+    const fetchMock = mockFetchOnce({ ltp: 2530.0, change_pct: 1.2, as_of: '2026-07-15T09:30:00+00:00', available: true });
+    await getCompanyLivePrice(1);
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(opts.cache).toBe('no-store');
+  });
 });
