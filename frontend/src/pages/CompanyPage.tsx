@@ -27,7 +27,7 @@ const PERIOD_LABEL_KEY: Record<PricePeriod, TranslationKey> = {
   '6mo': 'company.period6mo',
   '1y': 'company.period1y',
 };
-const LIVE_PRICE_POLL_INTERVAL_MS = 20000;
+const LIVE_PRICE_POLL_INTERVAL_MS = 3000;
 
 function withLivePoint(points: { date: string; close: number }[], live: LivePrice): { date: string; close: number }[] {
   if (live.ltp === null) return points;

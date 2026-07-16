@@ -277,7 +277,10 @@ export async function getCompanyPrices(id: number, period: PricePeriod = '6mo'):
 }
 
 export async function getCompanyLivePrice(id: number): Promise<LivePrice> {
-  const res = await fetch(`/api/companies/${id}/live-price`);
+  // no-store: this is polled every few seconds -- without it the browser's
+  // HTTP cache can silently serve a stale response to a repeat fetch() call
+  // against the same URL, freezing the displayed price until a hard reload.
+  const res = await fetch(`/api/companies/${id}/live-price`, { cache: 'no-store' });
   if (!res.ok) throw new Error(await parseError(res));
   return (await res.json()) as LivePrice;
 }

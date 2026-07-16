@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.calibration.track_record import get_win_rate
@@ -120,7 +120,12 @@ def get_company_prices(company_id: int, period: str = "6mo", db: Session = Depen
 
 
 @router.get("/{company_id}/live-price")
-def get_company_live_price(company_id: int, db: Session = Depends(get_db)):
+def get_company_live_price(company_id: int, response: Response, db: Session = Depends(get_db)):
+    # This is a polling endpoint (frontend refetches every few seconds) --
+    # without this, browsers can silently serve a stale cached response to
+    # repeat fetch() calls against the same URL, freezing the displayed
+    # price until a hard reload.
+    response.headers["Cache-Control"] = "no-store"
     company = _get_indian_company_or_404(db, company_id)
     entry = LIVE_PRICE_CACHE.get(company.instrument_token) if company.instrument_token else None
     if entry is None:
