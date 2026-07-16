@@ -25,6 +25,11 @@ export interface AlertCompany {
   name: string;
   index_tier: string; // NIFTY50 | NIFTY100 | NIFTY500 | GLOBAL_LARGE_CAP | OTHER
   sector?: string;
+  // One of backend app.companies.sub_sectors.SUB_SECTOR_TAXONOMY[sector], or
+  // null until the one-time enrichment backfill classifies it (or forever,
+  // for sector === 'other'). Render null as an "Unclassified" bucket, never
+  // filter it out silently.
+  sub_sector?: string | null;
   direction: string; // bullish | bearish
   magnitude_low: number;
   magnitude_high: number;
@@ -112,6 +117,7 @@ export interface Company {
   ticker: string;
   name: string;
   sector: string;
+  sub_sector?: string | null;
   index_tier: string;
   market: 'IN' | 'GLOBAL';
   isin: string | null;

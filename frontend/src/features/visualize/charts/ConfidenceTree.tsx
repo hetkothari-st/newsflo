@@ -5,7 +5,13 @@ import { confidenceColor } from '../colors';
 import { TreeRoot, TreeLeaf } from './tree/Tree';
 import { useCompanySelection } from './useCompanySelection';
 
-export default function ConfidenceTree({ companies }: { companies: AlertCompany[] }) {
+export default function ConfidenceTree({
+  companies,
+  eventType,
+}: {
+  companies: AlertCompany[];
+  eventType?: string | null;
+}) {
   const { toggle, selected } = useCompanySelection(companies);
   const ranked = rankByConfidence(companies);
 
@@ -25,7 +31,7 @@ export default function ConfidenceTree({ companies }: { companies: AlertCompany[
           />
         ))}
       </TreeRoot>
-      {selected && <ReasoningPanel company={selected} />}
+      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );
 }

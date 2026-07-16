@@ -48,7 +48,7 @@ def list_companies(market: str | None = None, db: Session = Depends(get_db)):
             continue
         result.append({
             "id": c.id, "ticker": c.ticker, "name": c.name,
-            "sector": c.sector, "index_tier": c.index_tier, "market": c_market,
+            "sector": c.sector, "sub_sector": c.sub_sector, "index_tier": c.index_tier, "market": c_market,
             "isin": c.isin, "logo_url": _logo_url(c),
         })
     return result
@@ -90,7 +90,8 @@ def get_company_profile(company_id: int, db: Session = Depends(get_db), lang: st
 
     return {
         "id": company.id, "ticker": company.ticker, "name": company.name,
-        "sector": company.sector, "index_tier": company.index_tier, "market": "IN",
+        "sector": company.sector, "sub_sector": company.sub_sector,
+        "index_tier": company.index_tier, "market": "IN",
         "isin": company.isin, "logo_url": _logo_url(company),
         "latest_alert": latest_alert,
         "track_record": get_win_rate(db, company_id),

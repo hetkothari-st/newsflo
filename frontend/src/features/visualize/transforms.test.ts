@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude, rankByConfidence, groupByTimeHorizon } from './transforms';
+import {
+  groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude, rankByConfidence,
+  groupByTimeHorizon, computeNetSignal, groupBySectorAndSubSector,
+} from './transforms';
 import type { AlertCompany } from '../../lib/api';
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
@@ -176,5 +179,60 @@ describe('groupByTimeHorizon', () => {
 
   it('returns an empty array for an empty input', () => {
     expect(groupByTimeHorizon([])).toEqual([]);
+  });
+});
+
+describe('computeNetSignal', () => {
+  it('returns even with zero avgConfidence for an empty list', () => {
+    expect(computeNetSignal([])).toEqual({ direction: 'even', bullishCount: 0, bearishCount: 0, avgConfidence: 0 });
+  });
+
+  it('reports net bullish and the mean confidence when bullish outnumbers bearish', () => {
+    const signal = computeNetSignal([
+      company({ direction: 'bullish', confidence_score: 80 }),
+      company({ direction: 'bullish', confidence_score: 60 }),
+      company({ direction: 'bearish', confidence_score: 40 }),
+    ]);
+    expect(signal.direction).toBe('bullish');
+    expect(signal.bullishCount).toBe(2);
+    expect(signal.bearishCount).toBe(1);
+    expect(signal.avgConfidence).toBe(60);
+  });
+
+  it('reports even on an exact tie', () => {
+    const signal = computeNetSignal([
+      company({ direction: 'bullish' }),
+      company({ direction: 'bearish' }),
+    ]);
+    expect(signal.direction).toBe('even');
+  });
+});
+
+describe('groupBySectorAndSubSector', () => {
+  it('buckets companies with no sub_sector into a single Unclassified group', () => {
+    const [sector] = groupBySectorAndSubSector([
+      company({ company_id: 1, sector: 'banking', sub_sector: null }),
+      company({ company_id: 2, sector: 'banking', sub_sector: null }),
+    ]);
+    expect(sector.subSectorGroups).toHaveLength(1);
+    expect(sector.subSectorGroups[0].label).toBe('Unclassified');
+    expect(sector.subSectorGroups[0].companies).toHaveLength(2);
+  });
+
+  it('splits into separate branches when distinct sub_sectors are present', () => {
+    const [sector] = groupBySectorAndSubSector([
+      company({ company_id: 1, sector: 'banking', sub_sector: 'private_bank' }),
+      company({ company_id: 2, sector: 'banking', sub_sector: 'psu_bank' }),
+    ]);
+    expect(sector.subSectorGroups.map((g) => g.label).sort()).toEqual(['PSU Bank', 'Private Bank']);
+  });
+
+  it('computes a net signal at both the sector and sub-sector level', () => {
+    const [sector] = groupBySectorAndSubSector([
+      company({ company_id: 1, sector: 'banking', sub_sector: 'private_bank', direction: 'bullish' }),
+      company({ company_id: 2, sector: 'banking', sub_sector: 'private_bank', direction: 'bullish' }),
+    ]);
+    expect(sector.netSignal.direction).toBe('bullish');
+    expect(sector.subSectorGroups[0].netSignal.direction).toBe('bullish');
   });
 });

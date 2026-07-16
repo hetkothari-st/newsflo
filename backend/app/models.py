@@ -17,6 +17,10 @@ class Company(Base):
     ticker = Column(String, nullable=False, unique=True)
     name = Column(String, nullable=False)
     sector = Column(String, nullable=False)
+    # One of app.companies.sub_sectors.SUB_SECTOR_TAXONOMY[sector], or NULL
+    # until backend/backfill_subsectors.py classifies it. See that module for
+    # the closed vocabulary and the one-time enrichment job.
+    sub_sector = Column(String, nullable=True)
     index_tier = Column(String, nullable=False)  # NIFTY50 | NIFTY100 | NIFTY500 | OTHER
     market_cap = Column(Float, nullable=True)
     isin = Column(String, nullable=True, unique=True)

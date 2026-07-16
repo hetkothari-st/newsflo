@@ -35,7 +35,8 @@ def _serialize_alert(
         rationale, key_points = ac_translations.get(ac.id, (ac.rationale, decode_key_points(ac)))
         companies.append({
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
-            "index_tier": ac.company.index_tier, "sector": ac.company.sector, "direction": ac.direction,
+            "index_tier": ac.company.index_tier, "sector": ac.company.sector,
+            "sub_sector": ac.company.sub_sector, "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": rationale, "key_points": key_points,
             "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,

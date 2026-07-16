@@ -103,7 +103,7 @@ export default function AlertChartsPage() {
             No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.
           </p>
         ) : (
-          <Component companies={visibleCompanies} />
+          <Component companies={visibleCompanies} eventType={alert.event_type} />
         )}
       </div>
     </div>

@@ -58,4 +58,44 @@ describe('SectorTree', () => {
     const { container } = render(<SectorTree companies={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('renders sub-sector branches when a sector has more than one distinct sub_sector', () => {
+    render(
+      <SectorTree
+        companies={[
+          company({ company_id: 1, sector: 'banking', sub_sector: 'private_bank', ticker: 'HDFCBANK' }),
+          company({ company_id: 2, sector: 'banking', sub_sector: 'psu_bank', ticker: 'SBIN' }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('Private Bank')).toBeInTheDocument();
+    expect(screen.getByText('PSU Bank')).toBeInTheDocument();
+  });
+
+  it('collapses to a flat sector -> company view when only one sub_sector bucket is present', () => {
+    render(
+      <SectorTree
+        companies={[
+          company({ company_id: 1, sector: 'banking', sub_sector: null, ticker: 'HDFCBANK' }),
+          company({ company_id: 2, sector: 'banking', sub_sector: null, ticker: 'SBIN' }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText('Unclassified')).not.toBeInTheDocument();
+    expect(screen.getByText('HDFCBANK')).toBeInTheDocument();
+    expect(screen.getByText('SBIN')).toBeInTheDocument();
+  });
+
+  it('buckets legacy companies with no sub_sector as Unclassified alongside a classified sibling', () => {
+    render(
+      <SectorTree
+        companies={[
+          company({ company_id: 1, sector: 'banking', sub_sector: 'private_bank', ticker: 'HDFCBANK' }),
+          company({ company_id: 2, sector: 'banking', sub_sector: null, ticker: 'SBIN' }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('Private Bank')).toBeInTheDocument();
+    expect(screen.getByText('Unclassified')).toBeInTheDocument();
+  });
 });

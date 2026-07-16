@@ -4,7 +4,13 @@ import { rankByMagnitude } from '../transforms';
 import { TreeRoot, TreeBranch, TreeLeaf } from './tree/Tree';
 import { useCompanySelection } from './useCompanySelection';
 
-export default function SplitTree({ companies }: { companies: AlertCompany[] }) {
+export default function SplitTree({
+  companies,
+  eventType,
+}: {
+  companies: AlertCompany[];
+  eventType?: string | null;
+}) {
   const { toggle, selected } = useCompanySelection(companies);
   const bullish = rankByMagnitude(companies.filter((c) => c.direction === 'bullish'));
   const bearish = rankByMagnitude(companies.filter((c) => c.direction === 'bearish'));
@@ -34,7 +40,7 @@ export default function SplitTree({ companies }: { companies: AlertCompany[] }) 
           </TreeBranch>
         )}
       </TreeRoot>
-      {selected && <ReasoningPanel company={selected} />}
+      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );
 }

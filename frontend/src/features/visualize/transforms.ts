@@ -1,5 +1,6 @@
 import type { AlertCompany } from '../../lib/api';
 import { sectorColor } from './colors';
+import { subSectorKey, subSectorLabel, UNCLASSIFIED_KEY } from './subSectorLabels';
 
 export type GroupMode = 'tier' | 'impact' | 'sector';
 
@@ -109,4 +110,65 @@ export function groupByTimeHorizon(companies: AlertCompany[]): CompanyGroup[] {
     label: horizon,
     companies: companies.filter((c) => c.time_horizon === horizon),
   })).filter((g) => g.companies.length > 0);
+}
+
+export interface NetSignal {
+  direction: 'bullish' | 'bearish' | 'even';
+  bullishCount: number;
+  bearishCount: number;
+  avgConfidence: number; // mean confidence_score across the group, rounded, 0 for an empty group
+}
+
+// Deterministic, DB-free aggregation over data already present on each
+// AlertCompany (direction, confidence_score) -- no new LLM calls, no network
+// round-trip. Shared by TierRows' inline net-sentiment glyph and the
+// sector/sub-sector drilldown branches.
+export function computeNetSignal(companies: AlertCompany[]): NetSignal {
+  const bullishCount = companies.filter((c) => c.direction === 'bullish').length;
+  const bearishCount = companies.length - bullishCount;
+  const direction: NetSignal['direction'] =
+    bullishCount === bearishCount ? 'even' : bullishCount > bearishCount ? 'bullish' : 'bearish';
+  const avgConfidence =
+    companies.length === 0
+      ? 0
+      : Math.round(companies.reduce((sum, c) => sum + c.confidence_score, 0) / companies.length);
+  return { direction, bullishCount, bearishCount, avgConfidence };
+}
+
+export interface SubSectorGroup extends CompanyGroup {
+  netSignal: NetSignal;
+}
+
+export interface SectorDrilldownGroup extends CompanyGroup {
+  netSignal: NetSignal;
+  subSectorGroups: SubSectorGroup[];
+}
+
+// Two-level grouping for the Sector chart's real drilldown: sector (reuses
+// groupBySector) -> sub_sector (new). A sector with only one distinct
+// sub_sector bucket present (including the all-null/all-unclassified case)
+// collapses to a flat sector -> company view at render time -- see
+// SectorTree.tsx -- so the extra tree depth only appears when it's actually
+// informative.
+export function groupBySectorAndSubSector(companies: AlertCompany[]): SectorDrilldownGroup[] {
+  return groupBySector(companies).map((sectorGroup) => {
+    const bySub = new Map<string, AlertCompany[]>();
+    for (const c of sectorGroup.companies) {
+      const key = subSectorKey(c.sub_sector);
+      const group = bySub.get(key) ?? [];
+      group.push(c);
+      bySub.set(key, group);
+    }
+    const subSectorGroups: SubSectorGroup[] = [...bySub.entries()]
+      .sort(([a], [b]) => subSectorLabel(a === UNCLASSIFIED_KEY ? null : a).localeCompare(
+        subSectorLabel(b === UNCLASSIFIED_KEY ? null : b),
+      ))
+      .map(([key, group]) => ({
+        key,
+        label: subSectorLabel(key === UNCLASSIFIED_KEY ? null : key),
+        companies: group,
+        netSignal: computeNetSignal(group),
+      }));
+    return { ...sectorGroup, netSignal: computeNetSignal(sectorGroup.companies), subSectorGroups };
+  });
 }

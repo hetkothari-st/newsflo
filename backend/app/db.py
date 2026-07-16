@@ -42,6 +42,7 @@ _ADDED_COLUMNS = [
     ("alert_companies", "confidence_contributors_json", "TEXT"),
     ("alert_companies", "confidence_penalties_json", "TEXT"),
     ("alert_companies", "rulebook_ids_json", "TEXT"),
+    ("companies", "sub_sector", "VARCHAR"),
 ]
 
 

@@ -433,5 +433,40 @@ def test_list_alerts_defaults_reasoning_engine_fields_for_legacy_rows(db_session
     assert company_payload["evidence_refs"] == []
     assert company_payload["confidence_band"] is None
     assert company_payload["alternative_hypothesis"] is None
+    assert company_payload["sub_sector"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_get_alert_includes_company_sub_sector(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/sub-sector", title="Test headline", status="ANALYZED", category="banking")
+    db_session.add(article)
+    db_session.commit()
+
+    company = Company(
+        ticker="HDFCBANK.NS", name="HDFC Bank", sector="banking", sub_sector="private_bank",
+        index_tier="NIFTY50", market_cap=1.0,
+    )
+    db_session.add(company)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="banking")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="rate cut",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get(f"/api/alerts/{alert.id}")
+
+    assert response.status_code == 200
+    assert response.json()["companies"][0]["sub_sector"] == "private_bank"
 
     app.dependency_overrides.clear()

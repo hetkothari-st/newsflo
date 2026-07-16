@@ -84,6 +84,7 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
             "name": ac.company.name,
             "index_tier": ac.company.index_tier,
             "sector": ac.company.sector,
+            "sub_sector": ac.company.sub_sector,
             "direction": ac.direction,
             "magnitude_low": ac.magnitude_low,
             "magnitude_high": ac.magnitude_high,
