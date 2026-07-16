@@ -51,3 +51,14 @@ def _no_real_feed_fetch(monkeypatch):
         def raise_for_status(self):
             pass
     monkeypatch.setattr("app.ingestion.poller.httpx.get", lambda url, timeout=None, follow_redirects=None: _EmptyResponse())
+
+
+@pytest.fixture(autouse=True)
+def _no_real_financial_snapshot_fetch(monkeypatch):
+    # process_new_articles now calls get_or_fetch_financial_snapshot for
+    # every resolved company, which would otherwise make a real yfinance
+    # network call in every pipeline test that doesn't care about this
+    # feature. Stub it to "no data" by default -- individual tests that DO
+    # care about financial-context behavior override this via their own
+    # monkeypatch.setattr, which takes precedence over this autouse default.
+    monkeypatch.setattr("app.pipeline.get_or_fetch_financial_snapshot", lambda session, ticker: None)

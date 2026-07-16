@@ -470,3 +470,68 @@ def test_get_alert_includes_company_sub_sector(db_session):
     assert response.json()["companies"][0]["sub_sector"] == "private_bank"
 
     app.dependency_overrides.clear()
+
+
+def test_list_alerts_includes_financial_context_fields(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/financial-fields", title="Test headline", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+        price_at_analysis=2500.5, return_1m=-12.0, return_3m=-20.0,
+        contradiction_note="Price down 12.0% over the past month despite bullish call.",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = response.json()
+    company_payload = body[0]["companies"][0]
+    assert company_payload["price_at_analysis"] == 2500.5
+    assert company_payload["return_1m"] == -12.0
+    assert company_payload["return_3m"] == -20.0
+    assert company_payload["contradiction_note"] == "Price down 12.0% over the past month despite bullish call."
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_defaults_financial_context_fields_for_legacy_rows(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/financial-fields-legacy", title="Legacy", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="LEGACY.NS", name="Legacy Co", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="legacy row",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_payload = response.json()[0]["companies"][0]
+    assert company_payload["price_at_analysis"] is None
+    assert company_payload["contradiction_note"] is None
+
+    app.dependency_overrides.clear()

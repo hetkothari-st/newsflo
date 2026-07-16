@@ -45,6 +45,32 @@ export default function ReasoningPanel({
         ))}
       </ul>
       <p className="mt-2 text-xs text-muted">{precedentLine(company, language)}</p>
+      {company.price_at_analysis != null && (
+        <div className="mt-3 border-t border-hairline pt-2">
+          <p className="text-xs uppercase tracking-widest text-muted">{t('reasoning.factsHeading')}</p>
+          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink">
+            <span>{company.market === 'IN' ? '₹' : '$'}{company.price_at_analysis.toFixed(2)}</span>
+            {company.return_1m != null && (
+              <span className={company.return_1m >= 0 ? 'text-bullish' : 'text-bearish'}>
+                {t('reasoning.oneMonthReturnLabel')}: {company.return_1m >= 0 ? '+' : ''}
+                {company.return_1m.toFixed(1)}%
+              </span>
+            )}
+            {company.return_3m != null && (
+              <span className={company.return_3m >= 0 ? 'text-bullish' : 'text-bearish'}>
+                {t('reasoning.threeMonthReturnLabel')}: {company.return_3m >= 0 ? '+' : ''}
+                {company.return_3m.toFixed(1)}%
+              </span>
+            )}
+          </div>
+          {company.contradiction_note && (
+            <p className="mt-1.5 flex items-start gap-1.5 text-bearish">
+              <span aria-hidden="true">⚠</span>
+              <span>{company.contradiction_note}</span>
+            </p>
+          )}
+        </div>
+      )}
       {hasEvidenceSection && (
         <div className="mt-3 border-t border-hairline pt-2">
           <button

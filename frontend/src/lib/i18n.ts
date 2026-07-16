@@ -526,6 +526,19 @@ const CATALOG = {
     en: 'Historical', hi: 'Historical', mr: 'Historical', gu: 'Historical', ml: 'Historical', te: 'Historical',
     ta: 'Historical', kn: 'Historical', pa: 'Historical', bn: 'Historical',
   },
+  // English text for now, matching other recently-added reasoning.* keys (reasoning.whyThisCall, reasoning.evidenceHeading, etc.)
+  'reasoning.factsHeading': {
+    en: 'Facts', hi: 'Facts', mr: 'Facts', gu: 'Facts', ml: 'Facts', te: 'Facts', ta: 'Facts', kn: 'Facts',
+    pa: 'Facts', bn: 'Facts',
+  },
+  'reasoning.oneMonthReturnLabel': {
+    en: '1M return', hi: '1M return', mr: '1M return', gu: '1M return', ml: '1M return', te: '1M return',
+    ta: '1M return', kn: '1M return', pa: '1M return', bn: '1M return',
+  },
+  'reasoning.threeMonthReturnLabel': {
+    en: '3M return', hi: '3M return', mr: '3M return', gu: '3M return', ml: '3M return', te: '3M return',
+    ta: '3M return', kn: '3M return', pa: '3M return', bn: '3M return',
+  },
   'common.close': {
     en: 'Close', hi: 'बंद करें', mr: 'बंद करा', gu: 'બંધ કરો', ml: 'അടയ്ക്കുക', te: 'మూసివేయండి', ta: 'மூடு', kn: 'ಮುಚ್ಚಿ',
     pa: 'ਬੰਦ ਕਰੋ', bn: 'বন্ধ করুন',
