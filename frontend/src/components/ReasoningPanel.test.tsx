@@ -199,4 +199,42 @@ describe('ReasoningPanel evidence section', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
     expect(screen.queryByText('Alternative view')).not.toBeInTheDocument();
   });
+
+  it('visually distinguishes evidence by provenance: rule as a tag, article/historical with a superscript label, other plain', async () => {
+    const withMixedEvidence = {
+      ...withEvidence,
+      evidence_refs: [
+        'RULE_CRUDE_OIL_UP',
+        'article: crude jumped 8% overnight',
+        'historical: 2018 sanctions episode',
+        'a plain unprefixed evidence string',
+      ],
+    };
+    render(<ReasoningPanel company={withMixedEvidence} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Why this call' }));
+
+    // Rule evidence renders its label inside a small muted tag <span>, not
+    // as bare text alongside the bullet -- distinguishing it visually from
+    // the other list items.
+    const ruleTag = screen.getByText('Crude oil up');
+    expect(ruleTag.tagName).toBe('SPAN');
+    expect(ruleTag.className).toContain('rounded-full');
+
+    // Article evidence gets a superscript "Article" label preceding the text.
+    const articleLabel = screen.getByText('Article');
+    expect(articleLabel.tagName).toBe('SUP');
+    expect(screen.getByText('crude jumped 8% overnight')).toBeInTheDocument();
+
+    // Historical evidence gets a superscript "Historical" label.
+    const historicalLabel = screen.getByText('Historical');
+    expect(historicalLabel.tagName).toBe('SUP');
+    expect(screen.getByText('2018 sanctions episode')).toBeInTheDocument();
+
+    // A plain/other-kind evidence ref shows neither a rule tag nor a
+    // provenance label -- just its own text.
+    const plainItem = screen.getByText('a plain unprefixed evidence string');
+    expect(plainItem.tagName).toBe('LI');
+    expect(screen.queryAllByText('Article')).toHaveLength(1); // only the one above
+    expect(screen.queryAllByText('Historical')).toHaveLength(1); // only the one above
+  });
 });

@@ -477,6 +477,14 @@ const CATALOG = {
     en: 'Very High', hi: 'Very High', mr: 'Very High', gu: 'Very High', ml: 'Very High', te: 'Very High',
     ta: 'Very High', kn: 'Very High', pa: 'Very High', bn: 'Very High',
   },
+  'reasoning.evidenceArticle': {
+    en: 'Article', hi: 'Article', mr: 'Article', gu: 'Article', ml: 'Article', te: 'Article', ta: 'Article',
+    kn: 'Article', pa: 'Article', bn: 'Article',
+  },
+  'reasoning.evidenceHistorical': {
+    en: 'Historical', hi: 'Historical', mr: 'Historical', gu: 'Historical', ml: 'Historical', te: 'Historical',
+    ta: 'Historical', kn: 'Historical', pa: 'Historical', bn: 'Historical',
+  },
   'common.close': {
     en: 'Close', hi: 'बंद करें', mr: 'बंद करा', gu: 'બંધ કરો', ml: 'അടയ്ക്കുക', te: 'మూసివేయండి', ta: 'மூடு', kn: 'ಮುಚ್ಚಿ',
     pa: 'ਬੰਦ ਕਰੋ', bn: 'বন্ধ করুন',

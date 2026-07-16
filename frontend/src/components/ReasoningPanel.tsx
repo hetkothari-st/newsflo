@@ -73,9 +73,29 @@ export default function ReasoningPanel({
                 <div>
                   <p className="uppercase tracking-widest text-muted">{t('reasoning.evidenceHeading')}</p>
                   <ul className="mt-1 space-y-1 text-ink">
-                    {evidenceRefs.map((ref, i) => (
-                      <li key={i}>{formatEvidenceRef(ref).text}</li>
-                    ))}
+                    {evidenceRefs.map((ref, i) => {
+                      const { text, kind } = formatEvidenceRef(ref);
+                      if (kind === 'rule') {
+                        return (
+                          <li key={i}>
+                            <span className="inline-flex items-center rounded-full bg-hairline px-1.5 py-0.5 text-[10px] text-muted">
+                              {text}
+                            </span>
+                          </li>
+                        );
+                      }
+                      if (kind === 'article' || kind === 'historical') {
+                        const label =
+                          kind === 'article' ? t('reasoning.evidenceArticle') : t('reasoning.evidenceHistorical');
+                        return (
+                          <li key={i}>
+                            <sup className="mr-1 text-[9px] uppercase tracking-widest text-muted">{label}</sup>
+                            {text}
+                          </li>
+                        );
+                      }
+                      return <li key={i}>{text}</li>;
+                    })}
                   </ul>
                 </div>
               )}
