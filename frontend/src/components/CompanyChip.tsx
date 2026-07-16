@@ -4,7 +4,13 @@ import CompanyAvatar from './CompanyAvatar';
 import DirectionArrow from './DirectionArrow';
 import ReasoningPanel from './ReasoningPanel';
 
-export default function CompanyChip({ company }: { company: AlertCompany }) {
+export default function CompanyChip({
+  company,
+  eventType,
+}: {
+  company: AlertCompany;
+  eventType?: string | null;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   function toggle() {
@@ -37,7 +43,7 @@ export default function CompanyChip({ company }: { company: AlertCompany }) {
           <span className="truncate text-[11px] uppercase tracking-wide text-muted">{company.ticker}</span>
         </div>
       </div>
-      {expanded && <ReasoningPanel company={company} />}
+      {expanded && <ReasoningPanel company={company} eventType={eventType} />}
     </div>
   );
 }

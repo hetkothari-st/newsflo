@@ -135,7 +135,7 @@ export default function AlertCompanies({
                   key={company.company_id}
                   className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
                 >
-                  <CompanyChip company={company} />
+                  <CompanyChip company={company} eventType={alert.event_type} />
                 </div>
               ))}
             </div>
