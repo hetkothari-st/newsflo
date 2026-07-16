@@ -206,6 +206,22 @@ export async function getArticles(lang: Language = 'en'): Promise<Article[]> {
   return (await res.json()) as Article[];
 }
 
+// Keyed by ISO date ("YYYY-MM-DD", IST calendar day) -> alert count that day.
+// Zero-count days are simply absent from the map.
+export type CalendarCounts = Record<string, number>;
+
+export async function getCalendarCounts(year: number, month: number): Promise<CalendarCounts> {
+  const res = await fetch(`/api/calendar/counts?year=${year}&month=${month}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as CalendarCounts;
+}
+
+export async function getCalendarDay(date: string, lang: Language = 'en'): Promise<Alert[]> {
+  const res = await fetch(`/api/calendar/day?date=${date}&lang=${lang}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as Alert[];
+}
+
 export async function getCompanyProfile(id: number, lang: Language = 'en'): Promise<CompanyProfile | null> {
   const res = await fetch(`/api/companies/${id}/profile?lang=${lang}`);
   // 404 (unknown id, or a non-Indian company this page doesn't support yet)

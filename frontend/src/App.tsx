@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import BottomNav from './components/BottomNav';
+import CalendarModal from './components/CalendarModal';
 import NavBar from './components/NavBar';
 import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
@@ -19,10 +20,11 @@ function RequireAuth({ children }: { children: ReactElement }) {
 }
 
 export default function App() {
+  const [calendarOpen, setCalendarOpen] = useState(false);
   return (
     <div className="min-h-screen bg-page pb-14 font-sans text-ink md:pb-0">
       <TranslationProgressBanner />
-      <NavBar />
+      <NavBar onOpenCalendar={() => setCalendarOpen(true)} />
       <Routes>
         <Route path="/" element={<FeedPage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
@@ -46,7 +48,8 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
       </Routes>
-      <BottomNav />
+      <BottomNav onOpenCalendar={() => setCalendarOpen(true)} />
+      <CalendarModal open={calendarOpen} onClose={() => setCalendarOpen(false)} />
     </div>
   );
 }

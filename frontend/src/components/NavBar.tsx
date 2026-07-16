@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
+import CalendarButton from './CalendarButton';
 import LanguagePicker from './LanguagePicker';
 import ThemeToggle from './ThemeToggle';
 
-export default function NavBar() {
+export default function NavBar({ onOpenCalendar }: { onOpenCalendar: () => void }) {
   const { token } = useAuth();
   const { t } = useLanguage();
   return (
@@ -22,6 +23,7 @@ export default function NavBar() {
           </Link>
         </div>
         <div className="flex items-center gap-4 text-xs uppercase tracking-widest">
+          <CalendarButton onClick={onOpenCalendar} />
           <LanguagePicker />
           <ThemeToggle />
           <div className="hidden items-center gap-4 md:flex">

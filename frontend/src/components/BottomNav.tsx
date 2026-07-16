@@ -8,7 +8,7 @@ const LINKS: { to: string; labelKey: TranslationKey }[] = [
   { to: '/holdings', labelKey: 'nav.holdings' },
 ];
 
-export default function BottomNav() {
+export default function BottomNav({ onOpenCalendar }: { onOpenCalendar: () => void }) {
   const { pathname } = useLocation();
   const { token } = useAuth();
   const { t } = useLanguage();
@@ -25,6 +25,9 @@ export default function BottomNav() {
           {t(l.labelKey)}
         </Link>
       ))}
+      <button type="button" onClick={onOpenCalendar} className={itemClass(false)}>
+        {t('nav.calendar')}
+      </button>
       <Link
         to={token ? '/account' : '/login'}
         className={itemClass(pathname === '/account' || pathname === '/login')}

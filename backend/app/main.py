@@ -19,7 +19,7 @@ from app.db import SessionLocal, init_db
 from app.models import Company
 from app.prices.kite_ws_client import run_hub_client
 from app.prices.live_price import LIVE_PRICE_CACHE
-from app.routers import alerts, articles, auth, categories, companies, holdings, translation, watchlist, ws
+from app.routers import alerts, articles, auth, calendar, categories, companies, holdings, translation, watchlist, ws
 from app.scheduler import start_scheduler
 from app.ws.manager import manager
 
@@ -27,6 +27,7 @@ app = FastAPI(title="NewsFlo")
 
 app.include_router(articles.router)
 app.include_router(alerts.router)
+app.include_router(calendar.router)
 app.include_router(auth.router)
 app.include_router(holdings.router)
 app.include_router(companies.router)
