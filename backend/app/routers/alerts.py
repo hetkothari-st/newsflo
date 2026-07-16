@@ -54,6 +54,8 @@ def _serialize_alert(
             "return_1m": ac.return_1m,
             "return_3m": ac.return_3m,
             "contradiction_note": ac.contradiction_note,
+            "impact_level": ac.impact_level,
+            "parent_company_id": ac.parent_company_id,
             "market": infer_market(ac.company.ticker),
             "in_my_holdings": ac.company_id in held_company_ids,
             "past_mentions": mentions_before(mentions_index, ac.company_id, alert.created_at),

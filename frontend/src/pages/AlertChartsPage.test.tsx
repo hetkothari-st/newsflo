@@ -45,6 +45,13 @@ const inferredCompany = {
   in_my_holdings: false, past_mentions: [],
 };
 
+const indirectCompany = {
+  company_id: 3, ticker: 'TSM', name: 'TSMC', index_tier: 'NIFTY50', sector: 'it',
+  direction: 'bearish' as const, magnitude_low: 1, magnitude_high: 2, rationale: 'Fabs Reliance-adjacent chips.',
+  key_points: [], confidence_score: 20, time_horizon: 'Medium-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN' as const,
+  in_my_holdings: false, past_mentions: [], impact_level: 'indirect_l1', parent_company_id: 1,
+};
+
 function renderPage(id = '1') {
   return render(
     <LanguageProvider>
@@ -92,24 +99,39 @@ describe('AlertChartsPage', () => {
     await waitFor(() => expect(screen.getByText('Alert not found')).toBeInTheDocument());
   });
 
-  it('Normal view shows only direct-mention companies; Drilldown reveals sector-inferred ones too', async () => {
-    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, inferredCompany] }));
+  it('Normal view shows direct and sector-inferred companies (both impact_level=direct); Drilldown adds indirect ones too', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, inferredCompany, indirectCompany] }));
     renderPage('1');
+    // Normal: both direct_mention (RIL) and sector_inference (ONGC) count as
+    // impact_level="direct" -- only genuinely indirect companies are hidden.
     await waitFor(() => expect(screen.getByText('RIL')).toBeInTheDocument());
-    expect(screen.queryByText('ONGC')).not.toBeInTheDocument();
+    expect(screen.getByText('ONGC')).toBeInTheDocument();
+    expect(screen.queryByText('TSM')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Drilldown'));
-    await waitFor(() => expect(screen.getByText('ONGC')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('TSM')).toBeInTheDocument());
     expect(screen.getByText('RIL')).toBeInTheDocument();
+    expect(screen.getByText('ONGC')).toBeInTheDocument();
   });
 
-  it('shows the no-direct-companies message in Normal view when every company is sector-inferred', async () => {
-    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [inferredCompany] }));
+  it('shows the no-direct-companies message in Normal view when every company is indirect', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [indirectCompany] }));
     renderPage('1');
     await waitFor(() =>
       expect(
         screen.getByText('No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.'),
       ).toBeInTheDocument(),
     );
+  });
+
+  it('shows the Levels tab and groups an indirect company under its parent', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, indirectCompany] }));
+    renderPage('1');
+    await waitFor(() => expect(screen.getByText('Levels')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Drilldown'));
+    fireEvent.click(screen.getByText('Levels'));
+    await waitFor(() => expect(screen.getByText('Direct Impact')).toBeInTheDocument());
+    expect(screen.getByText('Indirect Impact — Level 1')).toBeInTheDocument();
+    expect(screen.getByText(/via Reliance Industries/)).toBeInTheDocument();
   });
 });

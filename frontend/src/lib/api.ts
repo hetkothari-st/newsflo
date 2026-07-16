@@ -64,6 +64,12 @@ export interface AlertCompany {
   return_1m?: number | null;
   return_3m?: number | null;
   contradiction_note?: string | null;
+  // How far removed this company's impact is from the article's direct
+  // subject: 'direct' | 'indirect_l1' | 'indirect_l2'. Defaults to 'direct'
+  // for legacy alerts predating this field. See parent_company_id for the
+  // company an indirect entry is economically linked through.
+  impact_level?: string;
+  parent_company_id?: number | null;
 }
 
 export interface Alert {

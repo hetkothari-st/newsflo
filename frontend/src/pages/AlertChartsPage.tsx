@@ -1,18 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getAlert, type Alert } from '../lib/api';
+import { getAlert, type Alert, type AlertCompany } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import { useHorizontalSwipe } from '../lib/useHorizontalSwipe';
+import { computeNetSignal } from '../features/visualize/transforms';
+import { impactLevelKey } from '../features/visualize/impactLevels';
 import SectorTree from '../features/visualize/charts/SectorTree';
 import TierRows from '../features/visualize/charts/TierRows';
 import ImpactBar from '../features/visualize/charts/ImpactBar';
 import SplitTree from '../features/visualize/charts/SplitTree';
 import ConfidenceTree from '../features/visualize/charts/ConfidenceTree';
 import TimelineTree from '../features/visualize/charts/TimelineTree';
+import LevelTree from '../features/visualize/charts/LevelTree';
 
 const CHARTS = [
   { key: 'sector', label: 'Sector', Component: SectorTree },
+  { key: 'levels', label: 'Levels', Component: LevelTree },
   { key: 'tier', label: 'Tier', Component: TierRows },
   { key: 'impact', label: 'Impact', Component: ImpactBar },
   { key: 'split', label: 'Split', Component: SplitTree },
@@ -20,7 +24,47 @@ const CHARTS = [
   { key: 'timeline', label: 'Timeline', Component: TimelineTree },
 ] as const;
 
+// Normal = the article's own direct impact only (both actually-direct
+// mentions and sector-inference fan-out -- see impact_level in
+// app.analysis.schemas.IMPACT_LEVELS). Drilldown adds every company the
+// model knows is economically linked through a supplier/customer/
+// competitor chain (indirect_l1/indirect_l2), regardless of how deep.
 type Breadth = 'normal' | 'drilldown';
+
+function StatBar({ companies, breadth }: { companies: AlertCompany[]; breadth: Breadth }) {
+  const signal = computeNetSignal(companies);
+  const sectorCount = new Set(companies.map((c) => c.sector).filter(Boolean)).size;
+  const levelCounts = { direct: 0, indirect_l1: 0, indirect_l2: 0 } as Record<string, number>;
+  for (const c of companies) levelCounts[impactLevelKey(c)] += 1;
+
+  return (
+    <div className="flex flex-wrap gap-4 border-b border-hairline px-4 py-3 text-xs">
+      <div>
+        <p className="uppercase tracking-widest text-muted">Overall Impact</p>
+        <p className={signal.direction === 'even' ? 'text-muted' : signal.direction === 'bullish' ? 'text-bullish' : 'text-bearish'}>
+          {signal.direction === 'even' ? 'Mixed' : signal.direction === 'bullish' ? 'Bullish' : 'Bearish'}
+          <span className="ml-1 text-muted">({signal.avgConfidence}% confidence)</span>
+        </p>
+      </div>
+      <div>
+        <p className="uppercase tracking-widest text-muted">Affected Sectors</p>
+        <p className="text-ink">{sectorCount}</p>
+      </div>
+      <div>
+        <p className="uppercase tracking-widest text-muted">Affected Companies</p>
+        <p className="text-ink">{companies.length}</p>
+      </div>
+      {breadth === 'drilldown' && (
+        <div>
+          <p className="uppercase tracking-widest text-muted">By Level</p>
+          <p className="text-ink">
+            Direct {levelCounts.direct} · Indirect L1 {levelCounts.indirect_l1} · Indirect L2 {levelCounts.indirect_l2}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AlertChartsPage() {
   const { id } = useParams<{ id: string }>();
@@ -61,7 +105,7 @@ export default function AlertChartsPage() {
 
   const { Component } = CHARTS[index];
   const visibleCompanies =
-    breadth === 'normal' ? alert.companies.filter((c) => c.basis === 'direct_mention') : alert.companies;
+    breadth === 'normal' ? alert.companies.filter((c) => impactLevelKey(c) === 'direct') : alert.companies;
 
   return (
     <div className="flex min-h-screen flex-col bg-page" {...swipeHandlers}>
@@ -85,7 +129,8 @@ export default function AlertChartsPage() {
           ))}
         </div>
       </div>
-      <div className="flex gap-4 border-b border-hairline px-4 py-2">
+      <StatBar companies={visibleCompanies} breadth={breadth} />
+      <div className="flex gap-4 overflow-x-auto border-b border-hairline px-4 py-2">
         {CHARTS.map((chart, i) => (
           <button
             key={chart.key}

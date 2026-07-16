@@ -113,9 +113,21 @@ class AlertCompany(Base):
     return_1m = Column(Float, nullable=True)
     return_3m = Column(Float, nullable=True)
     contradiction_note = Column(Text, nullable=True)
+    # How far removed this company's impact is from the article's direct
+    # subject -- see app.analysis.schemas.IMPACT_LEVELS. "direct" for both
+    # actually-direct mentions and sector-inference fan-out (both are the
+    # article's own primary impact). indirect_l1/indirect_l2 are LLM-known
+    # supplier/customer/competitor relationships chained off an already-
+    # resolved company -- see parent_company_id.
+    impact_level = Column(String, nullable=False, default="direct")
+    # For impact_level in (indirect_l1, indirect_l2): the Company this one is
+    # economically linked through (a direct company for indirect_l1, an
+    # indirect_l1 company for indirect_l2). NULL for impact_level="direct".
+    parent_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
-    company = relationship("Company")
+    company = relationship("Company", foreign_keys=[company_id])
+    parent_company = relationship("Company", foreign_keys=[parent_company_id])
 
 
 class CalibrationSample(Base):

@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
 
-from app.analysis.schemas import EVENT_TYPES, SECTORS, TIME_HORIZONS, AnalysisOutput
+from app.analysis.schemas import EVENT_TYPES, IMPACT_LEVELS, SECTORS, TIME_HORIZONS, AnalysisOutput
 from app.reasoning.playbooks import PLAYBOOKS_TEXT
 from app.reasoning.rulebook import RULEBOOK_TEXT
 
@@ -175,7 +175,34 @@ ANALYSIS_INSTRUCTIONS = (
     "company -- even a weaker one you ultimately reject. Required even when "
     "you're confident in the primary call; if you truly see no credible "
     "alternative, state why (e.g. \"No credible alternative -- the "
-    "mechanism is direct and well-precedented.\").\n\n"
+    "mechanism is direct and well-precedented.\").\n"
+    "16. impact_level defaults to \"direct\" for every company covered by "
+    "rules 1-15 above (this includes both is_direct=true companies AND "
+    "sector-level inference -- both are the article's own primary subject, "
+    "just resolved two different ways). Beyond that, for EACH direct "
+    "company (is_direct=true) you named, you MAY add 0-3 further entries "
+    "with impact_level=\"indirect_l1\" for companies you have genuine, "
+    "specific knowledge are economically linked to it -- a real supplier, "
+    "a major customer, or a close competitor whose business outcome "
+    "actually moves with that direct company's, NOT merely a company in "
+    "the same sector. Set parent_ticker to the direct company's own ticker "
+    "(must exactly match a ticker you used elsewhere in this response). "
+    "Give each indirect_l1 entry its own direction/magnitude/rationale "
+    "explaining the SPECIFIC propagation mechanism (e.g. \"Company X "
+    "supplies component Y to [direct company]; a slowdown there reduces "
+    "X's order book\") -- never copy the direct company's rationale "
+    "verbatim. It is correct and expected to add ZERO indirect_l1 entries "
+    "for a direct company when you don't have real, specific knowledge of "
+    "its suppliers/customers/close competitors -- do not invent one to "
+    "have something to report.\n"
+    "17. Only for an indirect_l1 entry you actually added under rule 16, "
+    "you MAY similarly add 0-2 entries with impact_level=\"indirect_l2\", "
+    "parent_ticker set to THAT indirect_l1 company's own ticker, same "
+    "specificity and honesty requirements as rule 16 (a real, known "
+    "relationship, own distinct rationale, zero is a fine and expected "
+    "answer). Never skip straight from a direct company to an "
+    "indirect_l2 entry -- indirect_l2 must always chain through a real "
+    "indirect_l1 entry you added.\n\n"
 )
 
 RECORD_ANALYSIS_TOOL = {
@@ -263,11 +290,33 @@ RECORD_ANALYSIS_TOOL = {
                                 "type": "string",
                                 "description": "One sentence describing a plausible competing interpretation, or why none is credible.",
                             },
+                            "impact_level": {
+                                "type": "string",
+                                "enum": IMPACT_LEVELS,
+                                "description": (
+                                    "\"direct\" for every company covered by rules 1-15 (direct "
+                                    "mentions and sector inference alike). \"indirect_l1\"/"
+                                    "\"indirect_l2\" only for a genuinely-known supplier/customer/"
+                                    "close-competitor chain per rules 16-17 -- zero indirect "
+                                    "entries is a correct, expected answer when you don't have "
+                                    "real knowledge of one."
+                                ),
+                            },
+                            "parent_ticker": {
+                                "type": ["string", "null"],
+                                "description": (
+                                    "Required (non-null) when impact_level is indirect_l1 or "
+                                    "indirect_l2 -- the exact ticker string of the direct "
+                                    "(for indirect_l1) or indirect_l1 (for indirect_l2) company "
+                                    "this one is linked through. Null for impact_level=\"direct\"."
+                                ),
+                            },
                         },
                         "required": [
                             "name", "is_direct", "direction", "magnitude_low", "magnitude_high",
                             "rationale", "key_points", "time_horizon", "reasons", "evidence_refs",
                             "risks", "assumptions", "unknowns", "alternative_hypothesis",
+                            "impact_level", "parent_ticker",
                         ],
                     },
                 },
@@ -459,9 +508,10 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             # specific per-company reasoning (confirmed live -- Claude's own
             # richer output style, not Groq's terser one) runs past 1024 and
             # gets cut off mid-JSON, failing to parse and burning a wasted
-            # retry. 4096 gives real headroom for the max 5 companies x rich
-            # rationale + key_points this schema asks for.
-            max_tokens=4096,
+            # retry. 8192 gives headroom for direct companies PLUS their
+            # optional indirect_l1/indirect_l2 chains (rules 16-17) on top of
+            # the original 4096 budget for direct-only output.
+            max_tokens=8192,
             tools=[RECORD_ANALYSIS_TOOL],
             tool_choice={"type": "function", "function": {"name": "record_analysis"}},
             messages=messages,

@@ -202,3 +202,86 @@ def test_resolve_carries_evidence_discipline_fields_through(db_session):
     assert resolved[0]["assumptions"] == ["Crude stays elevated."]
     assert resolved[0]["unknowns"] == ["Duration of the spike."]
     assert resolved[0]["alternative_hypothesis"] == "Already priced in."
+
+
+def test_direct_mention_defaults_to_impact_level_direct_with_no_parent(db_session):
+    _make_company(db_session, "RELIANCE.NS", "Reliance Industries", "oil_gas", 1.0)
+    mention = CompanyMention(
+        name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+        direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        time_horizon="Short-Term",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved[0]["impact_level"] == "direct"
+    assert resolved[0]["parent_company_id"] is None
+
+
+def test_resolve_indirect_l1_links_to_its_direct_parent(db_session):
+    direct = _make_company(db_session, "NVDA.NS", "Nvidia", "it", 1.0)
+    supplier = _make_company(db_session, "TSM.NS", "TSMC", "it", 1.0)
+    mentions = [
+        CompanyMention(
+            name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
+            direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
+            time_horizon="Short-Term", impact_level="direct",
+        ),
+        CompanyMention(
+            name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
+            direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
+            rationale="TSMC fabs Nvidia's chips; lower Nvidia orders reduce TSMC's foundry revenue.",
+            time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+        ),
+    ]
+
+    resolved = resolve_companies(db_session, mentions)
+
+    direct_entry = next(r for r in resolved if r["company_id"] == direct.id)
+    indirect_entry = next(r for r in resolved if r["company_id"] == supplier.id)
+    assert direct_entry["impact_level"] == "direct"
+    assert indirect_entry["impact_level"] == "indirect_l1"
+    assert indirect_entry["parent_company_id"] == direct.id
+
+
+def test_resolve_indirect_l2_chains_through_indirect_l1(db_session):
+    direct = _make_company(db_session, "NVDA.NS", "Nvidia", "it", 1.0)
+    l1 = _make_company(db_session, "TSM.NS", "TSMC", "it", 1.0)
+    l2 = _make_company(db_session, "ASML.NS", "ASML", "it", 1.0)
+    mentions = [
+        CompanyMention(
+            name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
+            direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
+            time_horizon="Short-Term", impact_level="direct",
+        ),
+        CompanyMention(
+            name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
+            direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
+            time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+        ),
+        CompanyMention(
+            name="ASML", ticker="ASML.NS", is_direct=True, sector=None,
+            direction="bearish", magnitude_low=0.5, magnitude_high=1.0,
+            rationale="ASML supplies lithography tools to TSMC",
+            time_horizon="Long-Term", impact_level="indirect_l2", parent_ticker="TSM.NS",
+        ),
+    ]
+
+    resolved = resolve_companies(db_session, mentions)
+
+    l2_entry = next(r for r in resolved if r["company_id"] == l2.id)
+    assert l2_entry["impact_level"] == "indirect_l2"
+    assert l2_entry["parent_company_id"] == l1.id
+
+
+def test_resolve_drops_indirect_entry_whose_parent_ticker_never_resolved(db_session):
+    _make_company(db_session, "TSM.NS", "TSMC", "it", 1.0)
+    mention = CompanyMention(
+        name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
+        direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="orphaned indirect entry",
+        time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NOTHING_NAMED.NS",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved == []

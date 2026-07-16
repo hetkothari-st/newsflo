@@ -535,3 +535,76 @@ def test_list_alerts_defaults_financial_context_fields_for_legacy_rows(db_sessio
     assert company_payload["contradiction_note"] is None
 
     app.dependency_overrides.clear()
+
+
+def test_get_alert_includes_impact_level_and_parent_company_id(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/impact-level", title="Chip export ban", status="ANALYZED", category="tech")
+    db_session.add(article)
+    db_session.commit()
+
+    direct = Company(ticker="NVDA.NS", name="Nvidia", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    supplier = Company(ticker="TSM.NS", name="TSMC", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add_all([direct, supplier])
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="tech")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=direct.id, direction="bearish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
+        basis="direct_mention", confidence="llm_estimate", impact_level="direct",
+    ))
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=supplier.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
+        basis="direct_mention", confidence="llm_estimate",
+        impact_level="indirect_l1", parent_company_id=direct.id,
+    ))
+    db_session.commit()
+
+    response = client.get(f"/api/alerts/{alert.id}")
+
+    assert response.status_code == 200
+    companies = {c["company_id"]: c for c in response.json()["companies"]}
+    assert companies[direct.id]["impact_level"] == "direct"
+    assert companies[direct.id]["parent_company_id"] is None
+    assert companies[supplier.id]["impact_level"] == "indirect_l1"
+    assert companies[supplier.id]["parent_company_id"] == direct.id
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_defaults_impact_level_to_direct_for_legacy_rows(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/impact-level-legacy", title="Legacy", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="LEGACY2.NS", name="Legacy Co 2", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="legacy row",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_payload = response.json()[0]["companies"][0]
+    assert company_payload["impact_level"] == "direct"
+    assert company_payload["parent_company_id"] is None
+
+    app.dependency_overrides.clear()

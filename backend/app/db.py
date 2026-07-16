@@ -47,6 +47,8 @@ _ADDED_COLUMNS = [
     ("alert_companies", "return_1m", "FLOAT"),
     ("alert_companies", "return_3m", "FLOAT"),
     ("alert_companies", "contradiction_note", "TEXT"),
+    ("alert_companies", "impact_level", "VARCHAR DEFAULT 'direct'"),
+    ("alert_companies", "parent_company_id", "INTEGER"),
 ]
 
 

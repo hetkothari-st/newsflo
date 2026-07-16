@@ -17,8 +17,17 @@ _TIER_RANK = case(
     else_=4,
 )
 
+# Resolution order for impact_level: a parent must be resolved (and its
+# ticker recorded) before any entry that names it via parent_ticker, so
+# indirect_l1 entries resolve after every direct entry, and indirect_l2
+# entries resolve after every indirect_l1 entry.
+_LEVEL_ORDER = {"direct": 0, "indirect_l1": 1, "indirect_l2": 2}
 
-def _to_resolved(company: Company, mention: CompanyMention, basis: str) -> dict:
+
+def _to_resolved(
+    company: Company, mention: CompanyMention, basis: str,
+    impact_level: str = "direct", parent_company_id: int | None = None,
+) -> dict:
     return {
         "company_id": company.id,
         "direction": mention.direction,
@@ -38,6 +47,8 @@ def _to_resolved(company: Company, mention: CompanyMention, basis: str) -> dict:
         "assumptions": mention.assumptions,
         "unknowns": mention.unknowns,
         "alternative_hypothesis": mention.alternative_hypothesis,
+        "impact_level": impact_level,
+        "parent_company_id": parent_company_id,
     }
 
 
@@ -85,11 +96,41 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
     20 rows for a single article). First occurrence wins; later duplicate
     resolutions of an already-resolved company are dropped rather than
     appended again.
+
+    Mentions are processed in impact-level order (direct, then indirect_l1,
+    then indirect_l2) regardless of the order the LLM returned them in, so
+    an indirect entry's parent_ticker always resolves against an
+    already-populated ticker->company_id map -- see _LEVEL_ORDER.
     """
     resolved = []
     seen_company_ids: set[int] = set()
-    for mention in mentions:
-        if mention.is_direct:
+    ticker_to_company_id: dict[str, int] = {}
+
+    for mention in sorted(mentions, key=lambda m: _LEVEL_ORDER.get(m.impact_level, 0)):
+        if mention.impact_level in ("indirect_l1", "indirect_l2"):
+            company = _find_direct_company(session, mention)
+            if company is None:
+                continue
+            if company.id in seen_company_ids:
+                continue
+            seen_company_ids.add(company.id)
+            parent_company_id = (
+                ticker_to_company_id.get(mention.parent_ticker) if mention.parent_ticker else None
+            )
+            # A parent_ticker that didn't resolve to any already-persisted
+            # company (e.g. the model referenced a ticker outside this
+            # response, or a typo) means the chain is broken -- drop this
+            # entry rather than persist an orphaned indirect row with no
+            # parent, consistent with "omit rather than mismatch".
+            if parent_company_id is None:
+                continue
+            resolved.append(_to_resolved(
+                company, mention, basis="direct_mention",
+                impact_level=mention.impact_level, parent_company_id=parent_company_id,
+            ))
+            if mention.ticker:
+                ticker_to_company_id[mention.ticker] = company.id
+        elif mention.is_direct:
             company = _find_direct_company(session, mention)
             if company is None:
                 continue
@@ -97,6 +138,8 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
                 continue
             seen_company_ids.add(company.id)
             resolved.append(_to_resolved(company, mention, basis="direct_mention"))
+            if mention.ticker:
+                ticker_to_company_id[mention.ticker] = company.id
         else:
             if not mention.sector:
                 continue

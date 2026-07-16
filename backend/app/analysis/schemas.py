@@ -9,6 +9,14 @@ EVENT_TYPES = [
     "government_spending", "earnings", "merger_acquisition", "banking_metrics",
     "other",
 ]
+# How far removed a company's impact is from the article's direct subject.
+# "direct" covers both actually-direct mentions AND sector-inference fan-out
+# (both are the article's own primary impact, just resolved two different
+# ways -- see app.companies.resolution). "indirect_l1"/"indirect_l2" are
+# companies the model knows are economically linked (supplier/customer/close
+# competitor) to an already-named direct or indirect_l1 company, not
+# mentioned in the article itself -- see CompanyMention.parent_ticker.
+IMPACT_LEVELS = ["direct", "indirect_l1", "indirect_l2"]
 
 
 class CompanyMention(BaseModel):
@@ -43,6 +51,15 @@ class CompanyMention(BaseModel):
     assumptions: list[str] = []
     unknowns: list[str] = []
     alternative_hypothesis: Optional[str] = None
+    # One of IMPACT_LEVELS. Defaults to "direct" so every existing caller
+    # (older tests, the dedup-reuse path) validates without change.
+    impact_level: str = "direct"
+    # For impact_level in (indirect_l1, indirect_l2): the ticker of the
+    # already-named company (a direct company for indirect_l1, an indirect_l1
+    # company for indirect_l2) this one is economically linked through. None
+    # for impact_level="direct". Resolved to a real parent_company_id in
+    # app.companies.resolution.
+    parent_ticker: Optional[str] = None
 
 
 class AnalysisOutput(BaseModel):
