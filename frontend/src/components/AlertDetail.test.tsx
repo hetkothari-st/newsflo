@@ -75,4 +75,29 @@ describe('AlertDetail', () => {
     );
     expect(screen.getByRole('dialog')).toHaveClass('theme-light:shadow-neu');
   });
+
+  it('defaults to a bottom sheet capped at 85vh on mobile', () => {
+    render(
+      <AlertDetail open onClose={() => {}}>
+        <p>content</p>
+      </AlertDetail>,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveClass('max-h-[85vh]', 'rounded-t-lg');
+    expect(dialog).not.toHaveClass('h-full');
+  });
+
+  it('fullScreenMobile fills the viewport on mobile instead of a bottom sheet', () => {
+    render(
+      <AlertDetail open onClose={() => {}} fullScreenMobile>
+        <p>content</p>
+      </AlertDetail>,
+    );
+    const dialog = screen.getByRole('dialog');
+    // No gap above the panel on mobile -- nothing for the page behind to
+    // bleed through above an in-panel sticky header (e.g. CalendarModal's
+    // day-view bar). Desktop sizing (md:*) is unaffected either way.
+    expect(dialog).toHaveClass('h-full', 'max-h-full', 'rounded-none');
+    expect(dialog).not.toHaveClass('max-h-[85vh]', 'rounded-t-lg');
+  });
 });

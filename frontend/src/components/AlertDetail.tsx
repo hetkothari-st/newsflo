@@ -5,6 +5,7 @@ export default function AlertDetail({
   onClose,
   children,
   hiddenOnMobile = false,
+  fullScreenMobile = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -13,6 +14,13 @@ export default function AlertDetail({
   // modal (see AlertCoverCard) -- this instance stays desktop-only so the
   // two behaviors don't both fire off one card tap.
   hiddenOnMobile?: boolean;
+  // Mobile only: panel fills the full viewport instead of the usual bottom
+  // sheet capped at 85vh. The default bottom sheet leaves a gap above the
+  // panel where the page behind shows through the translucent backdrop --
+  // fine for a short popup, but for a content-dense view with its own
+  // sticky in-panel header (e.g. CalendarModal's day list), that gap reads
+  // as page content floating above the sticky header instead of backdrop.
+  fullScreenMobile?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -29,6 +37,9 @@ export default function AlertDetail({
   if (!open) return null;
 
   const displayClass = hiddenOnMobile ? 'hidden md:flex' : 'flex';
+  const panelSizeClass = fullScreenMobile
+    ? 'h-full max-h-full rounded-none md:h-auto md:max-h-[80vh] md:rounded-lg'
+    : 'max-h-[85vh] rounded-t-lg md:max-h-[80vh] md:rounded-lg';
 
   return (
     <div className={`fixed inset-0 z-50 ${displayClass} items-end md:items-center md:justify-center`}>
@@ -42,7 +53,7 @@ export default function AlertDetail({
         role="dialog"
         aria-modal="true"
         tabIndex={-1}
-        className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-lg border border-hairline bg-surface p-6 outline-none motion-safe:transition-transform md:max-h-[80vh] md:max-w-lg md:rounded-lg theme-light:border-transparent theme-light:shadow-neu"
+        className={`relative z-10 w-full overflow-y-auto border border-hairline bg-surface p-6 outline-none motion-safe:transition-transform md:max-w-lg theme-light:border-transparent theme-light:shadow-neu ${panelSizeClass}`}
       >
         <button
           type="button"

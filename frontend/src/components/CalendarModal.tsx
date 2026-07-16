@@ -187,7 +187,7 @@ export default function CalendarModal({ open, onClose }: { open: boolean; onClos
   }, [dayAlerts, sectorFilter, companyFilter]);
 
   return (
-    <AlertDetail open={open} onClose={closeOuter}>
+    <AlertDetail open={open} onClose={closeOuter} fullScreenMobile>
       {selectedDate === null ? (
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between pr-8">
