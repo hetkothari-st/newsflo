@@ -56,6 +56,14 @@ export interface AlertCompany {
   alternative_hypothesis?: string | null;
   confidence_contributors?: string[];
   confidence_penalties?: string[];
+  // Financial grounding + contradiction detection (see docs/superpowers/
+  // specs/2026-07-16-financial-grounding-contradiction-detection-design.md).
+  // Optional/nullable for the same reason as the reasoning-engine fields
+  // above: legacy alerts and existing test fixtures don't have these.
+  price_at_analysis?: number | null;
+  return_1m?: number | null;
+  return_3m?: number | null;
+  contradiction_note?: string | null;
 }
 
 export interface Alert {
