@@ -13,8 +13,9 @@ from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
 from app.ingestion.og_image import fetch_og_image
-from app.models import Alert, AlertCompany, Article, utcnow
+from app.models import Alert, AlertCompany, Article, Company, utcnow
 from app.reasoning.confidence import compute_confidence, source_credibility
+from app.reasoning.financial_context import detect_price_contradiction, get_or_fetch_financial_snapshot
 from app.reasoning.rulebook import get_rule
 from app.reasoning.versions import KNOWLEDGE_VERSION, PROMPT_VERSION
 from app.ws.manager import manager
@@ -102,6 +103,10 @@ def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
             "assumptions": _decode_json_list(ac.assumptions_json),
             "unknowns": _decode_json_list(ac.unknowns_json),
             "alternative_hypothesis": ac.alternative_hypothesis,
+            "price_at_analysis": ac.price_at_analysis,
+            "return_1m": ac.return_1m,
+            "return_3m": ac.return_3m,
+            "contradiction_note": ac.contradiction_note,
             "market": infer_market(ac.company.ticker),
             "past_mentions": mentions_before(mentions_index, ac.company_id, alert.created_at),
         } for ac in alert.companies],
@@ -173,6 +178,12 @@ def _persist_alert(
         matched_rule_ids = [ref for ref in evidence_refs if get_rule(ref) is not None]
         health = get_calibration_health(session, category=category, company_id=entry["company_id"])
 
+        company_obj = session.get(Company, entry["company_id"])
+        snapshot = get_or_fetch_financial_snapshot(session, company_obj.ticker) if company_obj else None
+        contradiction_note = detect_price_contradiction(
+            entry["direction"], snapshot["return_1m"] if snapshot else None,
+        )
+
         result = compute_confidence(
             calibration_sample_count=health["sample_count"],
             calibration_hit_rate=health["hit_rate"],
@@ -180,9 +191,7 @@ def _persist_alert(
             evidence_ref_count=len(evidence_refs),
             rule_matched=bool(matched_rule_ids),
             source_credibility=source_credibility(article.source),
-            # No contradiction-detection stage exists yet -- always True
-            # until one is built (see the design doc's deferred-work list).
-            reasoning_consistent=True,
+            reasoning_consistent=contradiction_note is None,
             article_age_hours=article_age_hours,
         )
 
@@ -208,6 +217,10 @@ def _persist_alert(
             confidence_contributors_json=json.dumps(result.contributors),
             confidence_penalties_json=json.dumps(result.penalties),
             rulebook_ids_json=json.dumps(matched_rule_ids),
+            price_at_analysis=snapshot["price"] if snapshot else None,
+            return_1m=snapshot["return_1m"] if snapshot else None,
+            return_3m=snapshot["return_3m"] if snapshot else None,
+            contradiction_note=contradiction_note,
         ))
 
     if article.image_url is None:

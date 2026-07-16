@@ -446,3 +446,73 @@ def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, mon
 
     acs = db_session.query(AlertCompany).order_by(AlertCompany.id).all()
     assert pipeline_module._decode_json_list(acs[0].reasons_json) == pipeline_module._decode_json_list(acs[1].reasons_json)
+
+
+def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/financial-context",
+        title="Oil prices spike", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy", event_type="crude_oil",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            time_horizon="Short-Term", reasons=["Refining margins widen."], evidence_refs=[],
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(
+        pipeline_module, "get_or_fetch_financial_snapshot",
+        lambda session, ticker: {"price": 2500.0, "return_1m": -12.0, "return_3m": -20.0},
+    )
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    ac = db_session.query(AlertCompany).one()
+    assert ac.price_at_analysis == 2500.0
+    assert ac.return_1m == -12.0
+    assert ac.return_3m == -20.0
+    # Bullish call + -12% over a month (past the 5% threshold) -> a real contradiction.
+    assert ac.contradiction_note is not None
+    assert "bullish" in ac.contradiction_note.lower()
+    assert ac.confidence_band in {"LOW", "MODERATE", "HIGH", "VERY_HIGH"}
+
+
+def test_process_new_articles_no_contradiction_when_snapshot_unavailable(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    article = Article(
+        source="test", url="https://example.com/financial-context-none",
+        title="Oil prices spike", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="x",
+            time_horizon="Short-Term",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    ac = db_session.query(AlertCompany).one()
+    assert ac.price_at_analysis is None
+    assert ac.return_1m is None
+    assert ac.contradiction_note is None
