@@ -419,6 +419,64 @@ const CATALOG = {
     ml: 'പൂർണ്ണ വിവരങ്ങൾ കാണുക', te: 'పూర్తి వివరాలు చూడండి', ta: 'முழு விவரங்களைப் பார்க்கவும்',
     kn: 'ಪೂರ್ಣ ವಿವರಗಳನ್ನು ವೀಕ್ಷಿಸಿ', pa: 'ਪੂਰੀ ਜਾਣਕਾਰੀ ਵੇਖੋ', bn: 'সম্পূর্ণ বিবরণ দেখুন',
   },
+  // English shown for every language slot below -- these are new keys with
+  // no native-speaker review yet (see docs/superpowers/plans/2026-07-16-
+  // reasoning-panel-evidence-ui.md's "Deviations" section). translate()'s
+  // own fallback (entry?.[lang] ?? entry?.en ?? key) would produce the same
+  // visible result if these per-language keys were simply omitted; they're
+  // spelled out explicitly here so the catalog's shape stays consistent
+  // with every other entry. Replace with real translations once reviewed.
+  'reasoning.whyThisCall': {
+    en: 'Why this call', hi: 'Why this call', mr: 'Why this call', gu: 'Why this call',
+    ml: 'Why this call', te: 'Why this call', ta: 'Why this call', kn: 'Why this call',
+    pa: 'Why this call', bn: 'Why this call',
+  },
+  'reasoning.reasoningHeading': {
+    en: 'Reasoning', hi: 'Reasoning', mr: 'Reasoning', gu: 'Reasoning',
+    ml: 'Reasoning', te: 'Reasoning', ta: 'Reasoning', kn: 'Reasoning',
+    pa: 'Reasoning', bn: 'Reasoning',
+  },
+  'reasoning.evidenceHeading': {
+    en: 'Evidence', hi: 'Evidence', mr: 'Evidence', gu: 'Evidence',
+    ml: 'Evidence', te: 'Evidence', ta: 'Evidence', kn: 'Evidence',
+    pa: 'Evidence', bn: 'Evidence',
+  },
+  'reasoning.alternativeView': {
+    en: 'Alternative view', hi: 'Alternative view', mr: 'Alternative view', gu: 'Alternative view',
+    ml: 'Alternative view', te: 'Alternative view', ta: 'Alternative view', kn: 'Alternative view',
+    pa: 'Alternative view', bn: 'Alternative view',
+  },
+  'reasoning.risksAndUnknowns': {
+    en: 'Risks & unknowns', hi: 'Risks & unknowns', mr: 'Risks & unknowns', gu: 'Risks & unknowns',
+    ml: 'Risks & unknowns', te: 'Risks & unknowns', ta: 'Risks & unknowns', kn: 'Risks & unknowns',
+    pa: 'Risks & unknowns', bn: 'Risks & unknowns',
+  },
+  'reasoning.confidenceBreakdown': {
+    en: 'Confidence breakdown', hi: 'Confidence breakdown', mr: 'Confidence breakdown', gu: 'Confidence breakdown',
+    ml: 'Confidence breakdown', te: 'Confidence breakdown', ta: 'Confidence breakdown', kn: 'Confidence breakdown',
+    pa: 'Confidence breakdown', bn: 'Confidence breakdown',
+  },
+  'reasoning.eventType': {
+    en: 'Event: {type}', hi: 'Event: {type}', mr: 'Event: {type}', gu: 'Event: {type}',
+    ml: 'Event: {type}', te: 'Event: {type}', ta: 'Event: {type}', kn: 'Event: {type}',
+    pa: 'Event: {type}', bn: 'Event: {type}',
+  },
+  'reasoning.confidenceLow': {
+    en: 'Low', hi: 'Low', mr: 'Low', gu: 'Low', ml: 'Low', te: 'Low', ta: 'Low', kn: 'Low',
+    pa: 'Low', bn: 'Low',
+  },
+  'reasoning.confidenceModerate': {
+    en: 'Moderate', hi: 'Moderate', mr: 'Moderate', gu: 'Moderate', ml: 'Moderate', te: 'Moderate',
+    ta: 'Moderate', kn: 'Moderate', pa: 'Moderate', bn: 'Moderate',
+  },
+  'reasoning.confidenceHigh': {
+    en: 'High', hi: 'High', mr: 'High', gu: 'High', ml: 'High', te: 'High', ta: 'High', kn: 'High',
+    pa: 'High', bn: 'High',
+  },
+  'reasoning.confidenceVeryHigh': {
+    en: 'Very High', hi: 'Very High', mr: 'Very High', gu: 'Very High', ml: 'Very High', te: 'Very High',
+    ta: 'Very High', kn: 'Very High', pa: 'Very High', bn: 'Very High',
+  },
   'common.close': {
     en: 'Close', hi: 'बंद करें', mr: 'बंद करा', gu: 'બંધ કરો', ml: 'അടയ്ക്കുക', te: 'మూసివేయండి', ta: 'மூடு', kn: 'ಮುಚ್ಚಿ',
     pa: 'ਬੰਦ ਕਰੋ', bn: 'বন্ধ করুন',
