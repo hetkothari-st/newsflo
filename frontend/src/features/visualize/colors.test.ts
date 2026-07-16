@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confidenceColor, sectorColor } from './colors';
+import { confidenceColor, confidenceBandColor, sectorColor } from './colors';
 
 describe('sectorColor', () => {
   it('assigns a fixed color to each known sector, not a hash', () => {
@@ -41,5 +41,27 @@ describe('confidenceColor', () => {
       expect(idx).toBeGreaterThanOrEqual(lastIndex);
       lastIndex = idx;
     }
+  });
+});
+
+describe('confidenceBandColor', () => {
+  it('returns a hex color string for every known band', () => {
+    for (const band of ['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH']) {
+      expect(confidenceBandColor(band)).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    }
+  });
+
+  it('is monotonic: LOW < MODERATE < HIGH < VERY_HIGH on the same ramp', () => {
+    const RAMP_ORDER = ['#6F9EE4', '#5C8ACE', '#4976B9', '#3763A4', '#25508F'];
+    const indices = ['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH'].map((band) =>
+      RAMP_ORDER.indexOf(confidenceBandColor(band)),
+    );
+    for (let i = 1; i < indices.length; i++) {
+      expect(indices[i]).toBeGreaterThan(indices[i - 1]);
+    }
+  });
+
+  it('falls back to the MODERATE color for an unrecognized band string', () => {
+    expect(confidenceBandColor('not_a_real_band')).toBe(confidenceBandColor('MODERATE'));
   });
 });

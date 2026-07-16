@@ -37,6 +37,20 @@ export interface AlertCompany {
   market: 'IN' | 'GLOBAL';
   in_my_holdings: boolean;
   past_mentions: PastMention[]; // this company's prior alerts, most recent first
+  // Reasoning-engine fields (see docs/superpowers/specs/2026-07-15-
+  // reasoning-engine-upgrade-design.md). Optional because ~27 existing test
+  // fixtures construct AlertCompany literals without them -- a legacy alert
+  // (persisted before this feature shipped) also genuinely has none of
+  // these, degrading to undefined/null exactly like a pre-feature alert.
+  confidence_band?: string | null; // LOW | MODERATE | HIGH | VERY_HIGH | null
+  reasons?: string[];
+  evidence_refs?: string[];
+  risks?: string[];
+  assumptions?: string[];
+  unknowns?: string[];
+  alternative_hypothesis?: string | null;
+  confidence_contributors?: string[];
+  confidence_penalties?: string[];
 }
 
 export interface Alert {
@@ -49,6 +63,9 @@ export interface Alert {
   created_at: string;
   article: AlertArticle;
   companies: AlertCompany[];
+  // Optional: legacy alerts (persisted before this feature shipped) have
+  // no event_type.
+  event_type?: string | null;
 }
 
 // The WebSocket live-push payload is one alert entry MINUS the per-viewer
