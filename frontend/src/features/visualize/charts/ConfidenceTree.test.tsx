@@ -86,4 +86,10 @@ describe('ConfidenceTree', () => {
     expect(screen.queryByText('Very High')).not.toBeInTheDocument();
     expect(screen.queryByText('Low')).not.toBeInTheDocument();
   });
+
+  it('renders wrapped in ChartCardShell with number 5 and title Confidence Tree', () => {
+    render(<ConfidenceTree companies={[company({})]} />);
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('Confidence Tree')).toBeInTheDocument();
+  });
 });
