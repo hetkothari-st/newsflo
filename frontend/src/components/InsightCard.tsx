@@ -5,6 +5,7 @@ import { getCompanyPrices } from '../lib/api';
 import { useLanguage } from '../lib/language';
 import { eventTypeLabel } from '../lib/ruleLabels';
 import { formatRelativeTime } from '../lib/relativeTime';
+import { sectorLabel } from '../features/visualize/transforms';
 import CompanyLogo from './CompanyLogo';
 import InsightSparkline from './InsightSparkline';
 import InsightGauges from './InsightGauges';
@@ -72,7 +73,7 @@ export default function InsightCard({
         <span>
           {eventType ? eventTypeLabel(eventType) : ''}
           {eventType && company.sector ? ' · ' : ''}
-          {company.sector ?? ''}
+          {company.sector ? sectorLabel(company.sector) : ''}
         </span>
         <span>{formatRelativeTime(alertCreatedAt, new Date(), language)}</span>
       </div>
