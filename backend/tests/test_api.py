@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 
 from app.main import app
-from app.models import Alert, AlertCompany, Article, Company
+from app.models import Alert, AlertCompany, Article, Company, utcnow
 from app.routers.alerts import ALERTS_LIMIT
 from app.routers.articles import get_db
 
@@ -58,6 +58,59 @@ def test_list_alerts_returns_nested_companies(db_session):
     app.dependency_overrides.clear()
 
 
+def test_list_alerts_excludes_alerts_from_previous_days(db_session):
+    # The feed shows only today's (IST) news -- older news moved to the
+    # calendar (GET /api/calendar/day) once that feature shipped, so the
+    # main list must no longer mix in alerts from prior days.
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    yesterday_article = Article(source="test", url="https://example.com/yesterday", title="Yesterday headline", status="ANALYZED")
+    db_session.add(yesterday_article)
+    db_session.commit()
+    db_session.add(Alert(article_id=yesterday_article.id, category="oil_energy", created_at=utcnow() - timedelta(days=1)))
+    db_session.commit()
+
+    today_article = Article(source="test", url="https://example.com/today", title="Today headline", status="ANALYZED")
+    db_session.add(today_article)
+    db_session.commit()
+    db_session.add(Alert(article_id=today_article.id, category="oil_energy", created_at=utcnow()))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    titles = {a["article"]["title"] for a in response.json()}
+    assert titles == {"Today headline"}
+
+    app.dependency_overrides.clear()
+
+
+def test_get_alert_by_id_still_works_for_an_alert_from_a_previous_day(db_session):
+    # The per-alert detail endpoint is NOT date-restricted -- the calendar's
+    # day view links into an old alert's full detail/charts by id, which
+    # must keep working even though that alert no longer appears in the
+    # (today-only) list endpoint.
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/old-detail", title="Old headline", status="ANALYZED")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy", created_at=utcnow() - timedelta(days=3))
+    db_session.add(alert)
+    db_session.commit()
+
+    list_response = client.get("/api/alerts")
+    assert list_response.json() == []
+
+    detail_response = client.get(f"/api/alerts/{alert.id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["article"]["title"] == "Old headline"
+
+    app.dependency_overrides.clear()
+
+
 def test_list_alerts_includes_past_mentions_for_the_same_company(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)
@@ -69,7 +122,7 @@ def test_list_alerts_includes_past_mentions_for_the_same_company(db_session):
     older_article = Article(source="test", url="https://example.com/older", title="Older Reliance story", status="ANALYZED")
     db_session.add(older_article)
     db_session.commit()
-    older_alert = Alert(article_id=older_article.id, category="corporate_event", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    older_alert = Alert(article_id=older_article.id, category="corporate_event", created_at=utcnow() - timedelta(days=1))
     db_session.add(older_alert)
     db_session.commit()
     db_session.add(AlertCompany(
@@ -81,7 +134,7 @@ def test_list_alerts_includes_past_mentions_for_the_same_company(db_session):
     newer_article = Article(source="test", url="https://example.com/newer", title="Newer Reliance story", status="ANALYZED")
     db_session.add(newer_article)
     db_session.commit()
-    newer_alert = Alert(article_id=newer_article.id, category="oil_energy", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc))
+    newer_alert = Alert(article_id=newer_article.id, category="oil_energy", created_at=utcnow())
     db_session.add(newer_alert)
     db_session.commit()
     db_session.add(AlertCompany(
@@ -94,13 +147,14 @@ def test_list_alerts_includes_past_mentions_for_the_same_company(db_session):
 
     assert response.status_code == 200
     body = {a["article"]["title"]: a for a in response.json()}
-    # The newer alert's company sees the older one as history.
+    # The list now only shows today's alert -- the older (yesterday's) one
+    # is excluded from the list itself, but still surfaces as history via
+    # past_mentions, which isn't date-windowed.
+    assert list(body.keys()) == ["Newer Reliance story"]
     newer_mentions = body["Newer Reliance story"]["companies"][0]["past_mentions"]
     assert len(newer_mentions) == 1
     assert newer_mentions[0]["article_title"] == "Older Reliance story"
     assert newer_mentions[0]["direction"] == "bearish"
-    # The older alert has no history of its own.
-    assert body["Older Reliance story"]["companies"][0]["past_mentions"] == []
 
     app.dependency_overrides.clear()
 
@@ -257,9 +311,12 @@ def _seed_alert_with_company(db_session, index: int) -> None:
     )
     db_session.add_all([company, article])
     db_session.commit()
+    # Relative to now (not a fixed past date) -- the feed now only lists
+    # today's (IST) alerts, so a fixed historical anchor would make every
+    # seeded alert here invisible to GET /api/alerts.
     alert = Alert(
         article_id=article.id, category="oil_energy",
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=index),
+        created_at=utcnow() + timedelta(minutes=index),
     )
     db_session.add(alert)
     db_session.commit()

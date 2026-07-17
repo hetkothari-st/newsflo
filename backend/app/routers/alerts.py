@@ -8,6 +8,7 @@ from app.companies.branding import logo_url
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.i18n import get_lang
+from app.ist_time import day_utc_window, today_ist
 from app.models import Alert, AlertCompany, Holding, User
 from app.pipeline import _decode_json_list, decode_key_points
 from app.routers.articles import get_db
@@ -112,6 +113,13 @@ def list_alerts(
 ):
     held_company_ids = _held_company_ids(db, current_user)
 
+    # The feed shows only today's (IST) news now that the calendar exists as
+    # the dedicated way to browse prior days -- older alerts are still
+    # reachable there (GET /api/calendar/day) and individually via
+    # GET /api/alerts/{id} (e.g. a calendar day's "Charts"/full-detail link),
+    # just no longer mixed into this list.
+    start_utc, end_utc = day_utc_window(today_ist())
+
     # selectinload replaces what used to be one lazy-load query per alert for
     # .article, one per alert for .companies, and one per AlertCompany for
     # .company -- each collapses into a single batched IN-query regardless
@@ -122,6 +130,7 @@ def list_alerts(
             selectinload(Alert.article),
             selectinload(Alert.companies).selectinload(AlertCompany.company),
         )
+        .filter(Alert.created_at >= start_utc, Alert.created_at < end_utc)
         .order_by(Alert.created_at.desc())
         .limit(ALERTS_LIMIT)
         .all()
