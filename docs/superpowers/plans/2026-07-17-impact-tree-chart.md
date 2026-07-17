@@ -549,3 +549,119 @@ git commit -m "fix: address manual verification findings in impact tree chart"
 ```
 
 (Skip this step entirely if nothing needed fixing.)
+
+---
+
+### Task 5: Per-group "why" explanation (added post-manual-verification, per user request)
+
+User asked for an explanation of *why* each affected sector / sub-sector is
+impacted, not just the list of companies. There is no sector-level rationale
+field in the schema — only per-company `rationale`. This task shows the
+highest-confidence company's real `rationale` in each sector/sub-sector
+group as that group's explanation (real data, not fabricated) — the
+existing `rankByConfidence` transform already ranks a company list by
+`confidence_score` descending.
+
+**Files:**
+- Modify: `frontend/src/features/visualize/charts/ImpactTree.tsx`
+- Modify: `frontend/src/features/visualize/charts/ImpactTree.test.tsx`
+
+**Interfaces:**
+- Consumes: `rankByConfidence` (already exported from `../transforms`, used elsewhere in the app e.g. `SectorTree`-adjacent code).
+- Produces: no new exports — `SectorBlock`/`SubSectorBlock` render an extra "Why" line each.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `frontend/src/features/visualize/charts/ImpactTree.test.tsx` (inside the existing `describe('ImpactTree', ...)` block):
+
+```tsx
+  it('shows the highest-confidence company\'s rationale as the sector\'s explanation', () => {
+    render(
+      <ImpactTree
+        companies={[
+          company({ company_id: 1, impact_level: 'direct', sector: 'banking', confidence_score: 40, rationale: 'Lower rationale.' }),
+          company({ company_id: 2, impact_level: 'direct', sector: 'banking', confidence_score: 90, rationale: 'Rate cut directly compresses net interest margins.' }),
+        ]}
+        article={article}
+        alertCreatedAt="2026-07-17T10:30:00Z"
+      />,
+    );
+    expect(screen.getByText('Rate cut directly compresses net interest margins.')).toBeInTheDocument();
+    expect(screen.queryByText('Lower rationale.')).not.toBeInTheDocument();
+  });
+
+  it('shows the highest-confidence company\'s rationale as the sub-sector\'s explanation', () => {
+    render(
+      <ImpactTree
+        companies={[
+          company({
+            company_id: 1,
+            impact_level: 'indirect_l1',
+            sub_sector: 'nbfc',
+            confidence_score: 70,
+            rationale: 'NBFCs face higher funding costs as rates rise.',
+          }),
+        ]}
+        article={article}
+        alertCreatedAt="2026-07-17T10:30:00Z"
+      />,
+    );
+    expect(screen.getByText('NBFCs face higher funding costs as rates rise.')).toBeInTheDocument();
+  });
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd frontend && npx vitest run src/features/visualize/charts/ImpactTree.test.tsx`
+Expected: FAIL — the new rationale text is not rendered anywhere yet.
+
+- [ ] **Step 3: Implement the "why" line**
+
+In `frontend/src/features/visualize/charts/ImpactTree.tsx`:
+
+1. Update the transforms import to add `rankByConfidence`:
+
+```tsx
+import { groupBySector, groupIndirectBySubSector, rankByConfidence, type CompanyGroup, type SubSectorGroup } from '../transforms';
+```
+
+2. Add this helper near the top of the file, after the imports (mirrors `InsightCard.tsx`'s existing private `truncatedRationale` — same convention, kept local to this file since it's a 5-line pure function, not worth a cross-file extraction for one duplicate):
+
+```tsx
+function truncatedRationale(rationale: string): string {
+  const firstSentence = rationale.split(/(?<=[.!?])\s+/)[0];
+  if (firstSentence.length <= 160) return firstSentence;
+  return `${firstSentence.slice(0, 157)}…`;
+}
+
+function WhyExplanation({ companies }: { companies: AlertCompany[] }) {
+  const top = rankByConfidence(companies)[0];
+  return (
+    <div className="flex max-w-md flex-col items-center gap-1 px-2 text-center">
+      <span className="font-data text-[10px] uppercase tracking-widest text-muted">Why</span>
+      <p className="font-editorial text-sm text-ink">{truncatedRationale(top.rationale)}</p>
+    </div>
+  );
+}
+```
+
+3. In `SectorBlock`, add `<WhyExplanation companies={sector.companies} />` directly after the `<LevelHeader ... />` line and before `<Connector />`.
+
+4. In `SubSectorBlock`, add `<WhyExplanation companies={subSector.companies} />` directly after the `<LevelHeader ... />` line and before `<Connector />`.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd frontend && npx vitest run src/features/visualize/charts/ImpactTree.test.tsx`
+Expected: PASS (all 8 tests — the original 6 plus these 2).
+
+- [ ] **Step 5: Run the full frontend suite and typecheck**
+
+Run: `cd frontend && npx tsc --noEmit && npm test -- --run`
+Expected: no type errors, all tests pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/features/visualize/charts/ImpactTree.tsx frontend/src/features/visualize/charts/ImpactTree.test.tsx
+git commit -m "feat: show highest-confidence company's rationale as each sector/sub-sector's why-explanation"
+```
