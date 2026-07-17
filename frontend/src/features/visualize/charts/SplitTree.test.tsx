@@ -26,6 +26,12 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 }
 
 describe('SplitTree', () => {
+  it('renders wrapped in ChartCardShell with number 6 and title Positive / Negative Split', () => {
+    render(<SplitTree companies={[company({})]} />);
+    expect(screen.getByText('6')).toBeInTheDocument();
+    expect(screen.getByText('Positive / Negative Split')).toBeInTheDocument();
+  });
+
   it('shows a Positive Impact and a Negative Impact column with the right counts', () => {
     render(
       <SplitTree
@@ -36,8 +42,9 @@ describe('SplitTree', () => {
         ]}
       />,
     );
-    expect(screen.getByText('Positive Impact')).toBeInTheDocument();
-    expect(screen.getByText('Negative Impact')).toBeInTheDocument();
+    // "Positive Impact" and "Negative Impact" appear twice (column header + legend), so use getAllByText
+    expect(screen.getAllByText('Positive Impact')).toHaveLength(2);
+    expect(screen.getAllByText('Negative Impact')).toHaveLength(2);
     expect(screen.getByText('AAA')).toBeInTheDocument();
     expect(screen.getByText('BBB')).toBeInTheDocument();
     expect(screen.getByText('CCC')).toBeInTheDocument();
@@ -45,8 +52,10 @@ describe('SplitTree', () => {
 
   it('omits the Negative Impact column entirely when every company is bullish', () => {
     render(<SplitTree companies={[company({ company_id: 1, direction: 'bullish' })]} />);
-    expect(screen.getByText('Positive Impact')).toBeInTheDocument();
-    expect(screen.queryByText('Negative Impact')).not.toBeInTheDocument();
+    // Positive Impact appears in both column header and legend
+    expect(screen.getAllByText('Positive Impact')).toHaveLength(2);
+    // Negative Impact only appears in legend, not as a column header
+    expect(screen.getAllByText('Negative Impact')).toHaveLength(1);
   });
 
   it('ranks companies within each column by magnitude descending', () => {

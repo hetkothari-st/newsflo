@@ -1,6 +1,7 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { rankByMagnitude } from '../transforms';
+import ChartCardShell from './ChartCardShell';
 import CompanyRow from './cards/CompanyRow';
 import { useCompanySelection } from './useCompanySelection';
 
@@ -47,12 +48,22 @@ export default function SplitTree({
   if (bullish.length === 0 && bearish.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <SplitColumn title="Positive Impact" tone="bullish" companies={bullish} selectedId={selectedId} onSelect={toggle} />
-        <SplitColumn title="Negative Impact" tone="bearish" companies={bearish} selectedId={selectedId} onSelect={toggle} />
+    <ChartCardShell
+      number={6}
+      title="Positive / Negative Split"
+      description="Clear separation of positive and negative impact"
+      legend={[
+        { label: 'Positive Impact', color: '#34C759' },
+        { label: 'Negative Impact', color: '#FF453A' },
+      ]}
+    >
+      <div className="flex flex-col gap-3 p-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <SplitColumn title="Positive Impact" tone="bullish" companies={bullish} selectedId={selectedId} onSelect={toggle} />
+          <SplitColumn title="Negative Impact" tone="bearish" companies={bearish} selectedId={selectedId} onSelect={toggle} />
+        </div>
+        {selected && <ReasoningPanel company={selected} eventType={eventType} />}
       </div>
-      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
-    </div>
+    </ChartCardShell>
   );
 }
