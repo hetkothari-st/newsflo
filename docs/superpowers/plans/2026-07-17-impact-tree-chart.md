@@ -665,3 +665,81 @@ Expected: no type errors, all tests pass.
 git add frontend/src/features/visualize/charts/ImpactTree.tsx frontend/src/features/visualize/charts/ImpactTree.test.tsx
 git commit -m "feat: show highest-confidence company's rationale as each sector/sub-sector's why-explanation"
 ```
+
+---
+
+### Task 6: Reconcile StatBar counts with ImpactTree's always-full company list (post-final-review fix, user-approved)
+
+The final whole-branch review found: `ImpactTree` always renders the full
+`alert.companies` list (both direct and indirect sections), but `StatBar`
+above it still receives the Normal/Drilldown-breadth-filtered
+`visibleCompanies` — so in Normal mode, `StatBar`'s counts ("Affected
+Companies: 3", etc.) contradict what the tree directly below visibly
+renders (which always includes indirect companies too). User chose to fix
+this by feeding `StatBar` the full company list as well, so its numbers
+always match the tree. The Normal/Drilldown toggle UI stays as-is (still
+switches the "By Level" stat tile) — only its effect on `StatBar`'s company
+count changes.
+
+**Files:**
+- Modify: `frontend/src/pages/AlertChartsPage.tsx`
+
+**Interfaces:** none new — this only changes which value is passed into the
+already-existing `StatBar` component's `companies` prop.
+
+- [ ] **Step 1: Remove the now-unused `visibleCompanies` variable and pass `alert.companies` to StatBar**
+
+In `frontend/src/pages/AlertChartsPage.tsx`, find this block (currently
+around lines 196-201):
+
+```tsx
+  const visibleCompanies =
+    alert == null
+      ? []
+      : breadth === 'normal'
+        ? alert.companies.filter((c) => impactLevelKey(c) === 'direct')
+        : alert.companies;
+```
+
+Delete it entirely — `frontend/tsconfig.json` has `noUnusedLocals: true`, so
+leaving it assigned-but-unused would break the typecheck once it has no
+other reader.
+
+Then find:
+
+```tsx
+      <StatBar companies={visibleCompanies} breadth={breadth} />
+```
+
+Replace with:
+
+```tsx
+      <StatBar companies={alert.companies} breadth={breadth} />
+```
+
+- [ ] **Step 2: Typecheck**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: no errors (confirms `visibleCompanies`'s removal didn't leave a
+dangling reference, and that removing it doesn't trigger the
+`noUnusedLocals` check some other way).
+
+- [ ] **Step 3: Run the full frontend test suite**
+
+Run: `cd frontend && npm test -- --run`
+Expected: all tests pass. `AlertChartsPage.test.tsx` may have existing
+assertions about `StatBar`'s counts in Normal mode that assumed the
+direct-only filtered count — if any such test now fails because the count
+legitimately changed (Normal mode now shows the full company count, not
+just direct), update that assertion's expected number to match the new,
+correct behavior (full count), rather than reverting the fix. If you find
+such a test, note exactly which one and what you changed in your report.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add frontend/src/pages/AlertChartsPage.tsx
+git commit -m "fix: feed StatBar the full company list so its counts match ImpactTree"
+```
+
+(If Step 3 required a test-file update, add that file to this commit too.)
