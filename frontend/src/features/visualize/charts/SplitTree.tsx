@@ -1,8 +1,37 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { rankByMagnitude } from '../transforms';
-import { TreeRoot, TreeBranch, TreeLeaf } from './tree/Tree';
+import CompanyRow from './cards/CompanyRow';
 import { useCompanySelection } from './useCompanySelection';
+
+function SplitColumn({
+  title,
+  tone,
+  companies,
+  selectedId,
+  onSelect,
+}: {
+  title: string;
+  tone: 'bullish' | 'bearish';
+  companies: AlertCompany[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  if (companies.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-hairline p-3.5 theme-light:border-transparent theme-light:shadow-neu-sm">
+      <div className="flex items-center justify-between">
+        <p className={`text-xs uppercase tracking-widest ${tone === 'bullish' ? 'text-bullish' : 'text-bearish'}`}>{title}</p>
+        <span className="text-xs text-muted">{companies.length}</span>
+      </div>
+      <div className="flex flex-col gap-1">
+        {companies.map((c) => (
+          <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => onSelect(c.company_id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function SplitTree({
   companies,
@@ -11,7 +40,7 @@ export default function SplitTree({
   companies: AlertCompany[];
   eventType?: string | null;
 }) {
-  const { toggle, selected } = useCompanySelection(companies);
+  const { toggle, selected, selectedId } = useCompanySelection(companies);
   const bullish = rankByMagnitude(companies.filter((c) => c.direction === 'bullish'));
   const bearish = rankByMagnitude(companies.filter((c) => c.direction === 'bearish'));
 
@@ -19,27 +48,10 @@ export default function SplitTree({
 
   return (
     <div className="flex flex-col gap-3 p-4">
-      <p className="text-xs">
-        <span className="text-bullish">{bullish.length} Bullish</span>
-        <span className="text-muted"> · </span>
-        <span className="text-bearish">{bearish.length} Bearish</span>
-      </p>
-      <TreeRoot>
-        {bullish.length > 0 && (
-          <TreeBranch label="Bullish">
-            {bullish.map((c) => (
-              <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
-            ))}
-          </TreeBranch>
-        )}
-        {bearish.length > 0 && (
-          <TreeBranch label="Bearish">
-            {bearish.map((c) => (
-              <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
-            ))}
-          </TreeBranch>
-        )}
-      </TreeRoot>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <SplitColumn title="Positive Impact" tone="bullish" companies={bullish} selectedId={selectedId} onSelect={toggle} />
+        <SplitColumn title="Negative Impact" tone="bearish" companies={bearish} selectedId={selectedId} onSelect={toggle} />
+      </div>
       {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );

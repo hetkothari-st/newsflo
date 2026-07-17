@@ -26,7 +26,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 }
 
 describe('TimelineTree', () => {
-  it('renders one branch per horizon present, in fixed chronological order', () => {
+  it('renders one stage per horizon present, in fixed chronological order', () => {
     render(
       <TimelineTree
         companies={[
@@ -35,20 +35,13 @@ describe('TimelineTree', () => {
         ]}
       />,
     );
-    const branches = screen.getAllByRole('button', { expanded: true }).map((el) => el.textContent || '');
-    const immediateIdx = branches.findIndex((t) => t.includes('Immediate'));
-    const longIdx = branches.findIndex((t) => t.includes('Long-Term'));
+    const labels = screen.getAllByText(/Immediate|Long-Term/).map((el) => el.textContent || '');
+    const immediateIdx = labels.findIndex((t) => t.includes('Immediate'));
+    const longIdx = labels.findIndex((t) => t.includes('Long-Term'));
     expect(immediateIdx).toBeGreaterThanOrEqual(0);
     expect(longIdx).toBeGreaterThan(immediateIdx);
     expect(screen.getByText('LONG')).toBeInTheDocument();
     expect(screen.getByText('NOW')).toBeInTheDocument();
-  });
-
-  it('collapses a horizon branch on tap, hiding its companies', async () => {
-    render(<TimelineTree companies={[company({ company_id: 1, time_horizon: 'Immediate' })]} />);
-    expect(screen.getByText('AAA')).toBeInTheDocument();
-    await userEvent.click(screen.getByText('Immediate'));
-    expect(screen.queryByText('AAA')).not.toBeInTheDocument();
   });
 
   it('expands a ReasoningPanel when a company is tapped', async () => {

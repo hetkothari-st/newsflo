@@ -238,3 +238,50 @@ describe('ReasoningPanel evidence section', () => {
     expect(screen.queryAllByText('Historical')).toHaveLength(1); // only the one above
   });
 });
+
+describe('ReasoningPanel Facts section', () => {
+  it('omits the Facts section for a legacy alert with no price data', () => {
+    render(<ReasoningPanel company={base} />);
+    expect(screen.queryByText('Facts')).not.toBeInTheDocument();
+  });
+
+  it('shows price and returns for an Indian company using the rupee symbol', () => {
+    const withFacts: AlertCompany = {
+      ...base, market: 'IN',
+      price_at_analysis: 2500.5, return_1m: 8.3, return_3m: -2.1,
+    };
+    render(<ReasoningPanel company={withFacts} />);
+    expect(screen.getByText('Facts')).toBeInTheDocument();
+    expect(screen.getByText('₹2500.50')).toBeInTheDocument();
+    expect(screen.getByText(/1M return: \+8\.3%/)).toBeInTheDocument();
+    expect(screen.getByText(/3M return: -2\.1%/)).toBeInTheDocument();
+  });
+
+  it('uses the dollar symbol for a global company', () => {
+    const withFacts: AlertCompany = { ...base, market: 'GLOBAL', price_at_analysis: 150.25 };
+    render(<ReasoningPanel company={withFacts} />);
+    expect(screen.getByText('$150.25')).toBeInTheDocument();
+  });
+
+  it('omits an individual return line when that return is null', () => {
+    const withFacts: AlertCompany = { ...base, price_at_analysis: 100.0, return_1m: null, return_3m: 4.0 };
+    render(<ReasoningPanel company={withFacts} />);
+    expect(screen.queryByText(/1M return/)).not.toBeInTheDocument();
+    expect(screen.getByText(/3M return: \+4\.0%/)).toBeInTheDocument();
+  });
+
+  it('shows a prominent contradiction warning when present', () => {
+    const withContradiction: AlertCompany = {
+      ...base, price_at_analysis: 2500.0, return_1m: -12.0,
+      contradiction_note: 'Price down 12.0% over the past month despite bullish call.',
+    };
+    render(<ReasoningPanel company={withContradiction} />);
+    expect(screen.getByText('Price down 12.0% over the past month despite bullish call.')).toBeInTheDocument();
+  });
+
+  it('omits the contradiction line when contradiction_note is absent', () => {
+    const withFacts: AlertCompany = { ...base, price_at_analysis: 2500.0, return_1m: 3.0 };
+    render(<ReasoningPanel company={withFacts} />);
+    expect(screen.queryByText(/despite/)).not.toBeInTheDocument();
+  });
+});

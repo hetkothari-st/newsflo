@@ -30,6 +30,10 @@ export interface AlertCompany {
   // for sector === 'other'). Render null as an "Unclassified" bucket, never
   // filter it out silently.
   sub_sector?: string | null;
+  // Real company logo from Brandfetch (see backend app.companies.branding),
+  // null when no BRANDFETCH_CLIENT_ID is configured or Brandfetch has no
+  // match for this company -- CompanyLogo degrades to a monogram either way.
+  logo_url?: string | null;
   direction: string; // bullish | bearish
   magnitude_low: number;
   magnitude_high: number;
@@ -56,6 +60,20 @@ export interface AlertCompany {
   alternative_hypothesis?: string | null;
   confidence_contributors?: string[];
   confidence_penalties?: string[];
+  // Financial grounding + contradiction detection (see docs/superpowers/
+  // specs/2026-07-16-financial-grounding-contradiction-detection-design.md).
+  // Optional/nullable for the same reason as the reasoning-engine fields
+  // above: legacy alerts and existing test fixtures don't have these.
+  price_at_analysis?: number | null;
+  return_1m?: number | null;
+  return_3m?: number | null;
+  contradiction_note?: string | null;
+  // How far removed this company's impact is from the article's direct
+  // subject: 'direct' | 'indirect_l1' | 'indirect_l2'. Defaults to 'direct'
+  // for legacy alerts predating this field. See parent_company_id for the
+  // company an indirect entry is economically linked through.
+  impact_level?: string;
+  parent_company_id?: number | null;
 }
 
 export interface Alert {

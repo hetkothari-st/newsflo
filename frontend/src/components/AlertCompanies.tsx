@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Alert, AlertCompany } from '../lib/api';
 import type { TranslationKey } from '../lib/i18n';
 import { useLanguage } from '../lib/language';
-import CompanyChip from './CompanyChip';
+import InsightCard from './InsightCard';
 import SentimentBar from '../features/visualize/SentimentBar';
 import {
   groupByTier,
@@ -129,13 +129,18 @@ export default function AlertCompanies({
               )}
               {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
             </p>
-            <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
+            <div className="flex flex-col">
               {group.companies.map((company) => (
                 <div
                   key={company.company_id}
                   className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
                 >
-                  <CompanyChip company={company} eventType={alert.event_type} />
+                  <InsightCard
+                    company={company}
+                    eventType={alert.event_type}
+                    alertCreatedAt={alert.created_at}
+                    alertId={alert.id}
+                  />
                 </div>
               ))}
             </div>

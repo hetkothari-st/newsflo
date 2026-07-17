@@ -446,3 +446,165 @@ def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, mon
 
     acs = db_session.query(AlertCompany).order_by(AlertCompany.id).all()
     assert pipeline_module._decode_json_list(acs[0].reasons_json) == pipeline_module._decode_json_list(acs[1].reasons_json)
+
+
+def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/financial-context",
+        title="Oil prices spike", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy", event_type="crude_oil",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            time_horizon="Short-Term", reasons=["Refining margins widen."], evidence_refs=[],
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(
+        pipeline_module, "get_or_fetch_financial_snapshot",
+        lambda session, ticker: {"price": 2500.0, "return_1m": -12.0, "return_3m": -20.0},
+    )
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    ac = db_session.query(AlertCompany).one()
+    assert ac.price_at_analysis == 2500.0
+    assert ac.return_1m == -12.0
+    assert ac.return_3m == -20.0
+    # Bullish call + -12% over a month (past the 5% threshold) -> a real contradiction.
+    assert ac.contradiction_note is not None
+    assert "bullish" in ac.contradiction_note.lower()
+    assert ac.confidence_band in {"LOW", "MODERATE", "HIGH", "VERY_HIGH"}
+
+
+def test_process_new_articles_no_contradiction_when_snapshot_unavailable(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    article = Article(
+        source="test", url="https://example.com/financial-context-none",
+        title="Oil prices spike", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_energy",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="x",
+            time_horizon="Short-Term",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    ac = db_session.query(AlertCompany).one()
+    assert ac.price_at_analysis is None
+    assert ac.return_1m is None
+    assert ac.contradiction_note is None
+
+
+def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confidence(db_session, monkeypatch):
+    direct = Company(ticker="NVDA.NS", name="Nvidia", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    supplier = Company(ticker="TSM.NS", name="TSMC", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add_all([direct, supplier])
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/indirect-impact",
+        title="Chip export ban", content="US restricts advanced chip exports",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="tech", event_type="other",
+        companies=[
+            CompanyMention(
+                name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
+                direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban hits Nvidia directly",
+                time_horizon="Short-Term", impact_level="direct",
+            ),
+            CompanyMention(
+                name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
+                direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
+                rationale="TSMC fabs Nvidia's chips; lower Nvidia orders reduce TSMC's foundry revenue.",
+                time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+            ),
+        ],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
+
+    created = process_new_articles(db_session, claude_client=object())
+    assert created == 1
+
+    direct_ac = db_session.query(AlertCompany).filter_by(company_id=direct.id).one()
+    indirect_ac = db_session.query(AlertCompany).filter_by(company_id=supplier.id).one()
+
+    assert direct_ac.impact_level == "direct"
+    assert direct_ac.parent_company_id is None
+    assert indirect_ac.impact_level == "indirect_l1"
+    assert indirect_ac.parent_company_id == direct.id
+    # Same underlying evidence/calibration signal, but the indirect entry's
+    # confidence must be strictly discounted relative to the direct one.
+    assert indirect_ac.confidence_score < direct_ac.confidence_score
+
+
+def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_session, monkeypatch):
+    direct = Company(ticker="NVDA.NS", name="Nvidia", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    supplier = Company(ticker="TSM.NS", name="TSMC", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add_all([direct, supplier])
+    db_session.commit()
+
+    older_article = Article(source="test", url="https://example.com/indirect-a", title="Chip export ban announced")
+    db_session.add(older_article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="tech",
+        companies=[
+            CompanyMention(
+                name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
+                direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
+                time_horizon="Short-Term", impact_level="direct",
+            ),
+            CompanyMention(
+                name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
+                direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
+                time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+            ),
+        ],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
+    assert process_new_articles(db_session, claude_client=object()) == 1
+
+    # Same normalized title -> dedup-reuse path, no second analyze_article call.
+    newer_article = Article(source="test", url="https://example.com/indirect-b", title="Chip export ban announced")
+    db_session.add(newer_article)
+    db_session.commit()
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: (_ for _ in ()).throw(AssertionError("should not be called")))
+    assert process_new_articles(db_session, claude_client=object()) == 1
+
+    reused_indirect = (
+        db_session.query(AlertCompany)
+        .filter_by(company_id=supplier.id, alert_id=newer_article.alerts[0].id)
+        .one()
+    )
+    assert reused_indirect.impact_level == "indirect_l1"
+    assert reused_indirect.parent_company_id == direct.id

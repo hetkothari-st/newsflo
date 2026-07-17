@@ -6,6 +6,7 @@ import NavBar from './components/NavBar';
 import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
 import AlertChartsPage from './pages/AlertChartsPage';
+import AlertCompanyAnalysisPage from './pages/AlertCompanyAnalysisPage';
 import CompanyPage from './pages/CompanyPage';
 import FeedPage from './pages/FeedPage';
 import HoldingsPage from './pages/HoldingsPage';
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/" element={<FeedPage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
         <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
+        <Route path="/alerts/:id/company/:companyId" element={<AlertCompanyAnalysisPage />} />
         <Route
           path="/holdings"
           element={

@@ -1,18 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getAlert, type Alert } from '../lib/api';
+import { getAlert, type Alert, type AlertCompany } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import { useHorizontalSwipe } from '../lib/useHorizontalSwipe';
+import { computeNetSignal } from '../features/visualize/transforms';
+import { impactLevelKey } from '../features/visualize/impactLevels';
 import SectorTree from '../features/visualize/charts/SectorTree';
 import TierRows from '../features/visualize/charts/TierRows';
 import ImpactBar from '../features/visualize/charts/ImpactBar';
 import SplitTree from '../features/visualize/charts/SplitTree';
 import ConfidenceTree from '../features/visualize/charts/ConfidenceTree';
 import TimelineTree from '../features/visualize/charts/TimelineTree';
+import LevelTree from '../features/visualize/charts/LevelTree';
 
 const CHARTS = [
   { key: 'sector', label: 'Sector', Component: SectorTree },
+  { key: 'levels', label: 'Levels', Component: LevelTree },
   { key: 'tier', label: 'Tier', Component: TierRows },
   { key: 'impact', label: 'Impact', Component: ImpactBar },
   { key: 'split', label: 'Split', Component: SplitTree },
@@ -20,7 +24,55 @@ const CHARTS = [
   { key: 'timeline', label: 'Timeline', Component: TimelineTree },
 ] as const;
 
+// Normal = the article's own direct impact only (both actually-direct
+// mentions and sector-inference fan-out -- see impact_level in
+// app.analysis.schemas.IMPACT_LEVELS). Drilldown adds every company the
+// model knows is economically linked through a supplier/customer/
+// competitor chain (indirect_l1/indirect_l2), regardless of how deep.
 type Breadth = 'normal' | 'drilldown';
+
+function StatTile({ label, value, valueClass, caption }: { label: string; value: string; valueClass?: string; caption?: string }) {
+  return (
+    <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-hairline p-3 theme-light:border-transparent theme-light:shadow-neu-sm">
+      <p className="text-[11px] uppercase tracking-widest text-muted">{label}</p>
+      <p className={`text-lg font-medium ${valueClass ?? 'text-ink'}`}>{value}</p>
+      {caption && <p className="text-[11px] text-muted">{caption}</p>}
+    </div>
+  );
+}
+
+function StatBar({ companies, breadth }: { companies: AlertCompany[]; breadth: Breadth }) {
+  const signal = computeNetSignal(companies);
+  const sectorCount = new Set(companies.map((c) => c.sector).filter(Boolean)).size;
+  const subSectorCount = new Set(companies.map((c) => c.sub_sector).filter(Boolean)).size;
+  const levelCounts = { direct: 0, indirect_l1: 0, indirect_l2: 0 } as Record<string, number>;
+  for (const c of companies) levelCounts[impactLevelKey(c)] += 1;
+
+  const overallLabel = signal.direction === 'even' ? 'Mixed' : signal.direction === 'bullish' ? 'Bullish' : 'Bearish';
+  const overallGlyph = signal.direction === 'even' ? '▬' : signal.direction === 'bullish' ? '▲' : '▼';
+  const overallClass = signal.direction === 'even' ? 'text-muted' : signal.direction === 'bullish' ? 'text-bullish' : 'text-bearish';
+
+  return (
+    <div className="flex flex-wrap gap-2.5 border-b border-hairline p-4">
+      <StatTile
+        label="Overall Impact"
+        value={`${overallGlyph} ${overallLabel}`}
+        valueClass={overallClass}
+        caption={`${signal.avgConfidence}% confidence`}
+      />
+      <StatTile label="Affected Sectors" value={String(sectorCount)} />
+      <StatTile label="Affected Categories" value={String(subSectorCount)} caption={subSectorCount === 0 ? 'Unclassified' : undefined} />
+      <StatTile label="Affected Companies" value={String(companies.length)} />
+      {breadth === 'drilldown' && (
+        <StatTile
+          label="By Level"
+          value={`${levelCounts.direct} / ${levelCounts.indirect_l1} / ${levelCounts.indirect_l2}`}
+          caption="Direct / Indirect L1 / Indirect L2"
+        />
+      )}
+    </div>
+  );
+}
 
 export default function AlertChartsPage() {
   const { id } = useParams<{ id: string }>();
@@ -61,7 +113,7 @@ export default function AlertChartsPage() {
 
   const { Component } = CHARTS[index];
   const visibleCompanies =
-    breadth === 'normal' ? alert.companies.filter((c) => c.basis === 'direct_mention') : alert.companies;
+    breadth === 'normal' ? alert.companies.filter((c) => impactLevelKey(c) === 'direct') : alert.companies;
 
   return (
     <div className="flex min-h-screen flex-col bg-page" {...swipeHandlers}>
@@ -85,7 +137,8 @@ export default function AlertChartsPage() {
           ))}
         </div>
       </div>
-      <div className="flex gap-4 border-b border-hairline px-4 py-2">
+      <StatBar companies={visibleCompanies} breadth={breadth} />
+      <div className="flex gap-4 overflow-x-auto border-b border-hairline px-4 py-2">
         {CHARTS.map((chart, i) => (
           <button
             key={chart.key}

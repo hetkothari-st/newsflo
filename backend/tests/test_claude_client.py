@@ -450,3 +450,67 @@ def test_analysis_instructions_contains_rulebook_and_playbook_content():
     from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
     assert "RULE_CRUDE_OIL_UP" in ANALYSIS_INSTRUCTIONS
     assert "ARPU" in ANALYSIS_INSTRUCTIONS
+
+
+def test_record_analysis_tool_requires_impact_level_and_parent_ticker():
+    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
+    from app.analysis.schemas import IMPACT_LEVELS
+    company_props = RECORD_ANALYSIS_TOOL["function"]["parameters"]["properties"]["companies"]["items"]
+    assert "impact_level" in company_props["required"]
+    assert "parent_ticker" in company_props["required"]
+    assert company_props["properties"]["impact_level"]["enum"] == IMPACT_LEVELS
+
+
+def test_analysis_instructions_covers_indirect_impact_rules():
+    from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
+    assert "indirect_l1" in ANALYSIS_INSTRUCTIONS
+    assert "indirect_l2" in ANALYSIS_INSTRUCTIONS
+    assert "parent_ticker" in ANALYSIS_INSTRUCTIONS
+
+
+def test_analyze_article_parses_indirect_impact_chain():
+    fake_output = {
+        "category": "tech", "event_type": "other",
+        "companies": [
+            {
+                "name": "Nvidia", "ticker": "NVDA.NS", "is_direct": True, "sector": None,
+                "direction": "bearish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+                "rationale": "export ban hits Nvidia directly", "time_horizon": "Short-Term",
+                "impact_level": "direct", "parent_ticker": None,
+            },
+            {
+                "name": "TSMC", "ticker": "TSM.NS", "is_direct": True, "sector": None,
+                "direction": "bearish", "magnitude_low": 1.0, "magnitude_high": 2.0,
+                "rationale": "TSMC fabs Nvidia's chips; lower orders reduce TSMC revenue.",
+                "time_horizon": "Medium-Term", "impact_level": "indirect_l1", "parent_ticker": "NVDA.NS",
+            },
+        ],
+    }
+    client = FakeClient(fake_output)
+
+    result = analyze_article(client, title="US restricts advanced chip exports", content="")
+
+    direct, indirect = result.companies
+    assert direct.impact_level == "direct"
+    assert direct.parent_ticker is None
+    assert indirect.impact_level == "indirect_l1"
+    assert indirect.parent_ticker == "NVDA.NS"
+
+
+def test_analyze_article_defaults_impact_level_to_direct_when_absent():
+    # Legacy-shape fake output (no impact_level/parent_ticker keys at all) --
+    # must still parse cleanly with the new fields defaulting.
+    fake_output = {
+        "category": "oil_energy",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "refiner margin", "time_horizon": "Short-Term",
+        }],
+    }
+    client = FakeClient(fake_output)
+
+    result = analyze_article(client, title="Oil prices spike", content="")
+
+    assert result.companies[0].impact_level == "direct"
+    assert result.companies[0].parent_ticker is None

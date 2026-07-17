@@ -526,6 +526,19 @@ const CATALOG = {
     en: 'Historical', hi: 'Historical', mr: 'Historical', gu: 'Historical', ml: 'Historical', te: 'Historical',
     ta: 'Historical', kn: 'Historical', pa: 'Historical', bn: 'Historical',
   },
+  // English text for now, matching other recently-added reasoning.* keys (reasoning.whyThisCall, reasoning.evidenceHeading, etc.)
+  'reasoning.factsHeading': {
+    en: 'Facts', hi: 'Facts', mr: 'Facts', gu: 'Facts', ml: 'Facts', te: 'Facts', ta: 'Facts', kn: 'Facts',
+    pa: 'Facts', bn: 'Facts',
+  },
+  'reasoning.oneMonthReturnLabel': {
+    en: '1M return', hi: '1M return', mr: '1M return', gu: '1M return', ml: '1M return', te: '1M return',
+    ta: '1M return', kn: '1M return', pa: '1M return', bn: '1M return',
+  },
+  'reasoning.threeMonthReturnLabel': {
+    en: '3M return', hi: '3M return', mr: '3M return', gu: '3M return', ml: '3M return', te: '3M return',
+    ta: '3M return', kn: '3M return', pa: '3M return', bn: '3M return',
+  },
   'common.close': {
     en: 'Close', hi: 'बंद करें', mr: 'बंद करा', gu: 'બંધ કરો', ml: 'അടയ്ക്കുക', te: 'మూసివేయండి', ta: 'மூடு', kn: 'ಮುಚ್ಚಿ',
     pa: 'ਬੰਦ ਕਰੋ', bn: 'বন্ধ করুন',
@@ -769,6 +782,66 @@ const CATALOG = {
   },
   'company.period1y': {
     en: '1Y', hi: '1व', mr: '1व', gu: '1વ', ml: '1വ', te: '1సం', ta: '1ஆ', kn: '1ವ', pa: '1ਸ', bn: '1ব',
+  },
+  'insights.justNow': {
+    en: 'just now', hi: 'just now', mr: 'just now', gu: 'just now', ml: 'just now', te: 'just now',
+    ta: 'just now', kn: 'just now', pa: 'just now', bn: 'just now',
+  },
+  'insights.minutesAgo': {
+    en: '{n}m ago', hi: '{n}m ago', mr: '{n}m ago', gu: '{n}m ago', ml: '{n}m ago', te: '{n}m ago',
+    ta: '{n}m ago', kn: '{n}m ago', pa: '{n}m ago', bn: '{n}m ago',
+  },
+  'insights.hoursAgo': {
+    en: '{n}h ago', hi: '{n}h ago', mr: '{n}h ago', gu: '{n}h ago', ml: '{n}h ago', te: '{n}h ago',
+    ta: '{n}h ago', kn: '{n}h ago', pa: '{n}h ago', bn: '{n}h ago',
+  },
+  'insights.daysAgo': {
+    en: '{n}d ago', hi: '{n}d ago', mr: '{n}d ago', gu: '{n}d ago', ml: '{n}d ago', te: '{n}d ago',
+    ta: '{n}d ago', kn: '{n}d ago', pa: '{n}d ago', bn: '{n}d ago',
+  },
+  'insights.horizonImmediate': {
+    en: 'Immediate', hi: 'Immediate', mr: 'Immediate', gu: 'Immediate', ml: 'Immediate', te: 'Immediate',
+    ta: 'Immediate', kn: 'Immediate', pa: 'Immediate', bn: 'Immediate',
+  },
+  'insights.horizonShort': {
+    en: 'Short', hi: 'Short', mr: 'Short', gu: 'Short', ml: 'Short', te: 'Short',
+    ta: 'Short', kn: 'Short', pa: 'Short', bn: 'Short',
+  },
+  'insights.horizonMedium': {
+    en: 'Medium', hi: 'Medium', mr: 'Medium', gu: 'Medium', ml: 'Medium', te: 'Medium',
+    ta: 'Medium', kn: 'Medium', pa: 'Medium', bn: 'Medium',
+  },
+  'insights.horizonLong': {
+    en: 'Long', hi: 'Long', mr: 'Long', gu: 'Long', ml: 'Long', te: 'Long',
+    ta: 'Long', kn: 'Long', pa: 'Long', bn: 'Long',
+  },
+  'insights.impactDirect': {
+    en: 'Direct', hi: 'Direct', mr: 'Direct', gu: 'Direct', ml: 'Direct', te: 'Direct',
+    ta: 'Direct', kn: 'Direct', pa: 'Direct', bn: 'Direct',
+  },
+  'insights.impactIndirect': {
+    en: 'Indirect', hi: 'Indirect', mr: 'Indirect', gu: 'Indirect', ml: 'Indirect', te: 'Indirect',
+    ta: 'Indirect', kn: 'Indirect', pa: 'Indirect', bn: 'Indirect',
+  },
+  'insights.impactIndirectL2': {
+    en: 'Indirect · 2nd-order', hi: 'Indirect · 2nd-order', mr: 'Indirect · 2nd-order',
+    gu: 'Indirect · 2nd-order', ml: 'Indirect · 2nd-order', te: 'Indirect · 2nd-order',
+    ta: 'Indirect · 2nd-order', kn: 'Indirect · 2nd-order', pa: 'Indirect · 2nd-order',
+    bn: 'Indirect · 2nd-order',
+  },
+  'insights.seeMoreInsights': {
+    en: '+ {n} more insights', hi: '+ {n} more insights', mr: '+ {n} more insights', gu: '+ {n} more insights',
+    ml: '+ {n} more insights', te: '+ {n} more insights', ta: '+ {n} more insights', kn: '+ {n} more insights',
+    pa: '+ {n} more insights', bn: '+ {n} more insights',
+  },
+  'insights.seeLess': {
+    en: 'See less', hi: 'See less', mr: 'See less', gu: 'See less', ml: 'See less', te: 'See less',
+    ta: 'See less', kn: 'See less', pa: 'See less', bn: 'See less',
+  },
+  'insights.readFullAnalysis': {
+    en: 'Read full analysis', hi: 'Read full analysis', mr: 'Read full analysis', gu: 'Read full analysis',
+    ml: 'Read full analysis', te: 'Read full analysis', ta: 'Read full analysis', kn: 'Read full analysis',
+    pa: 'Read full analysis', bn: 'Read full analysis',
   },
 } as const;
 

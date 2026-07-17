@@ -105,9 +105,29 @@ class AlertCompany(Base):
     # (app.reasoning.rulebook.get_rule(ref) is not None) -- stored separately
     # for easy future querying of which rules are well-calibrated.
     rulebook_ids_json = Column(Text, nullable=True)
+    # Financial grounding + contradiction detection (see docs/superpowers/
+    # specs/2026-07-16-financial-grounding-contradiction-detection-design.md).
+    # Null for rows persisted before this feature shipped, or when the
+    # underlying yfinance fetch failed for this company.
+    price_at_analysis = Column(Float, nullable=True)
+    return_1m = Column(Float, nullable=True)
+    return_3m = Column(Float, nullable=True)
+    contradiction_note = Column(Text, nullable=True)
+    # How far removed this company's impact is from the article's direct
+    # subject -- see app.analysis.schemas.IMPACT_LEVELS. "direct" for both
+    # actually-direct mentions and sector-inference fan-out (both are the
+    # article's own primary impact). indirect_l1/indirect_l2 are LLM-known
+    # supplier/customer/competitor relationships chained off an already-
+    # resolved company -- see parent_company_id.
+    impact_level = Column(String, nullable=False, default="direct")
+    # For impact_level in (indirect_l1, indirect_l2): the Company this one is
+    # economically linked through (a direct company for indirect_l1, an
+    # indirect_l1 company for indirect_l2). NULL for impact_level="direct".
+    parent_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
-    company = relationship("Company")
+    company = relationship("Company", foreign_keys=[company_id])
+    parent_company = relationship("Company", foreign_keys=[parent_company_id])
 
 
 class CalibrationSample(Base):
@@ -124,6 +144,22 @@ class CalibrationSample(Base):
     magnitude_actual = Column(Float, nullable=False)  # actual % price move over the horizon
     horizon_days = Column(Integer, nullable=False)  # 1 | 3 | 7
     sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class FinancialSnapshot(Base):
+    """Cached price/return data for a ticker, refreshed on a TTL by
+    app.reasoning.financial_context.get_or_fetch_financial_snapshot -- avoids
+    re-hitting yfinance for the same company across multiple alerts in a
+    short window."""
+    __tablename__ = "financial_snapshots"
+    __table_args__ = (UniqueConstraint("ticker", name="uq_financial_snapshot_ticker"),)
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    return_1m = Column(Float, nullable=True)
+    return_3m = Column(Float, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class User(Base):

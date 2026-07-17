@@ -146,3 +146,65 @@ def test_alert_company_has_evidence_discipline_and_confidence_engine_columns(db_
 
     assert ac.reasons_json == '["a"]'
     assert ac.confidence_band == "HIGH"
+
+
+def test_financial_snapshot_table_exists_and_enforces_unique_ticker(db_session):
+    from app.models import FinancialSnapshot
+    db_session.add(FinancialSnapshot(ticker="RELIANCE.NS", price=2500.5, return_1m=8.3, return_3m=-2.1))
+    db_session.commit()  # must not raise
+
+    row = db_session.query(FinancialSnapshot).filter_by(ticker="RELIANCE.NS").one()
+    assert row.price == 2500.5
+    assert row.return_1m == 8.3
+    assert row.return_3m == -2.1
+    assert row.fetched_at is not None
+
+
+def test_alert_company_has_financial_context_columns(db_session):
+    from app.models import Alert, AlertCompany
+    article = Article(source="test", url="https://example.com/financial-columns", title="t")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    company = Company(ticker="X.NS", name="X", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="x", basis="direct_mention",
+        price_at_analysis=2500.5, return_1m=8.3, return_3m=-2.1,
+        contradiction_note="Price down 12.0% over the past month despite bullish call.",
+    )
+    db_session.add(ac)
+    db_session.commit()  # must not raise
+    db_session.refresh(ac)
+
+    assert ac.price_at_analysis == 2500.5
+    assert ac.contradiction_note == "Price down 12.0% over the past month despite bullish call."
+
+
+def test_alert_company_financial_context_columns_are_nullable(db_session):
+    from app.models import Alert, AlertCompany
+    article = Article(source="test", url="https://example.com/financial-columns-null", title="t")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    company = Company(ticker="Y.NS", name="Y", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="x", basis="direct_mention",
+    )
+    db_session.add(ac)
+    db_session.commit()  # must not raise
+    db_session.refresh(ac)
+
+    assert ac.price_at_analysis is None
+    assert ac.contradiction_note is None

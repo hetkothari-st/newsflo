@@ -135,6 +135,18 @@ export function computeNetSignal(companies: AlertCompany[]): NetSignal {
   return { direction, bullishCount, bearishCount, avgConfidence };
 }
 
+// "High/Medium/Low Positive/Negative" -- matches the reference mockup's
+// severity-badge convention exactly, derived from data already computed by
+// computeNetSignal rather than a separate LLM-provided severity field (which
+// doesn't exist). "Mixed" for an even split, since there's no single
+// direction to grade the intensity of.
+export function severityLabel(signal: NetSignal): string {
+  if (signal.direction === 'even') return 'Mixed';
+  const intensity = signal.avgConfidence >= 70 ? 'High' : signal.avgConfidence >= 40 ? 'Medium' : 'Low';
+  const polarity = signal.direction === 'bullish' ? 'Positive' : 'Negative';
+  return `${intensity} ${polarity}`;
+}
+
 export interface SubSectorGroup extends CompanyGroup {
   netSignal: NetSignal;
 }

@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.calibration.track_record import get_win_rate
+from app.companies.branding import logo_url as _logo_url
 from app.companies.history import get_company_history_page
 from app.companies.market import infer_market
 from app.companies.price_series import fetch_price_series
-from app.config import settings
 from app.i18n import get_lang
 from app.models import Alert, AlertCompany, Article, Company
 from app.pipeline import decode_key_points
@@ -20,17 +20,16 @@ router = APIRouter(prefix="/api/companies", tags=["companies"])
 PRICE_SERIES_PERIODS = {"1mo", "3mo", "6mo", "1y"}
 
 
-def _logo_url(company: Company) -> str | None:
-    if not settings.brandfetch_client_id:
-        return None
-    if company.isin:
-        return f"https://cdn.brandfetch.io/isin/{company.isin}?c={settings.brandfetch_client_id}"
-    return f"https://cdn.brandfetch.io/ticker/{company.ticker}?c={settings.brandfetch_client_id}"
-
-
 def _get_indian_company_or_404(db: Session, company_id: int) -> Company:
     company = db.query(Company).filter(Company.id == company_id).first()
     if company is None or infer_market(company.ticker) != "IN":
+        raise HTTPException(404, "Company not found")
+    return company
+
+
+def _get_company_or_404(db: Session, company_id: int) -> Company:
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if company is None:
         raise HTTPException(404, "Company not found")
     return company
 
@@ -112,7 +111,7 @@ def get_company_history(company_id: int, before: str | None = None, limit: int =
 
 @router.get("/{company_id}/prices")
 def get_company_prices(company_id: int, period: str = "6mo", db: Session = Depends(get_db)):
-    company = _get_indian_company_or_404(db, company_id)
+    company = _get_company_or_404(db, company_id)
     if period not in PRICE_SERIES_PERIODS:
         raise HTTPException(400, f"Invalid period, must be one of {sorted(PRICE_SERIES_PERIODS)}")
     points = fetch_price_series(company.ticker, period)

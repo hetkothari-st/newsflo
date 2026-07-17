@@ -204,6 +204,48 @@ def test_list_alerts_includes_company_sector(db_session):
     app.dependency_overrides.clear()
 
 
+def test_list_alerts_includes_company_logo_url(db_session, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "brandfetch_client_id", "test-client-id")
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(
+        source="test", url="https://example.com/logo", title="Logo test headline",
+        status="ANALYZED", category="oil_energy",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    company = Company(
+        ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1.0, isin="INE002A01018",
+    )
+    db_session.add(company)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    assert response.json()[0]["companies"][0]["logo_url"] == (
+        "https://cdn.brandfetch.io/isin/INE002A01018?c=test-client-id"
+    )
+
+    app.dependency_overrides.clear()
+
+
 def _seed_alert_with_company(db_session, index: int) -> None:
     company = Company(
         ticker=f"CO{index}.NS", name=f"Company {index}", sector="oil_gas",
@@ -283,6 +325,44 @@ def test_list_alerts_limits_to_the_most_recent_alerts(db_session):
     assert "Headline 0" not in titles
     assert "Headline 4" not in titles
     assert f"Headline {ALERTS_LIMIT + 4}" in titles
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_survives_nan_financial_fields(db_session):
+    # Reproduces a production 500: a division-by-zero bug in
+    # app.outcomes.price_fetcher (since fixed) persisted NaN into
+    # AlertCompany.return_1m/return_3m/price_at_analysis. NaN is valid
+    # Python but not valid JSON -- Starlette's JSONResponse raised
+    # ValueError and took down the whole /api/alerts endpoint on the first
+    # row that had one. Old rows with NaN already in the DB must still
+    # serialize cleanly (as null) rather than 500ing again.
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/nan", title="Nan headline", status="ANALYZED")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="NANCO.NS", name="Nan Co", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="x", basis="direct_mention",
+        price_at_analysis=float("nan"), return_1m=float("nan"), return_3m=float("inf"),
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_payload = response.json()[0]["companies"][0]
+    assert company_payload["price_at_analysis"] is None
+    assert company_payload["return_1m"] is None
+    assert company_payload["return_3m"] is None
 
     app.dependency_overrides.clear()
 
@@ -468,5 +548,143 @@ def test_get_alert_includes_company_sub_sector(db_session):
 
     assert response.status_code == 200
     assert response.json()["companies"][0]["sub_sector"] == "private_bank"
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_includes_financial_context_fields(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/financial-fields", title="Test headline", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+        price_at_analysis=2500.5, return_1m=-12.0, return_3m=-20.0,
+        contradiction_note="Price down 12.0% over the past month despite bullish call.",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = response.json()
+    company_payload = body[0]["companies"][0]
+    assert company_payload["price_at_analysis"] == 2500.5
+    assert company_payload["return_1m"] == -12.0
+    assert company_payload["return_3m"] == -20.0
+    assert company_payload["contradiction_note"] == "Price down 12.0% over the past month despite bullish call."
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_defaults_financial_context_fields_for_legacy_rows(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/financial-fields-legacy", title="Legacy", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="LEGACY.NS", name="Legacy Co", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="legacy row",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_payload = response.json()[0]["companies"][0]
+    assert company_payload["price_at_analysis"] is None
+    assert company_payload["contradiction_note"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_get_alert_includes_impact_level_and_parent_company_id(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/impact-level", title="Chip export ban", status="ANALYZED", category="tech")
+    db_session.add(article)
+    db_session.commit()
+
+    direct = Company(ticker="NVDA.NS", name="Nvidia", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    supplier = Company(ticker="TSM.NS", name="TSMC", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add_all([direct, supplier])
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="tech")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=direct.id, direction="bearish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
+        basis="direct_mention", confidence="llm_estimate", impact_level="direct",
+    ))
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=supplier.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
+        basis="direct_mention", confidence="llm_estimate",
+        impact_level="indirect_l1", parent_company_id=direct.id,
+    ))
+    db_session.commit()
+
+    response = client.get(f"/api/alerts/{alert.id}")
+
+    assert response.status_code == 200
+    companies = {c["company_id"]: c for c in response.json()["companies"]}
+    assert companies[direct.id]["impact_level"] == "direct"
+    assert companies[direct.id]["parent_company_id"] is None
+    assert companies[supplier.id]["impact_level"] == "indirect_l1"
+    assert companies[supplier.id]["parent_company_id"] == direct.id
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_defaults_impact_level_to_direct_for_legacy_rows(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/impact-level-legacy", title="Legacy", status="ANALYZED", category="oil_energy")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="LEGACY2.NS", name="Legacy Co 2", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="legacy row",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_payload = response.json()[0]["companies"][0]
+    assert company_payload["impact_level"] == "direct"
+    assert company_payload["parent_company_id"] is None
 
     app.dependency_overrides.clear()

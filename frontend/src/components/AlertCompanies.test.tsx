@@ -163,6 +163,14 @@ describe('AlertCompanies', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/alerts/1/charts');
   });
 
+  it('renders a "Read full analysis" link for each company, routing to its detail page', () => {
+    render(<AlertCompanies alert={alert} isAuthenticated />);
+    const links = screen.getAllByRole('link', { name: /read full analysis/i });
+    const hrefs = links.map((link) => link.getAttribute('href'));
+    expect(hrefs).toContain('/alerts/1/company/1');
+    expect(hrefs).toContain('/alerts/1/company/2');
+  });
+
   it('ArrowRight does NOT navigate when an input element has focus', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
     mockNavigate.mockClear();

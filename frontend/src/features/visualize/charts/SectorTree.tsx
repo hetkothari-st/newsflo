@@ -1,20 +1,9 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { groupBySectorAndSubSector, type NetSignal } from '../transforms';
-import { TreeRoot, TreeBranch, TreeLeaf } from './tree/Tree';
+import { groupBySectorAndSubSector } from '../transforms';
+import ImpactCard from './cards/ImpactCard';
+import CompanyRow from './cards/CompanyRow';
 import { useCompanySelection } from './useCompanySelection';
-
-// CSS custom properties (not literal hex) so the badge stays correct across
-// light/dark theme without needing its own validated palette entry -- see
-// frontend/src/index.css's --color-bullish/--color-bearish.
-function signalBadge(signal: NetSignal): { text: string; color?: string } {
-  if (signal.direction === 'even') return { text: `▬ ${signal.avgConfidence}%` };
-  const bullish = signal.direction === 'bullish';
-  return {
-    text: `${bullish ? '▲' : '▼'} ${signal.avgConfidence}%`,
-    color: bullish ? 'rgb(var(--color-bullish))' : 'rgb(var(--color-bearish))',
-  };
-}
 
 export default function SectorTree({
   companies,
@@ -23,48 +12,37 @@ export default function SectorTree({
   companies: AlertCompany[];
   eventType?: string | null;
 }) {
-  const { toggle, selected } = useCompanySelection(companies);
+  const { toggle, selected, selectedId } = useCompanySelection(companies);
   const sectors = groupBySectorAndSubSector(companies);
 
   if (sectors.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <TreeRoot>
-        {sectors.map((sector) => {
-          const sectorBadge = signalBadge(sector.netSignal);
-          return (
-            <TreeBranch
-              key={sector.key}
-              label={sector.label}
-              color={sector.color}
-              badge={sectorBadge.text}
-              badgeColor={sectorBadge.color}
-            >
-              {sector.subSectorGroups.length <= 1
-                ? sector.companies.map((c) => (
-                    <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
-                  ))
-                : sector.subSectorGroups.map((sub) => {
-                    const subBadge = signalBadge(sub.netSignal);
-                    return (
-                      <TreeBranch
-                        key={sub.key}
-                        label={sub.label}
-                        color={sector.color}
-                        badge={subBadge.text}
-                        badgeColor={subBadge.color}
-                      >
-                        {sub.companies.map((c) => (
-                          <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
-                        ))}
-                      </TreeBranch>
-                    );
-                  })}
-            </TreeBranch>
-          );
-        })}
-      </TreeRoot>
+    <div className="flex flex-col gap-4 p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {sectors.map((sector) => (
+          <ImpactCard
+            key={sector.key}
+            label={sector.label}
+            color={sector.color ?? '#557C30'}
+            signal={sector.netSignal}
+            companyCount={sector.companies.length}
+          >
+            {sector.subSectorGroups.length <= 1
+              ? sector.companies.map((c) => (
+                  <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
+                ))
+              : sector.subSectorGroups.map((sub) => (
+                  <div key={sub.key} className="flex flex-col gap-0.5">
+                    <p className="px-2 pt-1.5 text-[11px] uppercase tracking-widest text-muted">{sub.label}</p>
+                    {sub.companies.map((c) => (
+                      <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
+                    ))}
+                  </div>
+                ))}
+          </ImpactCard>
+        ))}
+      </div>
       {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );

@@ -31,6 +31,8 @@ export default {
           "'Segoe UI'",
           'sans-serif',
         ],
+        editorial: ["'Newsreader'", 'Georgia', 'serif'],
+        data: ["'IBM Plex Mono'", 'monospace'],
       },
       borderRadius: {
         lg: '12px',
