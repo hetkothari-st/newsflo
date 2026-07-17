@@ -3,6 +3,7 @@ import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import CalendarButton from './CalendarButton';
 import LanguagePicker from './LanguagePicker';
+import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
 export default function NavBar({ onOpenCalendar }: { onOpenCalendar: () => void }) {
@@ -11,8 +12,8 @@ export default function NavBar({ onOpenCalendar }: { onOpenCalendar: () => void 
   return (
     <nav className="border-b border-hairline bg-page">
       <div className="mx-auto flex min-h-14 max-w-feed items-center justify-between px-4 py-3 md:h-auto md:py-4">
-        <Link to="/" className="font-display text-lg font-bold text-ink">
-          NewsFlo
+        <Link to="/" className="flex items-center">
+          <Logo className="h-8 w-auto" />
         </Link>
         <div className="hidden items-center gap-6 md:flex">
           <Link to="/" className="text-xs uppercase tracking-widest text-muted hover:text-ink">

@@ -43,4 +43,11 @@ describe('NavBar', () => {
     renderNav();
     expect(screen.getByRole('button', { name: /switch to light mode/i })).toBeInTheDocument();
   });
+
+  it('renders the logo linking to the feed', () => {
+    renderNav();
+    const logo = screen.getByAltText('NewsFlo');
+    expect(logo).toBeInTheDocument();
+    expect(logo.closest('a')).toHaveAttribute('href', '/');
+  });
 });
