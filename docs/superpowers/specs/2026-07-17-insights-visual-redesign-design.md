@@ -203,13 +203,21 @@ compact card, but showing everything (no truncation):
   preserve since the feed itself doesn't need to remember scroll position
   for this — standard SPA back-navigation).
 
-`CompanyChip`/`ReasoningPanel`'s current inline-accordion usage inside
-`AlertCompanies.tsx` is removed — the compact card replaces `CompanyChip`
-entirely, and `ReasoningPanel`'s content moves to this page. `ReasoningPanel`
-itself is deleted once its content is ported (not kept as unused dead code).
-The existing `/company/:id` page's own "latest alert" summary usage is
-unaffected — that page doesn't render `ReasoningPanel`, it renders its own
-short summary already, per the earlier codebase survey.
+`CompanyChip`'s current inline-accordion usage inside `AlertCompanies.tsx`
+is removed — the compact card replaces `CompanyChip` entirely, and
+`ReasoningPanel`'s content is duplicated into this page's own markup (not
+extracted into a shared component `ReasoningPanel` and this page both call,
+and not moved out of `ReasoningPanel`). `CompanyChip` itself is deleted,
+since nothing else references it. `ReasoningPanel` is NOT deleted —
+correction made during implementation (2026-07-17): it's still directly
+imported by seven chart components under `frontend/src/features/visualize/
+charts/` (rendered inline when a user selects a company node on the
+`/alerts/:id/charts` page), which is explicitly out of scope for this
+redesign. `CompanyAvatar` is likewise not deleted, for the same reason —
+still used by `CompanyRow.tsx` (visualize cards) and `CompanyPage.tsx`
+(profile header). The existing `/company/:id` page's own "latest alert"
+summary usage is unaffected — that page doesn't render `ReasoningPanel`, it
+renders its own short summary already, per the earlier codebase survey.
 
 ## Backend changes
 

@@ -45,7 +45,7 @@
 - Create `frontend/src/pages/AlertCompanyAnalysisPage.tsx` + `frontend/src/pages/AlertCompanyAnalysisPage.test.tsx` (ports `ReasoningPanel`'s content).
 - Modify `frontend/src/App.tsx` — add the new route.
 - Modify `frontend/src/App.test.tsx` — add a route-smoke-test entry if the existing test enumerates routes (check during Task 13).
-- Delete `frontend/src/components/CompanyChip.tsx`, `frontend/src/components/CompanyChip.test.tsx`, `frontend/src/components/ReasoningPanel.tsx`, `frontend/src/components/ReasoningPanel.test.tsx`, `frontend/src/components/CompanyAvatar.tsx`, `frontend/src/components/CompanyAvatar.test.tsx` (final cleanup task, once nothing references them).
+- Delete `frontend/src/components/CompanyChip.tsx`, `frontend/src/components/CompanyChip.test.tsx` (final cleanup task, once nothing references it — `ReasoningPanel.tsx`/`CompanyAvatar.tsx` are NOT deleted, see Task 14's execution note: both are still used by the out-of-scope `/alerts/:id/charts` chart components and `CompanyPage.tsx`).
 
 ---
 
@@ -1878,36 +1878,52 @@ git commit -m "feat: add full-analysis detail page and route"
 
 ---
 
-## Task 14: Remove superseded components
+## Task 14: Remove superseded `CompanyChip`
+
+**Corrected during execution (2026-07-17):** the original version of this
+task also targeted `ReasoningPanel.tsx`/`CompanyAvatar.tsx` for deletion, on
+the mistaken assumption that `CompanyChip` was their only consumer. It
+wasn't — a grep run during Task 14's own Step 1 found both are still
+imported directly (not via `CompanyChip`) by seven chart components under
+`frontend/src/features/visualize/charts/` (`ConfidenceTree.tsx`,
+`ImpactBar.tsx`, `LevelTree.tsx`, `SectorTree.tsx`, `SplitTree.tsx`,
+`TierRows.tsx`, `TimelineTree.tsx` — each renders `ReasoningPanel` inline
+when a user selects a company node in the `/alerts/:id/charts` page) and by
+`CompanyRow.tsx`/`CompanyPage.tsx` (`CompanyAvatar`, for the visualize card
+list and the company profile page header). Both are explicitly out of scope
+for this redesign per the design spec's "Explicitly out of scope" section
+("No changes to `AlertChartsPage`/`/alerts/:id/charts`... unrelated to
+per-company reasoning cards") — deleting them would break working,
+unrelated features. Only `CompanyChip` is actually orphaned (confirmed: no
+file other than `CompanyChip.tsx` itself references it after Task 12).
+Scope corrected to `CompanyChip` only.
 
 **Files:**
 - Delete: `frontend/src/components/CompanyChip.tsx`
 - Delete: `frontend/src/components/CompanyChip.test.tsx`
-- Delete: `frontend/src/components/ReasoningPanel.tsx`
-- Delete: `frontend/src/components/ReasoningPanel.test.tsx`
-- Delete: `frontend/src/components/CompanyAvatar.tsx`
-- Delete: `frontend/src/components/CompanyAvatar.test.tsx`
 
 **Interfaces:**
-- Consumes: nothing new — this task only removes files once Task 12 (which was the last consumer of `CompanyChip`, which was the last consumer of `ReasoningPanel` and `CompanyAvatar`) has landed.
+- Consumes: nothing new — this task only removes files once Task 12 (the
+  last consumer of `CompanyChip`) has landed.
 
-- [ ] **Step 1: Confirm nothing still imports the files to be deleted**
+- [ ] **Step 1: Confirm nothing still imports the file to be deleted**
 
-Run: `cd frontend && grep -rn "CompanyChip\|ReasoningPanel\|CompanyAvatar" src --include="*.tsx" --include="*.ts" | grep -v "\.test\.tsx"`
-Expected: No output (zero non-test-file matches) — if any file still imports one of these, stop and resolve that reference before deleting (it means an earlier task's integration step was missed).
+Run: `cd frontend && grep -rln "CompanyChip" src --include="*.tsx" --include="*.ts" | grep -v "\.test\.tsx"`
+Expected: exactly one match, `src/components/CompanyChip.tsx` itself (a
+component's own file always contains its own name) — no OTHER file may
+appear. If any other file appears, stop and resolve that reference before
+deleting.
 
 - [ ] **Step 2: Delete the files**
 
 ```bash
 git rm frontend/src/components/CompanyChip.tsx frontend/src/components/CompanyChip.test.tsx
-git rm frontend/src/components/ReasoningPanel.tsx frontend/src/components/ReasoningPanel.test.tsx
-git rm frontend/src/components/CompanyAvatar.tsx frontend/src/components/CompanyAvatar.test.tsx
 ```
 
 - [ ] **Step 3: Run the full frontend test suite**
 
 Run: `cd frontend && npx vitest run`
-Expected: All remaining tests PASS (0 failures, 0 references to the deleted files).
+Expected: All remaining tests PASS (0 failures, 0 references to `CompanyChip`).
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 0 errors.
@@ -1915,7 +1931,7 @@ Expected: 0 errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-git commit -m "chore: remove CompanyChip/ReasoningPanel/CompanyAvatar, superseded by InsightCard/AlertCompanyAnalysisPage/CompanyLogo"
+git commit -m "chore: remove CompanyChip, superseded by InsightCard"
 ```
 
 ---
