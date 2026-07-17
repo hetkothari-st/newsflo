@@ -257,6 +257,28 @@ New:
   container page (both views) and each new chart, per this project's established
   practice after two prior tree-chart visual failures.
 
+## Correction (post-review): the chart-inventory table's #4 mapping was wrong
+
+Reading the actual current code (not just its name) surfaced a mismatch the
+table above doesn't reflect: `TierRows.tsx` groups companies by
+`index_tier` (NIFTY50/NIFTYNEXT50/.../GLOBAL_LARGE_CAP — a market-cap
+classification), which has nothing to do with impact hierarchy. It does not
+fit "Multi-Level Impact Tree" (#4), which mockup image 1 shows as
+`direct → indirect_l1 → indirect_l2 → wider market` category rows — that's
+the exact same `impact_level`/`parent_company_id` data `LevelTree.tsx`
+already groups by, just rendered as flat leveled rows instead of a branching
+tree.
+
+Resolution: `LevelTree` (restyled per this spec, tree-branch layout) covers
+#1 Impact Tree. A genuinely new component, built in the follow-up plan
+alongside Ripple Effect/Supply Chain/Knowledge Graph (since it needs its own
+flat-row-with-arrows layout, not a restyle of existing code), covers #4
+Multi-Level Impact Tree, reusing the same real `impact_level` data as
+`LevelTree`. `TierRows` and `ImpactBar` are left untouched by the first
+implementation plan (visual-redesign only, no chart-inventory ambiguity) —
+their fate (retire, since neither maps to any of the 10 mockup charts) is
+decided in the follow-up plan alongside the new components, not here.
+
 ## Rollout phases
 
 1. `ChartCardShell` + color/legend additions (shared foundation).
