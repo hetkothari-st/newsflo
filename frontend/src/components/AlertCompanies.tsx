@@ -94,11 +94,21 @@ export default function AlertCompanies({
           <button type="button" onClick={() => setTab('my_demat')} className={tabClass(tab === 'my_demat')}>
             {t('companies.myPortfolio')}
           </button>
+          {visible.length > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate(`/alerts/${alert.id}/charts`)}
+              className={`flex items-center gap-1 ${tabClass(false)}`}
+            >
+              {t('companies.charts')}
+              <span aria-hidden="true">→</span>
+            </button>
+          )}
         </div>
+        {/* Group-by selector commented out per request -- keep groupMode
+            defaulted to 'tier' (see useState above) rather than removing
+            the grouping logic itself.
         <div className="flex shrink-0 items-center gap-3">
-          {/* Group-by selector commented out per request -- keep groupMode
-              defaulted to 'tier' (see useState above) rather than removing
-              the grouping logic itself.
           <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
             {t('companies.group')}
             <select
@@ -113,18 +123,8 @@ export default function AlertCompanies({
               ))}
             </select>
           </label>
-          */}
-          {visible.length > 0 && (
-            <button
-              type="button"
-              onClick={() => navigate(`/alerts/${alert.id}/charts`)}
-              className="flex items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-xs uppercase tracking-widest text-ink theme-light:border-transparent theme-light:shadow-neu-sm"
-            >
-              {t('companies.charts')}
-              <span aria-hidden="true">→</span>
-            </button>
-          )}
         </div>
+        */}
       </div>
       <SentimentBar companies={visible} />
       {grouped.length === 0 ? (
