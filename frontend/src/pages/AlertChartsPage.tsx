@@ -16,7 +16,7 @@ import ImpactBar from '../features/visualize/charts/ImpactBar';
 import SplitTree from '../features/visualize/charts/SplitTree';
 import ConfidenceTree from '../features/visualize/charts/ConfidenceTree';
 import TimelineTree from '../features/visualize/charts/TimelineTree';
-import LevelTree from '../features/visualize/charts/LevelTree';
+import LevelTree, { type ForceCollapseSignal } from '../features/visualize/charts/LevelTree';
 
 const CHARTS = [
   { key: 'levels', label: '1 · Impact Tree', Component: LevelTree },
@@ -145,6 +145,20 @@ export default function AlertChartsPage() {
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [breadth, setBreadth] = useState<Breadth>('normal');
+  const [forceCollapse, setForceCollapse] = useState<ForceCollapseSignal | undefined>(undefined);
+  const [collapseVersion, setCollapseVersion] = useState(0);
+
+  function expandAll() {
+    const next = collapseVersion + 1;
+    setCollapseVersion(next);
+    setForceCollapse({ mode: 'expand', version: next });
+  }
+
+  function collapseAll() {
+    const next = collapseVersion + 1;
+    setCollapseVersion(next);
+    setForceCollapse({ mode: 'collapse', version: next });
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -211,18 +225,29 @@ export default function AlertChartsPage() {
         <p className="p-4 text-xs uppercase tracking-widest text-muted">
           No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.
         </p>
+      ) : breadth === 'normal' ? (
+        <>
+          <DirectlyAffectedSectors companies={visibleCompanies} selectedId={selectedId} onSelect={toggle} />
+          {selected && (
+            <div className="border-b border-hairline p-4">
+              <ReasoningPanel company={selected} eventType={alert.event_type} />
+            </div>
+          )}
+          <ImpactSummaryBanner companies={visibleCompanies} alertId={alert.id} title="Impact Summary" />
+        </>
       ) : (
-        breadth === 'normal' && (
-          <>
-            <DirectlyAffectedSectors companies={visibleCompanies} selectedId={selectedId} onSelect={toggle} />
-            {selected && (
-              <div className="border-b border-hairline p-4">
-                <ReasoningPanel company={selected} eventType={alert.event_type} />
-              </div>
-            )}
-            <ImpactSummaryBanner companies={visibleCompanies} alertId={alert.id} title="Impact Summary" />
-          </>
-        )
+        <>
+          <div className="flex items-center justify-end gap-3 border-b border-hairline px-4 py-2 text-xs">
+            <button type="button" onClick={expandAll} className="text-muted hover:text-ink">
+              Expand All
+            </button>
+            <button type="button" onClick={collapseAll} className="text-muted hover:text-ink">
+              Collapse All
+            </button>
+          </div>
+          <LevelTree companies={visibleCompanies} eventType={alert.event_type} forceCollapse={forceCollapse} />
+          <ImpactSummaryBanner companies={visibleCompanies} alertId={alert.id} title="Full Impact Summary" />
+        </>
       )}
       <div className="flex gap-4 overflow-x-auto border-b border-hairline px-4 py-2">
         {CHARTS.map((chart, i) => (

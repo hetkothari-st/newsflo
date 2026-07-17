@@ -114,9 +114,12 @@ describe('AlertChartsPage', () => {
     expect(screen.queryByText('TSM')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Drilldown'));
-    await waitFor(() => expect(screen.getByText('TSM')).toBeInTheDocument());
-    expect(screen.getByText('RIL')).toBeInTheDocument();
-    expect(screen.getByText('ONGC')).toBeInTheDocument();
+    // Drilldown pins its own LevelTree overview above the chart-tab carousel
+    // (Task 9), and the carousel's default tab (index 0) is also the Impact
+    // Tree, so every company below now renders twice.
+    await waitFor(() => expect(screen.getAllByText('TSM')).toHaveLength(2));
+    expect(screen.getAllByText('RIL')).toHaveLength(2);
+    expect(screen.getAllByText('ONGC')).toHaveLength(2);
   });
 
   it('shows the no-direct-companies message in Normal view when every company is indirect', async () => {
@@ -137,10 +140,12 @@ describe('AlertChartsPage', () => {
     fireEvent.click(screen.getByText('1 · Impact Tree'));
     // LevelTree's ChartCardShell legend statically lists all three level
     // labels, so an active level's label appears twice (section header +
-    // legend entry) rather than once.
-    await waitFor(() => expect(screen.getAllByText('Direct Impact')).toHaveLength(2));
-    expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(2);
-    expect(screen.getByText(/via Reliance Industries/i)).toBeInTheDocument();
+    // legend entry) rather than once -- and Drilldown pins its own LevelTree
+    // overview above the chart-tab carousel (Task 9's documented duplication),
+    // so with the Levels tab also selected below, everything doubles again to 4.
+    await waitFor(() => expect(screen.getAllByText('Direct Impact')).toHaveLength(4));
+    expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(4);
+    expect(screen.getAllByText(/via Reliance Industries/i)).toHaveLength(2);
   });
 });
 
@@ -167,5 +172,35 @@ describe('AlertChartsPage Normal View', () => {
     // Appears twice: once in the new Directly Affected Sectors grid, once in
     // the default Impact Tree chart tab still rendered below it.
     expect(screen.getAllByText('HDFCBANK')).toHaveLength(2);
+  });
+});
+
+describe('AlertChartsPage Drilldown View', () => {
+  it('shows Expand All / Collapse All controls and a Full Impact Summary banner', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue({
+      id: 1,
+      category: 'banking',
+      category_label: 'Banking',
+      created_at: '2026-07-17T00:00:00Z',
+      article: { id: 1, title: 'RBI cuts repo rate', url: 'https://example.com', image_url: null },
+      event_type: 'repo_rate_change',
+      companies: [
+        {
+          company_id: 1, ticker: 'HDFCBANK', name: 'HDFC Bank', index_tier: 'NIFTY50', sector: 'banking',
+          direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'lower funding cost',
+          key_points: [], confidence_score: 90, time_horizon: 'Short-Term', basis: 'direct_mention',
+          confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [], impact_level: 'direct',
+        },
+      ],
+    } as api.Alert);
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText('RBI cuts repo rate')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /drilldown/i }));
+
+    expect(screen.getByRole('button', { name: /expand all/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /collapse all/i })).toBeInTheDocument();
+    expect(screen.getByText('Full Impact Summary')).toBeInTheDocument();
   });
 });
