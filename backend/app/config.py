@@ -48,11 +48,13 @@ class Settings(BaseSettings):
     # poller (app/ingestion/poller.py + sources.py) is still fully intact,
     # just no longer wired into the scheduler (see scheduler.py).
     indianapi_api_key: str = os.environ.get("INDIANAPI_API_KEY", "")
-    # This key is capped at 500 requests/month -- runs on its own, much
-    # longer interval than poll_interval_minutes (the analysis cycle, which
-    # stays fast since it just processes whatever's already pending). 120
-    # min = 12/day = ~360-372/month, leaving real headroom under the cap.
-    indianapi_poll_interval_minutes: int = int(os.environ.get("INDIANAPI_POLL_INTERVAL_MINUTES", "120"))
+    # This key is capped at 500 requests/month. Explicit product decision to
+    # poll at 1/min anyway (confirmed with the user, who understood the
+    # tradeoff): at that rate the 500 budget is exhausted in ~8 hours, after
+    # which IndianAPI ingestion goes dark (fetch_new_indianapi_articles
+    # degrades to returning 0, per its "never raise, skip this cycle"
+    # contract) until the key's quota resets next month.
+    indianapi_poll_interval_minutes: int = int(os.environ.get("INDIANAPI_POLL_INTERVAL_MINUTES", "1"))
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound
