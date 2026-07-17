@@ -718,16 +718,21 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import CompanyLogo from './CompanyLogo';
 
+// The logo is intentionally decorative (alt="") -- the company name is
+// already rendered as adjacent text in every consumer, so a screen reader
+// would announce it twice with a descriptive alt. An empty-alt <img> has
+// implicit role="presentation", not "img", so it must be queried by tag
+// (container.querySelector) rather than screen.getByRole('img').
 describe('CompanyLogo', () => {
   it('renders an img with the given logo url', () => {
-    render(<CompanyLogo logoUrl="https://cdn.brandfetch.io/ticker/AAPL?c=x" ticker="AAPL" />);
-    const img = screen.getByRole('img', { hidden: true });
+    const { container } = render(<CompanyLogo logoUrl="https://cdn.brandfetch.io/ticker/AAPL?c=x" ticker="AAPL" />);
+    const img = container.querySelector('img');
     expect(img).toHaveAttribute('src', 'https://cdn.brandfetch.io/ticker/AAPL?c=x');
   });
 
   it('shows a monogram fallback when logoUrl is null', () => {
-    render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" />);
-    expect(screen.queryByRole('img', { hidden: true })).not.toBeInTheDocument();
+    const { container } = render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" />);
+    expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText('RE')).toBeInTheDocument();
   });
 
@@ -737,8 +742,8 @@ describe('CompanyLogo', () => {
   });
 
   it('swaps to the monogram fallback on image load error', () => {
-    render(<CompanyLogo logoUrl="https://cdn.brandfetch.io/ticker/BAD?c=x" ticker="BAD" />);
-    const img = screen.getByRole('img', { hidden: true });
+    const { container } = render(<CompanyLogo logoUrl="https://cdn.brandfetch.io/ticker/BAD?c=x" ticker="BAD" />);
+    const img = container.querySelector('img')!;
     img.dispatchEvent(new Event('error'));
     expect(screen.getByText('BA')).toBeInTheDocument();
   });
@@ -1198,7 +1203,13 @@ describe('InsightCard', () => {
         alertCreatedAt="2026-07-17T10:00:00.000Z"
       />,
     );
-    expect(screen.getByText(/Refiner margins expand/)).toBeInTheDocument();
+    // Plain regex getByText substring-matches every ancestor's full
+    // textContent too (RTL matches per-element, not just leaves), which
+    // would throw "multiple elements found" here since the summary <p> is
+    // nested inside several containers -- constrain the match to the <p>.
+    expect(
+      screen.getByText((_, el) => el?.tagName === 'P' && /Refiner margins expand/.test(el.textContent ?? '')),
+    ).toBeInTheDocument();
   });
 
   it('links "Read full analysis" to the detail route', () => {
@@ -1581,12 +1592,21 @@ describe('AlertCompanyAnalysisPage', () => {
   });
 
   it('shows the facts section with price and returns', async () => {
+    // Price/returns render as adjacent leaf <span>s inside a shared div, so
+    // a plain regex getByText would substring-match every ancestor's full
+    // textContent too (RTL matches per-element, not just leaves) and throw
+    // "multiple elements found" -- a leaf-only exact-text matcher sidesteps
+    // that ambiguity entirely.
     vi.spyOn(api, 'getAlert').mockResolvedValue(ALERT);
     render(<AlertCompanyAnalysisPage />, '/alerts/7/company/1');
 
     await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
-    expect(screen.getByText(/1642.50/)).toBeInTheDocument();
-    expect(screen.getByText(/\+3\.2%/)).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '₹1642.50'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '+3.2% (1M)'),
+    ).toBeInTheDocument();
   });
 
   it('shows a contradiction note with distinct treatment when present', async () => {
@@ -1606,7 +1626,14 @@ describe('AlertCompanyAnalysisPage', () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(ALERT);
     render(<AlertCompanyAnalysisPage />, '/alerts/7/company/999');
 
-    await waitFor(() => expect(screen.getByText(/not found/i)).toBeInTheDocument());
+    // Regex getByText would also match RTL's own render-container div here
+    // (its textContent equals the single rendered <p>'s text in this
+    // minimal tree) and throw "multiple elements found" -- constrain to <p>.
+    await waitFor(() =>
+      expect(
+        screen.getByText((_, el) => el?.tagName === 'P' && /not found/i.test(el.textContent ?? '')),
+      ).toBeInTheDocument(),
+    );
   });
 });
 ```
@@ -1778,8 +1805,10 @@ export default function AlertCompanyAnalysisPage() {
         <div className="mt-4 border-t border-hairline pt-3">
           <p className="font-data text-[10.5px] uppercase tracking-widest text-muted">{t('reasoning.factsHeading')}</p>
           <div className="mt-1.5 font-data text-sm text-ink">
-            {company.market === 'IN' ? '₹' : '$'}
-            {company.price_at_analysis.toFixed(2)}
+            <span>
+              {company.market === 'IN' ? '₹' : '$'}
+              {company.price_at_analysis.toFixed(2)}
+            </span>
             {company.return_1m != null && (
               <span className={`ml-3 ${company.return_1m >= 0 ? 'text-bullish' : 'text-bearish'}`}>
                 {company.return_1m >= 0 ? '+' : ''}
