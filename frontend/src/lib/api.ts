@@ -30,6 +30,10 @@ export interface AlertCompany {
   // for sector === 'other'). Render null as an "Unclassified" bucket, never
   // filter it out silently.
   sub_sector?: string | null;
+  // Real company logo from Brandfetch (see backend app.companies.branding),
+  // null when no BRANDFETCH_CLIENT_ID is configured or Brandfetch has no
+  // match for this company -- CompanyLogo degrades to a monogram either way.
+  logo_url?: string | null;
   direction: string; // bullish | bearish
   magnitude_low: number;
   magnitude_high: number;
