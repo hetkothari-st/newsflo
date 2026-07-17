@@ -1,6 +1,7 @@
 import type { AlertCompany } from '../../lib/api';
 import { sectorColor } from './colors';
 import { subSectorKey, subSectorLabel, UNCLASSIFIED_KEY } from './subSectorLabels';
+import { impactLevelKey } from './impactLevels';
 
 export type GroupMode = 'tier' | 'impact' | 'sector';
 
@@ -183,4 +184,31 @@ export function groupBySectorAndSubSector(companies: AlertCompany[]): SectorDril
       }));
     return { ...sectorGroup, netSignal: computeNetSignal(sectorGroup.companies), subSectorGroups };
   });
+}
+
+// Level 3/4 of the Impact Tree chart: the indirect ripple (indirect_l1 +
+// indirect_l2 collapsed together -- the model has no L3+ level) grouped by
+// sub_sector, reusing the same subSectorKey/subSectorLabel/UNCLASSIFIED_KEY
+// fallback as groupBySectorAndSubSector rather than inventing a new one.
+export function groupIndirectBySubSector(companies: AlertCompany[]): SubSectorGroup[] {
+  const indirect = companies.filter((c) => impactLevelKey(c) !== 'direct');
+  const bySub = new Map<string, AlertCompany[]>();
+  for (const c of indirect) {
+    const key = subSectorKey(c.sub_sector);
+    const group = bySub.get(key) ?? [];
+    group.push(c);
+    bySub.set(key, group);
+  }
+  return [...bySub.entries()]
+    .sort(([a], [b]) =>
+      subSectorLabel(a === UNCLASSIFIED_KEY ? null : a).localeCompare(
+        subSectorLabel(b === UNCLASSIFIED_KEY ? null : b),
+      ),
+    )
+    .map(([key, group]) => ({
+      key,
+      label: subSectorLabel(key === UNCLASSIFIED_KEY ? null : key),
+      companies: group,
+      netSignal: computeNetSignal(group),
+    }));
 }

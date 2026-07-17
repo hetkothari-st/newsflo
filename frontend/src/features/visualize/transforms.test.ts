@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude, rankByConfidence,
-  groupByTimeHorizon, computeNetSignal, groupBySectorAndSubSector,
+  groupByTimeHorizon, computeNetSignal, groupBySectorAndSubSector, groupIndirectBySubSector,
 } from './transforms';
 import type { AlertCompany } from '../../lib/api';
 
@@ -234,5 +234,46 @@ describe('groupBySectorAndSubSector', () => {
     ]);
     expect(sector.netSignal.direction).toBe('bullish');
     expect(sector.subSectorGroups[0].netSignal.direction).toBe('bullish');
+  });
+});
+
+describe('groupIndirectBySubSector', () => {
+  it('excludes direct-impact companies, keeping only indirect_l1/indirect_l2', () => {
+    const groups = groupIndirectBySubSector([
+      company({ company_id: 1, impact_level: 'direct', sector: 'banking', sub_sector: 'private_bank' }),
+      company({ company_id: 2, impact_level: 'indirect_l1', sector: 'banking', sub_sector: 'nbfc' }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe('NBFC');
+    expect(groups[0].companies.map((c) => c.company_id)).toEqual([2]);
+  });
+
+  it('groups indirect_l1 and indirect_l2 companies together under the same sub_sector', () => {
+    const groups = groupIndirectBySubSector([
+      company({ company_id: 1, impact_level: 'indirect_l1', sub_sector: 'nbfc' }),
+      company({ company_id: 2, impact_level: 'indirect_l2', sub_sector: 'nbfc' }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].companies.map((c) => c.company_id)).toEqual([1, 2]);
+  });
+
+  it('buckets a null sub_sector as Unclassified rather than dropping it', () => {
+    const groups = groupIndirectBySubSector([
+      company({ company_id: 1, impact_level: 'indirect_l1', sub_sector: null }),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(['Unclassified']);
+  });
+
+  it('returns an empty array when there are no indirect companies', () => {
+    expect(groupIndirectBySubSector([company({ impact_level: 'direct' })])).toEqual([]);
+  });
+
+  it('includes a netSignal computed from the group\'s companies', () => {
+    const groups = groupIndirectBySubSector([
+      company({ company_id: 1, impact_level: 'indirect_l1', sub_sector: 'nbfc', direction: 'bullish' }),
+      company({ company_id: 2, impact_level: 'indirect_l1', sub_sector: 'nbfc', direction: 'bullish' }),
+    ]);
+    expect(groups[0].netSignal.direction).toBe('bullish');
+    expect(groups[0].netSignal.bullishCount).toBe(2);
   });
 });
