@@ -4,6 +4,7 @@ import type { Alert, AlertCompany, PricePoint } from '../lib/api';
 import { getAlert, getCompanyPrices } from '../lib/api';
 import { useLanguage } from '../lib/language';
 import { eventTypeLabel, formatEvidenceRef } from '../lib/ruleLabels';
+import { sectorLabel } from '../features/visualize/transforms';
 import CompanyLogo from '../components/CompanyLogo';
 import InsightSparkline from '../components/InsightSparkline';
 import InsightGauges from '../components/InsightGauges';
@@ -63,7 +64,7 @@ export default function AlertCompanyAnalysisPage() {
       <p className="font-data text-[11px] uppercase tracking-widest text-muted">
         {alert.event_type ? eventTypeLabel(alert.event_type) : ''}
         {alert.event_type && company.sector ? ' · ' : ''}
-        {company.sector ?? ''}
+        {company.sector ? sectorLabel(company.sector) : ''}
       </p>
 
       <div className="mt-3 flex items-center gap-4">
@@ -140,14 +141,45 @@ export default function AlertCompanyAnalysisPage() {
       {(risks.length > 0 || assumptions.length > 0 || unknowns.length > 0) && (
         <div className="mt-4 border-t border-hairline pt-3">
           <p className="font-data text-[10.5px] uppercase tracking-widest text-muted">Risks, assumptions &amp; unknowns</p>
-          <ul className="mt-2 flex flex-col gap-1 text-sm text-ink">
-            {[...risks, ...assumptions, ...unknowns].map((item, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="text-muted" aria-hidden="true">•</span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+          {risks.length > 0 && (
+            <div className="mt-2">
+              <p className="font-data text-[10px] uppercase tracking-widest text-muted">Risks</p>
+              <ul className="mt-1 flex flex-col gap-1 text-sm text-ink">
+                {risks.map((item, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-muted" aria-hidden="true">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {assumptions.length > 0 && (
+            <div className="mt-2">
+              <p className="font-data text-[10px] uppercase tracking-widest text-muted">Assumptions</p>
+              <ul className="mt-1 flex flex-col gap-1 text-sm text-ink">
+                {assumptions.map((item, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-muted" aria-hidden="true">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {unknowns.length > 0 && (
+            <div className="mt-2">
+              <p className="font-data text-[10px] uppercase tracking-widest text-muted">Unknowns</p>
+              <ul className="mt-1 flex flex-col gap-1 text-sm text-ink">
+                {unknowns.map((item, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-muted" aria-hidden="true">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -174,7 +206,7 @@ export default function AlertCompanyAnalysisPage() {
           </div>
           {company.contradiction_note && (
             <p className="mt-2 flex items-start gap-1.5 text-bearish">
-              <span aria-hidden="true">⚠</span>
+              <span aria-hidden="true" className="font-data font-bold">!</span>
               <span>{company.contradiction_note}</span>
             </p>
           )}
