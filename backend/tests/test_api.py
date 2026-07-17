@@ -329,6 +329,44 @@ def test_list_alerts_limits_to_the_most_recent_alerts(db_session):
     app.dependency_overrides.clear()
 
 
+def test_list_alerts_survives_nan_financial_fields(db_session):
+    # Reproduces a production 500: a division-by-zero bug in
+    # app.outcomes.price_fetcher (since fixed) persisted NaN into
+    # AlertCompany.return_1m/return_3m/price_at_analysis. NaN is valid
+    # Python but not valid JSON -- Starlette's JSONResponse raised
+    # ValueError and took down the whole /api/alerts endpoint on the first
+    # row that had one. Old rows with NaN already in the DB must still
+    # serialize cleanly (as null) rather than 500ing again.
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(source="test", url="https://example.com/nan", title="Nan headline", status="ANALYZED")
+    db_session.add(article)
+    db_session.commit()
+    company = Company(ticker="NANCO.NS", name="Nan Co", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="x", basis="direct_mention",
+        price_at_analysis=float("nan"), return_1m=float("nan"), return_3m=float("inf"),
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_payload = response.json()[0]["companies"][0]
+    assert company_payload["price_at_analysis"] is None
+    assert company_payload["return_1m"] is None
+    assert company_payload["return_3m"] is None
+
+    app.dependency_overrides.clear()
+
+
 def test_list_articles_returns_all(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)

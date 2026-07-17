@@ -1,3 +1,5 @@
+import math
+
 import yfinance as yf
 
 
@@ -16,9 +18,17 @@ def fetch_price_series(ticker: str, period: str) -> list[dict] | None:
         close = history["Close"]
         if len(close) == 0:
             return None
-        return [
+        # Drop individual days yfinance reports as NaN (a gap/glitch, not a
+        # real price) rather than propagating them -- both because the JSON
+        # encoder can't serialize NaN (see price_fetcher.py's fix for the
+        # matching bug) and because callers use the *last* point as "current
+        # price" (financial_context.fetch_financial_snapshot), which must
+        # never be a NaN masquerading as a real value.
+        points = [
             {"date": index.strftime("%Y-%m-%d"), "close": float(value)}
             for index, value in close.items()
+            if math.isfinite(float(value))
         ]
+        return points or None
     except Exception:
         return None

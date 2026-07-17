@@ -1,3 +1,5 @@
+import math
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
@@ -21,6 +23,19 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 # created means this endpoint's response size (and, before the eager-loading
 # fix below, its query count) grows forever as alerts accumulate.
 ALERTS_LIMIT = 200
+
+
+def _finite_or_none(value: float | None) -> float | None:
+    # yfinance-derived columns (price_at_analysis/return_1m/return_3m) can
+    # already hold NaN/Infinity in the DB from a since-fixed division-by-zero
+    # bug in app.outcomes.price_fetcher (a zero/missing close price). NaN is
+    # valid Python but not valid JSON -- Starlette's JSONResponse raises
+    # ValueError and 500s the whole endpoint on the first row that has one.
+    # Sanitizing here, not just at the source, means old corrupted rows
+    # (already persisted before that fix) can't take the feed down either.
+    if value is None or not math.isfinite(value):
+        return None
+    return value
 
 
 def _serialize_alert(
@@ -52,9 +67,9 @@ def _serialize_alert(
             "assumptions": _decode_json_list(ac.assumptions_json),
             "unknowns": _decode_json_list(ac.unknowns_json),
             "alternative_hypothesis": ac.alternative_hypothesis,
-            "price_at_analysis": ac.price_at_analysis,
-            "return_1m": ac.return_1m,
-            "return_3m": ac.return_3m,
+            "price_at_analysis": _finite_or_none(ac.price_at_analysis),
+            "return_1m": _finite_or_none(ac.return_1m),
+            "return_3m": _finite_or_none(ac.return_3m),
             "contradiction_note": ac.contradiction_note,
             "impact_level": ac.impact_level,
             "parent_company_id": ac.parent_company_id,
