@@ -33,8 +33,11 @@ describe('LevelTree', () => {
 
   it('renders only a Direct Impact branch when every company is direct', () => {
     render(<LevelTree companies={[company({ company_id: 1, ticker: 'NVDA' })]} />);
-    expect(screen.getByText('Direct Impact')).toBeInTheDocument();
-    expect(screen.queryByText('Indirect Impact — Level 1')).not.toBeInTheDocument();
+    // ChartCardShell's legend statically lists all three level labels regardless
+    // of which levels have data, so "Direct Impact" (section header + legend
+    // entry) appears twice while an absent level's label appears once (legend only).
+    expect(screen.getAllByText('Direct Impact')).toHaveLength(2);
+    expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(1);
     expect(screen.getByText('NVDA')).toBeInTheDocument();
   });
 
@@ -49,8 +52,8 @@ describe('LevelTree', () => {
         ]}
       />,
     );
-    expect(screen.getByText('Direct Impact')).toBeInTheDocument();
-    expect(screen.getByText('Indirect Impact — Level 1')).toBeInTheDocument();
+    expect(screen.getAllByText('Direct Impact')).toHaveLength(2);
+    expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(2);
     expect(screen.getByText(/via Alpha Co \(NVDA\)/i)).toBeInTheDocument();
     expect(screen.getByText('TSM')).toBeInTheDocument();
   });
@@ -65,7 +68,7 @@ describe('LevelTree', () => {
         ]}
       />,
     );
-    expect(screen.getByText('Indirect Impact — Level 2')).toBeInTheDocument();
+    expect(screen.getAllByText('Indirect Impact — Level 2')).toHaveLength(2);
     expect(screen.getByText(/via TSMC \(TSM\)/i)).toBeInTheDocument();
     expect(screen.getByText('ASML.NS')).toBeInTheDocument();
   });
@@ -75,5 +78,40 @@ describe('LevelTree', () => {
     render(<LevelTree companies={[company({ company_id: 1, ticker: 'NVDA', rationale: 'Export ban hits Nvidia directly.' })]} />);
     await userEvent.click(screen.getByText('NVDA'));
     expect(screen.getByText(/Export ban hits Nvidia directly/)).toBeInTheDocument();
+  });
+
+  it('renders wrapped in ChartCardShell with the Impact Tree title and number 1', () => {
+    render(<LevelTree companies={[company({ company_id: 1, ticker: 'NVDA' })]} />);
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('Impact Tree')).toBeInTheDocument();
+  });
+
+  it('forceCollapse with mode collapse hides every card, mode expand shows them again', () => {
+    const companies = [
+      company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
+      company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
+    ];
+    const { rerender } = render(<LevelTree companies={companies} />);
+    expect(screen.getByText('NVDA')).toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter>
+        <LanguageProvider>
+          <LevelTree companies={companies} forceCollapse={{ mode: 'collapse', version: 1 }} />
+        </LanguageProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText('NVDA')).not.toBeInTheDocument();
+    expect(screen.queryByText('TSM')).not.toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter>
+        <LanguageProvider>
+          <LevelTree companies={companies} forceCollapse={{ mode: 'expand', version: 2 }} />
+        </LanguageProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('NVDA')).toBeInTheDocument();
+    expect(screen.getByText('TSM')).toBeInTheDocument();
   });
 });

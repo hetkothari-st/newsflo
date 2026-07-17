@@ -130,8 +130,11 @@ describe('AlertChartsPage', () => {
     await waitFor(() => expect(screen.getByText('Levels')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Drilldown'));
     fireEvent.click(screen.getByText('Levels'));
-    await waitFor(() => expect(screen.getByText('Direct Impact')).toBeInTheDocument());
-    expect(screen.getByText('Indirect Impact — Level 1')).toBeInTheDocument();
+    // LevelTree's ChartCardShell legend statically lists all three level
+    // labels, so an active level's label appears twice (section header +
+    // legend entry) rather than once.
+    await waitFor(() => expect(screen.getAllByText('Direct Impact')).toHaveLength(2));
+    expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(2);
     expect(screen.getByText(/via Reliance Industries/i)).toBeInTheDocument();
   });
 });
