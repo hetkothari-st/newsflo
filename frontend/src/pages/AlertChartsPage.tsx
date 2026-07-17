@@ -193,13 +193,6 @@ export default function AlertChartsPage() {
   // });
   // --- end disabled chart system ---
 
-  const visibleCompanies =
-    alert == null
-      ? []
-      : breadth === 'normal'
-        ? alert.companies.filter((c) => impactLevelKey(c) === 'direct')
-        : alert.companies;
-
   // --- Chart system disabled: blank slate, chart rebuild pending ---
   // const { toggle, selected, selectedId } = useCompanySelection(visibleCompanies);
   // --- end disabled chart system ---
@@ -237,7 +230,7 @@ export default function AlertChartsPage() {
           ))}
         </div>
       </div>
-      <StatBar companies={visibleCompanies} breadth={breadth} />
+      <StatBar companies={alert.companies} breadth={breadth} />
       <div className="flex-1 overflow-y-auto">
         <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} />
       </div>
