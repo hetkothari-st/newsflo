@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import { computeNetSignal } from '../features/visualize/transforms';
 import { impactLevelKey } from '../features/visualize/impactLevels';
+import ImpactTree from '../features/visualize/charts/ImpactTree';
 
 // --- Chart system disabled: blank slate, chart rebuild pending ---
 // import { Link } from 'react-router-dom';
@@ -237,52 +238,9 @@ export default function AlertChartsPage() {
         </div>
       </div>
       <StatBar companies={visibleCompanies} breadth={breadth} />
-      {/* --- Chart system disabled: blank slate, chart rebuild pending ---
-      {visibleCompanies.length === 0 ? (
-        <p className="p-4 text-xs uppercase tracking-widest text-muted">
-          No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.
-        </p>
-      ) : breadth === 'normal' ? (
-        <>
-          <DirectlyAffectedSectors companies={visibleCompanies} selectedId={selectedId} onSelect={toggle} />
-          {selected && (
-            <div className="border-b border-hairline p-4">
-              <ReasoningPanel company={selected} eventType={alert.event_type} />
-            </div>
-          )}
-          <ImpactSummaryBanner companies={visibleCompanies} alertId={alert.id} title="Impact Summary" />
-        </>
-      ) : (
-        <>
-          <div className="flex items-center justify-end gap-3 border-b border-hairline px-4 py-2 text-xs">
-            <button type="button" onClick={expandAll} className="text-muted hover:text-ink">
-              Expand All
-            </button>
-            <button type="button" onClick={collapseAll} className="text-muted hover:text-ink">
-              Collapse All
-            </button>
-          </div>
-          <LevelTree companies={visibleCompanies} eventType={alert.event_type} forceCollapse={forceCollapse} />
-          <ImpactSummaryBanner companies={visibleCompanies} alertId={alert.id} title="Full Impact Summary" />
-        </>
-      )}
-      <div className="flex gap-4 overflow-x-auto border-b border-hairline px-4 py-2">
-        {CHARTS.map((chart, i) => (
-          <button
-            key={chart.key}
-            type="button"
-            onClick={() => setIndex(i)}
-            className={`text-xs uppercase tracking-widest ${i === index ? 'text-ink' : 'text-muted'}`}
-          >
-            {chart.label}
-          </button>
-        ))}
-      </div>
       <div className="flex-1 overflow-y-auto">
-        {visibleCompanies.length > 0 && <Component companies={visibleCompanies} eventType={alert.event_type} />}
+        <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} />
       </div>
-      --- end disabled chart system --- */}
-      <div className="flex-1" />
     </div>
   );
 }

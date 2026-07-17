@@ -72,7 +72,10 @@ describe('AlertChartsPage', () => {
   it('fetches the alert by route id and shows the article title', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('Crude prices ease on supply news')).toBeInTheDocument());
+    // The title also appears inside ImpactTree's news node, so scope to the page heading.
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Crude prices ease on supply news' })).toBeInTheDocument(),
+    );
   });
 
   it('shows an error state when the fetch fails', async () => {
