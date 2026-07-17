@@ -76,20 +76,20 @@ describe('AlertChartsPage', () => {
   it('shows the pager labels for all six chart types', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('Sector')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('8 · Sector')).toBeInTheDocument());
     expect(screen.getByText('Tier')).toBeInTheDocument();
     expect(screen.getByText('Impact')).toBeInTheDocument();
-    expect(screen.getByText('Split')).toBeInTheDocument();
-    expect(screen.getByText('Confidence')).toBeInTheDocument();
-    expect(screen.getByText('Timeline')).toBeInTheDocument();
+    expect(screen.getByText('6 · Split')).toBeInTheDocument();
+    expect(screen.getByText('5 · Confidence')).toBeInTheDocument();
+    expect(screen.getByText('7 · Timeline')).toBeInTheDocument();
   });
 
   it('advances to the next chart type when the pager control is clicked', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
     // Normal view now shows the company both in the new "Directly Affected
-    // Sectors" grid and in the Sector chart tab below it, so it legitimately
-    // appears twice (same pattern as the ChartCardShell legend collision).
+    // Sectors" grid and in the default Impact Tree chart tab below it, so it
+    // legitimately appears twice (same pattern as the ChartCardShell legend collision).
     await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
     fireEvent.click(screen.getByText('Tier'));
     // Tier view renders the same company under a tier-row label instead of a sector tile.
@@ -108,7 +108,7 @@ describe('AlertChartsPage', () => {
     // Normal: both direct_mention (RIL) and sector_inference (ONGC) count as
     // impact_level="direct" -- only genuinely indirect companies are hidden.
     // Each appears twice: once in the new "Directly Affected Sectors" grid,
-    // once in the Sector chart tab below it (both are still shown in Normal).
+    // once in the default Impact Tree chart tab below it (both are still shown in Normal).
     await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
     expect(screen.getAllByText('ONGC')).toHaveLength(2);
     expect(screen.queryByText('TSM')).not.toBeInTheDocument();
@@ -132,9 +132,9 @@ describe('AlertChartsPage', () => {
   it('shows the Levels tab and groups an indirect company under its parent', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, indirectCompany] }));
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('Levels')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('1 · Impact Tree')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Drilldown'));
-    fireEvent.click(screen.getByText('Levels'));
+    fireEvent.click(screen.getByText('1 · Impact Tree'));
     // LevelTree's ChartCardShell legend statically lists all three level
     // labels, so an active level's label appears twice (section header +
     // legend entry) rather than once.
@@ -165,7 +165,7 @@ describe('AlertChartsPage Normal View', () => {
     await waitFor(() => expect(screen.getByText('Directly Affected Sectors')).toBeInTheDocument());
     expect(screen.getByText('Impact Summary')).toBeInTheDocument();
     // Appears twice: once in the new Directly Affected Sectors grid, once in
-    // the default Sector chart tab still rendered below it.
+    // the default Impact Tree chart tab still rendered below it.
     expect(screen.getAllByText('HDFCBANK')).toHaveLength(2);
   });
 });

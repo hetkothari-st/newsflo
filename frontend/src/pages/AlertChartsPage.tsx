@@ -19,13 +19,13 @@ import TimelineTree from '../features/visualize/charts/TimelineTree';
 import LevelTree from '../features/visualize/charts/LevelTree';
 
 const CHARTS = [
-  { key: 'sector', label: 'Sector', Component: SectorTree },
-  { key: 'levels', label: 'Levels', Component: LevelTree },
+  { key: 'levels', label: '1 · Impact Tree', Component: LevelTree },
   { key: 'tier', label: 'Tier', Component: TierRows },
   { key: 'impact', label: 'Impact', Component: ImpactBar },
-  { key: 'split', label: 'Split', Component: SplitTree },
-  { key: 'confidence', label: 'Confidence', Component: ConfidenceTree },
-  { key: 'timeline', label: 'Timeline', Component: TimelineTree },
+  { key: 'confidence', label: '5 · Confidence', Component: ConfidenceTree },
+  { key: 'split', label: '6 · Split', Component: SplitTree },
+  { key: 'timeline', label: '7 · Timeline', Component: TimelineTree },
+  { key: 'sector', label: '8 · Sector', Component: SectorTree },
 ] as const;
 
 // Normal = the article's own direct impact only (both actually-direct
