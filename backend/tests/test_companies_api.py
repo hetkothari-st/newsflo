@@ -333,6 +333,25 @@ def test_get_company_prices_invalid_period_returns_400(db_session):
     app.dependency_overrides.clear()
 
 
+def test_get_company_prices_works_for_global_company(db_session, monkeypatch):
+    from app.routers import companies as companies_router
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    company = Company(ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market_cap=None)
+    db_session.add(company)
+    db_session.commit()
+    monkeypatch.setattr(
+        companies_router, "fetch_price_series",
+        lambda ticker, period: [{"date": "2026-01-01", "close": 200.0}],
+    )
+    client = TestClient(app)
+
+    body = client.get(f"/api/companies/{company.id}/prices?period=1mo").json()
+
+    assert body == {"period": "1mo", "points": [{"date": "2026-01-01", "close": 200.0}], "available": True}
+    app.dependency_overrides.clear()
+
+
 def test_get_company_live_price_unavailable_when_no_instrument_token(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)

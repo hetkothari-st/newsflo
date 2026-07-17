@@ -27,6 +27,13 @@ def _get_indian_company_or_404(db: Session, company_id: int) -> Company:
     return company
 
 
+def _get_company_or_404(db: Session, company_id: int) -> Company:
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if company is None:
+        raise HTTPException(404, "Company not found")
+    return company
+
+
 @router.get("")
 def list_companies(market: str | None = None, db: Session = Depends(get_db)):
     # Public reference data (no auth), matching GET /api/articles' pattern.
@@ -104,7 +111,7 @@ def get_company_history(company_id: int, before: str | None = None, limit: int =
 
 @router.get("/{company_id}/prices")
 def get_company_prices(company_id: int, period: str = "6mo", db: Session = Depends(get_db)):
-    company = _get_indian_company_or_404(db, company_id)
+    company = _get_company_or_404(db, company_id)
     if period not in PRICE_SERIES_PERIODS:
         raise HTTPException(400, f"Invalid period, must be one of {sorted(PRICE_SERIES_PERIODS)}")
     points = fetch_price_series(company.ticker, period)
