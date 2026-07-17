@@ -26,6 +26,12 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 }
 
 describe('SectorTree', () => {
+  it('renders wrapped in ChartCardShell with number 8 and title Sector Tree', () => {
+    render(<SectorTree companies={[company({})]} />);
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('Sector Tree')).toBeInTheDocument();
+  });
+
   it('renders one branch per sector present, labeled with the human-readable name', () => {
     render(
       <SectorTree
