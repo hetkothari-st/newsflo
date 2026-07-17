@@ -26,6 +26,12 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 }
 
 describe('TimelineTree', () => {
+  it('renders wrapped in ChartCardShell with number 7 and title Timeline Tree', () => {
+    render(<TimelineTree companies={[company({})]} />);
+    expect(screen.getByText('7')).toBeInTheDocument();
+    expect(screen.getByText('Timeline Tree')).toBeInTheDocument();
+  });
+
   it('renders one stage per horizon present, in fixed chronological order', () => {
     render(
       <TimelineTree
