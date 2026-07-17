@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Alert, AlertCompany } from '../lib/api';
-import type { TranslationKey } from '../lib/i18n';
+// TranslationKey only typed the commented-out GROUP_LABEL_KEY below.
+// import type { TranslationKey } from '../lib/i18n';
 import { useLanguage } from '../lib/language';
 import InsightCard from './InsightCard';
 import SentimentBar from '../features/visualize/SentimentBar';
@@ -15,12 +16,14 @@ import {
 
 type Tab = 'predicted' | 'my_demat';
 
-const GROUP_MODES: GroupMode[] = ['tier', 'impact', 'sector'];
-const GROUP_LABEL_KEY: Record<GroupMode, TranslationKey> = {
-  tier: 'companies.groupTier',
-  impact: 'companies.groupImpact',
-  sector: 'companies.groupSector',
-};
+// Only referenced by the group-by selector, which is commented out below --
+// commented out alongside it rather than removed.
+// const GROUP_MODES: GroupMode[] = ['tier', 'impact', 'sector'];
+// const GROUP_LABEL_KEY: Record<GroupMode, TranslationKey> = {
+//   tier: 'companies.groupTier',
+//   impact: 'companies.groupImpact',
+//   sector: 'companies.groupSector',
+// };
 
 function groupCompanies(mode: GroupMode, companies: AlertCompany[]): CompanyGroup[] {
   if (mode === 'impact') return groupByImpact(companies);
@@ -43,7 +46,9 @@ export default function AlertCompanies({
   const { t } = useLanguage();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('predicted');
-  const [groupMode, setGroupMode] = useState<GroupMode>('tier');
+  // setGroupMode is unused while the group-by selector below is commented
+  // out -- re-add it to this destructure when the selector comes back.
+  const [groupMode] = useState<GroupMode>('tier');
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
   const grouped = groupCompanies(groupMode, visible);
@@ -91,6 +96,9 @@ export default function AlertCompanies({
           </button>
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {/* Group-by selector commented out per request -- keep groupMode
+              defaulted to 'tier' (see useState above) rather than removing
+              the grouping logic itself.
           <label className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted">
             {t('companies.group')}
             <select
@@ -105,6 +113,7 @@ export default function AlertCompanies({
               ))}
             </select>
           </label>
+          */}
           {visible.length > 0 && (
             <button
               type="button"

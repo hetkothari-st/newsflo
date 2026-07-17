@@ -89,28 +89,30 @@ describe('AlertCompanies', () => {
     ]);
   });
 
-  it('shows Bullish/Bearish group headers with counts when grouped by Impact', async () => {
+  // The group-by selector is commented out in AlertCompanies.tsx (no
+  // combobox to drive these anymore) -- skipped, not deleted, to match.
+  it.skip('shows Bullish/Bearish group headers with counts when grouped by Impact', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
     await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
     expect(screen.getByText('Bullish · 1')).toBeInTheDocument();
     expect(screen.getByText('Bearish · 1')).toBeInTheDocument();
   });
 
-  it('shows sector group headers with counts when grouped by Sector', async () => {
+  it.skip('shows sector group headers with counts when grouped by Sector', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
     await userEvent.selectOptions(screen.getByRole('combobox'), 'sector');
     expect(screen.getByText('Energy · 1')).toBeInTheDocument();
     expect(screen.getByText('Financials · 1')).toBeInTheDocument();
   });
 
-  it('mutes sector-inferred companies relative to direct-mention companies when grouped', async () => {
+  it.skip('mutes sector-inferred companies relative to direct-mention companies when grouped', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
     await userEvent.selectOptions(screen.getByRole('combobox'), 'impact');
     expect(screen.getByText('Reliance Industries').closest('.opacity-70')).toBeNull();
     expect(screen.getByText('ONGC').closest('.opacity-70')).not.toBeNull();
   });
 
-  it('shows the empty-state message instead of a blank panel when Impact mode has no groupable companies', async () => {
+  it.skip('shows the empty-state message instead of a blank panel when Impact mode has no groupable companies', async () => {
     const noDirectionAlert: Alert = {
       ...alert,
       companies: alert.companies.map((c) => ({ ...c, direction: 'unknown' })),
