@@ -2,16 +2,20 @@ import { useRef, useState } from 'react';
 import type { PricePoint } from '../../lib/api';
 import { layoutPriceChart, nearestPointIndex } from './priceChartLayout';
 
-const WIDTH = 300;
-const AXIS_WIDTH = 42; // reserved right-side margin for min/max price labels
+const WIDTH = 320;
+const AXIS_WIDTH = 52; // reserved right-side margin for comma-formatted price labels
 const CHART_WIDTH = WIDTH - AXIS_WIDTH;
-const HEIGHT = 100;
-const PADDING_Y = 8; // keeps the line off the top/bottom edge of the viewBox
+const HEIGHT = 120;
+const PADDING_Y = 14; // keeps the line -- and the max/min axis labels -- off the top/bottom edge
 
 function formatTooltipDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function formatAxisPrice(value: number): string {
+  return Math.round(value).toLocaleString();
 }
 
 export default function PriceChart({
@@ -42,10 +46,11 @@ export default function PriceChart({
   const hovered = hoverIndex !== null ? { coord: layout.points[hoverIndex], point: points[hoverIndex] } : null;
 
   const midValue = (layout.max + layout.min) / 2;
-  const axisLabelX = CHART_WIDTH + 5;
+  const axisLabelX = CHART_WIDTH + 8;
   const maxY = PADDING_Y;
   const midY = HEIGHT / 2;
   const minY = HEIGHT - PADDING_Y;
+  const TICK_LENGTH = 4;
 
   return (
     <div className="relative">
@@ -54,19 +59,33 @@ export default function PriceChart({
         role="img"
         aria-label={`Price chart, ${layout.trend}`}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="h-24 w-full"
+        className="h-32 w-full"
         onMouseMove={(e) => updateHoverFromClientX(e.clientX)}
         onMouseLeave={() => setHoverIndex(null)}
         onTouchStart={(e) => updateHoverFromClientX(e.touches[0].clientX)}
         onTouchMove={(e) => updateHoverFromClientX(e.touches[0].clientX)}
       >
-        <line x1={0} x2={CHART_WIDTH} y1={maxY} y2={maxY} className="stroke-hairline" strokeWidth={1} strokeDasharray="1,3" />
-        <line x1={0} x2={CHART_WIDTH} y1={midY} y2={midY} className="stroke-hairline" strokeWidth={1} strokeDasharray="1,3" />
-        <line x1={0} x2={CHART_WIDTH} y1={minY} y2={minY} className="stroke-hairline" strokeWidth={1} strokeDasharray="1,3" />
-        <line x1={CHART_WIDTH} x2={CHART_WIDTH} y1={0} y2={HEIGHT} className="stroke-hairline" strokeWidth={1} />
-        <text x={axisLabelX} y={maxY + 3} className="fill-muted text-[9px]">{layout.max.toFixed(0)}</text>
-        <text x={axisLabelX} y={midY + 3} className="fill-muted text-[9px]">{midValue.toFixed(0)}</text>
-        <text x={axisLabelX} y={minY + 3} className="fill-muted text-[9px]">{layout.min.toFixed(0)}</text>
+        {[maxY, midY, minY].map((y) => (
+          <line key={y} x1={0} x2={CHART_WIDTH} y1={y} y2={y} className="stroke-hairline" strokeWidth={1} />
+        ))}
+        <line x1={0} x2={0} y1={0} y2={HEIGHT} className="stroke-hairline" strokeWidth={1} />
+        {[
+          { y: maxY, value: layout.max },
+          { y: midY, value: midValue },
+          { y: minY, value: layout.min },
+        ].map(({ y, value }) => (
+          <g key={y}>
+            <line x1={CHART_WIDTH} x2={CHART_WIDTH + TICK_LENGTH} y1={y} y2={y} className="stroke-hairline" strokeWidth={1} />
+            <text
+              x={axisLabelX}
+              y={y}
+              dominantBaseline="middle"
+              className="font-data fill-muted text-[10px] tabular-nums"
+            >
+              {formatAxisPrice(value)}
+            </text>
+          </g>
+        ))}
         <polyline points={polylinePoints} fill="none" strokeWidth={2} className={strokeClass} />
         {hovered && (
           <line

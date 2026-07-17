@@ -1,20 +1,42 @@
 import { useState } from 'react';
 
 // Full static class strings (not built by interpolation) so Tailwind's content
-// scanner keeps them -- same convention as CategorySwatch's SWATCH_CLASS.
+// scanner keeps them -- same convention as CategorySwatch's SWATCH_CLASS,
+// keyed by the same fixed category taxonomy (backend/app/analysis/schemas.py
+// CATEGORIES).
 const COVER_BG: Record<string, string> = {
-  oil_energy: 'bg-swatch-oil_energy/10',
+  oil_gas: 'bg-swatch-oil_gas/10',
   banking: 'bg-swatch-banking/10',
-  auto_ev: 'bg-swatch-auto_ev/10',
+  auto: 'bg-swatch-auto/10',
+  it: 'bg-swatch-it/10',
+  pharma: 'bg-swatch-pharma/10',
+  fmcg: 'bg-swatch-fmcg/10',
+  metals: 'bg-swatch-metals/10',
+  telecom: 'bg-swatch-telecom/10',
+  infra: 'bg-swatch-infra/10',
+  macro_policy: 'bg-swatch-macro_policy/10',
   geopolitics: 'bg-swatch-geopolitics/10',
+  corporate_event: 'bg-swatch-corporate_event/10',
+  market_commentary: 'bg-swatch-market_commentary/10',
+  other: 'bg-swatch-other/10',
 };
 const COVER_BG_FALLBACK = 'bg-swatch-other/10';
 
 const GLYPH_BG: Record<string, string> = {
-  oil_energy: 'bg-swatch-oil_energy',
+  oil_gas: 'bg-swatch-oil_gas',
   banking: 'bg-swatch-banking',
-  auto_ev: 'bg-swatch-auto_ev',
+  auto: 'bg-swatch-auto',
+  it: 'bg-swatch-it',
+  pharma: 'bg-swatch-pharma',
+  fmcg: 'bg-swatch-fmcg',
+  metals: 'bg-swatch-metals',
+  telecom: 'bg-swatch-telecom',
+  infra: 'bg-swatch-infra',
+  macro_policy: 'bg-swatch-macro_policy',
   geopolitics: 'bg-swatch-geopolitics',
+  corporate_event: 'bg-swatch-corporate_event',
+  market_commentary: 'bg-swatch-market_commentary',
+  other: 'bg-swatch-other',
 };
 const GLYPH_BG_FALLBACK = 'bg-swatch-other';
 

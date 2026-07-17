@@ -9,6 +9,18 @@ EVENT_TYPES = [
     "government_spending", "earnings", "merger_acquisition", "banking_metrics",
     "other",
 ]
+# The article-level topical bucket shown as a badge on every feed card
+# (Alert.category) -- unlike EVENT_TYPES (the specific triggering event) or
+# SECTORS (per-company classification), this had NO enum/tool-schema
+# constraint until now, so the LLM sometimes returned a full sentence
+# instead of a short tag, breaking the badge's layout. The first 9 mirror
+# SECTORS exactly (same names) for a single consistent vocabulary across the
+# app; the rest cover news that isn't about one sector.
+CATEGORIES = [
+    "oil_gas", "banking", "auto", "it", "pharma", "fmcg", "metals", "telecom", "infra",
+    "macro_policy", "geopolitics", "corporate_event", "market_commentary",
+    "other",
+]
 # How far removed a company's impact is from the article's direct subject.
 # "direct" covers both actually-direct mentions AND sector-inference fan-out
 # (both are the article's own primary impact, just resolved two different

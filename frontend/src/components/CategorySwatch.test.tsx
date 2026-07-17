@@ -4,8 +4,8 @@ import CategorySwatch from './CategorySwatch';
 
 describe('CategorySwatch', () => {
   it('renders a known category label', () => {
-    render(<CategorySwatch category="oil_energy" />);
-    expect(screen.getByText('Oil & Energy')).toBeInTheDocument();
+    render(<CategorySwatch category="oil_gas" />);
+    expect(screen.getByText('Oil & Gas')).toBeInTheDocument();
   });
   it('humanizes an unknown category label', () => {
     render(<CategorySwatch category="some_other" />);

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.claude_client import analyze_article
+from app.analysis.schemas import CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
@@ -165,6 +166,14 @@ def _persist_alert(
     alert reflects the current calibration state exactly like a brand new
     analysis would.
     """
+    # The tool schema constrains `category` to CATEGORIES, but that's a
+    # request-time hint, not a guarantee -- defend against a provider that
+    # doesn't strictly enforce JSON-schema enums (or a future caller that
+    # bypasses the LLM path) ever persisting a value the frontend's swatch
+    # maps don't recognize, same failure mode that used to let a full
+    # sentence through as a "category" and break the badge's layout.
+    if category not in CATEGORIES:
+        category = "other"
     alert = Alert(
         article_id=article.id, category=category, event_type=event_type,
         prompt_version=PROMPT_VERSION, knowledge_version=KNOWLEDGE_VERSION,

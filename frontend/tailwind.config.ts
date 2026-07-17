@@ -14,12 +14,23 @@ export default {
         bearish: 'rgb(var(--color-bearish) / <alpha-value>)',
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         'accent-secondary': 'rgb(var(--color-accent-secondary) / <alpha-value>)',
+        // Keyed by the fixed category taxonomy (backend/app/analysis/schemas.py
+        // CATEGORIES) -- category identity, unchanged across themes.
         swatch: {
-          oil_energy: '#F5A623',   // amber -- category identity, unchanged across themes
-          banking: '#4A90D9',      // blue
-          auto_ev: '#2DD4BF',      // teal
-          geopolitics: '#E85D4C',  // red-orange
-          other: '#8E8E93',        // gray (fallback)
+          oil_gas: '#F5A623',            // amber
+          banking: '#4A90D9',            // blue
+          auto: '#2DD4BF',               // teal
+          it: '#8B5CF6',                 // violet
+          pharma: '#EC4899',             // pink
+          fmcg: '#EAB308',               // yellow
+          metals: '#78716C',             // stone
+          telecom: '#0EA5E9',            // sky
+          infra: '#EA580C',              // burnt orange
+          macro_policy: '#6366F1',       // indigo
+          geopolitics: '#E85D4C',        // red-orange
+          corporate_event: '#D97706',    // dark amber
+          market_commentary: '#64748B',  // slate
+          other: '#8E8E93',              // gray (fallback)
         },
       },
       fontFamily: {

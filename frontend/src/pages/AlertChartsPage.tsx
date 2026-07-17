@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getAlert, type Alert, type AlertCompany } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import { useHorizontalSwipe } from '../lib/useHorizontalSwipe';
-import { computeNetSignal } from '../features/visualize/transforms';
+import { computeNetSignal, groupBySector, rankByConfidence } from '../features/visualize/transforms';
 import { impactLevelKey } from '../features/visualize/impactLevels';
+import { useCompanySelection } from '../features/visualize/charts/useCompanySelection';
+import ImpactCard from '../features/visualize/charts/cards/ImpactCard';
+import CompanyRow from '../features/visualize/charts/cards/CompanyRow';
+import ReasoningPanel from '../components/ReasoningPanel';
 import SectorTree from '../features/visualize/charts/SectorTree';
 import TierRows from '../features/visualize/charts/TierRows';
 import ImpactBar from '../features/visualize/charts/ImpactBar';
@@ -15,13 +19,13 @@ import TimelineTree from '../features/visualize/charts/TimelineTree';
 import LevelTree from '../features/visualize/charts/LevelTree';
 
 const CHARTS = [
-  { key: 'sector', label: 'Sector', Component: SectorTree },
-  { key: 'levels', label: 'Levels', Component: LevelTree },
+  { key: 'levels', label: '1 · Impact Tree', Component: LevelTree },
   { key: 'tier', label: 'Tier', Component: TierRows },
   { key: 'impact', label: 'Impact', Component: ImpactBar },
-  { key: 'split', label: 'Split', Component: SplitTree },
-  { key: 'confidence', label: 'Confidence', Component: ConfidenceTree },
-  { key: 'timeline', label: 'Timeline', Component: TimelineTree },
+  { key: 'confidence', label: '5 · Confidence', Component: ConfidenceTree },
+  { key: 'split', label: '6 · Split', Component: SplitTree },
+  { key: 'timeline', label: '7 · Timeline', Component: TimelineTree },
+  { key: 'sector', label: '8 · Sector', Component: SectorTree },
 ] as const;
 
 // Normal = the article's own direct impact only (both actually-direct
@@ -74,6 +78,64 @@ function StatBar({ companies, breadth }: { companies: AlertCompany[]; breadth: B
   );
 }
 
+function DirectlyAffectedSectors({
+  companies,
+  selectedId,
+  onSelect,
+}: {
+  companies: AlertCompany[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  const sectors = groupBySector(companies);
+  if (sectors.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-hairline p-4">
+      <p className="text-xs uppercase tracking-widest text-muted">Directly Affected Sectors</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {sectors.map((sector) => (
+          <ImpactCard
+            key={sector.key}
+            label={sector.label}
+            color={sector.color ?? '#557C30'}
+            signal={computeNetSignal(sector.companies)}
+            companyCount={sector.companies.length}
+            onViewDetails={() => onSelect(sector.companies[0].company_id)}
+          >
+            {sector.companies.map((c) => (
+              <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => onSelect(c.company_id)} />
+            ))}
+          </ImpactCard>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ImpactSummaryBanner({ companies, alertId, title }: { companies: AlertCompany[]; alertId: number; title: string }) {
+  if (companies.length === 0) return null;
+  const sectors = groupBySector(companies);
+  const topSector = [...sectors].sort((a, b) => b.companies.length - a.companies.length)[0];
+  const top = rankByConfidence(companies)[0];
+  const signal = computeNetSignal(companies);
+  const outlook = signal.direction === 'even' ? 'a mixed' : signal.direction === 'bullish' ? 'a bullish' : 'a bearish';
+
+  return (
+    <div className="flex flex-col gap-2 border-b border-hairline p-4">
+      <p className="text-xs uppercase tracking-widest text-muted">{title}</p>
+      <p className="text-sm text-ink">
+        This event points to {outlook} outlook concentrated in {topSector.label} (
+        {topSector.companies.length} {topSector.companies.length === 1 ? 'company' : 'companies'}), at{' '}
+        {signal.avgConfidence}% average confidence.
+      </p>
+      <Link to={`/alerts/${alertId}/company/${top.company_id}`} className="self-start text-xs text-muted hover:text-ink">
+        View Full Analysis →
+      </Link>
+    </div>
+  );
+}
+
 export default function AlertChartsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -104,6 +166,15 @@ export default function AlertChartsPage() {
     onSwipeRight: () => (index === 0 ? navigate(-1) : setIndex((i) => Math.max(i - 1, 0))),
   });
 
+  const visibleCompanies =
+    alert == null
+      ? []
+      : breadth === 'normal'
+        ? alert.companies.filter((c) => impactLevelKey(c) === 'direct')
+        : alert.companies;
+
+  const { toggle, selected, selectedId } = useCompanySelection(visibleCompanies);
+
   if (error) {
     return <p className="p-4 text-xs uppercase tracking-widest text-bearish">{error}</p>;
   }
@@ -112,8 +183,6 @@ export default function AlertChartsPage() {
   }
 
   const { Component } = CHARTS[index];
-  const visibleCompanies =
-    breadth === 'normal' ? alert.companies.filter((c) => impactLevelKey(c) === 'direct') : alert.companies;
 
   return (
     <div className="flex min-h-screen flex-col bg-page" {...swipeHandlers}>
@@ -138,6 +207,23 @@ export default function AlertChartsPage() {
         </div>
       </div>
       <StatBar companies={visibleCompanies} breadth={breadth} />
+      {visibleCompanies.length === 0 ? (
+        <p className="p-4 text-xs uppercase tracking-widest text-muted">
+          No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.
+        </p>
+      ) : (
+        breadth === 'normal' && (
+          <>
+            <DirectlyAffectedSectors companies={visibleCompanies} selectedId={selectedId} onSelect={toggle} />
+            {selected && (
+              <div className="border-b border-hairline p-4">
+                <ReasoningPanel company={selected} eventType={alert.event_type} />
+              </div>
+            )}
+            <ImpactSummaryBanner companies={visibleCompanies} alertId={alert.id} title="Impact Summary" />
+          </>
+        )
+      )}
       <div className="flex gap-4 overflow-x-auto border-b border-hairline px-4 py-2">
         {CHARTS.map((chart, i) => (
           <button
@@ -151,13 +237,7 @@ export default function AlertChartsPage() {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
-        {visibleCompanies.length === 0 ? (
-          <p className="p-4 text-xs uppercase tracking-widest text-muted">
-            No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.
-          </p>
-        ) : (
-          <Component companies={visibleCompanies} eventType={alert.event_type} />
-        )}
+        {visibleCompanies.length > 0 && <Component companies={visibleCompanies} eventType={alert.event_type} />}
       </div>
     </div>
   );

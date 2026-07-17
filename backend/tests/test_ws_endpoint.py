@@ -43,7 +43,7 @@ def test_pipeline_broadcasts_new_alert_to_connected_client(db_session, monkeypat
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -61,7 +61,7 @@ def test_pipeline_broadcasts_new_alert_to_connected_client(db_session, monkeypat
             payload = websocket.receive_json()
 
     assert payload["article"]["title"] == "US strikes Iran oil export sites"
-    assert payload["category"] == "oil_energy"
+    assert payload["category"] == "oil_gas"
     assert payload["companies"][0]["ticker"] == "RELIANCE.NS"
     assert payload["companies"][0]["direction"] == "bullish"
     assert payload["companies"][0]["market"] == "IN"

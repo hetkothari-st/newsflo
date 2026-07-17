@@ -29,7 +29,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -43,7 +43,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
 
     assert created == 1
     alert = db_session.query(Alert).one()
-    assert alert.category == "oil_energy"
+    assert alert.category == "oil_gas"
 
     alert_companies = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
     assert len(alert_companies) == 1
@@ -67,15 +67,53 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert refreshed_article.status == "ANALYZED"
 
 
+def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_session, monkeypatch):
+    # The tool schema constrains `category` to CATEGORIES, but that's a
+    # request-time hint to the LLM, not a guarantee -- a provider that
+    # doesn't strictly enforce JSON-schema enums could still return
+    # something else (in the real incident this fix addresses, a full
+    # sentence used as a "category", which broke the feed card's badge
+    # layout). _persist_alert must coerce any such value to "other" rather
+    # than persisting it verbatim.
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/bad-category",
+        title="US strikes Iran oil export sites", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="Indian IT sector rally driven by Tech Mahindra Q1 beat and HCL",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="x",
+            time_horizon="Short-Term",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    assert created == 1
+    alert = db_session.query(Alert).one()
+    assert alert.category == "other"
+    refreshed_article = db_session.query(Article).filter_by(id=article.id).one()
+    assert refreshed_article.category == "other"
+
+
 def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_session, monkeypatch):
     company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
     db_session.add(company)
     db_session.commit()
 
-    # 5 samples of [1, 2, 3, 4, 5] for (oil_energy, this company) -> mean = 3.0, pstdev = sqrt(2).
+    # 5 samples of [1, 2, 3, 4, 5] for (oil_gas, this company) -> mean = 3.0, pstdev = sqrt(2).
     for i, actual in enumerate([1.0, 2.0, 3.0, 4.0, 5.0]):
         db_session.add(CalibrationSample(
-            alert_company_id=i + 1, category="oil_energy", company_id=company.id,
+            alert_company_id=i + 1, category="oil_gas", company_id=company.id,
             direction="bullish", magnitude_actual=actual, horizon_days=1,
         ))
     db_session.commit()
@@ -88,7 +126,7 @@ def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_s
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -126,7 +164,7 @@ def test_process_new_articles_sends_email_notification_for_holder(db_session, mo
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -184,7 +222,7 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -207,7 +245,7 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
 
     alerts = db_session.query(Alert).order_by(Alert.id).all()
     assert len(alerts) == 2
-    assert alerts[0].category == alerts[1].category == "oil_energy"
+    assert alerts[0].category == alerts[1].category == "oil_gas"
 
     first_ac = db_session.query(AlertCompany).filter_by(alert_id=alerts[0].id).one()
     second_ac = db_session.query(AlertCompany).filter_by(alert_id=alerts[1].id).one()
@@ -235,7 +273,7 @@ def test_process_new_articles_sets_image_url_from_og_image_fetch(db_session, mon
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -275,7 +313,7 @@ def test_alert_broadcast_payload_includes_sector(db_session):
     db_session.add(article)
     db_session.commit()
 
-    alert = Alert(article_id=article.id, category="oil_energy", event_type="crude_oil")
+    alert = Alert(article_id=article.id, category="oil_gas", event_type="crude_oil")
     db_session.add(alert)
     db_session.commit()
 
@@ -309,7 +347,7 @@ def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_com
     db_session.add(article)
     db_session.commit()
 
-    alert = Alert(article_id=article.id, category="oil_energy")
+    alert = Alert(article_id=article.id, category="oil_gas")
     db_session.add(alert)
     db_session.commit()
 
@@ -352,7 +390,7 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
             direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="sector-wide tailwind",
@@ -385,7 +423,7 @@ def test_process_new_articles_persists_evidence_discipline_fields(db_session, mo
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy", event_type="crude_oil",
+        category="oil_gas", event_type="crude_oil",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -428,7 +466,7 @@ def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, mon
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy", event_type="crude_oil",
+        category="oil_gas", event_type="crude_oil",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -461,7 +499,7 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy", event_type="crude_oil",
+        category="oil_gas", event_type="crude_oil",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -499,7 +537,7 @@ def test_process_new_articles_no_contradiction_when_snapshot_unavailable(db_sess
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="x",
@@ -532,7 +570,7 @@ def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confid
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="tech", event_type="other",
+        category="it", event_type="other",
         companies=[
             CompanyMention(
                 name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
@@ -576,7 +614,7 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     db_session.commit()
 
     fake_output = AnalysisOutput(
-        category="tech",
+        category="it",
         companies=[
             CompanyMention(
                 name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,

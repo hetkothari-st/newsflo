@@ -32,7 +32,7 @@ def test_full_pipeline_from_rss_entry_to_alert(db_session, monkeypatch):
     assert inserted == 1
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -73,11 +73,11 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
     db_session.add(company)
     db_session.commit()
 
-    # Pre-seed 5 historical outcomes of [1, 2, 3, 4, 5] for (oil_energy, this company)
+    # Pre-seed 5 historical outcomes of [1, 2, 3, 4, 5] for (oil_gas, this company)
     # -> mean = 3.0, pstdev = sqrt(2) ~= 1.41421356 -> calibrated range applies.
     for i, actual in enumerate([1.0, 2.0, 3.0, 4.0, 5.0]):
         db_session.add(CalibrationSample(
-            alert_company_id=i + 1, category="oil_energy", company_id=company.id,
+            alert_company_id=i + 1, category="oil_gas", company_id=company.id,
             direction="bullish", magnitude_actual=actual, horizon_days=1,
         ))
     db_session.commit()
@@ -97,7 +97,7 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
     assert inserted == 1
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -164,7 +164,7 @@ def test_full_pipeline_notifies_holder_end_to_end(db_session, monkeypatch):
 
     # Run the pipeline with a mocked Claude analysis resolving to the held company.
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -215,7 +215,7 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
     reliance = db_session.query(Company).filter_by(ticker="RELIANCE.NS").one()
     put = client.put(
         "/api/watchlist",
-        json={"categories": ["oil_energy"], "company_ids": [reliance.id]},
+        json={"categories": ["oil_gas"], "company_ids": [reliance.id]},
         headers=auth,
     )
     assert put.status_code == 200
@@ -234,7 +234,7 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
     assert inserted == 1
 
     fake_output = AnalysisOutput(
-        category="oil_energy",
+        category="oil_gas",
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
@@ -248,7 +248,7 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
 
     # (a) GET /api/watchlist reflects the saved selection.
     watchlist = client.get("/api/watchlist", headers=auth).json()
-    assert watchlist["categories"] == ["oil_energy"]
+    assert watchlist["categories"] == ["oil_gas"]
     assert [c["ticker"] for c in watchlist["companies"]] == ["RELIANCE.NS"]
 
     # (b) GET /api/companies?market=IN returns the Indian company (and no global).
@@ -264,8 +264,10 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
     assert "AAPL" in glob_tickers
     assert "RELIANCE.NS" not in glob_tickers
 
-    # (c) GET /api/categories reflects the analyzed alert's category.
-    assert client.get("/api/categories").json() == [{"category": "oil_energy", "label": "oil_energy"}]
+    # (c) GET /api/categories returns the fixed taxonomy (not derived from
+    # the DB), which includes the analyzed alert's category among the rest.
+    category_list = client.get("/api/categories").json()
+    assert {"category": "oil_gas", "label": "oil_gas"} in category_list
 
     # (d) The alert itself carries the computed market on its company.
     alert_body = client.get("/api/alerts", headers=auth).json()

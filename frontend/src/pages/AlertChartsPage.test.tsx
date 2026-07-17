@@ -76,18 +76,21 @@ describe('AlertChartsPage', () => {
   it('shows the pager labels for all six chart types', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('Sector')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('8 · Sector')).toBeInTheDocument());
     expect(screen.getByText('Tier')).toBeInTheDocument();
     expect(screen.getByText('Impact')).toBeInTheDocument();
-    expect(screen.getByText('Split')).toBeInTheDocument();
-    expect(screen.getByText('Confidence')).toBeInTheDocument();
-    expect(screen.getByText('Timeline')).toBeInTheDocument();
+    expect(screen.getByText('6 · Split')).toBeInTheDocument();
+    expect(screen.getByText('5 · Confidence')).toBeInTheDocument();
+    expect(screen.getByText('7 · Timeline')).toBeInTheDocument();
   });
 
   it('advances to the next chart type when the pager control is clicked', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('RIL')).toBeInTheDocument());
+    // Normal view now shows the company both in the new "Directly Affected
+    // Sectors" grid and in the default Impact Tree chart tab below it, so it
+    // legitimately appears twice (same pattern as the ChartCardShell legend collision).
+    await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
     fireEvent.click(screen.getByText('Tier'));
     // Tier view renders the same company under a tier-row label instead of a sector tile.
     await waitFor(() => expect(screen.getByText('Nifty 50')).toBeInTheDocument());
@@ -104,8 +107,10 @@ describe('AlertChartsPage', () => {
     renderPage('1');
     // Normal: both direct_mention (RIL) and sector_inference (ONGC) count as
     // impact_level="direct" -- only genuinely indirect companies are hidden.
-    await waitFor(() => expect(screen.getByText('RIL')).toBeInTheDocument());
-    expect(screen.getByText('ONGC')).toBeInTheDocument();
+    // Each appears twice: once in the new "Directly Affected Sectors" grid,
+    // once in the default Impact Tree chart tab below it (both are still shown in Normal).
+    await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
+    expect(screen.getAllByText('ONGC')).toHaveLength(2);
     expect(screen.queryByText('TSM')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Drilldown'));
@@ -127,14 +132,40 @@ describe('AlertChartsPage', () => {
   it('shows the Levels tab and groups an indirect company under its parent', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, indirectCompany] }));
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('Levels')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('1 · Impact Tree')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Drilldown'));
-    fireEvent.click(screen.getByText('Levels'));
+    fireEvent.click(screen.getByText('1 · Impact Tree'));
     // LevelTree's ChartCardShell legend statically lists all three level
     // labels, so an active level's label appears twice (section header +
     // legend entry) rather than once.
     await waitFor(() => expect(screen.getAllByText('Direct Impact')).toHaveLength(2));
     expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(2);
     expect(screen.getByText(/via Reliance Industries/i)).toBeInTheDocument();
+  });
+});
+
+describe('AlertChartsPage Normal View', () => {
+  it('renders a Directly Affected Sectors section and an Impact Summary banner from real alert data', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(
+      alert({
+        event_type: 'repo_rate_change',
+        companies: [
+          {
+            company_id: 1, ticker: 'HDFCBANK', name: 'HDFC Bank', index_tier: 'NIFTY50', sector: 'banking',
+            direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'lower funding cost',
+            key_points: [], confidence_score: 90, time_horizon: 'Short-Term', basis: 'direct_mention',
+            confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [], impact_level: 'direct',
+          },
+        ],
+      }),
+    );
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Directly Affected Sectors')).toBeInTheDocument());
+    expect(screen.getByText('Impact Summary')).toBeInTheDocument();
+    // Appears twice: once in the new Directly Affected Sectors grid, once in
+    // the default Impact Tree chart tab still rendered below it.
+    expect(screen.getAllByText('HDFCBANK')).toHaveLength(2);
   });
 });
