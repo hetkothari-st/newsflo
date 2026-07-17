@@ -5,8 +5,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.analysis.claude_client import build_client
 from app.config import settings
 from app.db import SessionLocal
-from app.ingestion.poller import fetch_new_articles
-from app.ingestion.sources import RSS_FEEDS
+from app.ingestion.benzinga import fetch_new_benzinga_articles
+# RSS ingestion (poller.py + sources.py) is intact and fully working, just
+# not wired in below -- Benzinga's News API is the active source now. Swap
+# the fetch_new_articles(...) call back in (and re-enable this import) to
+# revert.
+# from app.ingestion.poller import fetch_new_articles
+# from app.ingestion.sources import RSS_FEEDS
 from app.outcomes.tracker import check_pending_outcomes
 from app.pipeline import process_new_articles
 from app.translation.groq_translator import (
@@ -45,13 +50,15 @@ def _run_horizon(horizon_days: int) -> None:
 
 
 def _run_ingestion_and_analysis() -> None:
-    """Poll RSS feeds, then run the pipeline over anything new. Claude call
-    failures are already handled per-article by process_new_articles (retry
-    once, then ANALYSIS_FAILED) — this only guards against the poll/pipeline
-    call itself raising, so one bad run never crashes the scheduler thread."""
+    """Poll the news source, then run the pipeline over anything new. Claude
+    call failures are already handled per-article by process_new_articles
+    (retry once, then ANALYSIS_FAILED) — this only guards against the poll/
+    pipeline call itself raising, so one bad run never crashes the scheduler
+    thread."""
     session = SessionLocal()
     try:
-        inserted = fetch_new_articles(session, RSS_FEEDS)
+        inserted = fetch_new_benzinga_articles(session, settings.benzinga_api_key)
+        # inserted = fetch_new_articles(session, RSS_FEEDS)  # RSS -- see import comment above
         client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
         created = process_new_articles(session, client, throttle_seconds=2.5)
         logger.info("Poll cycle: %s new articles, %s alerts created", inserted, created)
