@@ -799,6 +799,36 @@ const CATALOG = {
     en: '{n}d ago', hi: '{n}d ago', mr: '{n}d ago', gu: '{n}d ago', ml: '{n}d ago', te: '{n}d ago',
     ta: '{n}d ago', kn: '{n}d ago', pa: '{n}d ago', bn: '{n}d ago',
   },
+  'insights.horizonImmediate': {
+    en: 'Immediate', hi: 'Immediate', mr: 'Immediate', gu: 'Immediate', ml: 'Immediate', te: 'Immediate',
+    ta: 'Immediate', kn: 'Immediate', pa: 'Immediate', bn: 'Immediate',
+  },
+  'insights.horizonShort': {
+    en: 'Short', hi: 'Short', mr: 'Short', gu: 'Short', ml: 'Short', te: 'Short',
+    ta: 'Short', kn: 'Short', pa: 'Short', bn: 'Short',
+  },
+  'insights.horizonMedium': {
+    en: 'Medium', hi: 'Medium', mr: 'Medium', gu: 'Medium', ml: 'Medium', te: 'Medium',
+    ta: 'Medium', kn: 'Medium', pa: 'Medium', bn: 'Medium',
+  },
+  'insights.horizonLong': {
+    en: 'Long', hi: 'Long', mr: 'Long', gu: 'Long', ml: 'Long', te: 'Long',
+    ta: 'Long', kn: 'Long', pa: 'Long', bn: 'Long',
+  },
+  'insights.impactDirect': {
+    en: 'Direct', hi: 'Direct', mr: 'Direct', gu: 'Direct', ml: 'Direct', te: 'Direct',
+    ta: 'Direct', kn: 'Direct', pa: 'Direct', bn: 'Direct',
+  },
+  'insights.impactIndirect': {
+    en: 'Indirect', hi: 'Indirect', mr: 'Indirect', gu: 'Indirect', ml: 'Indirect', te: 'Indirect',
+    ta: 'Indirect', kn: 'Indirect', pa: 'Indirect', bn: 'Indirect',
+  },
+  'insights.impactIndirectL2': {
+    en: 'Indirect · 2nd-order', hi: 'Indirect · 2nd-order', mr: 'Indirect · 2nd-order',
+    gu: 'Indirect · 2nd-order', ml: 'Indirect · 2nd-order', te: 'Indirect · 2nd-order',
+    ta: 'Indirect · 2nd-order', kn: 'Indirect · 2nd-order', pa: 'Indirect · 2nd-order',
+    bn: 'Indirect · 2nd-order',
+  },
 } as const;
 
 export type TranslationKey = keyof typeof CATALOG;
