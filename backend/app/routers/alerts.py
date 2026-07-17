@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user_optional
+from app.companies.branding import logo_url
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.i18n import get_lang
@@ -36,7 +37,8 @@ def _serialize_alert(
         companies.append({
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
             "index_tier": ac.company.index_tier, "sector": ac.company.sector,
-            "sub_sector": ac.company.sub_sector, "direction": ac.direction,
+            "sub_sector": ac.company.sub_sector, "logo_url": logo_url(ac.company),
+            "direction": ac.direction,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": rationale, "key_points": key_points,
             "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
