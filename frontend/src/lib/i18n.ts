@@ -783,6 +783,22 @@ const CATALOG = {
   'company.period1y': {
     en: '1Y', hi: '1व', mr: '1व', gu: '1વ', ml: '1വ', te: '1సం', ta: '1ஆ', kn: '1ವ', pa: '1ਸ', bn: '1ব',
   },
+  'insights.justNow': {
+    en: 'just now', hi: 'just now', mr: 'just now', gu: 'just now', ml: 'just now', te: 'just now',
+    ta: 'just now', kn: 'just now', pa: 'just now', bn: 'just now',
+  },
+  'insights.minutesAgo': {
+    en: '{n}m ago', hi: '{n}m ago', mr: '{n}m ago', gu: '{n}m ago', ml: '{n}m ago', te: '{n}m ago',
+    ta: '{n}m ago', kn: '{n}m ago', pa: '{n}m ago', bn: '{n}m ago',
+  },
+  'insights.hoursAgo': {
+    en: '{n}h ago', hi: '{n}h ago', mr: '{n}h ago', gu: '{n}h ago', ml: '{n}h ago', te: '{n}h ago',
+    ta: '{n}h ago', kn: '{n}h ago', pa: '{n}h ago', bn: '{n}h ago',
+  },
+  'insights.daysAgo': {
+    en: '{n}d ago', hi: '{n}d ago', mr: '{n}d ago', gu: '{n}d ago', ml: '{n}d ago', te: '{n}d ago',
+    ta: '{n}d ago', kn: '{n}d ago', pa: '{n}d ago', bn: '{n}d ago',
+  },
 } as const;
 
 export type TranslationKey = keyof typeof CATALOG;
