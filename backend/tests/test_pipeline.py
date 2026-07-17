@@ -67,6 +67,39 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert refreshed_article.status == "ANALYZED"
 
 
+def test_process_new_articles_uses_full_content_over_summary_when_available(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/a",
+        title="US strikes Iran oil export sites", content="crude oil markets react",
+        full_content="The full scraped article body, much richer than the summary.",
+        full_content_fetch_attempted_at=pipeline_module.utcnow(),
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_gas",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            key_points=["Crude eases"], confidence_score=85, time_horizon="Short-Term",
+        )],
+    )
+    captured = {}
+    def fake_analyze(client, title, content):
+        captured["content"] = content
+        return fake_output
+    monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
+
+    process_new_articles(db_session, claude_client=object())
+
+    assert captured["content"] == "The full scraped article body, much richer than the summary."
+
+
 def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_session, monkeypatch):
     # The tool schema constrains `category` to CATEGORIES, but that's a
     # request-time hint to the LLM, not a guarantee -- a provider that

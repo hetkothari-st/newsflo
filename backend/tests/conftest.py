@@ -40,6 +40,17 @@ def _no_real_og_image_fetch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_full_text_fetch(monkeypatch):
+    # process_new_articles now calls fetch_pending_full_text for every NEW
+    # article, which would otherwise make a real HTTP GET (see
+    # app/ingestion/full_text.py). Stub it everywhere by default so the
+    # suite never makes network calls; app/ingestion/full_text.py's own
+    # tests exercise the real function directly and are unaffected since
+    # they don't go through app.pipeline.
+    monkeypatch.setattr("app.pipeline.fetch_pending_full_text", lambda session: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_feed_fetch(monkeypatch):
     # fetch_new_articles fetches each RSS feed over a real HTTP GET (see
     # app/ingestion/poller.py). Stub it everywhere by default so the suite

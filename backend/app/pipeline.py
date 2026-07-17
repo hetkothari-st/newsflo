@@ -13,6 +13,7 @@ from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.heuristic import filter_new_articles
+from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, Article, Company, utcnow
 from app.reasoning.confidence import _band as band_for_score
@@ -45,6 +46,10 @@ def _decode_json_list(value: str | None) -> list[str]:
 
 def decode_key_points(alert_company: AlertCompany) -> list[str]:
     return _decode_json_list(alert_company.key_points_json)
+
+
+def article_text(article: Article) -> str:
+    return article.full_content or article.content
 
 
 def _as_aware_utc(dt):
@@ -276,6 +281,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
     to 0 (no delay) so the test suite, which always uses a mocked/instant
     client, is not slowed down; the scheduler passes a real value.
     """
+    fetch_pending_full_text(session)
     filter_new_articles(session)
 
     alerts_created = 0
@@ -311,7 +317,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         analysis = None
         for attempt in range(2):  # try once, retry once
             try:
-                analysis = analyze_article(claude_client, article.title, article.content)
+                analysis = analyze_article(claude_client, article.title, article_text(article))
                 break
             except Exception:
                 if attempt == 0:
