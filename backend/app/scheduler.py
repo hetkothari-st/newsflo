@@ -5,11 +5,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.analysis.claude_client import build_client
 from app.config import settings
 from app.db import SessionLocal
-from app.ingestion.benzinga import fetch_new_benzinga_articles
+from app.ingestion.indianapi import fetch_new_indianapi_articles
 # RSS ingestion (poller.py + sources.py) is intact and fully working, just
-# not wired in below -- Benzinga's News API is the active source now. Swap
-# the fetch_new_articles(...) call back in (and re-enable this import) to
-# revert.
+# not wired in below -- IndianAPI's /news endpoint is the active source now.
+# Swap the fetch_new_articles(...) call back in (and re-enable this import)
+# to revert.
 # from app.ingestion.poller import fetch_new_articles
 # from app.ingestion.sources import RSS_FEEDS
 from app.outcomes.tracker import check_pending_outcomes
@@ -49,19 +49,36 @@ def _run_horizon(horizon_days: int) -> None:
         session.close()
 
 
-def _run_ingestion_and_analysis() -> None:
-    """Poll the news source, then run the pipeline over anything new. Claude
-    call failures are already handled per-article by process_new_articles
-    (retry once, then ANALYSIS_FAILED) — this only guards against the poll/
-    pipeline call itself raising, so one bad run never crashes the scheduler
-    thread."""
+def _run_indianapi_ingestion() -> None:
+    """Poll IndianAPI's /news endpoint for fresh Indian market news. Runs on
+    its own, much longer interval (indianapi_poll_interval_minutes) rather
+    than the fast analysis cycle below -- this key is capped at 500
+    requests/month, nowhere near enough for a 2-minute cadence. Whatever
+    lands here (status=NEW) is picked up and analyzed by the next regular
+    _run_ingestion_and_analysis tick, not here. Any failure is logged, never
+    raised, same as every other scheduler job."""
     session = SessionLocal()
     try:
-        inserted = fetch_new_benzinga_articles(session, settings.benzinga_api_key)
+        inserted = fetch_new_indianapi_articles(session, settings.indianapi_api_key)
+        logger.info("IndianAPI poll: %s new articles", inserted)
+    except Exception:
+        logger.exception("IndianAPI ingestion poll failed")
+    finally:
+        session.close()
+
+
+def _run_ingestion_and_analysis() -> None:
+    """Run the pipeline over any pending (status=NEW) articles, regardless
+    of which ingestion job inserted them. Claude call failures are already
+    handled per-article by process_new_articles (retry once, then
+    ANALYSIS_FAILED) — this only guards against the pipeline call itself
+    raising, so one bad run never crashes the scheduler thread."""
+    session = SessionLocal()
+    try:
         # inserted = fetch_new_articles(session, RSS_FEEDS)  # RSS -- see import comment above
         client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
         created = process_new_articles(session, client, throttle_seconds=2.5)
-        logger.info("Poll cycle: %s new articles, %s alerts created", inserted, created)
+        logger.info("Analysis cycle: %s alerts created", created)
     except Exception:
         logger.exception("Ingestion/analysis poll cycle failed")
     finally:
@@ -107,6 +124,12 @@ def start_scheduler() -> None:
             args=[horizon],
             id=f"outcome_tracker_{horizon}d",
         )
+    scheduler.add_job(
+        _run_indianapi_ingestion,
+        trigger="interval",
+        minutes=settings.indianapi_poll_interval_minutes,
+        id="indianapi_poll",
+    )
     scheduler.add_job(
         _run_ingestion_and_analysis,
         trigger="interval",

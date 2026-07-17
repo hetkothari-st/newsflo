@@ -44,10 +44,15 @@ class Settings(BaseSettings):
     # optional-at-dev-time pattern as anthropic_api_key defaulting to "".)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "dev-insecure-secret-change-in-production")
     resend_api_key: str = os.environ.get("RESEND_API_KEY", "")
-    # News ingestion source -- see app/ingestion/benzinga.py. The RSS-feed
+    # News ingestion source -- see app/ingestion/indianapi.py. The RSS-feed
     # poller (app/ingestion/poller.py + sources.py) is still fully intact,
     # just no longer wired into the scheduler (see scheduler.py).
-    benzinga_api_key: str = os.environ.get("BENZINGA_API_KEY", "")
+    indianapi_api_key: str = os.environ.get("INDIANAPI_API_KEY", "")
+    # This key is capped at 500 requests/month -- runs on its own, much
+    # longer interval than poll_interval_minutes (the analysis cycle, which
+    # stays fast since it just processes whatever's already pending). 120
+    # min = 12/day = ~360-372/month, leaving real headroom under the cap.
+    indianapi_poll_interval_minutes: int = int(os.environ.get("INDIANAPI_POLL_INTERVAL_MINUTES", "120"))
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound
