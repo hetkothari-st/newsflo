@@ -14,7 +14,7 @@ import {
 import type { TranslationKey } from '../lib/i18n';
 import { useLanguage } from '../lib/language';
 import { splitRationaleIntoPoints } from '../lib/reasoning';
-import CompanyAvatar from '../components/CompanyAvatar';
+import CompanyLogo from '../components/CompanyLogo';
 import DirectionArrow from '../components/DirectionArrow';
 import LivePriceReadout from '../components/LivePriceReadout';
 import MentionRow from '../components/MentionRow';
@@ -155,7 +155,7 @@ export default function CompanyPage() {
   return (
     <main className="mx-auto flex max-w-feed flex-col gap-6 px-4 py-8">
       <div className="flex items-center gap-3">
-        <CompanyAvatar ticker={profile.ticker} size="lg" />
+        <CompanyLogo logoUrl={profile.logo_url} ticker={profile.ticker} size="lg" />
         <div>
           <h1 className="font-display text-2xl font-bold text-ink">{profile.name}</h1>
           <p className="text-xs uppercase tracking-widest text-muted">

@@ -61,6 +61,15 @@ export default function AlertCompanyAnalysisPage() {
 
   return (
     <div className="mx-auto max-w-feed px-4 py-8 font-editorial">
+      {company.market === 'IN' && (
+        <Link
+          to={`/company/${company.company_id}`}
+          className="mb-3 inline-block font-data text-xs uppercase tracking-widest text-ink underline"
+        >
+          {t('insights.viewCompanyDetails')}
+        </Link>
+      )}
+
       <p className="font-data text-[11px] uppercase tracking-widest text-muted">
         {alert.event_type ? eventTypeLabel(alert.event_type) : ''}
         {alert.event_type && company.sector ? ' · ' : ''}
@@ -222,15 +231,6 @@ export default function AlertCompanyAnalysisPage() {
             ))}
           </ul>
         </div>
-      )}
-
-      {company.market === 'IN' && (
-        <Link
-          to={`/company/${company.company_id}`}
-          className="mt-4 inline-block border-t border-hairline pt-3 font-data text-xs uppercase tracking-widest text-ink underline"
-        >
-          {t('reasoning.viewDetails')}
-        </Link>
       )}
     </div>
   );

@@ -843,6 +843,12 @@ const CATALOG = {
     ml: 'Read full analysis', te: 'Read full analysis', ta: 'Read full analysis', kn: 'Read full analysis',
     pa: 'Read full analysis', bn: 'Read full analysis',
   },
+  'insights.viewCompanyDetails': {
+    en: 'View company details', hi: 'View company details', mr: 'View company details',
+    gu: 'View company details', ml: 'View company details', te: 'View company details',
+    ta: 'View company details', kn: 'View company details', pa: 'View company details',
+    bn: 'View company details',
+  },
 } as const;
 
 export type TranslationKey = keyof typeof CATALOG;

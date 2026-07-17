@@ -126,7 +126,7 @@ describe('AlertCompanyAnalysisPage', () => {
     render(<AlertCompanyAnalysisPage />, '/alerts/7/company/1');
 
     await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
-    const link = screen.getByRole('link', { name: /view full details/i });
+    const link = screen.getByRole('link', { name: /view company details/i });
     expect(link).toHaveAttribute('href', '/company/1');
   });
 
@@ -136,7 +136,7 @@ describe('AlertCompanyAnalysisPage', () => {
     render(<AlertCompanyAnalysisPage />, '/alerts/7/company/1');
 
     await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
-    expect(screen.queryByRole('link', { name: /view full details/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /view company details/i })).not.toBeInTheDocument();
   });
 
   it('renders nothing crashing when the company id is not found in the alert', async () => {
