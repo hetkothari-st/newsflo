@@ -177,11 +177,16 @@ compact card, but showing everything (no truncation):
 
 - Same header treatment as the compact card (logo, name, ticker, price,
   chart) at a larger size, plus the full confidence/horizon/impact gauge row.
-- Confidence breakdown as a thin (2px) hairline-height segmented bar —
-  segments sized by parsing `confidence_contributors`/`confidence_penalties`
-  (already-computed weighted values from `app.reasoning.confidence`, not
-  re-derived on the frontend) — labeled underneath in mono, not a thick
-  glowing rounded bar.
+- Confidence shown as a single thin (2px) hairline-height fill bar sized by
+  `confidence_score` alone — `confidence_contributors`/`confidence_penalties`
+  are opaque human-readable sentences (e.g. "Historical calibration: 84% hit
+  rate over 12 samples"), not `{label, weight}` pairs (confirmed against
+  `app/reasoning/confidence.py` — the six weight constants are fixed and not
+  exposed per-contributor), so there is no real per-item weight to size
+  segments by. A "segmented bar" would fabricate precision that doesn't
+  exist. Below the bar, render `confidence_contributors` (`+`, `bullish`)
+  and `confidence_penalties` (`−`, `bearish`) as plain mono list lines —
+  same content `ReasoningPanel` already renders, restyled only.
 - Full reasons + evidence as numbered footnotes: each `reasons[i]` gets a
   superscript marker inline (not applicable here since there's no single
   summary sentence to attach markers to on this page — instead render
