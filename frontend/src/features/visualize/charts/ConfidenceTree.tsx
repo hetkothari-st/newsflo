@@ -2,9 +2,10 @@ import { useLanguage } from '../../../lib/language';
 import type { AlertCompany } from '../../../lib/api';
 import { BAND_LABEL_KEY } from '../../../components/ConfidenceBandPill';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { rankByConfidence } from '../transforms';
-import { confidenceBandColor, confidenceBandFromScore, confidenceColor } from '../colors';
-import { TreeRoot, TreeBranch, TreeLeaf } from './tree/Tree';
+import { computeNetSignal, rankByConfidence } from '../transforms';
+import { confidenceBandColor, confidenceBandFromScore } from '../colors';
+import ImpactCard from './cards/ImpactCard';
+import CompanyRow from './cards/CompanyRow';
 import { useCompanySelection } from './useCompanySelection';
 
 // Highest-confidence band first -- matches the mockup's Confidence Tree,
@@ -19,7 +20,7 @@ export default function ConfidenceTree({
   eventType?: string | null;
 }) {
   const { t } = useLanguage();
-  const { toggle, selected } = useCompanySelection(companies);
+  const { toggle, selected, selectedId } = useCompanySelection(companies);
 
   if (companies.length === 0) return null;
 
@@ -29,29 +30,35 @@ export default function ConfidenceTree({
   })).filter((g) => g.companies.length > 0);
 
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <TreeRoot>
+    <div className="flex flex-col gap-4 p-4">
+      {/* Threshold legend -- same High/Medium/Low banding the mockup shows
+          as a colored side rail, compacted into one row since this feature's
+          cards already read top-to-bottom in that order. Only bands actually
+          present below get a legend entry -- an absent band shouldn't appear
+          anywhere on this chart, not even as a key. */}
+      <div className="flex flex-wrap gap-3 text-[11px] text-muted">
+        {groups.map(({ band }) => (
+          <span key={band} className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: confidenceBandColor(band) }} />
+            {t(BAND_LABEL_KEY[band])}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((group) => (
-          <TreeBranch
+          <ImpactCard
             key={group.band}
             label={t(BAND_LABEL_KEY[group.band])}
             color={confidenceBandColor(group.band)}
-            badge={`${group.companies.length}`}
-            badgeColor={confidenceBandColor(group.band)}
+            signal={computeNetSignal(group.companies)}
+            companyCount={group.companies.length}
           >
             {group.companies.map((c) => (
-              <TreeLeaf
-                key={c.company_id}
-                ticker={c.ticker}
-                direction={c.direction}
-                badge={`${c.confidence_score}%`}
-                badgeColor={confidenceColor(c.confidence_score)}
-                onClick={() => toggle(c.company_id)}
-              />
+              <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
             ))}
-          </TreeBranch>
+          </ImpactCard>
         ))}
-      </TreeRoot>
+      </div>
       {selected && <ReasoningPanel company={selected} eventType={eventType} />}
     </div>
   );

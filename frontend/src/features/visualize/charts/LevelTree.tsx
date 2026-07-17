@@ -1,23 +1,16 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { computeNetSignal, type NetSignal } from '../transforms';
+import { computeNetSignal, groupBySector } from '../transforms';
+import { sectorColor } from '../colors';
 import { IMPACT_LEVEL_ORDER, impactLevelColor, impactLevelKey, impactLevelLabel } from '../impactLevels';
-import { TreeRoot, TreeBranch, TreeLeaf } from './tree/Tree';
+import ImpactCard from './cards/ImpactCard';
+import CompanyRow from './cards/CompanyRow';
 import { useCompanySelection } from './useCompanySelection';
 
-function signalBadge(signal: NetSignal): { text: string; color?: string } {
-  if (signal.direction === 'even') return { text: `▬ ${signal.avgConfidence}%` };
-  const bullish = signal.direction === 'bullish';
-  return {
-    text: `${bullish ? '▲' : '▼'} ${signal.avgConfidence}%`,
-    color: bullish ? 'rgb(var(--color-bullish))' : 'rgb(var(--color-bearish))',
-  };
-}
-
 // Groups indirect companies at one level by the parent company (from the
-// PREVIOUS level) they're economically linked through -- e.g. every
-// indirect_l1 entry naming the same direct company as its parent_company_id
-// becomes one branch labeled with that direct company's own name/ticker.
+// level above) they're economically linked through -- e.g. every
+// indirect_l1 entry naming the same direct company as parent_company_id
+// becomes one card labeled with that direct company's own name/ticker.
 function groupByParent(levelCompanies: AlertCompany[], allCompanies: AlertCompany[]) {
   const byId = new Map(allCompanies.map((c) => [c.company_id, c]));
   const byParent = new Map<number, AlertCompany[]>();
@@ -35,11 +28,19 @@ function groupByParent(levelCompanies: AlertCompany[], allCompanies: AlertCompan
     const parent = byId.get(parentId);
     return {
       key: `parent-${parentId}`,
-      label: parent ? `via ${parent.name} (${parent.ticker})` : `via company #${parentId}`,
+      label: parent ? `Via ${parent.name} (${parent.ticker})` : `Via company #${parentId}`,
       companies: kids,
     };
   });
   return { groups, orphaned };
+}
+
+function LevelConnector() {
+  return (
+    <div aria-hidden="true" className="flex justify-center py-0.5">
+      <span className="text-muted">↓</span>
+    </div>
+  );
 }
 
 export default function LevelTree({
@@ -49,7 +50,7 @@ export default function LevelTree({
   companies: AlertCompany[];
   eventType?: string | null;
 }) {
-  const { toggle, selected } = useCompanySelection(companies);
+  const { toggle, selected, selectedId } = useCompanySelection(companies);
 
   const levels = IMPACT_LEVEL_ORDER.map((level) => ({
     level,
@@ -59,38 +60,48 @@ export default function LevelTree({
   if (levels.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <TreeRoot>
-        {levels.map(({ level, companies: levelCompanies }) => {
-          const badge = signalBadge(computeNetSignal(levelCompanies));
-          const color = impactLevelColor(level);
-          if (level === 'direct') {
-            return (
-              <TreeBranch key={level} label={impactLevelLabel(level)} color={color} badge={badge.text} badgeColor={badge.color}>
-                {levelCompanies.map((c) => (
-                  <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
-                ))}
-              </TreeBranch>
-            );
-          }
-          const { groups, orphaned } = groupByParent(levelCompanies, companies);
-          return (
-            <TreeBranch key={level} label={impactLevelLabel(level)} color={color} badge={badge.text} badgeColor={badge.color}>
-              {groups.map((group) => (
-                <TreeBranch key={group.key} label={group.label} color={color}>
-                  {group.companies.map((c) => (
-                    <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
+    <div className="flex flex-col p-4">
+      {levels.map(({ level, companies: levelCompanies }, i) => {
+        const color = impactLevelColor(level);
+        const cards =
+          level === 'direct'
+            ? groupBySector(levelCompanies).map((g) => ({ key: g.key, label: g.label, companies: g.companies }))
+            : (() => {
+                const { groups, orphaned } = groupByParent(levelCompanies, companies);
+                return orphaned.length > 0 ? [...groups, { key: 'orphaned', label: 'Other', companies: orphaned }] : groups;
+              })();
+
+        return (
+          <div key={level} className="flex flex-col">
+            {i > 0 && <LevelConnector />}
+            <div className="mb-2 flex items-center gap-2">
+              <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+              <p className="text-xs uppercase tracking-widest text-ink">{impactLevelLabel(level)}</p>
+              <p className="text-xs text-muted">({levelCompanies.length})</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {cards.map((card) => (
+                <ImpactCard
+                  key={card.key}
+                  label={card.label}
+                  color={level === 'direct' ? sectorColor(card.key) : color}
+                  signal={computeNetSignal(card.companies)}
+                  companyCount={card.companies.length}
+                >
+                  {card.companies.map((c) => (
+                    <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
                   ))}
-                </TreeBranch>
+                </ImpactCard>
               ))}
-              {orphaned.map((c) => (
-                <TreeLeaf key={c.company_id} ticker={c.ticker} direction={c.direction} onClick={() => toggle(c.company_id)} />
-              ))}
-            </TreeBranch>
-          );
-        })}
-      </TreeRoot>
-      {selected && <ReasoningPanel company={selected} eventType={eventType} />}
+            </div>
+          </div>
+        );
+      })}
+      {selected && (
+        <div className="mt-4">
+          <ReasoningPanel company={selected} eventType={eventType} />
+        </div>
+      )}
     </div>
   );
 }

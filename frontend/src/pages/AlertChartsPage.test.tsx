@@ -132,6 +132,6 @@ describe('AlertChartsPage', () => {
     fireEvent.click(screen.getByText('Levels'));
     await waitFor(() => expect(screen.getByText('Direct Impact')).toBeInTheDocument());
     expect(screen.getByText('Indirect Impact — Level 1')).toBeInTheDocument();
-    expect(screen.getByText(/via Reliance Industries/)).toBeInTheDocument();
+    expect(screen.getByText(/via Reliance Industries/i)).toBeInTheDocument();
   });
 });

@@ -31,36 +31,44 @@ const CHARTS = [
 // competitor chain (indirect_l1/indirect_l2), regardless of how deep.
 type Breadth = 'normal' | 'drilldown';
 
+function StatTile({ label, value, valueClass, caption }: { label: string; value: string; valueClass?: string; caption?: string }) {
+  return (
+    <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-hairline p-3 theme-light:border-transparent theme-light:shadow-neu-sm">
+      <p className="text-[11px] uppercase tracking-widest text-muted">{label}</p>
+      <p className={`text-lg font-medium ${valueClass ?? 'text-ink'}`}>{value}</p>
+      {caption && <p className="text-[11px] text-muted">{caption}</p>}
+    </div>
+  );
+}
+
 function StatBar({ companies, breadth }: { companies: AlertCompany[]; breadth: Breadth }) {
   const signal = computeNetSignal(companies);
   const sectorCount = new Set(companies.map((c) => c.sector).filter(Boolean)).size;
+  const subSectorCount = new Set(companies.map((c) => c.sub_sector).filter(Boolean)).size;
   const levelCounts = { direct: 0, indirect_l1: 0, indirect_l2: 0 } as Record<string, number>;
   for (const c of companies) levelCounts[impactLevelKey(c)] += 1;
 
+  const overallLabel = signal.direction === 'even' ? 'Mixed' : signal.direction === 'bullish' ? 'Bullish' : 'Bearish';
+  const overallGlyph = signal.direction === 'even' ? '▬' : signal.direction === 'bullish' ? '▲' : '▼';
+  const overallClass = signal.direction === 'even' ? 'text-muted' : signal.direction === 'bullish' ? 'text-bullish' : 'text-bearish';
+
   return (
-    <div className="flex flex-wrap gap-4 border-b border-hairline px-4 py-3 text-xs">
-      <div>
-        <p className="uppercase tracking-widest text-muted">Overall Impact</p>
-        <p className={signal.direction === 'even' ? 'text-muted' : signal.direction === 'bullish' ? 'text-bullish' : 'text-bearish'}>
-          {signal.direction === 'even' ? 'Mixed' : signal.direction === 'bullish' ? 'Bullish' : 'Bearish'}
-          <span className="ml-1 text-muted">({signal.avgConfidence}% confidence)</span>
-        </p>
-      </div>
-      <div>
-        <p className="uppercase tracking-widest text-muted">Affected Sectors</p>
-        <p className="text-ink">{sectorCount}</p>
-      </div>
-      <div>
-        <p className="uppercase tracking-widest text-muted">Affected Companies</p>
-        <p className="text-ink">{companies.length}</p>
-      </div>
+    <div className="flex flex-wrap gap-2.5 border-b border-hairline p-4">
+      <StatTile
+        label="Overall Impact"
+        value={`${overallGlyph} ${overallLabel}`}
+        valueClass={overallClass}
+        caption={`${signal.avgConfidence}% confidence`}
+      />
+      <StatTile label="Affected Sectors" value={String(sectorCount)} />
+      <StatTile label="Affected Categories" value={String(subSectorCount)} caption={subSectorCount === 0 ? 'Unclassified' : undefined} />
+      <StatTile label="Affected Companies" value={String(companies.length)} />
       {breadth === 'drilldown' && (
-        <div>
-          <p className="uppercase tracking-widest text-muted">By Level</p>
-          <p className="text-ink">
-            Direct {levelCounts.direct} · Indirect L1 {levelCounts.indirect_l1} · Indirect L2 {levelCounts.indirect_l2}
-          </p>
-        </div>
+        <StatTile
+          label="By Level"
+          value={`${levelCounts.direct} / ${levelCounts.indirect_l1} / ${levelCounts.indirect_l2}`}
+          caption="Direct / Indirect L1 / Indirect L2"
+        />
       )}
     </div>
   );

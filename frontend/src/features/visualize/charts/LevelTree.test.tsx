@@ -51,7 +51,7 @@ describe('LevelTree', () => {
     );
     expect(screen.getByText('Direct Impact')).toBeInTheDocument();
     expect(screen.getByText('Indirect Impact — Level 1')).toBeInTheDocument();
-    expect(screen.getByText(/via Alpha Co \(NVDA\)/)).toBeInTheDocument();
+    expect(screen.getByText(/via Alpha Co \(NVDA\)/i)).toBeInTheDocument();
     expect(screen.getByText('TSM')).toBeInTheDocument();
   });
 
@@ -61,13 +61,13 @@ describe('LevelTree', () => {
         companies={[
           company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
           company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
-          company({ company_id: 3, ticker: 'ASML', name: 'ASML', impact_level: 'indirect_l2', parent_company_id: 2 }),
+          company({ company_id: 3, ticker: 'ASML.NS', name: 'ASML Holding', impact_level: 'indirect_l2', parent_company_id: 2 }),
         ]}
       />,
     );
     expect(screen.getByText('Indirect Impact — Level 2')).toBeInTheDocument();
-    expect(screen.getByText(/via TSMC \(TSM\)/)).toBeInTheDocument();
-    expect(screen.getByText('ASML')).toBeInTheDocument();
+    expect(screen.getByText(/via TSMC \(TSM\)/i)).toBeInTheDocument();
+    expect(screen.getByText('ASML.NS')).toBeInTheDocument();
   });
 
   it('expands a ReasoningPanel when a leaf is tapped', async () => {

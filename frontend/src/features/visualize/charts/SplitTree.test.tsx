@@ -26,7 +26,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 }
 
 describe('SplitTree', () => {
-  it('shows a Bullish and a Bearish branch with the right counts', () => {
+  it('shows a Positive Impact and a Negative Impact column with the right counts', () => {
     render(
       <SplitTree
         companies={[
@@ -36,11 +36,20 @@ describe('SplitTree', () => {
         ]}
       />,
     );
-    expect(screen.getByText('2 Bullish')).toBeInTheDocument();
-    expect(screen.getByText('1 Bearish')).toBeInTheDocument();
+    expect(screen.getByText('Positive Impact')).toBeInTheDocument();
+    expect(screen.getByText('Negative Impact')).toBeInTheDocument();
+    expect(screen.getByText('AAA')).toBeInTheDocument();
+    expect(screen.getByText('BBB')).toBeInTheDocument();
+    expect(screen.getByText('CCC')).toBeInTheDocument();
   });
 
-  it('ranks companies within each branch by magnitude descending', () => {
+  it('omits the Negative Impact column entirely when every company is bullish', () => {
+    render(<SplitTree companies={[company({ company_id: 1, direction: 'bullish' })]} />);
+    expect(screen.getByText('Positive Impact')).toBeInTheDocument();
+    expect(screen.queryByText('Negative Impact')).not.toBeInTheDocument();
+  });
+
+  it('ranks companies within each column by magnitude descending', () => {
     render(
       <SplitTree
         companies={[
@@ -53,13 +62,6 @@ describe('SplitTree', () => {
     const strongIdx = items.findIndex((t) => t.includes('STRONG_BULL'));
     const weakIdx = items.findIndex((t) => t.includes('WEAK_BULL'));
     expect(strongIdx).toBeLessThan(weakIdx);
-  });
-
-  it('collapses a branch on tap, hiding its companies', async () => {
-    render(<SplitTree companies={[company({ company_id: 1, direction: 'bullish' })]} />);
-    expect(screen.getByText('AAA')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /Bullish/ }));
-    expect(screen.queryByText('AAA')).not.toBeInTheDocument();
   });
 
   it('expands a ReasoningPanel when a company is tapped', async () => {
