@@ -25,7 +25,12 @@ const company: AlertCompany = {
   magnitude_low: 2,
   magnitude_high: 4,
   rationale: 'Refiner margins expand on crude softness.',
-  key_points: ['Crude softness widens refining margin.', 'Peer refiners saw similar moves last cycle.', 'Watch Brent for reversal risk.'],
+  key_points: [
+    'Crude softness widens refining margin.',
+    'Peer refiners saw similar moves last cycle.',
+    'Watch Brent for reversal risk.',
+    'Analyst consensus target raised 4% this quarter.',
+  ],
   confidence_score: 84,
   time_horizon: 'Short-Term',
   basis: 'direct_mention',
@@ -48,23 +53,24 @@ describe('InsightCard', () => {
     expect(screen.getByText('84%')).toBeInTheDocument();
   });
 
-  it('shows only the first key point as the summary by default', () => {
+  it('shows the first 3 key points by default, not just 1', () => {
     render(<InsightCard company={company} eventType="crude_oil" alertCreatedAt="2026-07-17T10:00:00.000Z" />);
     expect(screen.getByText('Crude softness widens refining margin.')).toBeInTheDocument();
-    expect(screen.queryByText('Peer refiners saw similar moves last cycle.')).not.toBeInTheDocument();
-  });
-
-  it('expands remaining key points on "see more" and collapses on "see less"', async () => {
-    render(<InsightCard company={company} eventType="crude_oil" alertCreatedAt="2026-07-17T10:00:00.000Z" />);
-    await userEvent.click(screen.getByText('+ 2 more insights'));
     expect(screen.getByText('Peer refiners saw similar moves last cycle.')).toBeInTheDocument();
     expect(screen.getByText('Watch Brent for reversal risk.')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByText('See less'));
-    expect(screen.queryByText('Peer refiners saw similar moves last cycle.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Analyst consensus target raised 4% this quarter.')).not.toBeInTheDocument();
   });
 
-  it('does not show the see-more toggle when there is only one key point', () => {
+  it('expands remaining key points beyond the first 3 on "see more" and collapses on "see less"', async () => {
+    render(<InsightCard company={company} eventType="crude_oil" alertCreatedAt="2026-07-17T10:00:00.000Z" />);
+    await userEvent.click(screen.getByText('+ 1 more insights'));
+    expect(screen.getByText('Analyst consensus target raised 4% this quarter.')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('See less'));
+    expect(screen.queryByText('Analyst consensus target raised 4% this quarter.')).not.toBeInTheDocument();
+  });
+
+  it('does not show the see-more toggle when there are 3 or fewer key points', () => {
     render(
       <InsightCard
         company={{ ...company, key_points: ['Only point.'] }}
@@ -85,10 +91,11 @@ describe('InsightCard', () => {
     );
     // Plain regex getByText substring-matches every ancestor's full
     // textContent too (RTL matches per-element, not just leaves), which
-    // would throw "multiple elements found" here since the summary <p> is
-    // nested inside several containers -- constrain the match to the <p>.
+    // would throw "multiple elements found" here since the point is
+    // nested inside several containers -- constrain the match to the leaf
+    // <span> the bullet text actually lives in.
     expect(
-      screen.getByText((_, el) => el?.tagName === 'P' && /Refiner margins expand/.test(el.textContent ?? '')),
+      screen.getByText((_, el) => el?.tagName === 'SPAN' && /Refiner margins expand/.test(el.textContent ?? '')),
     ).toBeInTheDocument();
   });
 

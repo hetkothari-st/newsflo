@@ -46,9 +46,10 @@ export default function InsightCard({
     };
   }, [company.company_id]);
 
+  const DEFAULT_VISIBLE_POINTS = 3;
   const points_ = company.key_points.length > 0 ? company.key_points : [truncatedRationale(company.rationale)];
-  const summary = points_[0];
-  const extraPoints = points_.slice(1);
+  const visiblePoints = points_.slice(0, DEFAULT_VISIBLE_POINTS);
+  const extraPoints = points_.slice(DEFAULT_VISIBLE_POINTS);
 
   const priceLine =
     company.price_at_analysis != null ? (
@@ -99,10 +100,19 @@ export default function InsightCard({
         impactLevel={company.impact_level}
       />
 
-      <p className="mt-3 text-base leading-relaxed text-ink">{summary}</p>
+      <ul className="mt-3 flex flex-col gap-1.5 text-base leading-relaxed text-ink">
+        {visiblePoints.map((point, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="text-muted" aria-hidden="true">
+              •
+            </span>
+            <span>{point}</span>
+          </li>
+        ))}
+      </ul>
 
       {expanded && extraPoints.length > 0 && (
-        <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
+        <ul className="mt-1.5 flex flex-col gap-1.5 text-sm text-ink">
           {extraPoints.map((point, i) => (
             <li key={i} className="flex gap-2">
               <span className="text-muted" aria-hidden="true">
