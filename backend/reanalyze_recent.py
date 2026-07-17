@@ -27,6 +27,7 @@ from app.companies.resolution import _find_direct_company
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import Alert
+from app.pipeline import article_text
 
 
 def main(limit: int) -> None:
@@ -40,7 +41,7 @@ def main(limit: int) -> None:
         article = alert.article
         print(f"\n=== Alert {alert.id}: {article.title} ===")
         try:
-            result = analyze_article(client, article.title, article.content or "")
+            result = analyze_article(client, article.title, article_text(article))
         except Exception as exc:
             print(f"  SKIPPED (analysis call failed: {exc})")
             continue
