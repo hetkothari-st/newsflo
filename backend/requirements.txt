@@ -8,6 +8,7 @@ anthropic
 feedparser
 httpx
 beautifulsoup4
+trafilatura
 pytest
 yfinance
 pandas
