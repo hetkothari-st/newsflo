@@ -35,8 +35,8 @@ function fireTouchSwipe(target: Element, { fromX, toX }: { fromX: number; toX: n
 
 const alert: Alert = {
   id: 1,
-  category: 'oil_energy',
-  category_label: 'oil_energy',
+  category: 'oil_gas',
+  category_label: 'oil_gas',
   created_at: '2026-07-09T10:00:00+00:00',
   article: { id: 1, title: 'US strikes Iran oil export sites', url: 'https://example.com/a', image_url: 'https://example.com/pic.jpg' },
   companies: [
@@ -57,7 +57,7 @@ describe('AlertCoverCard', () => {
   it('renders the headline, category, and sentiment', () => {
     renderWithLanguage(<AlertCoverCard alert={alert} onOpen={() => {}} variant="carousel" />);
     expect(screen.getByText('US strikes Iran oil export sites')).toBeInTheDocument();
-    expect(screen.getByText('Oil & Energy')).toBeInTheDocument();
+    expect(screen.getByText('Oil & Gas')).toBeInTheDocument();
     expect(screen.getByText('Net Bullish')).toBeInTheDocument();
   });
 

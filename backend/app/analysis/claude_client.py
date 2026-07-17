@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
 
-from app.analysis.schemas import EVENT_TYPES, IMPACT_LEVELS, SECTORS, TIME_HORIZONS, AnalysisOutput
+from app.analysis.schemas import CATEGORIES, EVENT_TYPES, IMPACT_LEVELS, SECTORS, TIME_HORIZONS, AnalysisOutput
 from app.reasoning.playbooks import PLAYBOOKS_TEXT
 from app.reasoning.rulebook import RULEBOOK_TEXT
 
@@ -202,7 +202,13 @@ ANALYSIS_INSTRUCTIONS = (
     "relationship, own distinct rationale, zero is a fine and expected "
     "answer). Never skip straight from a direct company to an "
     "indirect_l2 entry -- indirect_l2 must always chain through a real "
-    "indirect_l1 entry you added.\n\n"
+    "indirect_l1 entry you added.\n"
+    "18. Classify this article's overall category (its topical bucket, "
+    "shown as a badge on the feed card -- distinct from event_type, which "
+    "classifies the specific triggering event) as exactly one of the "
+    "values listed below -- lowercase-with-underscores, exact spelling, "
+    "NEVER a sentence or description. If nothing matches, use \"other\":\n"
+    f"{', '.join(CATEGORIES)}\n\n"
 )
 
 RECORD_ANALYSIS_TOOL = {
@@ -213,7 +219,7 @@ RECORD_ANALYSIS_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "category": {"type": "string"},
+                "category": {"type": "string", "enum": CATEGORIES},
                 "event_type": {"type": ["string", "null"], "enum": EVENT_TYPES + [None]},
                 "companies": {
                     "type": "array",

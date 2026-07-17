@@ -6,12 +6,23 @@ import CategorySwatch from './CategorySwatch';
 
 // Full static class strings (not built by interpolation) so Tailwind's content
 // scanner keeps them. Selected chips tint with the same accent used for the
-// category's swatch dot everywhere else in the app.
+// category's swatch dot everywhere else in the app, keyed by the same fixed
+// category taxonomy (backend/app/analysis/schemas.py CATEGORIES).
 const CHIP_ACCENT: Record<string, string> = {
-  oil_energy: 'border-swatch-oil_energy bg-swatch-oil_energy/10',
+  oil_gas: 'border-swatch-oil_gas bg-swatch-oil_gas/10',
   banking: 'border-swatch-banking bg-swatch-banking/10',
-  auto_ev: 'border-swatch-auto_ev bg-swatch-auto_ev/10',
+  auto: 'border-swatch-auto bg-swatch-auto/10',
+  it: 'border-swatch-it bg-swatch-it/10',
+  pharma: 'border-swatch-pharma bg-swatch-pharma/10',
+  fmcg: 'border-swatch-fmcg bg-swatch-fmcg/10',
+  metals: 'border-swatch-metals bg-swatch-metals/10',
+  telecom: 'border-swatch-telecom bg-swatch-telecom/10',
+  infra: 'border-swatch-infra bg-swatch-infra/10',
+  macro_policy: 'border-swatch-macro_policy bg-swatch-macro_policy/10',
   geopolitics: 'border-swatch-geopolitics bg-swatch-geopolitics/10',
+  corporate_event: 'border-swatch-corporate_event bg-swatch-corporate_event/10',
+  market_commentary: 'border-swatch-market_commentary bg-swatch-market_commentary/10',
+  other: 'border-swatch-other bg-swatch-other/10',
 };
 const CHIP_ACCENT_FALLBACK = 'border-swatch-other bg-swatch-other/10';
 
