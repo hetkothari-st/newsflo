@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import type { Alert, AlertCompany, PricePoint } from '../lib/api';
 import { getAlert, getCompanyPrices } from '../lib/api';
 import { useLanguage } from '../lib/language';
@@ -222,6 +222,15 @@ export default function AlertCompanyAnalysisPage() {
             ))}
           </ul>
         </div>
+      )}
+
+      {company.market === 'IN' && (
+        <Link
+          to={`/company/${company.company_id}`}
+          className="mt-4 inline-block border-t border-hairline pt-3 font-data text-xs uppercase tracking-widest text-ink underline"
+        >
+          {t('reasoning.viewDetails')}
+        </Link>
       )}
     </div>
   );

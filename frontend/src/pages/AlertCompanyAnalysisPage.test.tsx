@@ -121,6 +121,24 @@ describe('AlertCompanyAnalysisPage', () => {
     );
   });
 
+  it('links to the company profile page for IN-market companies', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(ALERT);
+    render(<AlertCompanyAnalysisPage />, '/alerts/7/company/1');
+
+    await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
+    const link = screen.getByRole('link', { name: /view full details/i });
+    expect(link).toHaveAttribute('href', '/company/1');
+  });
+
+  it('does not show the profile link for GLOBAL-market companies', async () => {
+    const global: Alert = { ...ALERT, companies: [{ ...ALERT.companies[0], market: 'GLOBAL' }] };
+    vi.spyOn(api, 'getAlert').mockResolvedValue(global);
+    render(<AlertCompanyAnalysisPage />, '/alerts/7/company/1');
+
+    await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: /view full details/i })).not.toBeInTheDocument();
+  });
+
   it('renders nothing crashing when the company id is not found in the alert', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(ALERT);
     render(<AlertCompanyAnalysisPage />, '/alerts/7/company/999');
