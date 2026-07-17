@@ -110,6 +110,17 @@ def test_list_companies_logo_url_uses_isin_when_client_id_set(db_session, monkey
     app.dependency_overrides.clear()
 
 
+def test_branding_logo_url_importable_from_shared_module(db_session, monkeypatch):
+    from app.companies.branding import logo_url
+    from app.config import settings
+    from app.models import Company
+
+    monkeypatch.setattr(settings, "brandfetch_client_id", "test-client-id")
+    company = Company(ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market_cap=None)
+
+    assert logo_url(company) == "https://cdn.brandfetch.io/ticker/AAPL?c=test-client-id"
+
+
 def _make_alert_company(db_session, company, direction="bullish", url_suffix="a", created_at=None):
     article = Article(source="test", url=f"https://example.com/{url_suffix}", title=f"headline {url_suffix}", status="ANALYZED")
     db_session.add(article)

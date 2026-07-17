@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.calibration.track_record import get_win_rate
+from app.companies.branding import logo_url as _logo_url
 from app.companies.history import get_company_history_page
 from app.companies.market import infer_market
 from app.companies.price_series import fetch_price_series
-from app.config import settings
 from app.i18n import get_lang
 from app.models import Alert, AlertCompany, Article, Company
 from app.pipeline import decode_key_points
@@ -18,14 +18,6 @@ from app.translation.lookup import bulk_alert_company_translations, bulk_article
 router = APIRouter(prefix="/api/companies", tags=["companies"])
 
 PRICE_SERIES_PERIODS = {"1mo", "3mo", "6mo", "1y"}
-
-
-def _logo_url(company: Company) -> str | None:
-    if not settings.brandfetch_client_id:
-        return None
-    if company.isin:
-        return f"https://cdn.brandfetch.io/isin/{company.isin}?c={settings.brandfetch_client_id}"
-    return f"https://cdn.brandfetch.io/ticker/{company.ticker}?c={settings.brandfetch_client_id}"
 
 
 def _get_indian_company_or_404(db: Session, company_id: int) -> Company:
