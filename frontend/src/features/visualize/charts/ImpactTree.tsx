@@ -1,7 +1,23 @@
 import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { impactLevelKey } from '../impactLevels';
-import { groupBySector, groupIndirectBySubSector, type CompanyGroup, type SubSectorGroup } from '../transforms';
+import { groupBySector, groupIndirectBySubSector, rankByConfidence, type CompanyGroup, type SubSectorGroup } from '../transforms';
 import ChartCardShell from './ChartCardShell';
+
+function truncatedRationale(rationale: string): string {
+  const firstSentence = rationale.split(/(?<=[.!?])\s+/)[0];
+  if (firstSentence.length <= 160) return firstSentence;
+  return `${firstSentence.slice(0, 157)}…`;
+}
+
+function WhyExplanation({ companies }: { companies: AlertCompany[] }) {
+  const top = rankByConfidence(companies)[0];
+  return (
+    <div className="flex max-w-md flex-col items-center gap-1 px-2 text-center">
+      <span className="font-data text-[10px] uppercase tracking-widest text-muted">Why</span>
+      <p className="font-editorial text-sm text-ink">{truncatedRationale(top.rationale)}</p>
+    </div>
+  );
+}
 
 function Connector() {
   return (
@@ -64,6 +80,7 @@ function SectorBlock({ sector }: { sector: CompanyGroup }) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <LevelHeader level="Level 1 · Direct Impact" name={sector.label} count={sector.companies.length} color={sector.color} />
+      <WhyExplanation companies={sector.companies} />
       <Connector />
       <p className="font-data text-[10px] uppercase tracking-widest text-muted">Level 2 · Companies</p>
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -79,6 +96,7 @@ function SubSectorBlock({ subSector }: { subSector: SubSectorGroup }) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <LevelHeader level="Level 3 · Indirect Ripple" name={subSector.label} count={subSector.companies.length} />
+      <WhyExplanation companies={subSector.companies} />
       <Connector />
       <p className="font-data text-[10px] uppercase tracking-widest text-muted">Level 4 · Companies</p>
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">

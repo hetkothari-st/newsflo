@@ -74,4 +74,38 @@ describe('ImpactTree', () => {
     );
     expect(screen.getByText('No direct impact identified.')).toBeInTheDocument();
   });
+
+  it('shows the highest-confidence company\'s rationale as the sector\'s explanation', () => {
+    render(
+      <ImpactTree
+        companies={[
+          company({ company_id: 1, impact_level: 'direct', sector: 'banking', confidence_score: 40, rationale: 'Lower rationale.' }),
+          company({ company_id: 2, impact_level: 'direct', sector: 'banking', confidence_score: 90, rationale: 'Rate cut directly compresses net interest margins.' }),
+        ]}
+        article={article}
+        alertCreatedAt="2026-07-17T10:30:00Z"
+      />,
+    );
+    expect(screen.getByText('Rate cut directly compresses net interest margins.')).toBeInTheDocument();
+    expect(screen.queryByText('Lower rationale.')).not.toBeInTheDocument();
+  });
+
+  it('shows the highest-confidence company\'s rationale as the sub-sector\'s explanation', () => {
+    render(
+      <ImpactTree
+        companies={[
+          company({
+            company_id: 1,
+            impact_level: 'indirect_l1',
+            sub_sector: 'nbfc',
+            confidence_score: 70,
+            rationale: 'NBFCs face higher funding costs as rates rise.',
+          }),
+        ]}
+        article={article}
+        alertCreatedAt="2026-07-17T10:30:00Z"
+      />,
+    );
+    expect(screen.getByText('NBFCs face higher funding costs as rates rise.')).toBeInTheDocument();
+  });
 });
