@@ -87,7 +87,10 @@ describe('AlertChartsPage', () => {
   it('advances to the next chart type when the pager control is clicked', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
-    await waitFor(() => expect(screen.getByText('RIL')).toBeInTheDocument());
+    // Normal view now shows the company both in the new "Directly Affected
+    // Sectors" grid and in the Sector chart tab below it, so it legitimately
+    // appears twice (same pattern as the ChartCardShell legend collision).
+    await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
     fireEvent.click(screen.getByText('Tier'));
     // Tier view renders the same company under a tier-row label instead of a sector tile.
     await waitFor(() => expect(screen.getByText('Nifty 50')).toBeInTheDocument());
@@ -104,8 +107,10 @@ describe('AlertChartsPage', () => {
     renderPage('1');
     // Normal: both direct_mention (RIL) and sector_inference (ONGC) count as
     // impact_level="direct" -- only genuinely indirect companies are hidden.
-    await waitFor(() => expect(screen.getByText('RIL')).toBeInTheDocument());
-    expect(screen.getByText('ONGC')).toBeInTheDocument();
+    // Each appears twice: once in the new "Directly Affected Sectors" grid,
+    // once in the Sector chart tab below it (both are still shown in Normal).
+    await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
+    expect(screen.getAllByText('ONGC')).toHaveLength(2);
     expect(screen.queryByText('TSM')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Drilldown'));
@@ -136,5 +141,31 @@ describe('AlertChartsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Direct Impact')).toHaveLength(2));
     expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(2);
     expect(screen.getByText(/via Reliance Industries/i)).toBeInTheDocument();
+  });
+});
+
+describe('AlertChartsPage Normal View', () => {
+  it('renders a Directly Affected Sectors section and an Impact Summary banner from real alert data', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(
+      alert({
+        event_type: 'repo_rate_change',
+        companies: [
+          {
+            company_id: 1, ticker: 'HDFCBANK', name: 'HDFC Bank', index_tier: 'NIFTY50', sector: 'banking',
+            direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'lower funding cost',
+            key_points: [], confidence_score: 90, time_horizon: 'Short-Term', basis: 'direct_mention',
+            confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [], impact_level: 'direct',
+          },
+        ],
+      }),
+    );
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Directly Affected Sectors')).toBeInTheDocument());
+    expect(screen.getByText('Impact Summary')).toBeInTheDocument();
+    // Appears twice: once in the new Directly Affected Sectors grid, once in
+    // the default Sector chart tab still rendered below it.
+    expect(screen.getAllByText('HDFCBANK')).toHaveLength(2);
   });
 });
