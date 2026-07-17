@@ -829,6 +829,20 @@ const CATALOG = {
     ta: 'Indirect · 2nd-order', kn: 'Indirect · 2nd-order', pa: 'Indirect · 2nd-order',
     bn: 'Indirect · 2nd-order',
   },
+  'insights.seeMoreInsights': {
+    en: '+ {n} more insights', hi: '+ {n} more insights', mr: '+ {n} more insights', gu: '+ {n} more insights',
+    ml: '+ {n} more insights', te: '+ {n} more insights', ta: '+ {n} more insights', kn: '+ {n} more insights',
+    pa: '+ {n} more insights', bn: '+ {n} more insights',
+  },
+  'insights.seeLess': {
+    en: 'See less', hi: 'See less', mr: 'See less', gu: 'See less', ml: 'See less', te: 'See less',
+    ta: 'See less', kn: 'See less', pa: 'See less', bn: 'See less',
+  },
+  'insights.readFullAnalysis': {
+    en: 'Read full analysis', hi: 'Read full analysis', mr: 'Read full analysis', gu: 'Read full analysis',
+    ml: 'Read full analysis', te: 'Read full analysis', ta: 'Read full analysis', kn: 'Read full analysis',
+    pa: 'Read full analysis', bn: 'Read full analysis',
+  },
 } as const;
 
 export type TranslationKey = keyof typeof CATALOG;
