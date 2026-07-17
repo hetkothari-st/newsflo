@@ -49,6 +49,8 @@ _ADDED_COLUMNS = [
     ("alert_companies", "contradiction_note", "TEXT"),
     ("alert_companies", "impact_level", "VARCHAR DEFAULT 'direct'"),
     ("alert_companies", "parent_company_id", "INTEGER"),
+    ("articles", "full_content", "TEXT"),
+    ("articles", "full_content_fetch_attempted_at", "TIMESTAMP"),
 ]
 
 

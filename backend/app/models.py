@@ -53,6 +53,8 @@ class Article(Base):
     status = Column(String, nullable=False, default="NEW")  # NEW|FILTERED|CATEGORIZED|ANALYZED|ANALYSIS_FAILED
     category = Column(String, nullable=True)
     image_url = Column(String, nullable=True)  # og:image / twitter:image scraped from the article page
+    full_content = Column(Text, nullable=True)  # scraped+extracted full body text, see app/ingestion/full_text.py
+    full_content_fetch_attempted_at = Column(DateTime(timezone=True), nullable=True)
 
     alerts = relationship("Alert", back_populates="article")
 
