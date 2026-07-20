@@ -100,6 +100,24 @@ def test_process_new_articles_uses_full_content_over_summary_when_available(db_s
     assert captured["content"] == "The full scraped article body, much richer than the summary."
 
 
+def test_process_new_articles_passes_the_same_client_to_the_filter(db_session, monkeypatch):
+    article = Article(
+        source="test", url="https://example.com/a", title="t", content="c",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    sentinel_client = object()
+    captured = {}
+    def fake_filter(session, client):
+        captured["client"] = client
+    monkeypatch.setattr(pipeline_module, "filter_new_articles", fake_filter)
+
+    process_new_articles(db_session, claude_client=sentinel_client)
+
+    assert captured["client"] is sentinel_client
+
+
 def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_session, monkeypatch):
     # The tool schema constrains `category` to CATEGORIES, but that's a
     # request-time hint to the LLM, not a guarantee -- a provider that
@@ -328,6 +346,13 @@ def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch)
     db_session.add(irrelevant)
     db_session.commit()
 
+    def fake_filter(session, client):
+        # Mark the article as FILTERED so it's not analyzed
+        for article in session.query(Article).filter_by(status="NEW").all():
+            article.status = "FILTERED"
+        session.commit()
+
+    monkeypatch.setattr(pipeline_module, "filter_new_articles", fake_filter)
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: (_ for _ in ()).throw(AssertionError("should not be called")))
 
     created = process_new_articles(db_session, claude_client=object())

@@ -282,7 +282,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
     client, is not slowed down; the scheduler passes a real value.
     """
     fetch_pending_full_text(session)
-    filter_new_articles(session)
+    filter_new_articles(session, claude_client)
 
     alerts_created = 0
     pending = session.query(Article).filter_by(status="CATEGORIZED").all()
