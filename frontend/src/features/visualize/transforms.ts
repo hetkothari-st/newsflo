@@ -39,6 +39,19 @@ const SECTOR_LABEL: Record<string, string> = {
   metals: 'Metals',
   telecom: 'Telecom',
   infra: 'Infrastructure',
+  // Added when the backend sector taxonomy expanded from 10 to 18 values
+  // (see backend/app/analysis/schemas.py's SECTORS) -- without an entry
+  // here, sectorLabel() falls back to the raw enum string (e.g.
+  // "railways_transport"), which is what actually shipped to production
+  // and was caught live on the Cascade Levels chart.
+  railways_transport: 'Railways & Transport',
+  construction_realestate: 'Construction & Real Estate',
+  defense: 'Defense',
+  agriculture: 'Agriculture',
+  consumer_durables: 'Consumer Durables',
+  media_entertainment: 'Media & Entertainment',
+  chemicals: 'Chemicals',
+  textiles: 'Textiles',
   other: 'Other',
 };
 
