@@ -1,4 +1,4 @@
-from app.analysis.schemas import EVENT_TYPES, AnalysisOutput, CompanyMention
+from app.analysis.schemas import EVENT_TYPES, AnalysisOutput, CompanyMention, SECTOR_DEFINITIONS, SECTORS, FactsResult, SectorFinding
 
 
 def test_company_mention_defaults_for_new_evidence_fields():
@@ -36,3 +36,46 @@ def test_event_types_are_lowercase_with_underscores_only():
         assert value == value.lower()
         assert " " not in value
     assert "other" in EVENT_TYPES
+
+
+def test_new_sectors_are_in_the_taxonomy():
+    for sector in [
+        "railways_transport", "construction_realestate", "defense", "agriculture",
+        "consumer_durables", "media_entertainment", "chemicals", "textiles",
+    ]:
+        assert sector in SECTORS
+
+
+def test_sectors_has_exactly_one_shared_other_bucket():
+    assert SECTORS.count("other") == 1
+
+
+def test_sector_definitions_covers_every_sector():
+    for sector in SECTORS:
+        assert f"- {sector}:" in SECTOR_DEFINITIONS
+
+
+def test_facts_result_parses_required_fields():
+    result = FactsResult(facts="Rupee fell 2% today.", category="macro_policy", event_type="currency_move")
+    assert result.facts == "Rupee fell 2% today."
+    assert result.category == "macro_policy"
+    assert result.event_type == "currency_move"
+
+
+def test_sector_finding_parent_sector_defaults_to_none():
+    finding = SectorFinding(sector="banking", direction="bearish", mechanism="FX exposure hit.")
+    assert finding.parent_sector is None
+
+
+def test_sector_finding_accepts_parent_sector_for_cascade():
+    finding = SectorFinding(sector="railways_transport", direction="bearish", mechanism="Import costs rise.", parent_sector="banking")
+    assert finding.parent_sector == "banking"
+
+
+def test_company_mention_defaults_impact_level_to_direct_when_absent():
+    mention = CompanyMention(
+        name="Reliance Industries", is_direct=True, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin", time_horizon="Short-Term",
+    )
+    assert mention.impact_level == "direct"
+    assert mention.parent_ticker is None

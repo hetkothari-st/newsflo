@@ -2,7 +2,11 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-SECTORS = ["oil_gas", "banking", "auto", "it", "pharma", "fmcg", "metals", "telecom", "infra", "other"]
+SECTORS = [
+    "oil_gas", "banking", "auto", "it", "pharma", "fmcg", "metals", "telecom", "infra",
+    "railways_transport", "construction_realestate", "defense", "agriculture",
+    "consumer_durables", "media_entertainment", "chemicals", "textiles", "other",
+]
 TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
 EVENT_TYPES = [
     "repo_rate_change", "inflation", "crude_oil", "currency_move",
@@ -29,6 +33,55 @@ CATEGORIES = [
 # competitor) to an already-named direct or indirect_l1 company, not
 # mentioned in the article itself -- see CompanyMention.parent_ticker.
 IMPACT_LEVELS = ["direct", "indirect_l1", "indirect_l2"]
+
+# Precise definitions the model must use for sector inference. Ambiguity here
+# (e.g. treating "semiconductor" as close enough to "it") is what causes the
+# resolver to attach real reasoning about one company (say, a Korean chip
+# maker) to an unrelated company that merely shares a loosely-matched sector
+# tag (e.g. an Indian IT services firm). Precision here is load-bearing.
+# Moved here (was app.analysis.claude_client.SECTOR_DEFINITIONS) so both
+# app.analysis.cascade and app.companies.sector_classification can import it
+# without a circular dependency on claude_client.
+SECTOR_DEFINITIONS = """
+- oil_gas: oil & gas exploration, refining, and marketing companies only.
+- banking: deposit-taking banks, NBFCs, and financial services firms only.
+- auto: automobile and two-wheeler manufacturers, and auto component makers.
+- it: INDIAN IT SERVICES / software consulting / outsourcing firms only \
+(e.g. TCS, Infosys, Wipro). Does NOT include semiconductor, chip, or \
+hardware manufacturers -- those have no matching sector in this system.
+- pharma: pharmaceutical and healthcare companies, including hospitals and diagnostics.
+- fmcg: fast-moving consumer goods, food & beverage, personal care.
+- metals: metals, mining, and materials companies.
+- telecom: telecommunications and network infrastructure operators.
+- infra: industrial, infrastructure, construction/EPC, power/utilities, and heavy equipment.
+- railways_transport: railways, aviation, shipping, ports, and logistics/road transport operators.
+- construction_realestate: real estate developers (residential/commercial property) -- \
+NOT EPC/construction contractors, those are infra.
+- defense: defense and aerospace manufacturers.
+- agriculture: agricultural inputs, fertilizers, agrochemicals, and seed companies.
+- consumer_durables: consumer electronics and durable-goods manufacturers (appliances \
+etc) -- distinct from fmcg's fast-moving, non-durable goods.
+- media_entertainment: media, broadcasting, entertainment, and publishing companies.
+- chemicals: specialty and commodity chemical manufacturers.
+- textiles: textile and apparel manufacturers.
+- other: none of the above.
+""".strip()
+
+
+class FactsResult(BaseModel):
+    facts: str
+    category: str
+    event_type: str
+
+
+class SectorFinding(BaseModel):
+    sector: str
+    direction: str  # bullish | bearish
+    mechanism: str
+    # Set only for a cascade-hop finding (stages 4/6 of the sector-cascade
+    # pipeline): the sector this one ripples from. None for a primary/
+    # directly-affected sector (stage 2). See app.analysis.cascade.
+    parent_sector: Optional[str] = None
 
 
 class CompanyMention(BaseModel):
