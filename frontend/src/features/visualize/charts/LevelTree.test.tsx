@@ -73,17 +73,67 @@ describe('LevelTree', () => {
     expect(screen.getByText('ASML.NS')).toBeInTheDocument();
   });
 
-  it('expands a ReasoningPanel when a leaf is tapped', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    render(<LevelTree companies={[company({ company_id: 1, ticker: 'NVDA', rationale: 'Export ban hits Nvidia directly.' })]} />);
-    await userEvent.click(screen.getByText('NVDA'));
-    expect(screen.getByText(/Export ban hits Nvidia directly/)).toBeInTheDocument();
+  it('renders wrapped in ChartCardShell with the Cascade Levels title and number 2', () => {
+    render(<LevelTree companies={[company({ company_id: 1, ticker: 'NVDA' })]} />);
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('Cascade Levels')).toBeInTheDocument();
   });
 
-  it('renders wrapped in ChartCardShell with the Impact Tree title and number 1', () => {
-    render(<LevelTree companies={[company({ company_id: 1, ticker: 'NVDA' })]} />);
-    expect(screen.getByText('1')).toBeInTheDocument();
-    expect(screen.getByText('Impact Tree')).toBeInTheDocument();
+  it('shows no full rationale text anywhere, only key_points behind a Why linked? disclosure', () => {
+    render(
+      <LevelTree
+        companies={[
+          company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct', rationale: 'Full paragraph rationale text.' }),
+          company({
+            company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1,
+            rationale: 'Full paragraph rationale text.', key_points: ['TSMC makes Nvidia chips; fewer orders means less revenue.'],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText('Full paragraph rationale text.')).not.toBeInTheDocument();
+    expect(screen.queryByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).not.toBeInTheDocument();
+    expect(screen.getByText('Why linked?')).toBeInTheDocument();
+  });
+
+  it('reveals a cascade group key_point only after clicking Why linked?', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(
+      <LevelTree
+        companies={[
+          company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
+          company({
+            company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1,
+            key_points: ['TSMC makes Nvidia chips; fewer orders means less revenue.'],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('Why linked?'));
+    expect(screen.getByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).toBeInTheDocument();
+  });
+
+  it('does not show a Why linked? disclosure on a direct-level card', () => {
+    render(
+      <LevelTree
+        companies={[company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct', key_points: ['Some point.'] })]}
+      />,
+    );
+    expect(screen.queryByText('Why linked?')).not.toBeInTheDocument();
+  });
+
+  it('shows a sector chip on every company row, including cascade companies', () => {
+    render(
+      <LevelTree
+        companies={[
+          company({ company_id: 1, ticker: 'NVDA', sector: 'it', impact_level: 'direct' }),
+          company({ company_id: 2, ticker: 'TSM', name: 'TSMC', sector: 'metals', impact_level: 'indirect_l1', parent_company_id: 1 }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByText('IT').length).toBeGreaterThan(0);
+    expect(screen.getByText('Metals')).toBeInTheDocument();
   });
 
   it('forceCollapse with mode collapse hides every card, mode expand shows them again', () => {

@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AlertCompany } from '../../../lib/api';
-import ReasoningPanel from '../../../components/ReasoningPanel';
-import { computeNetSignal, groupBySector } from '../transforms';
+import { computeNetSignal, groupBySector, rankByConfidence } from '../transforms';
 import { sectorColor } from '../colors';
 import { IMPACT_LEVEL_ORDER, impactLevelColor, impactLevelKey, impactLevelLabel } from '../impactLevels';
 import ChartCardShell from './ChartCardShell';
 import ImpactCard from './cards/ImpactCard';
 import CompanyRow from './cards/CompanyRow';
-import { useCompanySelection } from './useCompanySelection';
 
 export interface ForceCollapseSignal {
   mode: 'expand' | 'collapse';
@@ -57,6 +55,30 @@ function LevelConnector() {
   );
 }
 
+// A short, click-to-reveal line explaining why a cascade group is linked --
+// sourced from the top-confidence company's own key_points (already a
+// short, plain-language WHY/HOW sentence returned by the API), never the
+// full `rationale` paragraph. Collapsed by default; renders nothing if the
+// group has no key_points at all (e.g. a legacy alert).
+function CascadeWhy({ companies }: { companies: AlertCompany[] }) {
+  const [open, setOpen] = useState(false);
+  const point = rankByConfidence(companies)[0]?.key_points?.[0];
+  if (!point) return null;
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1 font-data text-[10px] uppercase tracking-widest text-muted hover:text-ink"
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span> Why linked?
+      </button>
+      {open && <p className="mt-1 text-xs text-ink">{point}</p>}
+    </div>
+  );
+}
+
 const LEGEND = [
   { label: impactLevelLabel('direct'), color: impactLevelColor('direct') },
   { label: impactLevelLabel('indirect_l1'), color: impactLevelColor('indirect_l1') },
@@ -65,15 +87,11 @@ const LEGEND = [
 
 export default function LevelTree({
   companies,
-  eventType,
   forceCollapse,
 }: {
   companies: AlertCompany[];
-  eventType?: string | null;
   forceCollapse?: ForceCollapseSignal;
 }) {
-  const { toggle, selected, selectedId } = useCompanySelection(companies);
-
   const levels = useMemo(() => {
     return IMPACT_LEVEL_ORDER.map((level) => {
       const levelCompanies = companies.filter((c) => impactLevelKey(c) === level);
@@ -115,9 +133,9 @@ export default function LevelTree({
 
   return (
     <ChartCardShell
-      number={1}
-      title="Impact Tree"
-      description="Hierarchical tree showing primary, secondary, and tertiary affected companies"
+      number={2}
+      title="Cascade Levels"
+      description="Companies and sectors affected at each cascade level -- direct, and the ripple effects it triggers"
       legend={LEGEND}
     >
       <div className="flex flex-col p-4">
@@ -142,8 +160,9 @@ export default function LevelTree({
                     collapsed={collapsedKeys.has(card.key)}
                     onToggle={() => toggleCard(card.key)}
                   >
+                    {level !== 'direct' && <CascadeWhy companies={card.companies} />}
                     {card.companies.map((c) => (
-                      <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
+                      <CompanyRow key={c.company_id} company={c} sector={c.sector} />
                     ))}
                   </ImpactCard>
                 ))}
@@ -151,11 +170,6 @@ export default function LevelTree({
             </div>
           );
         })}
-        {selected && (
-          <div className="mt-4">
-            <ReasoningPanel company={selected} eventType={eventType} />
-          </div>
-        )}
       </div>
     </ChartCardShell>
   );
