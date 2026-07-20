@@ -13,8 +13,16 @@ them and for the truncate-on-failure behavior described in the design spec.
 """
 import json
 
-from app.analysis.claude_client import FALLBACK_MODEL, SYSTEM_PROMPT
-from app.analysis.schemas import CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, FactsResult, SectorFinding
+from openai import RateLimitError
+
+from app.reasoning.playbooks import PLAYBOOKS_TEXT
+from app.reasoning.rulebook import RULEBOOK_TEXT
+
+from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
+from app.analysis.schemas import (
+    CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
+    CompanyMention, FactsResult, SectorFinding,
+)
 
 FACTS_INSTRUCTIONS = (
     "Read this news article closely and extract its core facts and economic "
@@ -182,3 +190,216 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
         raise ValueError("No record_sectors tool_use block")
     arguments = json.loads(tool_call.function.arguments)
     return [SectorFinding.model_validate(s) for s in arguments.get("sectors", [])]
+
+
+# Preserves this session's own hard-won plain-language WHY/HOW quality bar
+# (see docs/superpowers/specs/2026-07-19-*-key-insights-quality*, and rules
+# 6-8 of the now-deleted app.analysis.claude_client.ANALYSIS_INSTRUCTIONS)
+# plus the rulebook/playbook citation discipline (rules 11-15 of the same,
+# now-deleted, instructions) that app.pipeline._persist_alert's
+# rulebook_ids_json extraction depends on -- both are load-bearing, not
+# cosmetic prompt text.
+COMPANY_RATIONALE_INSTRUCTIONS = (
+    "For each company:\n"
+    "- rationale: name the specific mechanism for THAT company -- its "
+    "specific role (upstream producer vs refiner vs distributor vs miner: "
+    "never assume every company in a sector plays the same role), its "
+    "market position, and a real precedent if you know one. Never restate a "
+    "price/number the article already reports as if it were analysis -- "
+    "explain WHY this specific news moves this specific company, and HOW.\n"
+    "- key_points: 1-4 plain-language sentences (full sentences, no word "
+    "cap, typically 15-30 words) a reader with ZERO finance background can "
+    "read once and immediately understand WHY this affects this company and "
+    "HOW. Spell out the causal chain: [what happened] -> [what that changes "
+    "for this company -- its costs, sales, profit, what its customers do] "
+    "-> [why that's good or bad]. Replace or immediately unpack finance "
+    "jargon (never leave \"margin compression\", \"deal pipeline "
+    "pressure\", or similar unexplained). Never: (a) restating a "
+    "price/number the article already reports; (b) a vague sentiment line "
+    "with no mechanism; (c) a generic, always-true company fact untied to "
+    "this specific news; (d) a jargon-dense sentence an ordinary reader "
+    "would have to look up. Fewer, clearer sentences beat more, vaguer "
+    "ones -- 1-2 entries is correct when that's all the genuine mechanism "
+    "supports.\n"
+    "- reasons: 1-4 short, distinct, individually-citable reasons "
+    "supporting the direction call.\n"
+    "- evidence_refs: one entry per `reasons` item -- either a rule id from "
+    "ECONOMIC REASONING RULES below (e.g. \"RULE_REPO_RATE_CUT\"), a quoted "
+    "or closely paraphrased fact from the article (prefix \"article: \"), "
+    "or a specific historical precedent you actually know (prefix "
+    "\"historical: \").\n"
+    "- risks: 0-3 specific risks that could invalidate this call. "
+    "assumptions: 0-3 things assumed true that, if wrong, change the call. "
+    "unknowns: 0-3 pieces of missing information that would make this call "
+    "more reliable.\n"
+    "- alternative_hypothesis: one sentence describing a plausible "
+    "competing interpretation, or why none is credible.\n"
+    "- time_horizon: exactly one of Immediate, Short-Term, Medium-Term, "
+    "Long-Term, based on when the mechanism actually plays out.\n\n"
+    "Consult the ECONOMIC REASONING RULES and SECTOR PLAYBOOKS below. If a "
+    "rule genuinely applies, use it to strengthen your rationale and "
+    "include its rule id verbatim as one entry in that company's "
+    "evidence_refs. Do not force-fit a rule that doesn't actually apply.\n"
+    f"ECONOMIC REASONING RULES:\n{RULEBOOK_TEXT}\n\n"
+    f"SECTOR PLAYBOOKS:\n{PLAYBOOKS_TEXT}"
+)
+
+_COMPANY_ITEM_PROPERTIES = {
+    "name": {"type": "string"},
+    "ticker": {"type": ["string", "null"]},
+    "direction": {"type": "string", "enum": ["bullish", "bearish"]},
+    "magnitude_low": {"type": "number"},
+    "magnitude_high": {"type": "number"},
+    "rationale": {"type": "string"},
+    "key_points": {"type": "array", "items": {"type": "string"}},
+    "time_horizon": {"type": "string", "enum": TIME_HORIZONS},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "unknowns": {"type": "array", "items": {"type": "string"}},
+    "alternative_hypothesis": {"type": "string"},
+}
+_COMPANY_ITEM_REQUIRED = [
+    "name", "direction", "magnitude_low", "magnitude_high", "rationale", "key_points",
+    "time_horizon", "reasons", "evidence_refs", "risks", "assumptions", "unknowns",
+    "alternative_hypothesis",
+]
+
+
+def build_company_tool(parent_tickers: list[str] | None) -> dict:
+    """parent_tickers=None builds the direct/primary-stage tool (stage 3, no
+    parent_ticker field). A non-empty list builds a cascade-stage tool
+    (stages 5/7), adding a parent_ticker field enum-constrained to
+    parent_tickers so the model cannot invent a nonexistent parent."""
+    properties = dict(_COMPANY_ITEM_PROPERTIES)
+    required = list(_COMPANY_ITEM_REQUIRED)
+    if parent_tickers:
+        properties["parent_ticker"] = {"type": "string", "enum": parent_tickers}
+        required.append("parent_ticker")
+    return {
+        "type": "function",
+        "function": {
+            "name": "record_sector_companies",
+            "description": "Record companies affected within each given sector.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sector_companies": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sector": {"type": "string", "enum": SECTORS},
+                                "companies": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object", "properties": properties, "required": required,
+                                    },
+                                },
+                            },
+                            "required": ["sector", "companies"],
+                        },
+                    },
+                },
+                "required": ["sector_companies"],
+            },
+        },
+    }
+
+
+def _identify_companies(
+    client, facts: str, sectors: list[SectorFinding], impact_level: str,
+    parent_pool: list[CompanyMention] | None,
+) -> list[CompanyMention]:
+    """sectors: the sector(s) to find companies within (from a prior
+    _identify_sectors call). impact_level: stamped onto every returned
+    CompanyMention programmatically (never asked of the LLM). parent_pool:
+    for a cascade stage, the companies (from the previous company-stage)
+    each returned company must chain from via parent_ticker; None for the
+    direct/primary stage (stage 3)."""
+    sector_lines = "\n".join(f"- {s.sector} ({s.direction}): {s.mechanism}" for s in sectors)
+    if parent_pool is None:
+        framing = (
+            "For each sector below, name the specific companies genuinely, "
+            "directly affected -- both winners and losers where applicable (a "
+            "single sector can have companies benefiting AND companies hurt by "
+            "the same news, e.g. importers vs exporters on a currency move). "
+            "Use your own knowledge of real companies and their actual "
+            "business models; do not force-fit a company that doesn't "
+            "genuinely fit. Zero companies for a sector is correct when none "
+            "genuinely fit."
+        )
+        parent_context = ""
+        parent_tickers = None
+    else:
+        # Filtered from the SAME iteration so names and tickers can never
+        # misalign -- do not build parent_tickers and parent_lines from two
+        # separately-filtered lists and zip() them; a parent_pool entry
+        # with no ticker would then pair the wrong name with the wrong
+        # ticker.
+        parent_tickers = [c.ticker for c in parent_pool if c.ticker]
+        parent_lines = "\n".join(f"- {c.ticker} ({c.name})" for c in parent_pool if c.ticker)
+        framing = (
+            "For each sector below, name the specific companies affected as a "
+            "ripple from the already-identified companies listed. Every "
+            "company you name MUST chain from one of those via parent_ticker "
+            "(the exact ticker string) -- a real, specific economic link "
+            "(supplier, customer, or close competitor), not merely being in "
+            "the same sector. Zero companies for a sector is correct when you "
+            "don't have a real, specific one."
+        )
+        parent_context = f"\n\nMust chain from one of these companies:\n{parent_lines}"
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"{framing}\n\n"
+                f"Facts: {facts}\n\n"
+                f"Sectors:\n{sector_lines}"
+                f"{parent_context}\n\n"
+                f"{COMPANY_RATIONALE_INSTRUCTIONS}"
+            ),
+        },
+    ]
+    tool = build_company_tool(parent_tickers if parent_tickers else None)
+
+    def _call(model: str):
+        return client.chat.completions.create(
+            model=model,
+            max_tokens=8192,
+            tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_sector_companies"}},
+            messages=messages,
+        )
+
+    try:
+        response = _call(MODEL)
+    except RateLimitError:
+        response = _call(FALLBACK_MODEL)
+
+    message = response.choices[0].message
+    tool_calls = message.tool_calls or []
+    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_sector_companies"), None)
+    if tool_call is None:
+        raise ValueError("No record_sector_companies tool_use block")
+    arguments = json.loads(tool_call.function.arguments)
+
+    mentions: list[CompanyMention] = []
+    for group in arguments.get("sector_companies", []):
+        sector = group.get("sector")
+        for company in group.get("companies", []):
+            mentions.append(CompanyMention(
+                name=company["name"], ticker=company.get("ticker"), is_direct=True,
+                sector=sector, direction=company["direction"],
+                magnitude_low=company["magnitude_low"], magnitude_high=company["magnitude_high"],
+                rationale=company["rationale"], key_points=company.get("key_points", []),
+                time_horizon=company["time_horizon"], reasons=company.get("reasons", []),
+                evidence_refs=company.get("evidence_refs", []), risks=company.get("risks", []),
+                assumptions=company.get("assumptions", []), unknowns=company.get("unknowns", []),
+                alternative_hypothesis=company.get("alternative_hypothesis"),
+                impact_level=impact_level, parent_ticker=company.get("parent_ticker"),
+            ))
+    return mentions

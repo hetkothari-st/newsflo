@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.analysis.cascade import _extract_facts, _identify_sectors, build_sector_tool
-from app.analysis.schemas import SectorFinding
+from app.analysis.cascade import _extract_facts, _identify_companies, _identify_sectors, build_company_tool, build_sector_tool
+from app.analysis.schemas import CompanyMention, SectorFinding
 
 
 class FakeToolCall:
@@ -148,3 +148,123 @@ def test_build_sector_tool_primary_has_no_parent_sector_field():
     tool = build_sector_tool(cascade=False, valid_parents=None)
     properties = tool["function"]["parameters"]["properties"]["sectors"]["items"]["properties"]
     assert "parent_sector" not in properties
+
+
+_BANKING_SECTOR = SectorFinding(sector="banking", direction="bearish", mechanism="FX exposure on the rupee's fall.")
+
+_FULL_COMPANY_FIELDS = {
+    "name": "HDFC Bank", "ticker": "HDFCBANK.NS", "direction": "bearish",
+    "magnitude_low": 1.0, "magnitude_high": 2.0,
+    "rationale": "Large forex book takes a mark-to-market hit as the rupee weakens.",
+    "key_points": ["The rupee falling means HDFC Bank's dollar-denominated liabilities cost more in rupee terms."],
+    "time_horizon": "Short-Term",
+    "reasons": ["Forex mark-to-market loss on rupee depreciation."],
+    "evidence_refs": ["article: rupee fell 2% today"],
+    "risks": ["Rupee could recover quickly."],
+    "assumptions": ["No RBI intervention in the next week."],
+    "unknowns": ["Size of HDFC Bank's unhedged forex book."],
+    "alternative_hypothesis": "A weaker rupee could also boost NRI deposit inflows, offsetting the forex loss.",
+}
+
+
+def test_identify_companies_direct_stage_sets_impact_level_and_sector():
+    client = ScriptedClient({
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [_FULL_COMPANY_FIELDS]},
+        ]},
+    })
+
+    result = _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+
+    assert len(result) == 1
+    company = result[0]
+    assert company.ticker == "HDFCBANK.NS"
+    assert company.is_direct is True
+    assert company.sector == "banking"
+    assert company.impact_level == "direct"
+    assert company.parent_ticker is None
+    assert company.rationale == _FULL_COMPANY_FIELDS["rationale"]
+    assert company.reasons == _FULL_COMPANY_FIELDS["reasons"]
+    assert company.evidence_refs == _FULL_COMPANY_FIELDS["evidence_refs"]
+    assert company.alternative_hypothesis == _FULL_COMPANY_FIELDS["alternative_hypothesis"]
+
+
+def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    cascade_fields = dict(_FULL_COMPANY_FIELDS, name="IRCTC", ticker="IRCTC.NS", parent_ticker="HDFCBANK.NS")
+    client = ScriptedClient({
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "railways_transport", "companies": [cascade_fields]},
+        ]},
+    })
+
+    result = _identify_companies(
+        client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+
+    assert result[0].impact_level == "indirect_l1"
+    assert result[0].parent_ticker == "HDFCBANK.NS"
+
+
+def test_identify_companies_direct_stage_calls_primary_model():
+    from app.analysis.claude_client import MODEL
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+
+    _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+
+    assert client.calls == [{"name": "record_sector_companies", "model": MODEL}]
+
+
+def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
+    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+
+    class RateLimitOnceThenScripted(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                if kwargs["model"] == MODEL:
+                    from openai import RateLimitError
+                    import httpx
+                    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+                    response = httpx.Response(status_code=429, request=request)
+                    self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
+                    raise RateLimitError("rate limited", response=response, body=None)
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = RateLimitOnceThenScripted({"record_sector_companies": {"sector_companies": []}})
+
+    _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+
+    assert client.calls == [
+        {"name": "record_sector_companies", "model": MODEL},
+        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+    ]
+
+
+def test_build_company_tool_cascade_constrains_parent_ticker_enum():
+    tool = build_company_tool(parent_tickers=["HDFCBANK.NS"])
+    props = tool["function"]["parameters"]["properties"]["sector_companies"]["items"]["properties"]["companies"]["items"]["properties"]
+    assert props["parent_ticker"]["enum"] == ["HDFCBANK.NS"]
+
+
+def test_build_company_tool_direct_has_no_parent_ticker_field():
+    tool = build_company_tool(parent_tickers=None)
+    props = tool["function"]["parameters"]["properties"]["sector_companies"]["items"]["properties"]["companies"]["items"]["properties"]
+    assert "parent_ticker" not in props
+
+
+def test_company_rationale_instructions_contains_rulebook_and_playbook_content():
+    # ARPU appears only in the telecom playbook entry (verified absent from
+    # RULEBOOK_TEXT and SECTOR_DEFINITIONS) -- a real, specific probe that
+    # would catch a dropped PLAYBOOKS_TEXT interpolation.
+    from app.analysis.cascade import COMPANY_RATIONALE_INSTRUCTIONS
+    assert "RULE_CRUDE_OIL_UP" in COMPANY_RATIONALE_INSTRUCTIONS
+    assert "ARPU" in COMPANY_RATIONALE_INSTRUCTIONS
