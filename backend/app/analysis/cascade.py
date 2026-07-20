@@ -21,7 +21,7 @@ from app.reasoning.rulebook import RULEBOOK_TEXT
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
 from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
-    CompanyMention, FactsResult, SectorFinding,
+    AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
 
 FACTS_INSTRUCTIONS = (
@@ -403,3 +403,61 @@ def _identify_companies(
                 impact_level=impact_level, parent_ticker=company.get("parent_ticker"),
             ))
     return mentions
+
+
+def analyze_article(client, title: str, content: str) -> AnalysisOutput:
+    """Runs the 7-call sector-cascade chain and composes the result into the
+    same AnalysisOutput shape app.pipeline.py already consumes. Failure
+    handling (see docs/superpowers/specs/2026-07-20-sector-cascade-
+    reasoning-design.md): a facts (stage 1) or primary-sector (stage 2)
+    failure propagates, failing the whole article -- identical to the old
+    single-call analyze_article's behavior. A failure at any later stage
+    truncates the pipeline there: everything produced by stages that
+    already succeeded is still returned.
+    """
+    facts_result = _extract_facts(client, title, content)
+    primary_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=None)
+
+    all_companies: list = []
+    if not primary_sectors:
+        return AnalysisOutput(category=facts_result.category, event_type=facts_result.event_type, companies=all_companies)
+
+    try:
+        primary_companies = _identify_companies(
+            client, facts_result.facts, primary_sectors, impact_level="direct", parent_pool=None,
+        )
+    except Exception:
+        primary_companies = []
+    all_companies.extend(primary_companies)
+
+    l1_parent_tickers_present = [c for c in primary_companies if c.ticker]
+    if l1_parent_tickers_present:
+        try:
+            l1_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=primary_sectors)
+            l1_companies = (
+                _identify_companies(
+                    client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
+                    parent_pool=l1_parent_tickers_present,
+                )
+                if l1_sectors else []
+            )
+        except Exception:
+            l1_sectors, l1_companies = [], []
+        all_companies.extend(l1_companies)
+
+        l2_parent_tickers_present = [c for c in l1_companies if c.ticker]
+        if l1_sectors and l2_parent_tickers_present:
+            try:
+                l2_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=l1_sectors)
+                l2_companies = (
+                    _identify_companies(
+                        client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
+                        parent_pool=l2_parent_tickers_present,
+                    )
+                    if l2_sectors else []
+                )
+            except Exception:
+                l2_companies = []
+            all_companies.extend(l2_companies)
+
+    return AnalysisOutput(category=facts_result.category, event_type=facts_result.event_type, companies=all_companies)

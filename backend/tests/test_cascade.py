@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.analysis.cascade import _extract_facts, _identify_companies, _identify_sectors, build_company_tool, build_sector_tool
+from app.analysis.cascade import analyze_article, _extract_facts, _identify_companies, _identify_sectors, build_company_tool, build_sector_tool
 from app.analysis.schemas import CompanyMention, SectorFinding
 
 
@@ -268,3 +268,129 @@ def test_company_rationale_instructions_contains_rulebook_and_playbook_content()
     from app.analysis.cascade import COMPANY_RATIONALE_INSTRUCTIONS
     assert "RULE_CRUDE_OIL_UP" in COMPANY_RATIONALE_INSTRUCTIONS
     assert "ARPU" in COMPANY_RATIONALE_INSTRUCTIONS
+
+
+def _full_company(name, ticker, parent_ticker=None):
+    fields = dict(_FULL_COMPANY_FIELDS, name=name, ticker=ticker)
+    if parent_ticker:
+        fields["parent_ticker"] = parent_ticker
+    return fields
+
+
+def test_analyze_article_composes_all_seven_stages_end_to_end():
+    # Sector/company stages are called multiple times with the same tool
+    # name in one run (stage 2 vs 4 vs 6 all call record_sectors; stage 3
+    # vs 5 vs 7 all call record_sector_companies) -- ScriptedClient as built
+    # in Task 3 only supports ONE canned response per tool name. Use a
+    # call-count-based variant here instead.
+    class MultiStageClient:
+        def __init__(self):
+            self.calls = []
+            self._sector_responses = [
+                {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "FX exposure."}]},
+                {"sectors": [{
+                    "sector": "railways_transport", "direction": "bearish",
+                    "mechanism": "Import costs rise.", "parent_sector": "banking",
+                }]},
+                {"sectors": []},  # no hop-2 sectors found -- stops the chain
+            ]
+            self._company_responses = [
+                {"sector_companies": [{"sector": "banking", "companies": [_full_company("HDFC Bank", "HDFCBANK.NS")]}]},
+                {"sector_companies": [{
+                    "sector": "railways_transport",
+                    "companies": [_full_company("IRCTC", "IRCTC.NS", parent_ticker="HDFCBANK.NS")],
+                }]},
+            ]
+            self._sector_call_count = 0
+            self._company_call_count = 0
+
+        class _Completions:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def create(self, **kwargs):
+                name = kwargs["tool_choice"]["function"]["name"]
+                self._outer.calls.append(name)
+                if name == "record_facts":
+                    response = {"facts": "The rupee fell 2% today.", "category": "macro_policy", "event_type": "currency_move"}
+                elif name == "record_sectors":
+                    response = self._outer._sector_responses[self._outer._sector_call_count]
+                    self._outer._sector_call_count += 1
+                elif name == "record_sector_companies":
+                    response = self._outer._company_responses[self._outer._company_call_count]
+                    self._outer._company_call_count += 1
+                else:
+                    raise AssertionError(f"unexpected tool: {name}")
+                message = SimpleNamespace(tool_calls=[FakeToolCall(name, response)])
+                return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = MultiStageClient()
+
+    result = analyze_article(client, title="Rupee falls sharply", content="The rupee weakened 2% today.")
+
+    assert result.category == "macro_policy"
+    assert result.event_type == "currency_move"
+    assert len(result.companies) == 2
+    direct, cascade = result.companies
+    assert direct.ticker == "HDFCBANK.NS"
+    assert direct.impact_level == "direct"
+    assert direct.parent_ticker is None
+    assert cascade.ticker == "IRCTC.NS"
+    assert cascade.impact_level == "indirect_l1"
+    assert cascade.parent_ticker == "HDFCBANK.NS"
+    # 6 calls: facts, primary sectors, primary companies, L1 sectors, L1
+    # companies, L2 sectors -- the L2-sector call DOES run (L1 sectors and
+    # L1 companies-with-tickers are both non-empty, so the orchestrator's
+    # guards let it through), but it returns zero L2 sectors, so stage 7
+    # (L2 companies) never runs.
+    assert client.calls == [
+        "record_facts", "record_sectors", "record_sector_companies",
+        "record_sectors", "record_sector_companies", "record_sectors",
+    ]
+
+
+def test_analyze_article_propagates_facts_stage_failure():
+    client = ScriptedClient({"record_facts": ValueError("boom")})
+
+    with pytest.raises(ValueError, match="boom"):
+        analyze_article(client, title="t", content="c")
+
+
+def test_analyze_article_propagates_primary_sector_stage_failure():
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": ValueError("boom"),
+    })
+
+    with pytest.raises(ValueError, match="boom"):
+        analyze_article(client, title="t", content="c")
+
+
+def test_analyze_article_truncates_and_returns_direct_companies_when_primary_company_stage_fails():
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "m"}]},
+        "record_sector_companies": ValueError("boom"),
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    assert result.companies == []
+
+
+def test_analyze_article_stops_cascade_when_primary_sectors_are_empty():
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": []},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    assert result.companies == []
+    # No company stage should have run at all -- nothing to find companies
+    # within when there are zero primary sectors.
+    assert [c["name"] for c in client.calls] == ["record_facts", "record_sectors"]
