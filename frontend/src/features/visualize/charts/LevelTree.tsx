@@ -162,7 +162,7 @@ export default function LevelTree({
                   >
                     {level !== 'direct' && <CascadeWhy companies={card.companies} />}
                     {card.companies.map((c) => (
-                      <CompanyRow key={c.company_id} company={c} sector={c.sector} />
+                      <CompanyRow key={c.company_id} company={c} showSector />
                     ))}
                   </ImpactCard>
                 ))}

@@ -12,19 +12,20 @@ import { sectorLabel } from '../../transforms';
 // behavior), the row renders as a plain, non-interactive block instead of a
 // button, so it doesn't imply an action that does nothing.
 //
-// `sector` is optional -- pass it when the row's own card grouping doesn't
-// already imply a single sector (e.g. a cascade/parent-linked group can mix
-// sectors), so the sector is still visible per-company.
+// `showSector` is optional -- pass it to show a sector chip alongside the
+// ticker (reads `company.sector` directly, no separate value to keep in
+// sync). Useful when the row's own card grouping doesn't already imply a
+// single sector (e.g. a cascade/parent-linked group can mix sectors).
 export default function CompanyRow({
   company,
   onClick,
   selected = false,
-  sector,
+  showSector = false,
 }: {
   company: AlertCompany;
   onClick?: () => void;
   selected?: boolean;
-  sector?: string;
+  showSector?: boolean;
 }) {
   const bullish = company.direction === 'bullish';
   const content = (
@@ -34,10 +35,10 @@ export default function CompanyRow({
         <span className="truncate text-sm text-ink">{company.name}</span>
         <span className="flex items-center gap-1.5">
           <span className="truncate font-mono text-[11px] tracking-tight text-muted">{company.ticker}</span>
-          {sector && (
-            <span className="inline-flex shrink-0 items-center gap-1 font-data text-[10px] uppercase tracking-wide text-muted">
-              <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: sectorColor(sector) }} />
-              {sectorLabel(sector)}
+          {showSector && company.sector && (
+            <span className="inline-flex shrink-0 items-center gap-1 font-data text-[10px] uppercase tracking-widest text-muted">
+              <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: sectorColor(company.sector) }} />
+              {sectorLabel(company.sector)}
             </span>
           )}
         </span>
