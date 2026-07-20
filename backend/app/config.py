@@ -44,9 +44,10 @@ class Settings(BaseSettings):
     # optional-at-dev-time pattern as anthropic_api_key defaulting to "".)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "dev-insecure-secret-change-in-production")
     resend_api_key: str = os.environ.get("RESEND_API_KEY", "")
-    # News ingestion source -- see app/ingestion/indianapi.py. The RSS-feed
-    # poller (app/ingestion/poller.py + sources.py) is still fully intact,
-    # just no longer wired into the scheduler (see scheduler.py).
+    # News ingestion source -- see app/ingestion/indianapi.py. Now disabled
+    # (not deleted, see app/scheduler.py), replaced by the thenewsapi block
+    # below. The RSS-feed poller (app/ingestion/poller.py + sources.py) is
+    # also still fully intact, just not wired into the scheduler either.
     indianapi_api_key: str = os.environ.get("INDIANAPI_API_KEY", "")
     # This key is capped at 500 requests/month. Explicit product decision to
     # poll at 1/min anyway (confirmed with the user, who understood the
