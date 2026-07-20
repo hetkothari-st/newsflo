@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getAlert, type Alert, type AlertCompany } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 import { computeNetSignal } from '../features/visualize/transforms';
 import { impactLevelKey } from '../features/visualize/impactLevels';
 import ImpactTree from '../features/visualize/charts/ImpactTree';
-import LevelTree from '../features/visualize/charts/LevelTree';
 
 // --- Chart system disabled: blank slate, chart rebuild pending ---
 // import { Link } from 'react-router-dom';
@@ -234,12 +233,13 @@ export default function AlertChartsPage() {
       <StatBar companies={alert.companies} breadth={breadth} />
       <div className="flex-1 overflow-y-auto">
         <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} />
-        <div className="mt-6 border-t border-hairline">
-          <LevelTree
-            companies={
-              breadth === 'drilldown' ? alert.companies : alert.companies.filter((c) => impactLevelKey(c) === 'direct')
-            }
-          />
+        <div className="flex justify-center border-t border-hairline p-4">
+          <Link
+            to={`/alerts/${alert.id}/charts/cascade`}
+            className="rounded-lg border border-hairline px-4 py-2 text-xs uppercase tracking-widest text-ink hover:bg-surface"
+          >
+            View Cascade Levels →
+          </Link>
         </div>
       </div>
     </div>

@@ -84,32 +84,13 @@ describe('AlertChartsPage', () => {
     await waitFor(() => expect(screen.getByText('Alert not found')).toBeInTheDocument());
   });
 
-  it('Normal breadth shows only direct companies in the Cascade Levels chart; Drilldown adds indirect ones too', async () => {
-    const { fireEvent } = await import('@testing-library/react');
-    const directCompany = {
-      company_id: 1, ticker: 'RIL', name: 'Reliance Industries', index_tier: 'NIFTY50', sector: 'oil_gas',
-      direction: 'bullish' as const, magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner margins widen.',
-      key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN' as const,
-      in_my_holdings: false, past_mentions: [], impact_level: 'direct' as const, parent_company_id: null,
-    };
-    const indirectCompany = {
-      company_id: 2, ticker: 'TSM', name: 'TSMC', index_tier: 'NIFTY50', sector: 'it',
-      direction: 'bearish' as const, magnitude_low: 1, magnitude_high: 2, rationale: 'Fabs Reliance-adjacent chips.',
-      key_points: [], confidence_score: 20, time_horizon: 'Medium-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN' as const,
-      in_my_holdings: false, past_mentions: [], impact_level: 'indirect_l1' as const, parent_company_id: 1,
-    };
-    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, indirectCompany] }));
+  it('links to the dedicated Cascade Levels page instead of rendering it inline', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
     renderPage('1');
 
-    // ImpactTree (unaffected by breadth, unchanged in this task) always shows
-    // indirect companies in its own "ripple" section, so TSM already appears
-    // once in Normal mode -- Cascade Levels only adds a second occurrence
-    // once Drilldown is selected.
-    await waitFor(() => expect(screen.getByText('Cascade Levels')).toBeInTheDocument());
-    expect(screen.getAllByText('TSM')).toHaveLength(1);
-
-    fireEvent.click(screen.getByText('Drilldown'));
-    await waitFor(() => expect(screen.getAllByText('TSM')).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText('View Cascade Levels →')).toBeInTheDocument());
+    expect(screen.getByText('View Cascade Levels →').closest('a')).toHaveAttribute('href', '/alerts/1/charts/cascade');
+    expect(screen.queryByText('Cascade Levels')).not.toBeInTheDocument();
   });
 
   // --- Chart system disabled: blank slate, chart rebuild pending ---
