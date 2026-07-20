@@ -1,4 +1,7 @@
+from sqlalchemy.orm import Session
+
 from app.analysis.claude_client import FALLBACK_MODEL
+from app.models import Article
 
 _PROMPT_TEMPLATE = (
     "Does this news plausibly affect any financial, business, or economic "
@@ -30,3 +33,14 @@ def classify_relevance(client, title: str, content: str) -> bool:
         return True
 
     return "yes" in (answer or "").strip().lower()
+
+
+def filter_new_articles(session: Session, client) -> None:
+    from app.pipeline import article_text
+
+    for article in session.query(Article).filter_by(status="NEW").all():
+        if classify_relevance(client, article.title, article_text(article)):
+            article.status = "CATEGORIZED"
+        else:
+            article.status = "FILTERED"
+    session.commit()

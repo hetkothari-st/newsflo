@@ -12,7 +12,7 @@ from app.calibration.blender import get_calibrated_magnitude, get_calibration_he
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
-from app.filtering.heuristic import filter_new_articles
+from app.filtering.relevance import filter_new_articles
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, Article, Company, utcnow
