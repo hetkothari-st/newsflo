@@ -46,3 +46,19 @@ def test_classify_sector_batch_omits_a_ticker_the_model_did_not_address():
     client = FakeClient({"classifications": []})
     result = classify_sector_batch(client, [("IRCTC.NS", "Indian Railway Catering and Tourism Corp")])
     assert result == {}
+
+
+def test_classify_sector_batch_prompt_includes_sector_definitions():
+    captured = {}
+
+    def create(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        response = {"classifications": []}
+        message = SimpleNamespace(tool_calls=[FakeToolCall("record_sector_classifications", response)])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    classify_sector_batch(client, [("IRCTC.NS", "Indian Railway Catering and Tourism Corp")])
+
+    all_content = " ".join(m["content"] for m in captured["messages"])
+    assert "construction_realestate: real estate developers" in all_content

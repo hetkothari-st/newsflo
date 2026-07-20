@@ -382,6 +382,20 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
     assert result.companies == []
 
 
+def test_analyze_article_logs_swallowed_stage_failures(caplog):
+    import logging
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "m"}]},
+        "record_sector_companies": ValueError("boom"),
+    })
+
+    with caplog.at_level(logging.WARNING):
+        analyze_article(client, title="t", content="c")
+
+    assert any("boom" in record.message for record in caplog.records)
+
+
 def test_analyze_article_stops_cascade_when_primary_sectors_are_empty():
     client = ScriptedClient({
         "record_facts": {"facts": "f", "category": "other", "event_type": "other"},

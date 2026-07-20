@@ -12,6 +12,7 @@ added in a later task of this same plan) is responsible for sequencing
 them and for the truncate-on-failure behavior described in the design spec.
 """
 import json
+import logging
 
 from openai import RateLimitError
 
@@ -23,6 +24,8 @@ from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
+
+logger = logging.getLogger(__name__)
 
 FACTS_INSTRUCTIONS = (
     "Read this news article closely and extract its core facts and economic "
@@ -426,7 +429,8 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         primary_companies = _identify_companies(
             client, facts_result.facts, primary_sectors, impact_level="direct", parent_pool=None,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("cascade stage 3 (primary companies) failed, truncating: %s", exc)
         primary_companies = []
     all_companies.extend(primary_companies)
 
@@ -441,7 +445,8 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
                 )
                 if l1_sectors else []
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("cascade stage 4/5 (L1 cascade sectors/companies) failed, truncating: %s", exc)
             l1_sectors, l1_companies = [], []
         all_companies.extend(l1_companies)
 
@@ -456,7 +461,8 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
                     )
                     if l2_sectors else []
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning("cascade stage 6/7 (L2 cascade sectors/companies) failed, truncating: %s", exc)
                 l2_companies = []
             all_companies.extend(l2_companies)
 

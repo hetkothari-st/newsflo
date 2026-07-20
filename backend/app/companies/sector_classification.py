@@ -10,7 +10,7 @@ import json
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL
-from app.analysis.schemas import SECTORS
+from app.analysis.schemas import SECTOR_DEFINITIONS, SECTORS
 
 
 def build_sector_classify_tool() -> dict:
@@ -59,7 +59,8 @@ def classify_sector_batch(client, tickers_and_names: list[tuple[str, str]]) -> d
             "content": (
                 "You are a financial sector-classification analyst. Classify each "
                 "listed company into exactly one sector from the given enum, based "
-                "on its actual, primary line of business."
+                "on its actual, primary line of business.\n\n"
+                f"SECTOR DEFINITIONS:\n{SECTOR_DEFINITIONS}"
             ),
         },
         {"role": "user", "content": f"Companies to classify:\n{listing}"},
