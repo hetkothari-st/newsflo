@@ -5,7 +5,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.analysis.claude_client import build_client
 from app.config import settings
 from app.db import SessionLocal
-from app.ingestion.indianapi import fetch_new_indianapi_articles
+# IndianAPI is disabled (not deleted) -- replaced by thenewsapi.com, see
+# docs/superpowers/specs/2026-07-20-thenewsapi-ingestion-source-design.md.
+# Swap the fetch_new_indianapi_articles(...) call back in (and re-enable
+# this import and the _run_indianapi_ingestion function below) to revert.
+# from app.ingestion.indianapi import fetch_new_indianapi_articles
+from app.ingestion.thenewsapi import fetch_new_thenewsapi_articles
 # RSS ingestion (poller.py + sources.py) is intact and fully working, just
 # not wired in below -- IndianAPI's /news endpoint is the active source now.
 # Swap the fetch_new_articles(...) call back in (and re-enable this import)
@@ -49,20 +54,36 @@ def _run_horizon(horizon_days: int) -> None:
         session.close()
 
 
-def _run_indianapi_ingestion() -> None:
-    """Poll IndianAPI's /news endpoint for fresh Indian market news. Runs on
-    its own, much longer interval (indianapi_poll_interval_minutes) rather
-    than the fast analysis cycle below -- this key is capped at 500
-    requests/month, nowhere near enough for a 2-minute cadence. Whatever
-    lands here (status=NEW) is picked up and analyzed by the next regular
-    _run_ingestion_and_analysis tick, not here. Any failure is logged, never
-    raised, same as every other scheduler job."""
+# def _run_indianapi_ingestion() -> None:
+#     """Poll IndianAPI's /news endpoint for fresh Indian market news. Runs on
+#     its own, much longer interval (indianapi_poll_interval_minutes) rather
+#     than the fast analysis cycle below -- this key is capped at 500
+#     requests/month, nowhere near enough for a 2-minute cadence. Whatever
+#     lands here (status=NEW) is picked up and analyzed by the next regular
+#     _run_ingestion_and_analysis tick, not here. Any failure is logged, never
+#     raised, same as every other scheduler job."""
+#     session = SessionLocal()
+#     try:
+#         inserted = fetch_new_indianapi_articles(session, settings.indianapi_api_key)
+#         logger.info("IndianAPI poll: %s new articles", inserted)
+#     except Exception:
+#         logger.exception("IndianAPI ingestion poll failed")
+#     finally:
+#         session.close()
+
+
+def _run_thenewsapi_ingestion() -> None:
+    """Poll thenewsapi.com's /v1/news/all endpoint for fresh business/
+    politics/general/tech news. Runs on its own, much longer interval
+    (thenewsapi_poll_interval_minutes) rather than the fast per-minute
+    analysis cycle -- this key is capped at 100 requests/day. Any failure
+    is logged, never raised, same as every other scheduler job."""
     session = SessionLocal()
     try:
-        inserted = fetch_new_indianapi_articles(session, settings.indianapi_api_key)
-        logger.info("IndianAPI poll: %s new articles", inserted)
+        inserted = fetch_new_thenewsapi_articles(session, settings.thenewsapi_api_key)
+        logger.info("thenewsapi poll: %s new articles", inserted)
     except Exception:
-        logger.exception("IndianAPI ingestion poll failed")
+        logger.exception("thenewsapi ingestion poll failed")
     finally:
         session.close()
 
@@ -124,11 +145,19 @@ def start_scheduler() -> None:
             args=[horizon],
             id=f"outcome_tracker_{horizon}d",
         )
+    # IndianAPI job disabled -- see the import comment above. Restore this
+    # block (and re-enable _run_indianapi_ingestion) to revert.
+    # scheduler.add_job(
+    #     _run_indianapi_ingestion,
+    #     trigger="interval",
+    #     minutes=settings.indianapi_poll_interval_minutes,
+    #     id="indianapi_poll",
+    # )
     scheduler.add_job(
-        _run_indianapi_ingestion,
+        _run_thenewsapi_ingestion,
         trigger="interval",
-        minutes=settings.indianapi_poll_interval_minutes,
-        id="indianapi_poll",
+        minutes=settings.thenewsapi_poll_interval_minutes,
+        id="thenewsapi_poll",
     )
     scheduler.add_job(
         _run_ingestion_and_analysis,

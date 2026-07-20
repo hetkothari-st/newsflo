@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # degrades to returning 0, per its "never raise, skip this cycle"
     # contract) until the key's quota resets next month.
     indianapi_poll_interval_minutes: int = int(os.environ.get("INDIANAPI_POLL_INTERVAL_MINUTES", "1"))
+    # News ingestion source -- replaces IndianAPI (disabled, not deleted --
+    # see app/scheduler.py). See docs/superpowers/specs/2026-07-20-
+    # thenewsapi-ingestion-source-design.md. Free tier: 100 requests/day,
+    # 3 articles/request -- 20-minute default interval is 72 requests/day,
+    # comfortably under the cap.
+    thenewsapi_api_key: str = os.environ.get("THENEWSAPI_API_KEY", "")
+    thenewsapi_poll_interval_minutes: int = int(os.environ.get("THENEWSAPI_POLL_INTERVAL_MINUTES", "20"))
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound
