@@ -1,5 +1,6 @@
 """One-off: re-run analysis on the N most recently created alerts using the
-CURRENT ANALYSIS_INSTRUCTIONS prompt, updating each matched company's
+CURRENT sector-cascade analysis pipeline (see app.analysis.cascade), updating
+each matched company's
 rationale/key_points in place (same Alert/AlertCompany row, same id,
 same created_at) -- does not add or remove AlertCompany rows, only
 refreshes the text for companies the fresh analysis still names. A
@@ -22,7 +23,8 @@ to run against production):
 import json
 import sys
 
-from app.analysis.claude_client import analyze_article, build_client
+from app.analysis.cascade import analyze_article
+from app.analysis.claude_client import build_client
 from app.companies.resolution import _find_direct_company
 from app.config import settings
 from app.db import SessionLocal, init_db
