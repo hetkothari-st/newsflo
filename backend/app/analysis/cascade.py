@@ -1,15 +1,26 @@
 """Sector-first, multi-step cascade reasoning: replaces the old single-call
-app.analysis.claude_client.analyze_article with a 7-call chain (facts ->
+app.analysis.claude_client.analyze_article with a staged chain (facts ->
 primary sectors -> primary companies -> cascade sectors L1 -> cascade
 companies L1 -> cascade sectors L2 -> cascade companies L2). See
 docs/superpowers/specs/2026-07-20-sector-cascade-reasoning-design.md.
 
+Originally a fixed 7 calls total. Confirmed in production that bundling
+every cascade sector's company lookup into one call degrades to an empty
+response once there are several sectors (each company's required fields
+are verbose enough that 5-7 sectors' worth doesn't fit one tool call's
+token budget, and the model returns nothing rather than a partial result)
+-- so cascade company identification (stages 5/7) now makes one call PER
+cascade sector via _identify_cascade_companies_per_sector, making the
+total call count scale with how many cascade sectors are actually found
+(typically 1 for facts + 1-2 for primary sectors/companies + N for each
+cascade level's sectors and companies), not a fixed 7.
+
 All three stage functions below (_extract_facts, _identify_sectors,
 _identify_companies) are pure: given a client and inputs, they make exactly
 one LLM call and return parsed, validated output, raising on a genuinely
-malformed response (no tool_use block). The orchestrator (analyze_article,
-added in a later task of this same plan) is responsible for sequencing
-them and for the truncate-on-failure behavior described in the design spec.
+malformed response (no tool_use block). The orchestrator (analyze_article)
+is responsible for sequencing them and for the truncate-on-failure
+behavior described in the design spec.
 """
 import json
 import logging
@@ -155,13 +166,29 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
         framing = (
             "Given these facts and the sectors already identified as directly "
             "affected, identify sectors affected AS A CONSEQUENCE of those -- a "
-            "ripple/knock-on effect, not the news's own direct subject. Only "
-            "include a sector here if you have a genuine, specific mechanism "
-            "for why it's affected because of the parent sector's own move, "
-            "not because it's tangentially related. Zero cascade sectors is a "
-            "correct answer when you don't have a real, specific one. For each, "
-            "give its direction, a one-line mechanism, and which of the "
-            "already-identified sectors it's rippling from (parent_sector)."
+            "ripple/knock-on effect, not the news's own direct subject.\n\n"
+            "Real financial and economic news almost always ripples beyond its "
+            "own direct sector -- a genuine cascade is the norm, not the "
+            "exception. Actively look for it through channels like: credit/"
+            "loan cost (a rate or lending-policy move changes borrowing costs "
+            "for buyers of cars, homes, appliances, etc. -- e.g. a bank's own "
+            "move affects auto and consumer-durables sectors as EMI/financing "
+            "costs shift); input costs (an oil, metals, or currency move "
+            "changes production costs for downstream manufacturers); consumer "
+            "spending power (a rate, inflation, or currency move changes how "
+            "much households can spend, affecting retail/fmcg/travel); trade/"
+            "logistics (a shipping, tariff, or currency move affects importers "
+            "and exporters differently). Example: an RBI/lending-rate story's "
+            "primary sector is banking, but it genuinely cascades to auto "
+            "(car-loan EMIs), construction_realestate (mortgage rates), and "
+            "consumer_durables (financed purchases) -- these are not a stretch, "
+            "they are the direct, well-known transmission mechanism of a rate "
+            "change. Only skip a cascade sector if you genuinely cannot state "
+            "a specific mechanism for it -- do not skip one just because "
+            "naming it takes more reasoning than stopping at the primary "
+            "sector. For each sector you include, give its direction, a "
+            "one-line mechanism, and which of the already-identified sectors "
+            "it's rippling from (parent_sector)."
         )
         parent_context = f"\n\nAlready-identified sectors this may ripple from:\n{parent_lines}"
         valid_parents = [s.sector for s in parent_sectors]
@@ -192,7 +219,21 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
     if tool_call is None:
         raise ValueError("No record_sectors tool_use block")
     arguments = json.loads(tool_call.function.arguments)
-    return [SectorFinding.model_validate(s) for s in arguments.get("sectors", [])]
+    findings = [SectorFinding.model_validate(s) for s in arguments.get("sectors", [])]
+    # Defensive filter: the tool schema enum-constrains `sector` to SECTORS,
+    # but that constraint isn't always strictly enforced server-side for a
+    # nested array item (confirmed in production: a real response returned
+    # "aviation", not a SECTORS value -- it's only mentioned inside
+    # railways_transport's own definition text). An off-taxonomy sector
+    # here doesn't just mean one bad entry: the NEXT call's company tool
+    # schema also enum-constrains `sector`, and feeding it a sector name
+    # outside that enum can make the model unable to satisfy the schema at
+    # all, degrading the whole call to an empty response. Drop rather than
+    # coerce to "other" -- the finding's own mechanism text is written for
+    # the specific (invalid) sector it named, not for "other", so
+    # relabeling it would misrepresent the reasoning ("omit rather than
+    # mismatch", same discipline as app.companies.resolution).
+    return [f for f in findings if f.sector in SECTORS]
 
 
 # Preserves this session's own hard-won plain-language WHY/HOW quality bar
@@ -202,7 +243,20 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
 # now-deleted, instructions) that app.pipeline._persist_alert's
 # rulebook_ids_json extraction depends on -- both are load-bearing, not
 # cosmetic prompt text.
-COMPANY_RATIONALE_INSTRUCTIONS = (
+_COMPANY_FIELD_INSTRUCTIONS = (
+    "- ticker: write the EXACT ticker symbol as it trades, including the "
+    "exchange suffix -- Indian companies almost always end in \".NS\" (NSE, "
+    "e.g. \"MARUTI.NS\", \"RELIANCE.NS\", \"HINDUNILVR.NS\") or occasionally "
+    "\".BO\" (BSE); global companies typically have no suffix (e.g. \"BP\", "
+    "\"AAPL\"). This match must be exact -- a ticker off by the suffix alone "
+    "(e.g. \"MARUTI\" instead of \"MARUTI.NS\") will fail to resolve to a "
+    "real record and the company will be silently dropped. If you are not "
+    "confident of the exact ticker, set it to null rather than guessing a "
+    "close-but-wrong symbol.\n"
+    "- name: the company's real, commonly-used legal name (e.g. \"Maruti "
+    "Suzuki India Ltd.\", not an invented or shortened variant) -- if the "
+    "ticker above is null or turns out wrong, this name is the only other "
+    "way the company can be matched to a real record.\n"
     "For each company:\n"
     "- rationale: name the specific mechanism for THAT company -- its "
     "specific role (upstream producer vs refiner vs distributor vs miner: "
@@ -226,11 +280,6 @@ COMPANY_RATIONALE_INSTRUCTIONS = (
     "supports.\n"
     "- reasons: 1-4 short, distinct, individually-citable reasons "
     "supporting the direction call.\n"
-    "- evidence_refs: one entry per `reasons` item -- either a rule id from "
-    "ECONOMIC REASONING RULES below (e.g. \"RULE_REPO_RATE_CUT\"), a quoted "
-    "or closely paraphrased fact from the article (prefix \"article: \"), "
-    "or a specific historical precedent you actually know (prefix "
-    "\"historical: \").\n"
     "- risks: 0-3 specific risks that could invalidate this call. "
     "assumptions: 0-3 things assumed true that, if wrong, change the call. "
     "unknowns: 0-3 pieces of missing information that would make this call "
@@ -238,13 +287,42 @@ COMPANY_RATIONALE_INSTRUCTIONS = (
     "- alternative_hypothesis: one sentence describing a plausible "
     "competing interpretation, or why none is credible.\n"
     "- time_horizon: exactly one of Immediate, Short-Term, Medium-Term, "
-    "Long-Term, based on when the mechanism actually plays out.\n\n"
+    "Long-Term, based on when the mechanism actually plays out."
+)
+
+# Direct-stage (stage 3) gets the full rulebook/playbook reference block --
+# it's the highest-value, lowest-cardinality call (one company list, no
+# nested per-sector grouping to also reason about) so the extra prompt
+# weight doesn't risk starving the model's attention. evidence_refs may
+# cite a rule id from this block.
+COMPANY_RATIONALE_INSTRUCTIONS = (
+    f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
+    "- evidence_refs: one entry per `reasons` item -- either a rule id from "
+    "ECONOMIC REASONING RULES below (e.g. \"RULE_REPO_RATE_CUT\"), a quoted "
+    "or closely paraphrased fact from the article (prefix \"article: \"), "
+    "or a specific historical precedent you actually know (prefix "
+    "\"historical: \").\n\n"
     "Consult the ECONOMIC REASONING RULES and SECTOR PLAYBOOKS below. If a "
     "rule genuinely applies, use it to strengthen your rationale and "
     "include its rule id verbatim as one entry in that company's "
     "evidence_refs. Do not force-fit a rule that doesn't actually apply.\n"
     f"ECONOMIC REASONING RULES:\n{RULEBOOK_TEXT}\n\n"
     f"SECTOR PLAYBOOKS:\n{PLAYBOOKS_TEXT}"
+)
+
+# Cascade stages (5/7) drop the rulebook/playbook block -- those calls
+# already carry a longer prompt (multiple sectors + a parent-company list +
+# the anti-division-naming rules below), and a real production test showed
+# the combined weight pushed the model to return a degenerate empty tool
+# call instead of reasoning through it. evidence_refs here is scoped to
+# what's actually available in this call (article facts + real-world
+# knowledge), not a rulebook that isn't provided.
+CASCADE_COMPANY_RATIONALE_INSTRUCTIONS = (
+    f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
+    "- evidence_refs: one entry per `reasons` item -- either a quoted or "
+    "closely paraphrased fact from the article (prefix \"article: \"), or "
+    "a specific historical precedent you actually know (prefix "
+    "\"historical: \")."
 )
 
 _COMPANY_ITEM_PROPERTIES = {
@@ -349,11 +427,36 @@ def _identify_companies(
             "company you name MUST chain from one of those via parent_ticker "
             "(the exact ticker string) -- a real, specific economic link "
             "(supplier, customer, or close competitor), not merely being in "
-            "the same sector. Zero companies for a sector is correct when you "
-            "don't have a real, specific one."
+            "the same sector.\n\n"
+            "A sector reaching this stage already has a stated, genuine "
+            "mechanism (see its one-line reason below) -- that mechanism is "
+            "not in question, your job now is just to name who it actually "
+            "hits. For most sectors that is very findable: you don't need a "
+            "documented, publicly-reported supplier/customer relationship, "
+            "a large, well-known, real company that is genuinely prominent "
+            "in that specific sector is a legitimate answer (e.g. for a "
+            "cascade sector caused by rising import/freight costs, the "
+            "sector's own major real players ARE the companies affected by "
+            "that mechanism). Naming 1-3 real companies per sector is the "
+            "normal, expected outcome, not the exception -- reach for that "
+            "before concluding there is nothing to name. Only return zero "
+            "companies for a sector when you genuinely cannot think of a "
+            "single real company operating in it, which should be rare.\n\n"
+            "Each company you name MUST be a real, separate, independently "
+            "publicly-traded company with its own ticker -- NEVER a division, "
+            "segment, subsidiary, or business unit of a company you (or the "
+            "parent list above) already named. Do not write a name like "
+            "\"[Company] - [Segment] Division\" or \"[Company]'s [Segment] "
+            "arm\" -- that is the SAME company again, not a genuine cascade "
+            "link, and it cannot be resolved to a real database row. If your "
+            "first instinct is a division/segment of an already-named "
+            "company, name a genuinely different, separate company in that "
+            "sector instead -- do not omit the sector just because your "
+            "first instinct was a segment name."
         )
         parent_context = f"\n\nMust chain from one of these companies:\n{parent_lines}"
 
+    rationale_instructions = COMPANY_RATIONALE_INSTRUCTIONS if parent_pool is None else CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -363,7 +466,7 @@ def _identify_companies(
                 f"Facts: {facts}\n\n"
                 f"Sectors:\n{sector_lines}"
                 f"{parent_context}\n\n"
-                f"{COMPANY_RATIONALE_INSTRUCTIONS}"
+                f"{rationale_instructions}"
             ),
         },
     ]
@@ -408,8 +511,35 @@ def _identify_companies(
     return mentions
 
 
+def _identify_cascade_companies_per_sector(
+    client, facts: str, sectors: list[SectorFinding], impact_level: str, parent_pool: list[CompanyMention],
+) -> list[CompanyMention]:
+    """Calls _identify_companies ONCE PER SECTOR rather than bundling every
+    cascade sector into one call. Confirmed in production: bundling 5-7
+    cascade sectors (each company requires a long rationale/key_points/
+    reasons/evidence_refs/risks/assumptions/unknowns block, easily 500+
+    tokens) into a single max_tokens=8192 tool call made the model return a
+    degenerate empty response (no exception, just `{}` -- silently zero
+    companies) even though every sector had a genuine, findable answer. The
+    SAME sectors, called one at a time, reliably produced rich, correct,
+    multi-company results. Direct/primary companies (stage 3) do not use
+    this -- that stage empirically has few enough sectors (the article's
+    own direct subject, not a wide cascade fan-out) that bundling is fine.
+    A failure on one sector is logged and skipped -- it does not lose the
+    other sectors' results.
+    """
+    mentions: list[CompanyMention] = []
+    for sector in sectors:
+        try:
+            mentions.extend(_identify_companies(client, facts, [sector], impact_level=impact_level, parent_pool=parent_pool))
+        except Exception as exc:
+            logger.warning("cascade company lookup for sector %r failed, skipping: %s", sector.sector, exc)
+    return mentions
+
+
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
-    """Runs the 7-call sector-cascade chain and composes the result into the
+    """Runs the sector-cascade chain (see module docstring for why the call
+    count now scales with cascade sector count) and composes the result into the
     same AnalysisOutput shape app.pipeline.py already consumes. Failure
     handling (see docs/superpowers/specs/2026-07-20-sector-cascade-
     reasoning-design.md): a facts (stage 1) or primary-sector (stage 2)
@@ -438,32 +568,32 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     if l1_parent_tickers_present:
         try:
             l1_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=primary_sectors)
-            l1_companies = (
-                _identify_companies(
-                    client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
-                    parent_pool=l1_parent_tickers_present,
-                )
-                if l1_sectors else []
-            )
         except Exception as exc:
-            logger.warning("cascade stage 4/5 (L1 cascade sectors/companies) failed, truncating: %s", exc)
-            l1_sectors, l1_companies = [], []
+            logger.warning("cascade stage 4 (L1 cascade sectors) failed, truncating: %s", exc)
+            l1_sectors = []
+        l1_companies = (
+            _identify_cascade_companies_per_sector(
+                client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
+                parent_pool=l1_parent_tickers_present,
+            )
+            if l1_sectors else []
+        )
         all_companies.extend(l1_companies)
 
         l2_parent_tickers_present = [c for c in l1_companies if c.ticker]
         if l1_sectors and l2_parent_tickers_present:
             try:
                 l2_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=l1_sectors)
-                l2_companies = (
-                    _identify_companies(
-                        client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
-                        parent_pool=l2_parent_tickers_present,
-                    )
-                    if l2_sectors else []
-                )
             except Exception as exc:
-                logger.warning("cascade stage 6/7 (L2 cascade sectors/companies) failed, truncating: %s", exc)
-                l2_companies = []
+                logger.warning("cascade stage 6 (L2 cascade sectors) failed, truncating: %s", exc)
+                l2_sectors = []
+            l2_companies = (
+                _identify_cascade_companies_per_sector(
+                    client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
+                    parent_pool=l2_parent_tickers_present,
+                )
+                if l2_sectors else []
+            )
             all_companies.extend(l2_companies)
 
     return AnalysisOutput(category=facts_result.category, event_type=facts_result.event_type, companies=all_companies)

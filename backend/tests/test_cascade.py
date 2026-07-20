@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.analysis.cascade import analyze_article, _extract_facts, _identify_companies, _identify_sectors, build_company_tool, build_sector_tool
+from app.analysis.cascade import (
+    analyze_article, _extract_facts, _identify_cascade_companies_per_sector, _identify_companies,
+    _identify_sectors, build_company_tool, build_sector_tool,
+)
 from app.analysis.schemas import CompanyMention, SectorFinding
 
 
@@ -124,6 +127,24 @@ def test_identify_sectors_empty_result_is_valid():
     result = _identify_sectors(client, facts="Nothing much happened.", parent_sectors=None)
 
     assert result == []
+
+
+def test_identify_sectors_drops_an_off_taxonomy_sector_value():
+    # A real production response returned "aviation" -- not a SECTORS
+    # value (only mentioned inside railways_transport's own definition
+    # text) -- which the tool schema's enum doesn't always strictly block
+    # server-side. Must be dropped, not passed through: an off-taxonomy
+    # sector here breaks the NEXT call's enum-constrained company schema.
+    client = ScriptedClient({
+        "record_sectors": {"sectors": [
+            {"sector": "aviation", "direction": "bearish", "mechanism": "not a real SECTORS value"},
+            {"sector": "banking", "direction": "bearish", "mechanism": "a real one"},
+        ]},
+    })
+
+    result = _identify_sectors(client, facts="f", parent_sectors=None)
+
+    assert [s.sector for s in result] == ["banking"]
 
 
 def test_identify_sectors_calls_fallback_model_only():
@@ -275,6 +296,77 @@ def _full_company(name, ticker, parent_ticker=None):
     if parent_ticker:
         fields["parent_ticker"] = parent_ticker
     return fields
+
+
+class PerSectorScriptedClient:
+    """Returns one scripted response per call, keyed by call order --
+    unlike ScriptedClient (one fixed response per tool name), this lets a
+    test give each of several same-tool-name calls its own distinct
+    response, proving _identify_cascade_companies_per_sector makes one
+    real call per sector rather than bundling them."""
+
+    def __init__(self, responses: list):
+        self._responses = list(responses)
+        self.calls = []
+
+    class _Completions:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def create(self, **kwargs):
+            name = kwargs["tool_choice"]["function"]["name"]
+            self._outer.calls.append(name)
+            response = self._outer._responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            message = SimpleNamespace(tool_calls=[FakeToolCall(name, response)])
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    @property
+    def chat(self):
+        return SimpleNamespace(completions=self._Completions(self))
+
+
+def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
+    banking = SectorFinding(sector="banking", direction="bearish", mechanism="m", parent_sector="oil_gas")
+    auto = SectorFinding(sector="auto", direction="bearish", mechanism="m", parent_sector="oil_gas")
+    parent_pool = [CompanyMention(
+        name="Reliance", ticker="RELIANCE.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = PerSectorScriptedClient([
+        {"sector_companies": [{"sector": "banking", "companies": [_full_company("HDFC Bank", "HDFCBANK.NS", parent_ticker="RELIANCE.NS")]}]},
+        {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
+    ])
+
+    result = _identify_cascade_companies_per_sector(
+        client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+
+    assert client.calls == ["record_sector_companies", "record_sector_companies"]
+    assert {c.ticker for c in result} == {"HDFCBANK.NS", "MARUTI.NS"}
+    assert all(c.impact_level == "indirect_l1" for c in result)
+
+
+def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_others():
+    banking = SectorFinding(sector="banking", direction="bearish", mechanism="m", parent_sector="oil_gas")
+    auto = SectorFinding(sector="auto", direction="bearish", mechanism="m", parent_sector="oil_gas")
+    parent_pool = [CompanyMention(
+        name="Reliance", ticker="RELIANCE.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = PerSectorScriptedClient([
+        ValueError("boom"),
+        {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
+    ])
+
+    result = _identify_cascade_companies_per_sector(
+        client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+
+    assert [c.ticker for c in result] == ["MARUTI.NS"]
 
 
 def test_analyze_article_composes_all_seven_stages_end_to_end():

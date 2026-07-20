@@ -161,6 +161,85 @@ def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
     return None
 
 
+def _build_alert_company(
+    session: Session, alert_id: int, article: Article, category: str, entry: dict,
+) -> AlertCompany:
+    """Build one AlertCompany row (unattached -- caller must session.add it)
+    from a resolved entry dict, computing calibration/confidence fresh. Split
+    out of _persist_alert so a one-off re-analysis script can attach fresh
+    rows to an EXISTING alert without duplicating this calibration logic --
+    see backend/reanalyze_cascade.py.
+    """
+    calibrated = get_calibrated_magnitude(session, category=category, company_id=entry["company_id"])
+    if calibrated is not None:
+        magnitude_low, magnitude_high = calibrated
+        confidence = "calibrated"
+    else:
+        magnitude_low, magnitude_high = entry["magnitude_low"], entry["magnitude_high"]
+        confidence = "llm_estimate"
+
+    reasons = entry.get("reasons") or []
+    evidence_refs = entry.get("evidence_refs") or []
+    matched_rule_ids = [ref for ref in evidence_refs if get_rule(ref) is not None]
+    health = get_calibration_health(session, category=category, company_id=entry["company_id"])
+
+    company_obj = session.get(Company, entry["company_id"])
+    snapshot = get_or_fetch_financial_snapshot(session, company_obj.ticker) if company_obj else None
+    contradiction_note = detect_price_contradiction(
+        entry["direction"], snapshot["return_1m"] if snapshot else None,
+    )
+
+    article_age_hours = (
+        utcnow() - _as_aware_utc(article.published_at or article.fetched_at)
+    ).total_seconds() / 3600
+
+    result = compute_confidence(
+        calibration_sample_count=health["sample_count"],
+        calibration_hit_rate=health["hit_rate"],
+        claim_count=len(reasons),
+        evidence_ref_count=len(evidence_refs),
+        rule_matched=bool(matched_rule_ids),
+        source_credibility=source_credibility(article.source),
+        reasoning_consistent=contradiction_note is None,
+        article_age_hours=article_age_hours,
+    )
+
+    impact_level = entry.get("impact_level") or "direct"
+    level_multiplier = LEVEL_CONFIDENCE_MULTIPLIER.get(impact_level, 1.0)
+    confidence_score = round(result.score * level_multiplier)
+    confidence_band = result.band if level_multiplier == 1.0 else band_for_score(confidence_score)
+
+    return AlertCompany(
+        alert_id=alert_id,
+        company_id=entry["company_id"],
+        direction=entry["direction"],
+        magnitude_low=magnitude_low,
+        magnitude_high=magnitude_high,
+        rationale=entry["rationale"],
+        key_points_json=json.dumps(entry.get("key_points") or []),
+        confidence_score=confidence_score,
+        time_horizon=entry["time_horizon"],
+        basis=entry["basis"],
+        confidence=confidence,
+        reasons_json=json.dumps(reasons),
+        evidence_refs_json=json.dumps(evidence_refs),
+        risks_json=json.dumps(entry.get("risks") or []),
+        assumptions_json=json.dumps(entry.get("assumptions") or []),
+        unknowns_json=json.dumps(entry.get("unknowns") or []),
+        alternative_hypothesis=entry.get("alternative_hypothesis"),
+        confidence_band=confidence_band,
+        confidence_contributors_json=json.dumps(result.contributors),
+        confidence_penalties_json=json.dumps(result.penalties),
+        rulebook_ids_json=json.dumps(matched_rule_ids),
+        price_at_analysis=snapshot["price"] if snapshot else None,
+        return_1m=snapshot["return_1m"] if snapshot else None,
+        return_3m=snapshot["return_3m"] if snapshot else None,
+        contradiction_note=contradiction_note,
+        impact_level=impact_level,
+        parent_company_id=entry.get("parent_company_id"),
+    )
+
+
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
 ) -> Alert:
@@ -186,75 +265,8 @@ def _persist_alert(
     session.add(alert)
     session.flush()
 
-    article_age_hours = (
-        utcnow() - _as_aware_utc(article.published_at or article.fetched_at)
-    ).total_seconds() / 3600
-
     for entry in entries:
-        calibrated = get_calibrated_magnitude(session, category=category, company_id=entry["company_id"])
-        if calibrated is not None:
-            magnitude_low, magnitude_high = calibrated
-            confidence = "calibrated"
-        else:
-            magnitude_low, magnitude_high = entry["magnitude_low"], entry["magnitude_high"]
-            confidence = "llm_estimate"
-
-        reasons = entry.get("reasons") or []
-        evidence_refs = entry.get("evidence_refs") or []
-        matched_rule_ids = [ref for ref in evidence_refs if get_rule(ref) is not None]
-        health = get_calibration_health(session, category=category, company_id=entry["company_id"])
-
-        company_obj = session.get(Company, entry["company_id"])
-        snapshot = get_or_fetch_financial_snapshot(session, company_obj.ticker) if company_obj else None
-        contradiction_note = detect_price_contradiction(
-            entry["direction"], snapshot["return_1m"] if snapshot else None,
-        )
-
-        result = compute_confidence(
-            calibration_sample_count=health["sample_count"],
-            calibration_hit_rate=health["hit_rate"],
-            claim_count=len(reasons),
-            evidence_ref_count=len(evidence_refs),
-            rule_matched=bool(matched_rule_ids),
-            source_credibility=source_credibility(article.source),
-            reasoning_consistent=contradiction_note is None,
-            article_age_hours=article_age_hours,
-        )
-
-        impact_level = entry.get("impact_level") or "direct"
-        level_multiplier = LEVEL_CONFIDENCE_MULTIPLIER.get(impact_level, 1.0)
-        confidence_score = round(result.score * level_multiplier)
-        confidence_band = result.band if level_multiplier == 1.0 else band_for_score(confidence_score)
-
-        session.add(AlertCompany(
-            alert_id=alert.id,
-            company_id=entry["company_id"],
-            direction=entry["direction"],
-            magnitude_low=magnitude_low,
-            magnitude_high=magnitude_high,
-            rationale=entry["rationale"],
-            key_points_json=json.dumps(entry.get("key_points") or []),
-            confidence_score=confidence_score,
-            time_horizon=entry["time_horizon"],
-            basis=entry["basis"],
-            confidence=confidence,
-            reasons_json=json.dumps(reasons),
-            evidence_refs_json=json.dumps(evidence_refs),
-            risks_json=json.dumps(entry.get("risks") or []),
-            assumptions_json=json.dumps(entry.get("assumptions") or []),
-            unknowns_json=json.dumps(entry.get("unknowns") or []),
-            alternative_hypothesis=entry.get("alternative_hypothesis"),
-            confidence_band=confidence_band,
-            confidence_contributors_json=json.dumps(result.contributors),
-            confidence_penalties_json=json.dumps(result.penalties),
-            rulebook_ids_json=json.dumps(matched_rule_ids),
-            price_at_analysis=snapshot["price"] if snapshot else None,
-            return_1m=snapshot["return_1m"] if snapshot else None,
-            return_3m=snapshot["return_3m"] if snapshot else None,
-            contradiction_note=contradiction_note,
-            impact_level=impact_level,
-            parent_company_id=entry.get("parent_company_id"),
-        ))
+        session.add(_build_alert_company(session, alert.id, article, category, entry))
 
     if article.image_url is None:
         article.image_url = fetch_og_image(article.url)
