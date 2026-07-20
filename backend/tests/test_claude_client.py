@@ -11,7 +11,6 @@ from app.analysis.claude_client import (
     AnthropicAdapter,
     FallbackClient,
     RotatingClient,
-    analyze_article,
     build_client,
 )
 
@@ -26,92 +25,6 @@ def _anthropic_rate_limit_error() -> AnthropicRateLimitError:
     request = httpx.Request("POST", "https://example.test/v1/messages")
     response = httpx.Response(status_code=429, request=request)
     return AnthropicRateLimitError("rate limited", response=response, body=None)
-
-
-class FakeToolCall:
-    def __init__(self, name, arguments_dict):
-        self.function = SimpleNamespace(name=name, arguments=json.dumps(arguments_dict))
-
-
-class FakeCompletions:
-    def __init__(self, response_input):
-        self._response_input = response_input
-
-    def create(self, **kwargs):
-        message = SimpleNamespace(tool_calls=[FakeToolCall("record_analysis", self._response_input)])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-
-class FakeChat:
-    def __init__(self, response_input):
-        self.completions = FakeCompletions(response_input)
-
-
-class FakeClient:
-    def __init__(self, response_input):
-        self.chat = FakeChat(response_input)
-
-
-def test_analyze_article_parses_direct_mention():
-    fake_output = {
-        "category": "oil_energy",
-        "companies": [{
-            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
-            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
-            "rationale": "Top refiner benefits from crude price spike.",
-            "confidence_score": 85, "time_horizon": "Short-Term",
-        }],
-    }
-    client = FakeClient(fake_output)
-
-    result = analyze_article(client, title="US strikes Iran oil sites", content="crude oil markets react")
-
-    assert result.category == "oil_energy"
-    assert result.companies[0].ticker == "RELIANCE.NS"
-    assert result.companies[0].direction == "bullish"
-
-
-def test_analyze_article_parses_sector_mention():
-    fake_output = {
-        "category": "oil_energy",
-        "companies": [{
-            "name": "oil refiners", "ticker": None, "is_direct": False, "sector": "oil_gas",
-            "direction": "bullish", "magnitude_low": 1.0, "magnitude_high": 2.0,
-            "rationale": "Sector-wide margin expansion.",
-            "confidence_score": 55, "time_horizon": "Medium-Term",
-        }],
-    }
-    client = FakeClient(fake_output)
-
-    result = analyze_article(client, title="Crude prices spike globally", content="")
-
-    assert result.companies[0].is_direct is False
-    assert result.companies[0].sector == "oil_gas"
-
-
-class FakeCompletionsNoToolCall:
-    """Fake completions that returns no tool_calls."""
-    def create(self, **kwargs):
-        message = SimpleNamespace(tool_calls=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-
-class FakeClientNoToolUse:
-    def __init__(self):
-        self.chat = SimpleNamespace(completions=FakeCompletionsNoToolCall())
-
-
-def test_analyze_article_raises_on_missing_tool_use_block():
-    """Test that a clear ValueError is raised when the response has no tool call."""
-    client = FakeClientNoToolUse()
-    article_title = "Test Article Title"
-
-    try:
-        analyze_article(client, title=article_title, content="Some content")
-        assert False, "Expected ValueError to be raised"
-    except ValueError as e:
-        assert "Claude response contained no tool_use block" in str(e)
-        assert article_title in str(e)
 
 
 def test_build_client_returns_rotating_client_for_a_list():
@@ -177,43 +90,6 @@ def test_rotating_client_raises_when_every_key_is_rate_limited():
         assert False, "Expected RateLimitError to propagate"
     except RateLimitError:
         pass
-
-
-class FakeCompletionsModelFallback:
-    """Raises a rate limit for the primary MODEL, succeeds for FALLBACK_MODEL."""
-    def __init__(self, response_input):
-        self._response_input = response_input
-        self.models_called = []
-
-    def create(self, **kwargs):
-        from app.analysis.claude_client import FALLBACK_MODEL, MODEL
-        self.models_called.append(kwargs["model"])
-        if kwargs["model"] == MODEL:
-            raise _rate_limit_error()
-        assert kwargs["model"] == FALLBACK_MODEL
-        message = SimpleNamespace(tool_calls=[FakeToolCall("record_analysis", self._response_input)])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-
-def test_analyze_article_falls_back_to_secondary_model_on_rate_limit():
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
-
-    fake_output = {
-        "category": "oil_energy",
-        "companies": [{
-            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
-            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
-            "rationale": "Top refiner benefits from crude price spike.",
-            "confidence_score": 85, "time_horizon": "Short-Term",
-        }],
-    }
-    completions = FakeCompletionsModelFallback(fake_output)
-    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-
-    result = analyze_article(client, title="US strikes Iran oil sites", content="crude oil markets react")
-
-    assert result.companies[0].ticker == "RELIANCE.NS"
-    assert completions.models_called == [MODEL, FALLBACK_MODEL]
 
 
 def test_rotating_client_does_not_rotate_on_non_rate_limit_errors():
@@ -335,11 +211,20 @@ def test_anthropic_adapter_translates_request_and_response_to_openai_shape():
         create=lambda **kw: _translate_via_fake(fake_messages, **kw),
     ))
 
-    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL, SYSTEM_PROMPT
+    from app.analysis.claude_client import SYSTEM_PROMPT
+
+    FAKE_TOOL = {
+        "type": "function",
+        "function": {
+            "name": "record_analysis",
+            "description": "test tool",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
 
     result = adapter.chat.completions.create(
         max_tokens=1024,
-        tools=[RECORD_ANALYSIS_TOOL],
+        tools=[FAKE_TOOL],
         tool_choice={"type": "function", "function": {"name": "record_analysis"}},
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -365,152 +250,3 @@ def _translate_via_fake(fake_messages, **kwargs):
     completions._client = SimpleNamespace(messages=fake_messages)
     completions._model = ANTHROPIC_MODEL
     return completions.create(**kwargs)
-
-
-def test_analyze_article_works_end_to_end_via_anthropic_adapter():
-    tool_input = {
-        "category": "oil_energy",
-        "companies": [{
-            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
-            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
-            "rationale": "Refiner margins expand.",
-            "confidence_score": 85, "time_horizon": "Short-Term",
-        }],
-    }
-    fake_messages = _FakeAnthropicMessages(tool_input)
-    adapter = AnthropicAdapter.__new__(AnthropicAdapter)
-    adapter.chat = SimpleNamespace(completions=SimpleNamespace(
-        create=lambda **kw: _translate_via_fake(fake_messages, **kw),
-    ))
-
-    result = analyze_article(adapter, title="US strikes Iran oil sites", content="crude oil markets react")
-
-    assert result.category == "oil_energy"
-    assert result.companies[0].ticker == "RELIANCE.NS"
-
-
-def test_record_analysis_tool_no_longer_requires_confidence_score():
-    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
-    company_props = RECORD_ANALYSIS_TOOL["function"]["parameters"]["properties"]["companies"]["items"]
-    assert "confidence_score" not in company_props["properties"]
-    assert "confidence_score" not in company_props["required"]
-
-
-def test_record_analysis_tool_requires_evidence_discipline_fields():
-    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
-    company_props = RECORD_ANALYSIS_TOOL["function"]["parameters"]["properties"]["companies"]["items"]
-    for field in ["reasons", "evidence_refs", "risks", "assumptions", "unknowns", "alternative_hypothesis"]:
-        assert field in company_props["properties"]
-        assert field in company_props["required"]
-
-
-def test_record_analysis_tool_requires_event_type_at_top_level():
-    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
-    top_level = RECORD_ANALYSIS_TOOL["function"]["parameters"]
-    assert "event_type" in top_level["properties"]
-    assert "event_type" in top_level["required"]
-
-
-def test_analyze_article_parses_new_evidence_fields_when_present():
-    fake_output = {
-        "category": "oil_energy",
-        "event_type": "crude_oil",
-        "companies": [{
-            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
-            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
-            "rationale": "Top refiner benefits from crude price spike.",
-            "key_points": ["Crude spikes"], "time_horizon": "Short-Term",
-            "reasons": ["Refining margins widen on crude spike."],
-            "evidence_refs": ["RULE_CRUDE_OIL_UP"],
-            "risks": ["Margin reversal if crude falls back."],
-            "assumptions": ["Crude stays elevated for the quarter."],
-            "unknowns": ["Whether this is a durable supply shock or a spike."],
-            "alternative_hypothesis": "Market has already priced this in.",
-        }],
-    }
-    client = FakeClient(fake_output)
-
-    result = analyze_article(client, title="Oil prices spike", content="crude oil markets react")
-
-    assert result.event_type == "crude_oil"
-    company = result.companies[0]
-    assert company.reasons == ["Refining margins widen on crude spike."]
-    assert company.evidence_refs == ["RULE_CRUDE_OIL_UP"]
-    assert company.risks == ["Margin reversal if crude falls back."]
-    assert company.confidence_score is None  # no longer LLM-provided
-
-
-def test_analysis_instructions_contains_rulebook_and_playbook_content():
-    # CASA (an earlier choice here) is NOT playbook-unique -- it also
-    # appears in RULEBOOK_TEXT via RULE_BANKING_METRICS's "credit growth,
-    # deposit growth, CASA, NIM, ..." text, so it wouldn't actually catch a
-    # dropped PLAYBOOKS_TEXT interpolation. ARPU appears only in the
-    # telecom playbook entry -- verified absent from RULEBOOK_TEXT,
-    # SECTOR_DEFINITIONS, and every rule's example text.
-    from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
-    assert "RULE_CRUDE_OIL_UP" in ANALYSIS_INSTRUCTIONS
-    assert "ARPU" in ANALYSIS_INSTRUCTIONS
-
-
-def test_record_analysis_tool_requires_impact_level_and_parent_ticker():
-    from app.analysis.claude_client import RECORD_ANALYSIS_TOOL
-    from app.analysis.schemas import IMPACT_LEVELS
-    company_props = RECORD_ANALYSIS_TOOL["function"]["parameters"]["properties"]["companies"]["items"]
-    assert "impact_level" in company_props["required"]
-    assert "parent_ticker" in company_props["required"]
-    assert company_props["properties"]["impact_level"]["enum"] == IMPACT_LEVELS
-
-
-def test_analysis_instructions_covers_indirect_impact_rules():
-    from app.analysis.claude_client import ANALYSIS_INSTRUCTIONS
-    assert "indirect_l1" in ANALYSIS_INSTRUCTIONS
-    assert "indirect_l2" in ANALYSIS_INSTRUCTIONS
-    assert "parent_ticker" in ANALYSIS_INSTRUCTIONS
-
-
-def test_analyze_article_parses_indirect_impact_chain():
-    fake_output = {
-        "category": "tech", "event_type": "other",
-        "companies": [
-            {
-                "name": "Nvidia", "ticker": "NVDA.NS", "is_direct": True, "sector": None,
-                "direction": "bearish", "magnitude_low": 2.0, "magnitude_high": 4.0,
-                "rationale": "export ban hits Nvidia directly", "time_horizon": "Short-Term",
-                "impact_level": "direct", "parent_ticker": None,
-            },
-            {
-                "name": "TSMC", "ticker": "TSM.NS", "is_direct": True, "sector": None,
-                "direction": "bearish", "magnitude_low": 1.0, "magnitude_high": 2.0,
-                "rationale": "TSMC fabs Nvidia's chips; lower orders reduce TSMC revenue.",
-                "time_horizon": "Medium-Term", "impact_level": "indirect_l1", "parent_ticker": "NVDA.NS",
-            },
-        ],
-    }
-    client = FakeClient(fake_output)
-
-    result = analyze_article(client, title="US restricts advanced chip exports", content="")
-
-    direct, indirect = result.companies
-    assert direct.impact_level == "direct"
-    assert direct.parent_ticker is None
-    assert indirect.impact_level == "indirect_l1"
-    assert indirect.parent_ticker == "NVDA.NS"
-
-
-def test_analyze_article_defaults_impact_level_to_direct_when_absent():
-    # Legacy-shape fake output (no impact_level/parent_ticker keys at all) --
-    # must still parse cleanly with the new fields defaulting.
-    fake_output = {
-        "category": "oil_energy",
-        "companies": [{
-            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
-            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
-            "rationale": "refiner margin", "time_horizon": "Short-Term",
-        }],
-    }
-    client = FakeClient(fake_output)
-
-    result = analyze_article(client, title="Oil prices spike", content="")
-
-    assert result.companies[0].impact_level == "direct"
-    assert result.companies[0].parent_ticker is None

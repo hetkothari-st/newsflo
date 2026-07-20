@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
-from app.analysis.claude_client import analyze_article
+from app.analysis.cascade import analyze_article
 from app.analysis.schemas import CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
