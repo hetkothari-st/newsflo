@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.analysis.cascade import _extract_facts
+from app.analysis.cascade import _extract_facts, _identify_sectors, build_sector_tool
+from app.analysis.schemas import SectorFinding
 
 
 class FakeToolCall:
@@ -83,3 +84,67 @@ def test_extract_facts_raises_on_missing_tool_use_block():
 
     with pytest.raises(ValueError, match="record_facts"):
         _extract_facts(NoToolCallClient(), title="Test Title", content="c")
+
+
+def test_identify_sectors_primary_parses_response():
+    client = ScriptedClient({
+        "record_sectors": {"sectors": [
+            {"sector": "banking", "direction": "bearish", "mechanism": "FX exposure on the rupee's fall."},
+        ]},
+    })
+
+    result = _identify_sectors(client, facts="The rupee fell 2% today.", parent_sectors=None)
+
+    assert len(result) == 1
+    assert result[0].sector == "banking"
+    assert result[0].direction == "bearish"
+    assert result[0].parent_sector is None
+
+
+def test_identify_sectors_cascade_sets_parent_sector():
+    primary = [SectorFinding(sector="banking", direction="bearish", mechanism="FX exposure.")]
+    client = ScriptedClient({
+        "record_sectors": {"sectors": [
+            {
+                "sector": "railways_transport", "direction": "bearish",
+                "mechanism": "Higher import costs for fuel/rolling stock.", "parent_sector": "banking",
+            },
+        ]},
+    })
+
+    result = _identify_sectors(client, facts="The rupee fell 2% today.", parent_sectors=primary)
+
+    assert result[0].sector == "railways_transport"
+    assert result[0].parent_sector == "banking"
+
+
+def test_identify_sectors_empty_result_is_valid():
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+
+    result = _identify_sectors(client, facts="Nothing much happened.", parent_sectors=None)
+
+    assert result == []
+
+
+def test_identify_sectors_calls_fallback_model_only():
+    from app.analysis.claude_client import FALLBACK_MODEL
+
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+
+    _identify_sectors(client, facts="f", parent_sectors=None)
+
+    assert client.calls == [{"name": "record_sectors", "model": FALLBACK_MODEL}]
+
+
+def test_build_sector_tool_cascade_constrains_parent_sector_enum():
+    tool = build_sector_tool(cascade=True, valid_parents=["banking", "auto"])
+    parent_enum = tool["function"]["parameters"]["properties"]["sectors"]["items"]["properties"]["parent_sector"]["enum"]
+    assert parent_enum == ["banking", "auto"]
+    required = tool["function"]["parameters"]["properties"]["sectors"]["items"]["required"]
+    assert "parent_sector" in required
+
+
+def test_build_sector_tool_primary_has_no_parent_sector_field():
+    tool = build_sector_tool(cascade=False, valid_parents=None)
+    properties = tool["function"]["parameters"]["properties"]["sectors"]["items"]["properties"]
+    assert "parent_sector" not in properties
