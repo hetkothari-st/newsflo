@@ -14,6 +14,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # counts, HTTP request logs) because our own log lines were invisible.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+# Must run right after basicConfig, before any request-logging call happens
+# -- see app/log_redaction.py's own docstring for why this exists (a real
+# API key was visible in plaintext in production logs otherwise).
+from app.log_redaction import RedactSecretsFilter  # noqa: E402
+
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(RedactSecretsFilter())
+
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import Company
