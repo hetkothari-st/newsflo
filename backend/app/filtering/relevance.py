@@ -1,3 +1,5 @@
+import time
+
 from sqlalchemy.orm import Session
 
 from app.analysis.claude_client import FALLBACK_MODEL
@@ -29,13 +31,16 @@ def classify_relevance(client, title: str, content: str) -> bool:
             max_tokens=5,
         )
         answer = response.choices[0].message.content
+        return "yes" in (answer or "").strip().lower()
     except Exception:
         return True
 
-    return "yes" in (answer or "").strip().lower()
 
-
-def filter_new_articles(session: Session, client) -> None:
+def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -> None:
+    """Classify every NEW article. ``throttle_seconds`` exists for the same
+    rate-limit reason as ``process_new_articles``'s throttle -- one Groq call
+    per article here too.
+    """
     from app.pipeline import article_text
 
     for article in session.query(Article).filter_by(status="NEW").all():
@@ -43,4 +48,5 @@ def filter_new_articles(session: Session, client) -> None:
             article.status = "CATEGORIZED"
         else:
             article.status = "FILTERED"
+        time.sleep(throttle_seconds)
     session.commit()

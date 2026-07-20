@@ -109,7 +109,7 @@ def test_process_new_articles_passes_the_same_client_to_the_filter(db_session, m
 
     sentinel_client = object()
     captured = {}
-    def fake_filter(session, client):
+    def fake_filter(session, client, throttle_seconds=0):
         captured["client"] = client
     monkeypatch.setattr(pipeline_module, "filter_new_articles", fake_filter)
 
@@ -346,7 +346,7 @@ def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch)
     db_session.add(irrelevant)
     db_session.commit()
 
-    def fake_filter(session, client):
+    def fake_filter(session, client, throttle_seconds=0):
         # Mark the article as FILTERED so it's not analyzed
         for article in session.query(Article).filter_by(status="NEW").all():
             article.status = "FILTERED"

@@ -95,3 +95,24 @@ def test_filter_new_articles_only_touches_new_articles(db_session, monkeypatch):
     filter_new_articles(db_session, client=object())
 
     assert call_count["n"] == 0
+
+
+def test_classify_relevance_fails_open_on_non_string_content():
+    # Load-bearing: a non-string content (e.g. a list of content-part
+    # blocks) must not escape the try block as an uncaught AttributeError --
+    # the function must still fail open.
+    assert classify_relevance(_fake_client(["yes"]), "t", "c") is True
+
+
+def test_filter_new_articles_throttles_between_articles(db_session, monkeypatch):
+    a1 = Article(source="test", url="https://example.com/1", title="t1", content="c")
+    a2 = Article(source="test", url="https://example.com/2", title="t2", content="c")
+    db_session.add_all([a1, a2])
+    db_session.commit()
+
+    sleep_calls = []
+    monkeypatch.setattr("app.filtering.relevance.time.sleep", lambda s: sleep_calls.append(s))
+
+    filter_new_articles(db_session, client=object(), throttle_seconds=0.01)
+
+    assert sleep_calls == [0.01, 0.01]
