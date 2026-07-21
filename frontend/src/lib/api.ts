@@ -76,6 +76,42 @@ export interface AlertCompany {
   parent_company_id?: number | null;
 }
 
+export interface GraphNode {
+  id: string;
+  kind: 'news' | 'mechanism' | 'sector' | 'company';
+  label: string;
+  // Root/news nodes have no direction of their own -- null/absent there.
+  direction?: string | null; // bullish | bearish | null
+  // Company-kind nodes only:
+  company_id?: number;
+  ticker?: string;
+  name?: string;
+  confidence_score?: number;
+  impact_level?: string;
+  in_my_holdings?: boolean;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  relation: string;
+  direction: string; // bullish | bearish
+  note: string;
+  source: string; // rulebook_verified | rulebook_pruned | llm_only
+}
+
+export interface GraphGap {
+  sector: string;
+  impact_level: string;
+  reason: string;
+}
+
+export interface ImpactGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  gaps: GraphGap[];
+}
+
 export interface Alert {
   id: number;
   // Raw, canonical, untranslated category slug -- used for watchlist
@@ -89,6 +125,12 @@ export interface Alert {
   // Optional: legacy alerts (persisted before this feature shipped) have
   // no event_type.
   event_type?: string | null;
+  // Optional: only present on GET /api/alerts/{id} (never on the list
+  // endpoint, and absent on any alert predating Phase 3/4's rollout). Use
+  // buildGraph(alert) (see features/visualize/graph/model.ts) rather than
+  // reading this field directly -- it synthesizes a fallback for the
+  // absent case so every graph chart has one consistent shape to consume.
+  graph?: ImpactGraph;
 }
 
 // The WebSocket live-push payload is one alert entry MINUS the per-viewer
