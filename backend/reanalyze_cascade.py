@@ -9,7 +9,11 @@ this script deletes the alert's existing AlertCompany rows and re-persists
 a fresh set via app.pipeline._build_alert_company -- the same calibration/
 confidence logic process_new_articles uses for a brand new article, reused
 directly rather than duplicated, so this can't drift from the live
-pipeline's behavior.
+pipeline's behavior. Existing ImpactEdge/CascadeGap rows for the alert are
+also deleted and replaced with the fresh analysis's edges/gaps, using the
+same app.pipeline._resolve_edge_endpoint_company_id ticker-resolution
+helper _persist_alert itself uses -- without this, the graph API (GET
+/api/alerts/{id}) would keep serving edges from before this run.
 
 The Alert row itself (id, created_at, article_id) is left untouched --
 only its companies are replaced -- so existing links/bookmarks to this
@@ -34,8 +38,11 @@ from app.analysis.claude_client import build_client
 from app.companies.resolution import resolve_companies
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import Alert, AlertCompanyTranslation
-from app.pipeline import _build_alert_company, article_text, clear_analysis_cache, get_cached_analysis, store_analysis_cache
+from app.models import Alert, AlertCompanyTranslation, CascadeGap, ImpactEdge
+from app.pipeline import (
+    _build_alert_company, _resolve_edge_endpoint_company_id, article_text,
+    clear_analysis_cache, get_cached_analysis, store_analysis_cache,
+)
 
 
 def main(limit: int, force: bool) -> None:
@@ -73,10 +80,30 @@ def main(limit: int, force: bool) -> None:
             ).delete(synchronize_session=False)
         for ac in list(alert.companies):
             session.delete(ac)
+        # Edges/gaps from a prior real analysis (Phase 3) must also be
+        # replaced, not left stale -- they'd otherwise reference companies
+        # this alert no longer has, showing a graph that doesn't match the
+        # fresh companies[] list.
+        session.query(ImpactEdge).filter_by(alert_id=alert.id).delete(synchronize_session=False)
+        session.query(CascadeGap).filter_by(alert_id=alert.id).delete(synchronize_session=False)
         session.flush()
 
         for entry in resolved:
             session.add(_build_alert_company(session, alert.id, article, result.category, entry))
+        for edge in result.edges:
+            session.add(ImpactEdge(
+                alert_id=alert.id,
+                from_company_id=_resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"]),
+                from_node_kind=edge["from"]["kind"], from_label=edge["from"]["label"],
+                to_company_id=_resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"]),
+                to_node_kind=edge["to"]["kind"], to_label=edge["to"]["label"],
+                relation=edge["relation"], direction=edge["direction"], note=edge["note"], source=edge["source"],
+            ))
+        for gap in result.gaps:
+            session.add(CascadeGap(
+                alert_id=alert.id, sector=gap["sector"], impact_level=gap["impact_level"],
+                parent_ticker=gap.get("parent_ticker"), attempts=gap["attempts"], last_error=gap.get("last_error"),
+            ))
         session.commit()
 
         session.refresh(alert)
