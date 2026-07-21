@@ -48,7 +48,7 @@ function node(overrides: Partial<GraphNode>): GraphNode {
 
 describe('GraphNodeChip', () => {
   it('renders a company node with ticker, name, and direction glyph/confidence', () => {
-    render(<GraphNodeChip node={node({ kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80 })} />);
+    render(<GraphNodeChip node={node({ kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80 })} />);
     expect(screen.getByText('HDFCBANK.NS')).toBeInTheDocument();
     expect(screen.getByText('HDFC Bank')).toBeInTheDocument();
     expect(screen.getByText('▲ 80%')).toBeInTheDocument();
@@ -71,14 +71,14 @@ describe('GraphNodeChip', () => {
   });
 
   it('shows the portfolio ring for a held company node', () => {
-    render(<GraphNodeChip node={node({ kind: 'company', company_id: 1, ticker: 'AAA', name: 'Alpha', direction: 'bullish', confidence_score: 50, in_my_holdings: true })} />);
+    render(<GraphNodeChip node={node({ kind: 'company', company_id: 1, ticker: 'AAA', label: 'Alpha', name: 'Alpha', direction: 'bullish', confidence_score: 50, in_my_holdings: true })} />);
     expect(screen.getByText('AAA').closest('div')).toHaveClass('ring-2', 'ring-accent-secondary');
   });
 
   it('is a clickable button when onClick is provided', async () => {
     const { default: userEvent } = await import('@testing-library/user-event');
     const onClick = vi.fn();
-    render(<GraphNodeChip node={node({ kind: 'company', company_id: 1, ticker: 'AAA', name: 'Alpha', direction: 'bullish', confidence_score: 50 })} onClick={onClick} />);
+    render(<GraphNodeChip node={node({ kind: 'company', company_id: 1, ticker: 'AAA', label: 'Alpha', name: 'Alpha', direction: 'bullish', confidence_score: 50 })} onClick={onClick} />);
     await userEvent.click(screen.getByText('AAA'));
     expect(onClick).toHaveBeenCalledOnce();
   });
@@ -205,7 +205,7 @@ const chainGraph: ImpactGraph = {
     { id: 'news', kind: 'news', label: 'Repo rate cut announced' },
     { id: 'mech:repo_rate_down', kind: 'mechanism', label: 'Repo Rate ↓' },
     { id: 'sector:banking', kind: 'sector', label: 'banking' },
-    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80 },
+    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80 },
   ],
   edges: [
     { from: 'news', to: 'mech:repo_rate_down', relation: 'correlation', direction: 'bullish', note: 'n0', source: 'llm_only' },
@@ -386,7 +386,7 @@ const chainGraph: ImpactGraph = {
     { id: 'mech:a', kind: 'mechanism', label: 'Repo Rate ↓' },
     { id: 'mech:b', kind: 'mechanism', label: 'Borrowing Costs ↓' },
     { id: 'sector:banking', kind: 'sector', label: 'banking' },
-    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80 },
+    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80 },
   ],
   edges: [
     { from: 'news', to: 'mech:a', relation: 'correlation', direction: 'bullish', note: 'n', source: 'llm_only' },
@@ -648,8 +648,8 @@ const graph: ImpactGraph = {
     { id: 'news', kind: 'news', label: 'x' },
     { id: 'mech:a', kind: 'mechanism', label: 'A' },
     { id: 'sector:banking', kind: 'sector', label: 'banking' },
-    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'AAA', name: 'Alpha', direction: 'bullish', confidence_score: 50, impact_level: 'direct' },
-    { id: 'company:2', kind: 'company', company_id: 2, ticker: 'BBB', name: 'Beta', direction: 'bearish', confidence_score: 40, impact_level: 'indirect_l1' },
+    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'AAA', label: 'Alpha', name: 'Alpha', direction: 'bullish', confidence_score: 50, impact_level: 'direct' },
+    { id: 'company:2', kind: 'company', company_id: 2, ticker: 'BBB', label: 'Beta', name: 'Beta', direction: 'bearish', confidence_score: 40, impact_level: 'indirect_l1' },
   ],
   edges: [],
   gaps: [],
@@ -778,7 +778,7 @@ const graph: ImpactGraph = {
   nodes: [
     { id: 'news', kind: 'news', label: 'Repo rate cut' },
     { id: 'sector:banking', kind: 'sector', label: 'banking' },
-    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, impact_level: 'direct' },
+    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, impact_level: 'direct' },
   ],
   edges: [
     { from: 'news', to: 'sector:banking', relation: 'correlation', direction: 'bullish', note: 'n0', source: 'llm_only' },
@@ -1004,7 +1004,7 @@ describe('forceDirectedPositions', () => {
     nodes: [
       { id: 'news', kind: 'news', label: 'x' },
       { id: 'sector:banking', kind: 'sector', label: 'banking' },
-      { id: 'company:1', kind: 'company', company_id: 1, ticker: 'AAA', name: 'Alpha', direction: 'bullish', confidence_score: 50 },
+      { id: 'company:1', kind: 'company', company_id: 1, ticker: 'AAA', label: 'Alpha', name: 'Alpha', direction: 'bullish', confidence_score: 50 },
     ],
     edges: [
       { from: 'news', to: 'sector:banking', relation: 'correlation', direction: 'bullish', note: 'n', source: 'llm_only' },
@@ -1125,7 +1125,7 @@ const graph: ImpactGraph = {
   nodes: [
     { id: 'news', kind: 'news', label: 'Repo rate cut' },
     { id: 'sector:banking', kind: 'sector', label: 'banking' },
-    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, in_my_holdings: true },
+    { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, in_my_holdings: true },
   ],
   edges: [
     { from: 'news', to: 'sector:banking', relation: 'correlation', direction: 'bullish', note: 'n0', source: 'llm_only' },
@@ -1329,7 +1329,7 @@ it('renders all ten charts in numeric order for an alert with a rich cascade', a
         { id: 'news', kind: 'news', label: 'Repo rate cut announced' },
         { id: 'mech:repo_rate_down', kind: 'mechanism', label: 'Repo Rate ↓' },
         { id: 'sector:banking', kind: 'sector', label: 'banking' },
-        { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, impact_level: 'direct' },
+        { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, impact_level: 'direct' },
       ],
       edges: [
         { from: 'news', to: 'mech:repo_rate_down', relation: 'correlation', direction: 'bullish', note: 'n0', source: 'llm_only' },
