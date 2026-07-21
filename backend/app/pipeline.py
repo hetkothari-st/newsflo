@@ -16,7 +16,7 @@ from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
-from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, utcnow
+from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, utcnow
 from app.reasoning.confidence import _band as band_for_score
 from app.reasoning.confidence import compute_confidence, source_credibility
 from app.reasoning.financial_context import detect_price_contradiction, get_or_fetch_financial_snapshot
@@ -268,9 +268,25 @@ def _build_alert_company(
     )
 
 
+def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: str) -> int | None:
+    """label is a ticker string when node_kind=="company" -- resolve it to
+    a real Company row's id via a direct exact-match query (same
+    ticker-first discipline as app.companies.resolution._find_direct_company,
+    but simpler since an edge label is always a ticker string, never a
+    company name). Returns None (never raises, never drops the edge) if the
+    node isn't a company or the ticker doesn't resolve -- the edge still
+    persists with a null company id, matching this codebase's "omit rather
+    than mismatch" resolution discipline applied to a link field, not the
+    whole row."""
+    if node_kind != "company":
+        return None
+    company = session.query(Company).filter_by(ticker=label).one_or_none()
+    return company.id if company else None
+
+
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
-    gaps: list[dict] | None = None,
+    gaps: list[dict] | None = None, edges: list[dict] | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -301,6 +317,16 @@ def _persist_alert(
         session.add(CascadeGap(
             alert_id=alert.id, sector=gap["sector"], impact_level=gap["impact_level"],
             parent_ticker=gap.get("parent_ticker"), attempts=gap["attempts"], last_error=gap.get("last_error"),
+        ))
+
+    for edge in (edges or []):
+        session.add(ImpactEdge(
+            alert_id=alert.id,
+            from_company_id=_resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"]),
+            from_node_kind=edge["from"]["kind"], from_label=edge["from"]["label"],
+            to_company_id=_resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"]),
+            to_node_kind=edge["to"]["kind"], to_label=edge["to"]["label"],
+            relation=edge["relation"], direction=edge["direction"], note=edge["note"], source=edge["source"],
         ))
 
     if article.image_url is None:
@@ -381,7 +407,10 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             store_analysis_cache(session, article, analysis)
 
         resolved = resolve_companies(session, analysis.companies)
-        _persist_alert(session, article, analysis.category, resolved, event_type=analysis.event_type, gaps=analysis.gaps)
+        _persist_alert(
+            session, article, analysis.category, resolved,
+            event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges,
+        )
         alerts_created += 1
 
     return alerts_created

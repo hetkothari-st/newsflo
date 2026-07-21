@@ -12,6 +12,7 @@ from app.models import (
     Company,
     EmailNotification,
     Holding,
+    ImpactEdge,
     User,
 )
 from app.pipeline import process_new_articles
@@ -873,3 +874,104 @@ def test_persist_alert_with_no_gaps_writes_no_gap_rows(db_session):
     alert = pipeline_module._persist_alert(db_session, article, category="oil_gas", entries=[], event_type="crude_oil")
 
     assert db_session.query(CascadeGap).filter_by(alert_id=alert.id).count() == 0
+
+
+def test_persist_alert_writes_impact_edge_rows_resolving_company_tickers(db_session):
+    company_a = Company(ticker="HDFCBANK.NS", name="HDFC Bank", sector="banking", index_tier="NIFTY50", market_cap=1.0)
+    company_b = Company(ticker="MARUTI.NS", name="Maruti Suzuki", sector="auto", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add_all([company_a, company_b])
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/edge1", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    edges = [
+        {
+            "from": {"kind": "mechanism", "label": "Repo Rate ↓"},
+            "to": {"kind": "sector", "label": "banking"},
+            "relation": "credit_cost", "direction": "bullish", "note": "n1", "source": "rulebook_verified",
+        },
+        {
+            "from": {"kind": "sector", "label": "banking"},
+            "to": {"kind": "company", "label": "HDFCBANK.NS"},
+            "relation": "demand", "direction": "bullish", "note": "n2", "source": "llm_only",
+        },
+        {
+            "from": {"kind": "company", "label": "HDFCBANK.NS"},
+            "to": {"kind": "company", "label": "MARUTI.NS"},
+            "relation": "credit_cost", "direction": "bullish", "note": "n3", "source": "llm_only",
+        },
+        {
+            # A ticker that doesn't resolve to any real Company -- must
+            # still persist (with a null company_id), never dropped and
+            # never crash.
+            "from": {"kind": "company", "label": "NOTAREALTICKER.NS"},
+            "to": {"kind": "sector", "label": "auto"},
+            "relation": "competitor", "direction": "bearish", "note": "n4", "source": "llm_only",
+        },
+    ]
+
+    alert = pipeline_module._persist_alert(
+        db_session, article, category="banking", entries=[], event_type="repo_rate_change", edges=edges,
+    )
+
+    rows = db_session.query(ImpactEdge).filter_by(alert_id=alert.id).order_by(ImpactEdge.id).all()
+    assert len(rows) == 4
+
+    assert rows[0].from_node_kind == "mechanism"
+    assert rows[0].from_company_id is None
+    assert rows[0].to_node_kind == "sector"
+    assert rows[0].to_company_id is None
+
+    assert rows[1].from_node_kind == "sector"
+    assert rows[1].to_node_kind == "company"
+    assert rows[1].to_company_id == company_a.id
+
+    assert rows[2].from_company_id == company_a.id
+    assert rows[2].to_company_id == company_b.id
+    assert rows[2].relation == "credit_cost"
+    assert rows[2].source == "llm_only"
+
+    assert rows[3].from_node_kind == "company"
+    assert rows[3].from_label == "NOTAREALTICKER.NS"
+    assert rows[3].from_company_id is None  # unresolved ticker -- kept, not dropped, no crash
+
+
+def test_persist_alert_with_no_edges_writes_no_edge_rows(db_session):
+    article = Article(source="test", url="https://example.com/edge2", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = pipeline_module._persist_alert(db_session, article, category="oil_gas", entries=[], event_type="crude_oil")
+
+    assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 0
+
+
+def test_process_new_articles_persists_edges_from_analysis(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/edge3", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_gas",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector="oil_gas",
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="r",
+            key_points=["k"], time_horizon="Short-Term",
+        )],
+        edges=[{
+            "from": {"kind": "sector", "label": "oil_gas"}, "to": {"kind": "company", "label": "RELIANCE.NS"},
+            "relation": "demand", "direction": "bullish", "note": "n", "source": "llm_only",
+        }],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    process_new_articles(db_session, claude_client=object())
+
+    alert = db_session.query(Alert).one()
+    assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 1
