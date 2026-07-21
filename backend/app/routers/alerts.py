@@ -160,6 +160,7 @@ def _serialize_alert(
     ac_translations: dict[int, tuple[str, list[str]]],
     category_labels: dict[str, str],
     mentions_index,
+    include_graph: bool = False,
 ) -> dict:
     companies = []
     for ac in alert.companies:
@@ -192,7 +193,7 @@ def _serialize_alert(
             "in_my_holdings": ac.company_id in held_company_ids,
             "past_mentions": mentions_before(mentions_index, ac.company_id, alert.created_at),
         })
-    return {
+    result = {
         "id": alert.id,
         # `category` stays the raw, canonical, untranslated slug -- it's
         # a matching/storage key (watchlist filtering, color swatch
@@ -210,6 +211,9 @@ def _serialize_alert(
         },
         "companies": companies,
     }
+    if include_graph:
+        result["graph"] = _build_graph(alert, held_company_ids)
+    return result
 
 
 def _held_company_ids(db: Session, current_user: User | None) -> set[int]:
@@ -278,6 +282,8 @@ def get_alert(
         .options(
             selectinload(Alert.article),
             selectinload(Alert.companies).selectinload(AlertCompany.company),
+            selectinload(Alert.impact_edges),
+            selectinload(Alert.cascade_gaps),
         )
         .filter(Alert.id == alert_id)
         .first()
@@ -291,4 +297,7 @@ def get_alert(
     category_labels = bulk_category_labels(db, [alert.category], lang)
     mentions_index = bulk_past_mentions(db, {ac.company_id for ac in alert.companies})
 
-    return _serialize_alert(alert, held_company_ids, article_titles, ac_translations, category_labels, mentions_index)
+    return _serialize_alert(
+        alert, held_company_ids, article_titles, ac_translations, category_labels, mentions_index,
+        include_graph=True,
+    )

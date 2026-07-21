@@ -471,7 +471,15 @@ def test_get_alert_by_id_returns_same_shape_as_list_alerts(db_session):
     single_response = client.get(f"/api/alerts/{alert.id}")
 
     assert single_response.status_code == 200
-    assert single_response.json() == list_response.json()[0]
+    single_body = single_response.json()
+    list_item = list_response.json()[0]
+    # GET /api/alerts/{id} additively includes a "graph" key that the list
+    # endpoint intentionally omits (see test_list_alerts_response_has_no_graph_key)
+    # -- every other field must still match exactly.
+    assert "graph" in single_body
+    assert "graph" not in list_item
+    single_body_without_graph = {k: v for k, v in single_body.items() if k != "graph"}
+    assert single_body_without_graph == list_item
 
     app.dependency_overrides.clear()
 
@@ -909,3 +917,44 @@ def test_build_graph_drops_edge_referencing_a_company_not_in_this_alert(db_sessi
     assert not any(e["from"] == f"company:{other_company.id}" for e in graph["edges"])
     node_ids = {n["id"] for n in graph["nodes"]}
     assert f"company:{other_company.id}" not in node_ids
+
+
+def test_get_alert_response_includes_graph(db_session):
+    # Adapted to this file's established pattern -- there is no `client`
+    # fixture in this file; every route-level test wires its own
+    # TestClient via app.dependency_overrides[get_db] (see
+    # test_get_alert_by_id_still_works_for_an_alert_from_a_previous_day above).
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    alert = _make_alert_with_companies(db_session, [("RELIANCE.NS", "Reliance Industries", "oil_gas", "bullish")])
+
+    response = client.get(f"/api/alerts/{alert.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "graph" in body
+    assert "nodes" in body["graph"]
+    assert "edges" in body["graph"]
+    assert "gaps" in body["graph"]
+    assert any(n["id"] == "news" for n in body["graph"]["nodes"])
+    # companies[] is completely unaffected by this change.
+    assert body["companies"][0]["ticker"] == "RELIANCE.NS"
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_response_has_no_graph_key(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    _make_alert_with_companies(db_session, [("RELIANCE.NS", "Reliance Industries", "oil_gas", "bullish")])
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) >= 1
+    assert "graph" not in body[0]
+
+    app.dependency_overrides.clear()
