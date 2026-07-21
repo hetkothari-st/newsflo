@@ -1,4 +1,6 @@
+import logging
 import math
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
@@ -9,7 +11,7 @@ from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.i18n import get_lang
 from app.ist_time import day_utc_window, today_ist
-from app.models import Alert, AlertCompany, Holding, User
+from app.models import Alert, AlertCompany, Holding, ImpactEdge, User
 from app.pipeline import _decode_json_list, decode_key_points
 from app.routers.articles import get_db
 from app.translation.lookup import (
@@ -17,6 +19,8 @@ from app.translation.lookup import (
     bulk_article_titles,
     bulk_category_labels,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -37,6 +41,116 @@ def _finite_or_none(value: float | None) -> float | None:
     if value is None or not math.isfinite(value):
         return None
     return value
+
+
+def _slugify_mechanism(label: str) -> str:
+    text = label.replace("↓", " down").replace("↑", " up").lower()
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def _graph_node_id(node_kind: str, label: str, company_id: int | None) -> str:
+    if node_kind == "company":
+        return f"company:{company_id}"
+    if node_kind == "sector":
+        return f"sector:{label}"
+    return f"mech:{_slugify_mechanism(label)}"
+
+
+def _build_graph(alert: Alert, held_company_ids: set[int]) -> dict:
+    """Assembles the news -> mechanism -> sector -> company graph from
+    already-loaded relationships (alert.companies, alert.impact_edges,
+    alert.cascade_gaps) -- no DB session needed here, everything was
+    eager-loaded by the caller. Never raises: a legacy alert with zero
+    ImpactEdge rows still gets a minimal, valid graph (news connected
+    directly to each company), never a 500 or an empty/broken response.
+    """
+    nodes: dict[str, dict] = {"news": {"id": "news", "kind": "news", "label": alert.article.title}}
+
+    for ac in alert.companies:
+        node_id = f"company:{ac.company_id}"
+        nodes[node_id] = {
+            "id": node_id, "kind": "company", "company_id": ac.company_id,
+            "ticker": ac.company.ticker, "name": ac.company.name,
+            "direction": ac.direction, "confidence_score": ac.confidence_score,
+            "impact_level": ac.impact_level,
+            "in_my_holdings": ac.company_id in held_company_ids,
+        }
+
+    graph_edges: list[dict] = []
+    to_ids: set[str] = set()
+
+    for edge in alert.impact_edges:
+        from_id = _graph_node_id(edge.from_node_kind, edge.from_label, edge.from_company_id)
+        to_id = _graph_node_id(edge.to_node_kind, edge.to_label, edge.to_company_id)
+
+        # A company-kind endpoint must already be one of THIS alert's own
+        # companies (added above) -- if it isn't (shouldn't happen given
+        # Phase 3's own resolution, but defensively), drop the edge rather
+        # than reference a node id that was never added.
+        if edge.from_node_kind == "company" and from_id not in nodes:
+            logger.warning("alert %s: ImpactEdge %s references a from-company not in this alert's companies[], dropping", alert.id, edge.id)
+            continue
+        if edge.to_node_kind == "company" and to_id not in nodes:
+            logger.warning("alert %s: ImpactEdge %s references a to-company not in this alert's companies[], dropping", alert.id, edge.id)
+            continue
+
+        if edge.from_node_kind != "company" and from_id not in nodes:
+            nodes[from_id] = {"id": from_id, "kind": edge.from_node_kind, "label": edge.from_label, "direction": None}
+        if edge.to_node_kind != "company" and to_id not in nodes:
+            nodes[to_id] = {"id": to_id, "kind": edge.to_node_kind, "label": edge.to_label, "direction": None}
+
+        graph_edges.append({
+            "from": from_id, "to": to_id, "relation": edge.relation,
+            "direction": edge.direction, "note": edge.note, "source": edge.source,
+        })
+        to_ids.add(to_id)
+
+    if graph_edges:
+        # Roots: a non-company node that is a `from` somewhere but never a
+        # `to` anywhere in this alert -- the true entry point(s) of the
+        # chain. Connect news to each, inheriting the root's OWN first
+        # outbound edge's direction (a root has no direction of its own --
+        # this is the closest honest proxy: "this news triggered a chain
+        # that starts out net bullish/bearish").
+        seen_roots: set[str] = set()
+        # Snapshot via list(...) -- the loop body appends to graph_edges
+        # itself below, and iterating a list while mutating it is a real
+        # hazard. (An earlier draft of this function zipped graph_edges
+        # against alert.impact_edges directly, which breaks the moment any
+        # edge was dropped above -- the two lists can have different
+        # lengths, silently misaligning which raw edge a root's direction
+        # gets attributed to. Iterate graph_edges alone; only its own
+        # "from"/"direction" keys are needed here.)
+        for edge_dict in list(graph_edges):
+            root_id = edge_dict["from"]
+            if root_id in to_ids or root_id in seen_roots or root_id == "news":
+                continue
+            if nodes.get(root_id, {}).get("kind") == "company":
+                continue  # a company is never treated as a chain root here
+            seen_roots.add(root_id)
+            graph_edges.append({
+                "from": "news", "to": root_id, "relation": "correlation",
+                "direction": edge_dict["direction"], "note": "This news is the origin of this transmission chain.",
+                "source": "llm_only",
+            })
+    else:
+        # Degrade-safely fallback: no persisted edges at all (legacy alert,
+        # or a narrow story with nothing beyond company rows) -- connect
+        # news directly to every company so the graph is still minimally
+        # connected and renderable, never bare/disconnected nodes.
+        for ac in alert.companies:
+            graph_edges.append({
+                "from": "news", "to": f"company:{ac.company_id}", "relation": "correlation",
+                "direction": ac.direction, "note": "This news directly names this company.",
+                "source": "llm_only",
+            })
+
+    gaps = [
+        {"sector": g.sector, "impact_level": g.impact_level, "reason": g.last_error or "resolution failed after retries"}
+        for g in alert.cascade_gaps
+    ]
+
+    return {"nodes": list(nodes.values()), "edges": graph_edges, "gaps": gaps}
 
 
 def _serialize_alert(

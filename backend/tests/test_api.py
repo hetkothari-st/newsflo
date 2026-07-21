@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 
 from app.main import app
-from app.models import Alert, AlertCompany, Article, Company, utcnow
-from app.routers.alerts import ALERTS_LIMIT
+from app.models import Alert, AlertCompany, Article, CascadeGap, Company, ImpactEdge, utcnow
+from app.routers.alerts import ALERTS_LIMIT, _build_graph
 from app.routers.articles import get_db
 
 
@@ -745,3 +745,167 @@ def test_list_alerts_defaults_impact_level_to_direct_for_legacy_rows(db_session)
     assert company_payload["parent_company_id"] is None
 
     app.dependency_overrides.clear()
+
+
+def _make_alert_with_companies(db_session, companies_spec):
+    """companies_spec: list of (ticker, name, sector, direction) tuples.
+    Returns the persisted Alert with .companies populated (matches this
+    file's existing fixture style -- adjust to it if it differs)."""
+    article = Article(source="test", url=f"https://example.com/{id(companies_spec)}", title="Test article", content="c")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_gas", event_type="repo_rate_change")
+    db_session.add(alert)
+    db_session.flush()
+    for ticker, name, sector, direction in companies_spec:
+        company = db_session.query(Company).filter_by(ticker=ticker).one_or_none()
+        if company is None:
+            company = Company(ticker=ticker, name=name, sector=sector, index_tier="NIFTY50", market_cap=1.0)
+            db_session.add(company)
+            db_session.flush()
+        db_session.add(AlertCompany(
+            alert_id=alert.id, company_id=company.id, direction=direction,
+            magnitude_low=1.0, magnitude_high=2.0, rationale="r",
+            confidence_score=70, impact_level="direct",
+            basis="direct_mention",  # NOT NULL column with no default; the brief's
+            # sample fixture omitted it, but this file's existing tests always set it.
+        ))
+    db_session.commit()
+    db_session.refresh(alert)
+    return alert
+
+
+def test_build_graph_legacy_alert_with_no_edges_still_has_news_and_company_nodes(db_session):
+    alert = _make_alert_with_companies(db_session, [("RELIANCE.NS", "Reliance Industries", "oil_gas", "bullish")])
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert "news" in node_ids
+    assert "company:" + str(alert.companies[0].company_id) in node_ids
+    assert graph["gaps"] == []
+    # Degrade-safely fallback: news connects straight to the company when
+    # there are no real ImpactEdge rows to derive a richer path from.
+    assert any(e["from"] == "news" and e["to"] == f"company:{alert.companies[0].company_id}" for e in graph["edges"])
+
+
+def test_build_graph_dedupes_sector_node_reached_by_multiple_edges(db_session):
+    alert = _make_alert_with_companies(db_session, [
+        ("HDFCBANK.NS", "HDFC Bank", "banking", "bullish"),
+        ("ICICIBANK.NS", "ICICI Bank", "banking", "bullish"),
+    ])
+    for ac in alert.companies:
+        db_session.add(ImpactEdge(
+            alert_id=alert.id,
+            from_node_kind="sector", from_label="banking", from_company_id=None,
+            to_node_kind="company", to_label=ac.company.ticker, to_company_id=ac.company_id,
+            relation="demand", direction="bullish", note="n", source="llm_only",
+        ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    sector_nodes = [n for n in graph["nodes"] if n["id"] == "sector:banking"]
+    assert len(sector_nodes) == 1
+    # 2 original edges + 1 root->news edge: "sector:banking" is a `from` in
+    # both edges and never a `to` anywhere in this alert, so per the
+    # root-detection logic (see test_build_graph_root_mechanism_connects_to_news)
+    # it is legitimately the chain root and news connects to it once. The
+    # point under test here is node dedup, not edge count.
+    assert len(graph["edges"]) == 3  # both original edges present, only the node deduped
+
+
+def test_build_graph_mechanism_labels_slugified_deterministically(db_session):
+    alert = _make_alert_with_companies(db_session, [("HDFCBANK.NS", "HDFC Bank", "banking", "bullish")])
+    db_session.add(ImpactEdge(
+        alert_id=alert.id,
+        from_node_kind="mechanism", from_label="Repo Rate ↓", from_company_id=None,
+        to_node_kind="mechanism", to_label="Borrowing Costs ↓", to_company_id=None,
+        relation="credit_cost", direction="bullish", note="n", source="rulebook_verified",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert "mech:repo_rate_down" in node_ids
+    assert "mech:borrowing_costs_down" in node_ids
+
+
+def test_build_graph_root_mechanism_connects_to_news(db_session):
+    alert = _make_alert_with_companies(db_session, [("HDFCBANK.NS", "HDFC Bank", "banking", "bullish")])
+    db_session.add(ImpactEdge(
+        alert_id=alert.id,
+        from_node_kind="mechanism", from_label="Repo Rate ↓", from_company_id=None,
+        to_node_kind="sector", to_label="banking", to_company_id=None,
+        relation="credit_cost", direction="bullish", note="n", source="rulebook_verified",
+    ))
+    db_session.add(ImpactEdge(
+        alert_id=alert.id,
+        from_node_kind="sector", from_label="banking", from_company_id=None,
+        to_node_kind="company", to_label="HDFCBANK.NS", to_company_id=alert.companies[0].company_id,
+        relation="demand", direction="bullish", note="n2", source="llm_only",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    # "Repo Rate ↓" is never a `to` anywhere in this alert -- it's the root,
+    # and must be the thing news connects to (not "banking", which IS a
+    # `to` of the first edge and therefore not a root).
+    news_edges = [e for e in graph["edges"] if e["from"] == "news"]
+    assert len(news_edges) == 1
+    assert news_edges[0]["to"] == "mech:repo_rate_down"
+    assert news_edges[0]["direction"] == "bullish"  # inherited from the root's own outbound edge
+
+
+def test_build_graph_includes_gaps(db_session):
+    alert = _make_alert_with_companies(db_session, [("RELIANCE.NS", "Reliance Industries", "oil_gas", "bullish")])
+    db_session.add(CascadeGap(
+        alert_id=alert.id, sector="consumer_durables", impact_level="indirect_l1",
+        parent_ticker=None, attempts=2, last_error="rate limited",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    assert graph["gaps"] == [{"sector": "consumer_durables", "impact_level": "indirect_l1", "reason": "rate limited"}]
+
+
+def test_build_graph_company_node_carries_in_my_holdings(db_session):
+    alert = _make_alert_with_companies(db_session, [("RELIANCE.NS", "Reliance Industries", "oil_gas", "bullish")])
+    company_id = alert.companies[0].company_id
+
+    graph = _build_graph(alert, held_company_ids={company_id})
+
+    company_node = next(n for n in graph["nodes"] if n["id"] == f"company:{company_id}")
+    assert company_node["in_my_holdings"] is True
+    assert company_node["ticker"] == "RELIANCE.NS"
+    assert company_node["direction"] == "bullish"
+
+
+def test_build_graph_drops_edge_referencing_a_company_not_in_this_alert(db_session, caplog):
+    alert = _make_alert_with_companies(db_session, [("RELIANCE.NS", "Reliance Industries", "oil_gas", "bullish")])
+    # from_company_id points at a real company row, but one that is NOT
+    # among this alert's own companies -- must be dropped, not crash.
+    other_company = Company(ticker="TCS.NS", name="TCS", sector="it", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(other_company)
+    db_session.commit()
+    db_session.add(ImpactEdge(
+        alert_id=alert.id,
+        from_node_kind="company", from_label="TCS.NS", from_company_id=other_company.id,
+        to_node_kind="sector", to_label="it", to_company_id=None,
+        relation="competitor", direction="bearish", note="n", source="llm_only",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    assert not any(e["from"] == f"company:{other_company.id}" for e in graph["edges"])
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert f"company:{other_company.id}" not in node_ids

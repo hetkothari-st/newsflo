@@ -88,6 +88,8 @@ class Alert(Base):
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
+    impact_edges = relationship("ImpactEdge", order_by="ImpactEdge.id")
+    cascade_gaps = relationship("CascadeGap", order_by="CascadeGap.id")
 
 
 class AlertCompany(Base):
