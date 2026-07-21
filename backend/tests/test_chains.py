@@ -66,3 +66,9 @@ def test_chains_text_is_nonempty_and_mentions_every_event_type():
     assert CHAINS_TEXT
     for event_type in CHAINS:
         assert event_type in CHAINS_TEXT
+
+
+def test_chains_has_exactly_the_five_broad_mechanism_event_types():
+    assert set(CHAINS) == {
+        "repo_rate_change", "crude_oil", "government_spending", "currency_move", "inflation",
+    }

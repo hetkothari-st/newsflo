@@ -132,14 +132,14 @@ _REPO_RATE_CHANGE_CHAIN = [
         "note": "Cheaper auto financing lifts vehicle demand.",
     },
     {
-        "from": _sector("construction_realestate"), "to": _sector("infra"),
+        "from": _sector("construction_realestate"), "to": _sector("metals"),
         "relation": "demand", "direction": "bullish",
-        "note": "Housing demand up drives construction/EPC activity (rule's second-order chain: housing -> cement -> steel -> construction).",
+        "note": "Housing demand up drives cement/steel demand (rule's second-order chain: housing -> cement -> steel -> construction).",
     },
     {
-        "from": _sector("infra"), "to": _sector("metals"),
+        "from": _sector("metals"), "to": _sector("infra"),
         "relation": "demand", "direction": "bullish",
-        "note": "Construction activity up drives steel/cement demand (rule's second-order chain).",
+        "note": "Steel/cement demand up drives construction/EPC activity (rule's second-order chain).",
     },
 ]
 
