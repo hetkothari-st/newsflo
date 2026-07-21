@@ -11,10 +11,15 @@ export default function GraphNodeChip({
   node,
   onClick,
   selected = false,
+  width,
 }: {
   node: GraphNode;
   onClick?: () => void;
   selected?: boolean;
+  // Overrides the default fixed w-40 (160px) tile width in px -- used by
+  // Knowledge Graph (#10) to size a node by confidence_score. Omitted
+  // everywhere else, keeping the existing fixed-width tile.
+  width?: number;
 }) {
   const isCompany = node.kind === 'company';
   const bearish = node.direction === 'bearish';
@@ -43,10 +48,13 @@ export default function GraphNodeChip({
   const ringClass = isCompany && node.in_my_holdings ? 'ring-2 ring-accent-secondary' : '';
   const sectorBorder = node.kind === 'sector' ? sectorColor(node.label) : undefined;
 
-  const className = `flex w-40 flex-col gap-0.5 rounded-lg border p-2.5 text-left theme-light:shadow-neu-sm ${
+  const className = `flex ${width == null ? 'w-40' : ''} flex-col gap-0.5 rounded-lg border p-2.5 text-left theme-light:shadow-neu-sm ${
     selected ? 'border-ink theme-light:border-ink' : 'border-hairline theme-light:border-transparent'
   } ${ringClass}`;
-  const style = sectorBorder ? { borderColor: sectorBorder } : undefined;
+  const style = {
+    ...(sectorBorder ? { borderColor: sectorBorder } : {}),
+    ...(width != null ? { width } : {}),
+  };
 
   if (!onClick) {
     return <div className={className} style={style}>{content}</div>;

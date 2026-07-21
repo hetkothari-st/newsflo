@@ -19,7 +19,7 @@ interface FlowNodeData {
 
 function FlowNode({ data }: NodeProps<Node<FlowNodeData>>) {
   return (
-    <div style={{ width: data.size }}>
+    <>
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       {/* nodrag/nopan: React Flow's documented convention for an interactive
           element inside a custom node (see @xyflow/react's own NodeToolbar/
@@ -30,10 +30,14 @@ function FlowNode({ data }: NodeProps<Node<FlowNodeData>>) {
           d3-drag's nodrag() helper. Same fix RippleGraph.tsx (Task 3)
           already needed for the identical GraphNodeChip-in-FlowNode shape. */}
       <div className="nodrag nopan">
-        <GraphNodeChip node={data.node} onClick={data.onClick} selected={data.selected} />
+        {/* width passed through to GraphNodeChip itself (not an outer
+            wrapper div) -- the chip's own w-40 class previously overrode
+            any container width, making confidence-based sizing a no-op.
+            Caught by review. */}
+        <GraphNodeChip node={data.node} onClick={data.onClick} selected={data.selected} width={data.size} />
       </div>
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
-    </div>
+    </>
   );
 }
 
