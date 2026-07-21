@@ -74,6 +74,20 @@ def test_fetch_new_finnhub_articles_inserts_and_dedupes(db_session, monkeypatch)
     assert inserted_again == 0
 
 
+def test_fetch_new_finnhub_articles_normalizes_empty_image_to_none(db_session, monkeypatch):
+    # Finnhub returns "image": "" (present, empty) for imageless items,
+    # not an omitted field -- must normalize to None so pipeline.py's
+    # `if article.image_url is None` og:image fallback still triggers.
+    monkeypatch.setattr(
+        "app.ingestion.finnhub.httpx.get",
+        lambda url, params=None, timeout=None: _fake_response([_item(image="")]),
+    )
+
+    fetch_new_finnhub_articles(db_session, "fake-key")
+
+    assert db_session.query(Article).one().image_url is None
+
+
 def test_fetch_new_finnhub_articles_dedupes_same_url_across_categories_under_autoflush_false():
     session = _autoflush_false_session()
     try:

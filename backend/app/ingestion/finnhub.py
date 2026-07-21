@@ -66,7 +66,11 @@ def fetch_new_finnhub_articles(session: Session, api_key: str) -> int:
                 title=item.get("headline", ""),
                 content=item.get("summary", ""),
                 published_at=published_at,
-                image_url=item.get("image"),
+                # Finnhub returns "image": "" (present, empty) rather than
+                # omitting the field for imageless items -- normalize to
+                # None so _persist_alert's `if article.image_url is None`
+                # og:image fallback (app/pipeline.py) actually triggers.
+                image_url=item.get("image") or None,
                 status="NEW",
             ))
             seen_urls.add(url)
