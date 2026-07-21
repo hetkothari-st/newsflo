@@ -90,4 +90,45 @@ describe('AlertChartsPage', () => {
     expect(screen.getByText('Timeline Tree')).toBeInTheDocument();
     expect(screen.getByText('Sector Tree')).toBeInTheDocument();
   });
+
+  it('renders all ten charts in numeric order for an alert with a rich cascade', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({
+      event_type: 'repo_rate_change',
+      companies: [
+        {
+          company_id: 1, ticker: 'HDFCBANK.NS', name: 'HDFC Bank', index_tier: 'NIFTY50',
+          sector: 'banking', direction: 'bullish', magnitude_low: 2, magnitude_high: 4,
+          rationale: 'Lower rates lift loan demand.', key_points: ['Rates ease'], confidence_score: 80,
+          time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+          in_my_holdings: false, past_mentions: [], impact_level: 'direct', parent_company_id: null,
+        },
+      ],
+      graph: {
+        nodes: [
+          { id: 'news', kind: 'news', label: 'Repo rate cut announced' },
+          { id: 'mech:repo_rate_down', kind: 'mechanism', label: 'Repo Rate ↓' },
+          { id: 'sector:banking', kind: 'sector', label: 'banking' },
+          { id: 'company:1', kind: 'company', company_id: 1, ticker: 'HDFCBANK.NS', label: 'HDFC Bank', name: 'HDFC Bank', direction: 'bullish', confidence_score: 80, impact_level: 'direct' },
+        ],
+        edges: [
+          { from: 'news', to: 'mech:repo_rate_down', relation: 'correlation', direction: 'bullish', note: 'n0', source: 'llm_only' },
+          { from: 'mech:repo_rate_down', to: 'sector:banking', relation: 'credit_cost', direction: 'bullish', note: 'n1', source: 'rulebook_verified' },
+          { from: 'sector:banking', to: 'company:1', relation: 'demand', direction: 'bullish', note: 'n2', source: 'llm_only' },
+        ],
+        gaps: [{ sector: 'consumer_durables', impact_level: 'indirect_l1', reason: 'resolution failed after retries' }],
+      },
+    }));
+    renderPage('1');
+
+    expect(await screen.findByText('Multi-Level Impact Tree')).toBeInTheDocument();
+    expect(screen.getByText('Ripple Effect Graph')).toBeInTheDocument();
+    expect(screen.getByText('Supply Chain Graph')).toBeInTheDocument();
+    expect(screen.getByText('Cascade Levels')).toBeInTheDocument();
+    expect(screen.getByText('Confidence Tree')).toBeInTheDocument();
+    expect(screen.getByText('Positive / Negative Split')).toBeInTheDocument();
+    expect(screen.getByText('Timeline Tree')).toBeInTheDocument();
+    expect(screen.getByText('Sector Tree')).toBeInTheDocument();
+    expect(screen.getByText('Economic Chain')).toBeInTheDocument();
+    expect(screen.getByText('Knowledge Graph')).toBeInTheDocument();
+  });
 });

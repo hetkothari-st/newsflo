@@ -11,6 +11,11 @@ import ConfidenceTree from '../features/visualize/charts/ConfidenceTree';
 import SplitTree from '../features/visualize/charts/SplitTree';
 import TimelineTree from '../features/visualize/charts/TimelineTree';
 import SectorTree from '../features/visualize/charts/SectorTree';
+import RippleGraph from '../features/visualize/charts/RippleGraph';
+import SupplyChainGraph from '../features/visualize/charts/SupplyChainGraph';
+import EconomicChain from '../features/visualize/charts/EconomicChain';
+import KnowledgeGraph from '../features/visualize/charts/KnowledgeGraph';
+import { buildGraph } from '../features/visualize/graph/model';
 
 // Normal = the article's own direct impact only (both actually-direct
 // mentions and sector-inference fan-out -- see impact_level in
@@ -93,6 +98,8 @@ export default function AlertChartsPage() {
     return <p className="p-4 text-xs uppercase tracking-widest text-muted">Loading…</p>;
   }
 
+  const graph = buildGraph(alert);
+
   return (
     <div className="flex min-h-screen flex-col bg-page">
       <div className="flex items-center gap-3 border-b border-hairline p-4">
@@ -119,6 +126,12 @@ export default function AlertChartsPage() {
       <div className="flex-1 overflow-y-auto">
         <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
         <div className="border-t border-hairline">
+          <RippleGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
+        </div>
+        <div className="border-t border-hairline">
+          <SupplyChainGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
+        </div>
+        <div className="border-t border-hairline">
           <LevelTree companies={alert.companies} eventType={alert.event_type} />
         </div>
         <div className="border-t border-hairline">
@@ -132,6 +145,12 @@ export default function AlertChartsPage() {
         </div>
         <div className="border-t border-hairline">
           <SectorTree companies={alert.companies} eventType={alert.event_type} />
+        </div>
+        <div className="border-t border-hairline">
+          <EconomicChain graph={graph} companies={alert.companies} />
+        </div>
+        <div className="border-t border-hairline">
+          <KnowledgeGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
         </div>
       </div>
     </div>
