@@ -63,8 +63,8 @@ export default function CompanyRow({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-page ${
-        selected ? 'bg-page' : ''
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface ${
+        selected ? 'bg-surface' : ''
       } ${ringClass}`}
     >
       {content}
