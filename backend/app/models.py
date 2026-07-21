@@ -39,6 +39,20 @@ class CompanyIndexMembership(Base):
     company = relationship("Company")
 
 
+class AnalysisCache(Base):
+    """Determinism cache: the same article content (title + body) always
+    produces the same analyze_article() output. Keyed by a content hash,
+    not article id, so a republished/duplicate article with identical text
+    hits the same cache row. See app.pipeline.get_cached_analysis."""
+    __tablename__ = "analysis_cache"
+    __table_args__ = (UniqueConstraint("content_hash", name="uq_analysis_cache_content_hash"),)
+
+    id = Column(Integer, primary_key=True)
+    content_hash = Column(String, nullable=False)
+    output_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class Article(Base):
     __tablename__ = "articles"
     __table_args__ = (UniqueConstraint("url", name="uq_articles_url"),)

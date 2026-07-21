@@ -25,7 +25,7 @@ Not part of the test suite and not imported by the app.
 Usage (from the backend/ directory, against whichever DATABASE_URL is
 active in the environment -- e.g. `railway run python reanalyze_cascade.py`
 to run against production):
-    .venv/Scripts/python reanalyze_cascade.py [N]
+    .venv/Scripts/python reanalyze_cascade.py [N] [--force]
 """
 import sys
 
@@ -35,10 +35,10 @@ from app.companies.resolution import resolve_companies
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import Alert, AlertCompanyTranslation
-from app.pipeline import _build_alert_company, article_text
+from app.pipeline import _build_alert_company, article_text, clear_analysis_cache, get_cached_analysis, store_analysis_cache
 
 
-def main(limit: int) -> None:
+def main(limit: int, force: bool) -> None:
     init_db()
     session = SessionLocal()
     client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
@@ -51,11 +51,18 @@ def main(limit: int) -> None:
         old_summary = [(c.company.ticker, c.impact_level) for c in alert.companies]
         print(f"  BEFORE: {old_summary}")
 
-        try:
-            result = analyze_article(client, article.title, article_text(article))
-        except Exception as exc:
-            print(f"  SKIPPED (analysis call failed: {exc})")
-            continue
+        if force:
+            clear_analysis_cache(session, article)
+        result = get_cached_analysis(session, article)
+        if result is not None:
+            print("  (using cached analysis -- pass --force for a fresh LLM call)")
+        else:
+            try:
+                result = analyze_article(client, article.title, article_text(article))
+            except Exception as exc:
+                print(f"  SKIPPED (analysis call failed: {exc})")
+                continue
+            store_analysis_cache(session, article, result)
 
         resolved = resolve_companies(session, result.companies)
 
@@ -80,5 +87,7 @@ def main(limit: int) -> None:
 
 
 if __name__ == "__main__":
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    main(limit)
+    args = [a for a in sys.argv[1:] if a != "--force"]
+    force = "--force" in sys.argv
+    limit = int(args[0]) if args else 5
+    main(limit, force)

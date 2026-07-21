@@ -704,3 +704,82 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     )
     assert reused_indirect.impact_level == "indirect_l1"
     assert reused_indirect.parent_company_id == direct.id
+
+
+def test_process_new_articles_analysis_cache_deterministic(db_session, monkeypatch):
+    """Same content -> the LLM is called at most once; a second article
+    with byte-identical (title, content) reuses the cached output instead
+    of calling analyze_article again, even if analyze_article would have
+    returned something different on a second call."""
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article1 = Article(source="test", url="https://example.com/a1", title="Crude oil spikes", content="Oil prices jump 5%.")
+    article2 = Article(source="test", url="https://example.com/a2", title="Crude oil spikes", content="Oil prices jump 5%.")
+    db_session.add_all([article1, article2])
+    db_session.commit()
+
+    call_count = {"n": 0}
+    outputs = [
+        AnalysisOutput(category="oil_gas", companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            key_points=["Crude eases"], time_horizon="Short-Term",
+        )]),
+        AnalysisOutput(category="other", companies=[]),  # DIFFERENT output -- must never be reached
+    ]
+
+    def fake_analyze(client, title, content):
+        result = outputs[call_count["n"]]
+        call_count["n"] += 1
+        return result
+
+    monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    assert created == 2
+    assert call_count["n"] == 1  # second article hit the cache, never called analyze_article again
+
+    alerts = db_session.query(Alert).order_by(Alert.id).all()
+    assert alerts[0].category == "oil_gas"
+    assert alerts[1].category == "oil_gas"  # cached output, NOT the second scripted "other" output
+    assert len(alerts[0].companies) == 1
+    assert len(alerts[1].companies) == 1
+
+
+def test_get_cached_analysis_returns_none_on_miss(db_session):
+    article = Article(source="test", url="https://example.com/miss", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    assert pipeline_module.get_cached_analysis(db_session, article) is None
+
+
+def test_store_then_get_cached_analysis_round_trips(db_session):
+    article = Article(source="test", url="https://example.com/rt", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    output = AnalysisOutput(category="oil_gas", companies=[])
+    pipeline_module.store_analysis_cache(db_session, article, output)
+    db_session.commit()
+
+    cached = pipeline_module.get_cached_analysis(db_session, article)
+    assert cached is not None
+    assert cached.category == "oil_gas"
+
+
+def test_clear_analysis_cache_removes_the_row(db_session):
+    article = Article(source="test", url="https://example.com/clr", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    pipeline_module.store_analysis_cache(db_session, article, AnalysisOutput(category="oil_gas", companies=[]))
+    db_session.commit()
+    assert pipeline_module.get_cached_analysis(db_session, article) is not None
+
+    pipeline_module.clear_analysis_cache(db_session, article)
+    db_session.commit()
+    assert pipeline_module.get_cached_analysis(db_session, article) is None

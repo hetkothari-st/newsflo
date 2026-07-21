@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from datetime import timedelta, timezone
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.cascade import analyze_article
-from app.analysis.schemas import CATEGORIES
+from app.analysis.schemas import AnalysisOutput, CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
@@ -15,7 +16,7 @@ from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
-from app.models import Alert, AlertCompany, Article, Company, utcnow
+from app.models import Alert, AlertCompany, AnalysisCache, Article, Company, utcnow
 from app.reasoning.confidence import _band as band_for_score
 from app.reasoning.confidence import compute_confidence, source_credibility
 from app.reasoning.financial_context import detect_price_contradiction, get_or_fetch_financial_snapshot
@@ -50,6 +51,33 @@ def decode_key_points(alert_company: AlertCompany) -> list[str]:
 
 def article_text(article: Article) -> str:
     return article.full_content or article.content
+
+
+def _content_hash(article: Article) -> str:
+    return hashlib.sha256((article.title + "\n" + article_text(article)).encode()).hexdigest()
+
+
+def get_cached_analysis(session: Session, article: Article) -> AnalysisOutput | None:
+    """Look up a prior analyze_article() result for this EXACT article
+    content (title + body), so a re-run (whether the live pipeline seeing
+    a republished duplicate, or a one-off reanalyze_*.py script re-run)
+    never has to spend a fresh LLM call to reproduce the same result --
+    and always reproduces the SAME result, not a fresh one that may differ
+    slightly (LLMs are not literally deterministic across calls)."""
+    cached = session.query(AnalysisCache).filter_by(content_hash=_content_hash(article)).one_or_none()
+    if cached is None:
+        return None
+    return AnalysisOutput.model_validate_json(cached.output_json)
+
+
+def store_analysis_cache(session: Session, article: Article, analysis: AnalysisOutput) -> None:
+    session.add(AnalysisCache(content_hash=_content_hash(article), output_json=analysis.model_dump_json()))
+
+
+def clear_analysis_cache(session: Session, article: Article) -> None:
+    """The only intentional way to force a fresh LLM call for content
+    that's already cached -- used by reanalyze_*.py's --force flag."""
+    session.query(AnalysisCache).filter_by(content_hash=_content_hash(article)).delete()
 
 
 def _as_aware_utc(dt):
@@ -326,21 +354,24 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             alerts_created += 1
             continue
 
-        analysis = None
-        for attempt in range(2):  # try once, retry once
-            try:
-                analysis = analyze_article(claude_client, article.title, article_text(article))
-                break
-            except Exception:
-                if attempt == 0:
-                    time.sleep(throttle_seconds)
-                continue
-        time.sleep(throttle_seconds)  # stay under the provider's rate limit before the next article
-
+        analysis = get_cached_analysis(session, article)
         if analysis is None:
-            article.status = "ANALYSIS_FAILED"
-            session.commit()
-            continue
+            for attempt in range(2):  # try once, retry once
+                try:
+                    analysis = analyze_article(claude_client, article.title, article_text(article))
+                    break
+                except Exception:
+                    if attempt == 0:
+                        time.sleep(throttle_seconds)
+                    continue
+            time.sleep(throttle_seconds)  # stay under the provider's rate limit before the next article
+
+            if analysis is None:
+                article.status = "ANALYSIS_FAILED"
+                session.commit()
+                continue
+
+            store_analysis_cache(session, article, analysis)
 
         resolved = resolve_companies(session, analysis.companies)
         _persist_alert(session, article, analysis.category, resolved, event_type=analysis.event_type)
