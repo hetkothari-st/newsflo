@@ -65,7 +65,7 @@ export default function AlertCascadePage() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        <LevelTree companies={visibleCompanies} />
+        <LevelTree alertId={alert.id} companies={visibleCompanies} />
       </div>
     </div>
   );

@@ -29,6 +29,11 @@ export default function AlertCompanyAnalysisPage() {
     (c) => c.company_id === Number(companyId),
   );
 
+  const parentCompany: AlertCompany | undefined =
+    company?.parent_company_id != null
+      ? alert?.companies.find((c) => c.company_id === company.parent_company_id)
+      : undefined;
+
   useEffect(() => {
     if (!company) return;
     let cancelled = false;
@@ -84,6 +89,12 @@ export default function AlertCompanyAnalysisPage() {
           </Link>
         )}
       </div>
+
+      {parentCompany && (
+        <p className="mt-3 font-data text-[11px] uppercase tracking-widest text-muted">
+          Linked via {parentCompany.ticker} · {parentCompany.name}
+        </p>
+      )}
 
       {points.length >= 2 && (
         <div className="mt-4">

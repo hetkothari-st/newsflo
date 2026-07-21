@@ -139,6 +139,32 @@ describe('AlertCompanyAnalysisPage', () => {
     expect(screen.queryByRole('link', { name: /view company details/i })).not.toBeInTheDocument();
   });
 
+  it('shows which parent company a cascade company is linked via', async () => {
+    const withCascade: Alert = {
+      ...ALERT,
+      companies: [
+        ALERT.companies[0],
+        {
+          ...ALERT.companies[0], company_id: 2, ticker: 'IOC.NS', name: 'Indian Oil Corporation',
+          impact_level: 'indirect_l1', parent_company_id: 1,
+        },
+      ],
+    };
+    vi.spyOn(api, 'getAlert').mockResolvedValue(withCascade);
+    render(<AlertCompanyAnalysisPage />, '/alerts/7/company/2');
+
+    await waitFor(() => expect(screen.getByText('Indian Oil Corporation')).toBeInTheDocument());
+    expect(screen.getByText('Linked via RELIANCE.NS · Reliance Industries')).toBeInTheDocument();
+  });
+
+  it('does not show a linked-via note for a direct company', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(ALERT);
+    render(<AlertCompanyAnalysisPage />, '/alerts/7/company/1');
+
+    await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
+    expect(screen.queryByText(/Linked via/)).not.toBeInTheDocument();
+  });
+
   it('renders nothing crashing when the company id is not found in the alert', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(ALERT);
     render(<AlertCompanyAnalysisPage />, '/alerts/7/company/999');
