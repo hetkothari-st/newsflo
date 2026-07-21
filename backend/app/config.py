@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     # not a one-time cost like IndianAPI's monthly cap above. Same
     # documented-tradeoff pattern as indianapi_poll_interval_minutes.
     thenewsapi_poll_interval_minutes: int = int(os.environ.get("THENEWSAPI_POLL_INTERVAL_MINUTES", "1"))
+    # News ingestion source -- replaces thenewsapi (disabled, not deleted --
+    # see app/scheduler.py). thenewsapi's 100/day cap kept exhausting
+    # mid-day in production; Finnhub's free tier is 60 calls/min. See
+    # docs/superpowers/specs/2026-07-21-finnhub-ingestion-source-design.md.
+    finnhub_api_key: str = os.environ.get("FINNHUB_API_KEY", "")
+    finnhub_poll_interval_minutes: int = int(os.environ.get("FINNHUB_POLL_INTERVAL_MINUTES", "1"))
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound

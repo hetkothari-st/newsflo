@@ -10,7 +10,12 @@ from app.db import SessionLocal
 # Swap the fetch_new_indianapi_articles(...) call back in (and re-enable
 # this import and the _run_indianapi_ingestion function below) to revert.
 # from app.ingestion.indianapi import fetch_new_indianapi_articles
-from app.ingestion.thenewsapi import fetch_new_thenewsapi_articles
+# thenewsapi is disabled (not deleted) -- replaced by finnhub.io, see
+# docs/superpowers/specs/2026-07-21-finnhub-ingestion-source-design.md.
+# Swap the fetch_new_thenewsapi_articles(...) call back in (and re-enable
+# this import and the _run_thenewsapi_ingestion function below) to revert.
+# from app.ingestion.thenewsapi import fetch_new_thenewsapi_articles
+from app.ingestion.finnhub import fetch_new_finnhub_articles
 # RSS ingestion (poller.py + sources.py) is intact and fully working, just
 # not wired in below -- IndianAPI's /news endpoint is the active source now.
 # Swap the fetch_new_articles(...) call back in (and re-enable this import)
@@ -72,18 +77,34 @@ def _run_horizon(horizon_days: int) -> None:
 #         session.close()
 
 
-def _run_thenewsapi_ingestion() -> None:
-    """Poll thenewsapi.com's /v1/news/all endpoint for fresh business/
-    politics/general/tech news. Runs on its own, much longer interval
-    (thenewsapi_poll_interval_minutes) rather than the fast per-minute
-    analysis cycle -- this key is capped at 100 requests/day. Any failure
-    is logged, never raised, same as every other scheduler job."""
+# def _run_thenewsapi_ingestion() -> None:
+#     """Poll thenewsapi.com's /v1/news/all endpoint for fresh business/
+#     politics/general/tech news. Runs on its own, much longer interval
+#     (thenewsapi_poll_interval_minutes) rather than the fast per-minute
+#     analysis cycle -- this key is capped at 100 requests/day. Any failure
+#     is logged, never raised, same as every other scheduler job."""
+#     session = SessionLocal()
+#     try:
+#         inserted = fetch_new_thenewsapi_articles(session, settings.thenewsapi_api_key)
+#         logger.info("thenewsapi poll: %s new articles", inserted)
+#     except Exception:
+#         logger.exception("thenewsapi ingestion poll failed")
+#     finally:
+#         session.close()
+
+
+def _run_finnhub_ingestion() -> None:
+    """Poll finnhub.io's /v1/news endpoint (general + merger categories)
+    for fresh market news. Runs on its own interval
+    (finnhub_poll_interval_minutes) rather than the fast per-minute
+    analysis cycle. Any failure is logged, never raised, same as every
+    other scheduler job."""
     session = SessionLocal()
     try:
-        inserted = fetch_new_thenewsapi_articles(session, settings.thenewsapi_api_key)
-        logger.info("thenewsapi poll: %s new articles", inserted)
+        inserted = fetch_new_finnhub_articles(session, settings.finnhub_api_key)
+        logger.info("finnhub poll: %s new articles", inserted)
     except Exception:
-        logger.exception("thenewsapi ingestion poll failed")
+        logger.exception("finnhub ingestion poll failed")
     finally:
         session.close()
 
@@ -153,11 +174,19 @@ def start_scheduler() -> None:
     #     minutes=settings.indianapi_poll_interval_minutes,
     #     id="indianapi_poll",
     # )
+    # thenewsapi job disabled -- see the import comment above. Restore
+    # this block (and re-enable _run_thenewsapi_ingestion) to revert.
+    # scheduler.add_job(
+    #     _run_thenewsapi_ingestion,
+    #     trigger="interval",
+    #     minutes=settings.thenewsapi_poll_interval_minutes,
+    #     id="thenewsapi_poll",
+    # )
     scheduler.add_job(
-        _run_thenewsapi_ingestion,
+        _run_finnhub_ingestion,
         trigger="interval",
-        minutes=settings.thenewsapi_poll_interval_minutes,
-        id="thenewsapi_poll",
+        minutes=settings.finnhub_poll_interval_minutes,
+        id="finnhub_poll",
     )
     scheduler.add_job(
         _run_ingestion_and_analysis,
