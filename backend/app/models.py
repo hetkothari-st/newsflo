@@ -88,8 +88,8 @@ class Alert(Base):
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
-    impact_edges = relationship("ImpactEdge", order_by="ImpactEdge.id")
-    cascade_gaps = relationship("CascadeGap", order_by="CascadeGap.id")
+    impact_edges = relationship("ImpactEdge", order_by="ImpactEdge.id", back_populates="alert")
+    cascade_gaps = relationship("CascadeGap", order_by="CascadeGap.id", back_populates="alert")
 
 
 class AlertCompany(Base):
@@ -168,7 +168,7 @@ class CascadeGap(Base):
     last_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-    alert = relationship("Alert")
+    alert = relationship("Alert", back_populates="cascade_gaps")
 
 
 class ImpactEdge(Base):
@@ -196,7 +196,7 @@ class ImpactEdge(Base):
     confidence_score = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-    alert = relationship("Alert")
+    alert = relationship("Alert", back_populates="impact_edges")
 
 
 class CalibrationSample(Base):
