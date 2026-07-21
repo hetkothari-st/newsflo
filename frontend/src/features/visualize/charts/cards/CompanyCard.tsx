@@ -33,8 +33,8 @@ export default function CompanyCard({
           {sectorLabel(company.sector)}
         </span>
       )}
-      <span className={`font-data text-xs ${bearish ? 'text-bearish' : 'text-bullish'}`}>
-        <span aria-hidden="true">{bearish ? '▼' : '▲'}</span> {company.confidence_score}%
+      <span aria-hidden="true" className={`font-data text-xs ${bearish ? 'text-bearish' : 'text-bullish'}`}>
+        {bearish ? '▼' : '▲'} {company.confidence_score}%
       </span>
     </>
   );
