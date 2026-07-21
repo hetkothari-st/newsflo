@@ -70,6 +70,12 @@ def _build_graph(alert: Alert, held_company_ids: set[int]) -> dict:
         node_id = f"company:{ac.company_id}"
         nodes[node_id] = {
             "id": node_id, "kind": "company", "company_id": ac.company_id,
+            # Every node kind carries "label" (mechanism/sector/news nodes
+            # already do) so frontend code can read node.label uniformly
+            # without a kind check -- redundant with "name" here, but a
+            # real type-safety gap otherwise (GraphNode.label is required,
+            # not optional, on the frontend).
+            "label": ac.company.name,
             "ticker": ac.company.ticker, "name": ac.company.name,
             "direction": ac.direction, "confidence_score": ac.confidence_score,
             "impact_level": ac.impact_level,
