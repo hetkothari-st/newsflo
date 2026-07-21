@@ -16,7 +16,7 @@ from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
-from app.models import Alert, AlertCompany, AnalysisCache, Article, Company, utcnow
+from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, utcnow
 from app.reasoning.confidence import _band as band_for_score
 from app.reasoning.confidence import compute_confidence, source_credibility
 from app.reasoning.financial_context import detect_price_contradiction, get_or_fetch_financial_snapshot
@@ -270,6 +270,7 @@ def _build_alert_company(
 
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
+    gaps: list[dict] | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -295,6 +296,12 @@ def _persist_alert(
 
     for entry in entries:
         session.add(_build_alert_company(session, alert.id, article, category, entry))
+
+    for gap in (gaps or []):
+        session.add(CascadeGap(
+            alert_id=alert.id, sector=gap["sector"], impact_level=gap["impact_level"],
+            parent_ticker=gap.get("parent_ticker"), attempts=gap["attempts"], last_error=gap.get("last_error"),
+        ))
 
     if article.image_url is None:
         article.image_url = fetch_og_image(article.url)
@@ -374,7 +381,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             store_analysis_cache(session, article, analysis)
 
         resolved = resolve_companies(session, analysis.companies)
-        _persist_alert(session, article, analysis.category, resolved, event_type=analysis.event_type)
+        _persist_alert(session, article, analysis.category, resolved, event_type=analysis.event_type, gaps=analysis.gaps)
         alerts_created += 1
 
     return alerts_created

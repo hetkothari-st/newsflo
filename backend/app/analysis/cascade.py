@@ -557,7 +557,7 @@ def _identify_companies(
 
 def _identify_cascade_companies_per_sector(
     client, facts: str, sectors: list[SectorFinding], impact_level: str, parent_pool: list[CompanyMention],
-) -> list[CompanyMention]:
+) -> tuple[list[CompanyMention], list[dict]]:
     """Calls _identify_companies ONCE PER SECTOR rather than bundling every
     cascade sector into one call. Confirmed in production: bundling 5-7
     cascade sectors (each company requires a long rationale/key_points/
@@ -569,16 +569,42 @@ def _identify_cascade_companies_per_sector(
     multi-company results. Direct/primary companies (stage 3) do not use
     this -- that stage empirically has few enough sectors (the article's
     own direct subject, not a wide cascade fan-out) that bundling is fine.
-    A failure on one sector is logged and skipped -- it does not lose the
-    other sectors' results.
+
+    A failure on one sector is retried once (2 attempts total) before being
+    recorded as a gap dict in the returned gaps list -- never silently
+    dropped, so a genuine transient failure (rate limit, malformed
+    response) is distinguishable from "this sector genuinely has no
+    cascade companies" (which returns normally with an empty list, not a
+    gap). A gap on one sector does not lose another sector's results.
     """
     mentions: list[CompanyMention] = []
+    gaps: list[dict] = []
     for sector in sectors:
-        try:
-            mentions.extend(_identify_companies(client, facts, [sector], impact_level=impact_level, parent_pool=parent_pool))
-        except Exception as exc:
-            logger.warning("cascade company lookup for sector %r failed, skipping: %s", sector.sector, exc)
-    return mentions
+        last_error: str | None = None
+        succeeded = False
+        for attempt in range(2):  # try once, retry once
+            try:
+                mentions.extend(_identify_companies(client, facts, [sector], impact_level=impact_level, parent_pool=parent_pool))
+                succeeded = True
+                break
+            except Exception as exc:
+                last_error = str(exc)
+        if not succeeded:
+            logger.warning("cascade company lookup for sector %r failed after retry, recording gap: %s", sector.sector, last_error)
+            gaps.append({
+                "sector": sector.sector,
+                "impact_level": impact_level,
+                # parent_pool is a POOL of companies this sector's lookup
+                # chains from, not a single one -- there is no single
+                # correct parent_ticker to attribute a whole-sector
+                # failure to, so this is intentionally left None rather
+                # than picking (and thereby misrepresenting) just the
+                # first entry.
+                "parent_ticker": None,
+                "attempts": 2,
+                "last_error": last_error,
+            })
+    return mentions, gaps
 
 
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
@@ -590,14 +616,21 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     failure propagates, failing the whole article -- identical to the old
     single-call analyze_article's behavior. A failure at any later stage
     truncates the pipeline there: everything produced by stages that
-    already succeeded is still returned.
+    already succeeded is still returned. Per-sector cascade-company
+    failures (stages 5/7) are retried and, if still unresolved, recorded
+    as gaps rather than truncating the pipeline (see
+    _identify_cascade_companies_per_sector).
     """
     facts_result = _extract_facts(client, title, content)
     primary_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=None)
 
     all_companies: list = []
+    all_gaps: list[dict] = []
     if not primary_sectors:
-        return AnalysisOutput(category=facts_result.category, event_type=facts_result.event_type, companies=all_companies)
+        return AnalysisOutput(
+            category=facts_result.category, event_type=facts_result.event_type,
+            companies=all_companies, gaps=all_gaps,
+        )
 
     try:
         primary_companies = _identify_companies(
@@ -615,14 +648,15 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         except Exception as exc:
             logger.warning("cascade stage 4 (L1 cascade sectors) failed, truncating: %s", exc)
             l1_sectors = []
-        l1_companies = (
-            _identify_cascade_companies_per_sector(
+        if l1_sectors:
+            l1_companies, l1_gaps = _identify_cascade_companies_per_sector(
                 client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
                 parent_pool=l1_parent_tickers_present,
             )
-            if l1_sectors else []
-        )
+        else:
+            l1_companies, l1_gaps = [], []
         all_companies.extend(l1_companies)
+        all_gaps.extend(l1_gaps)
 
         l2_parent_tickers_present = [c for c in l1_companies if c.ticker]
         if l1_sectors and l2_parent_tickers_present:
@@ -631,13 +665,17 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             except Exception as exc:
                 logger.warning("cascade stage 6 (L2 cascade sectors) failed, truncating: %s", exc)
                 l2_sectors = []
-            l2_companies = (
-                _identify_cascade_companies_per_sector(
+            if l2_sectors:
+                l2_companies, l2_gaps = _identify_cascade_companies_per_sector(
                     client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
                     parent_pool=l2_parent_tickers_present,
                 )
-                if l2_sectors else []
-            )
+            else:
+                l2_companies, l2_gaps = [], []
             all_companies.extend(l2_companies)
+            all_gaps.extend(l2_gaps)
 
-    return AnalysisOutput(category=facts_result.category, event_type=facts_result.event_type, companies=all_companies)
+    return AnalysisOutput(
+        category=facts_result.category, event_type=facts_result.event_type,
+        companies=all_companies, gaps=all_gaps,
+    )

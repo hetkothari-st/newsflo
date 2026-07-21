@@ -340,13 +340,14 @@ def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
     ])
 
-    result = _identify_cascade_companies_per_sector(
+    result, gaps = _identify_cascade_companies_per_sector(
         client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
     assert client.calls == ["record_sector_companies", "record_sector_companies"]
     assert {c.ticker for c in result} == {"HDFCBANK.NS", "MARUTI.NS"}
     assert all(c.impact_level == "indirect_l1" for c in result)
+    assert gaps == []
 
 
 def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_others():
@@ -359,14 +360,70 @@ def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_ot
     )]
     client = PerSectorScriptedClient([
         ValueError("boom"),
+        ValueError("boom again"),  # banking's retry attempt also fails
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
     ])
 
-    result = _identify_cascade_companies_per_sector(
+    result, gaps = _identify_cascade_companies_per_sector(
         client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
     assert [c.ticker for c in result] == ["MARUTI.NS"]
+    assert len(gaps) == 1
+    assert gaps[0]["sector"] == "banking"
+    assert gaps[0]["attempts"] == 2
+
+
+def test_identify_cascade_companies_per_sector_retries_then_records_gap():
+    sectors = [
+        SectorFinding(sector="banking", direction="bullish", mechanism="m1", parent_sector="oil_gas"),
+        SectorFinding(sector="auto", direction="bullish", mechanism="m2", parent_sector="oil_gas"),
+    ]
+    parent_pool = [CompanyMention(
+        name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+    )]
+
+    call_log = []
+
+    class FlakyThenGoodClient:
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self)
+
+        def create(self, **kwargs):
+            # Which sector this call is for isn't directly inspectable from
+            # kwargs (the tool schema doesn't echo it back); key off call
+            # order instead -- sectors are processed in list order (banking,
+            # then auto), and each sector gets up to 2 attempts, so calls
+            # 1-2 are banking's two attempts (both fail) and call 3 is
+            # auto's first attempt (succeeds).
+            call_log.append(kwargs["tool_choice"]["function"]["name"])
+            if len(call_log) <= 2:
+                raise RuntimeError("transient failure")
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+                tool_calls=[FakeToolCall("record_sector_companies", {"sector_companies": [
+                    {"sector": "auto", "companies": [{
+                        "name": "Maruti Suzuki", "ticker": "MARUTI.NS", "direction": "bullish",
+                        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+                        "key_points": [], "time_horizon": "Short-Term", "reasons": [],
+                        "evidence_refs": [], "risks": [], "assumptions": [], "unknowns": [],
+                        "alternative_hypothesis": "none", "parent_ticker": "RELIANCE.NS",
+                    }]},
+                ]})],
+            ))])
+
+    mentions, gaps = _identify_cascade_companies_per_sector(
+        FlakyThenGoodClient(), facts="f", sectors=sectors, impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+
+    assert len(gaps) == 1
+    assert gaps[0]["sector"] == "banking"
+    assert gaps[0]["impact_level"] == "indirect_l1"
+    assert gaps[0]["attempts"] == 2
+    assert gaps[0]["last_error"]
+    assert len(mentions) == 1
+    assert mentions[0].ticker == "MARUTI.NS"  # the "auto" sector still succeeded
 
 
 def test_analyze_article_composes_all_seven_stages_end_to_end():

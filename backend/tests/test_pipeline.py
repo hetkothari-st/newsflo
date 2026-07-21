@@ -8,6 +8,7 @@ from app.models import (
     AlertCompany,
     Article,
     CalibrationSample,
+    CascadeGap,
     Company,
     EmailNotification,
     Holding,
@@ -843,4 +844,32 @@ def test_clear_analysis_cache_removes_the_row(db_session):
 
     pipeline_module.clear_analysis_cache(db_session, article)
     db_session.commit()
+
+
+def test_persist_alert_writes_cascade_gap_rows(db_session):
+    article = Article(source="test", url="https://example.com/gap", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = pipeline_module._persist_alert(
+        db_session, article, category="oil_gas", entries=[], event_type="crude_oil",
+        gaps=[{"sector": "banking", "impact_level": "indirect_l1", "parent_ticker": None, "attempts": 2, "last_error": "boom"}],
+    )
+
+    gap_rows = db_session.query(CascadeGap).filter_by(alert_id=alert.id).all()
+    assert len(gap_rows) == 1
+    assert gap_rows[0].sector == "banking"
+    assert gap_rows[0].impact_level == "indirect_l1"
+    assert gap_rows[0].attempts == 2
+    assert gap_rows[0].last_error == "boom"
+
+
+def test_persist_alert_with_no_gaps_writes_no_gap_rows(db_session):
+    article = Article(source="test", url="https://example.com/nogap", title="t", content="c")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = pipeline_module._persist_alert(db_session, article, category="oil_gas", entries=[], event_type="crude_oil")
+
+    assert db_session.query(CascadeGap).filter_by(alert_id=alert.id).count() == 0
     assert pipeline_module.get_cached_analysis(db_session, article) is None
