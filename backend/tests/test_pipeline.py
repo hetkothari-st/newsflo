@@ -844,6 +844,7 @@ def test_clear_analysis_cache_removes_the_row(db_session):
 
     pipeline_module.clear_analysis_cache(db_session, article)
     db_session.commit()
+    assert pipeline_module.get_cached_analysis(db_session, article) is None
 
 
 def test_persist_alert_writes_cascade_gap_rows(db_session):
@@ -872,4 +873,3 @@ def test_persist_alert_with_no_gaps_writes_no_gap_rows(db_session):
     alert = pipeline_module._persist_alert(db_session, article, category="oil_gas", entries=[], event_type="crude_oil")
 
     assert db_session.query(CascadeGap).filter_by(alert_id=alert.id).count() == 0
-    assert pipeline_module.get_cached_analysis(db_session, article) is None
