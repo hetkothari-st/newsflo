@@ -1,7 +1,11 @@
 import type { ImpactGraph } from '../../../lib/api';
 import { ringsByImpactLevel } from './model';
 
-const RING_SPACING = 160;
+// Each GraphNodeChip is a fixed w-40 (160px) wide tile -- ring spacing
+// must clear that width with real margin, or chips on adjacent rings can
+// visually overlap (a real risk flagged by review, since this layout
+// can't be checked in a browser in this environment).
+const RING_SPACING = 240;
 
 function placeRing(positions: Record<string, { x: number; y: number }>, ids: string[], ringIndex: number) {
   const radius = ringIndex * RING_SPACING;
