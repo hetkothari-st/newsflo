@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { AlertCompany } from '../../../lib/api';
+import ReasoningPanel from '../../../components/ReasoningPanel';
 import { IMPACT_LEVEL_ORDER, impactLevelColor, impactLevelKey, impactLevelLabel } from '../impactLevels';
 import ChartCardShell from './ChartCardShell';
 import CompanyCard from './cards/CompanyCard';
+import { useCompanySelection } from './useCompanySelection';
 
 function LevelConnector() {
   return (
@@ -19,12 +20,14 @@ const LEGEND = [
   { label: impactLevelLabel('indirect_l2'), color: impactLevelColor('indirect_l2') },
 ];
 
-// alertId is required -- every company card navigates to its full
-// reasoning page (/alerts/:alertId/company/:companyId) on click, which
-// needs the alert id LevelTree itself never otherwise receives (a plain
-// AlertCompany carries its own company_id but not its parent alert's id).
-export default function LevelTree({ alertId, companies }: { alertId: number; companies: AlertCompany[] }) {
-  const navigate = useNavigate();
+export default function LevelTree({
+  companies,
+  eventType,
+}: {
+  companies: AlertCompany[];
+  eventType?: string | null;
+}) {
+  const { toggle, selected, selectedId } = useCompanySelection(companies);
 
   const levels = useMemo(
     () =>
@@ -39,7 +42,7 @@ export default function LevelTree({ alertId, companies }: { alertId: number; com
 
   return (
     <ChartCardShell
-      number={2}
+      number={4}
       title="Cascade Levels"
       description="Companies affected at each cascade level -- direct, and the ripple effects it triggers"
       legend={LEGEND}
@@ -61,13 +64,15 @@ export default function LevelTree({ alertId, companies }: { alertId: number; com
                     key={c.company_id}
                     company={c}
                     showSector
-                    onClick={() => navigate(`/alerts/${alertId}/company/${c.company_id}`)}
+                    onClick={() => toggle(c.company_id)}
+                    selected={selectedId === c.company_id}
                   />
                 ))}
               </div>
             </div>
           );
         })}
+        {selected && <ReasoningPanel company={selected} eventType={eventType} />}
       </div>
     </ChartCardShell>
   );

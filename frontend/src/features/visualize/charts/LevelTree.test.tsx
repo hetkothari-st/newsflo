@@ -1,24 +1,16 @@
 import { render as rtlRender, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import LevelTree from './LevelTree';
 import type { AlertCompany } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
 
-// LevelTree navigates on click (to the full reasoning page), so tests need
-// a real Routes tree with a stub destination to observe -- not just a bare
-// MemoryRouter -- to prove the right URL was actually navigated to.
-function renderAtRoute(companies: AlertCompany[], alertId = 7) {
+function render(companies: AlertCompany[], eventType?: string | null) {
   return rtlRender(
-    <MemoryRouter initialEntries={['/start']}>
+    <MemoryRouter>
       <LanguageProvider>
-        <Routes>
-          <Route path="/start" element={<LevelTree alertId={alertId} companies={companies} />} />
-          <Route
-            path="/alerts/:id/company/:companyId"
-            element={<p>Reasoning page placeholder</p>}
-          />
-        </Routes>
+        <LevelTree companies={companies} eventType={eventType} />
       </LanguageProvider>
     </MemoryRouter>,
   );
@@ -37,22 +29,19 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 
 describe('LevelTree', () => {
   it('renders nothing for an empty company list', () => {
-    const { container } = renderAtRoute([]);
+    const { container } = render([]);
     expect(container).toBeEmptyDOMElement();
   });
 
   it('renders only a Direct Impact branch when every company is direct', () => {
-    renderAtRoute([company({ company_id: 1, ticker: 'NVDA' })]);
-    // ChartCardShell's legend statically lists all three level labels regardless
-    // of which levels have data, so "Direct Impact" (section header + legend
-    // entry) appears twice while an absent level's label appears once (legend only).
+    render([company({ company_id: 1, ticker: 'NVDA' })]);
     expect(screen.getAllByText('Direct Impact')).toHaveLength(2);
     expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(1);
     expect(screen.getByText('NVDA')).toBeInTheDocument();
   });
 
   it('shows every company flat within its level, with no parent-company grouping label', () => {
-    renderAtRoute([
+    render([
       company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
       company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
       company({ company_id: 3, ticker: 'QCOM', name: 'Qualcomm', impact_level: 'indirect_l1', parent_company_id: 1 }),
@@ -64,7 +53,7 @@ describe('LevelTree', () => {
   });
 
   it('shows indirect_l2 companies under their own level, flat like every other level', () => {
-    renderAtRoute([
+    render([
       company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
       company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
       company({ company_id: 3, ticker: 'ASML.NS', name: 'ASML Holding', impact_level: 'indirect_l2', parent_company_id: 2 }),
@@ -73,14 +62,14 @@ describe('LevelTree', () => {
     expect(screen.getByText('ASML.NS')).toBeInTheDocument();
   });
 
-  it('renders wrapped in ChartCardShell with the Cascade Levels title and number 2', () => {
-    renderAtRoute([company({ company_id: 1, ticker: 'NVDA' })]);
-    expect(screen.getByText('2')).toBeInTheDocument();
+  it('renders wrapped in ChartCardShell with the Cascade Levels title and number 4', () => {
+    render([company({ company_id: 1, ticker: 'NVDA' })]);
+    expect(screen.getByText('4')).toBeInTheDocument();
     expect(screen.getByText('Cascade Levels')).toBeInTheDocument();
   });
 
-  it('shows no full rationale text anywhere', () => {
-    renderAtRoute([
+  it('shows no full rationale text anywhere until a company is tapped', () => {
+    render([
       company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct', rationale: 'Full paragraph rationale text.' }),
       company({
         company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1,
@@ -90,32 +79,26 @@ describe('LevelTree', () => {
     expect(screen.queryByText('Full paragraph rationale text.')).not.toBeInTheDocument();
   });
 
-  it('navigates to the full reasoning page for a direct company on click', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    renderAtRoute([company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' })], 42);
-
+  it('expands a ReasoningPanel for a direct company on click', async () => {
+    render([company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct', rationale: 'Chip demand accelerates.' })]);
     await userEvent.click(screen.getByText('NVDA'));
-
-    expect(screen.getByText('Reasoning page placeholder')).toBeInTheDocument();
+    expect(screen.getByText(/Chip demand accelerates/)).toBeInTheDocument();
   });
 
-  it('navigates to the full reasoning page for a cascade company on click, using its own company id', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    renderAtRoute(
-      [
-        company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
-        company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
-      ],
-      42,
-    );
-
+  it('expands a ReasoningPanel for a cascade company on click, using its own company id', async () => {
+    render([
+      company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
+      company({
+        company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1,
+        rationale: 'Foundry capacity is the binding constraint.',
+      }),
+    ]);
     await userEvent.click(screen.getByText('TSM'));
-
-    expect(screen.getByText('Reasoning page placeholder')).toBeInTheDocument();
+    expect(screen.getByText(/Foundry capacity is the binding constraint/)).toBeInTheDocument();
   });
 
   it('shows a sector chip on every company card, including cascade companies', () => {
-    renderAtRoute([
+    render([
       company({ company_id: 1, ticker: 'NVDA', sector: 'it', impact_level: 'direct' }),
       company({ company_id: 2, ticker: 'TSM', name: 'TSMC', sector: 'metals', impact_level: 'indirect_l1', parent_company_id: 1 }),
     ]);

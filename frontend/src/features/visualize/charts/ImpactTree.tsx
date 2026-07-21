@@ -3,6 +3,8 @@ import { impactLevelKey } from '../impactLevels';
 import { groupBySector, groupIndirectBySubSector, rankByConfidence, type CompanyGroup, type SubSectorGroup } from '../transforms';
 import ChartCardShell from './ChartCardShell';
 import CompanyCard from './cards/CompanyCard';
+import ReasoningPanel from '../../../components/ReasoningPanel';
+import { useCompanySelection } from './useCompanySelection';
 
 function truncatedRationale(rationale: string): string {
   const firstSentence = rationale.split(/(?<=[.!?])\s+/)[0];
@@ -64,7 +66,11 @@ function LevelHeader({ level, name, count, color }: { level: string; name: strin
   );
 }
 
-function SectorBlock({ sector }: { sector: CompanyGroup }) {
+function SectorBlock({
+  sector, selectedId, onToggle,
+}: {
+  sector: CompanyGroup; selectedId: number | null; onToggle: (id: number) => void;
+}) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <LevelHeader level="Level 1 · Direct Impact" name={sector.label} count={sector.companies.length} color={sector.color} />
@@ -73,14 +79,18 @@ function SectorBlock({ sector }: { sector: CompanyGroup }) {
       <p className="font-data text-[10px] uppercase tracking-widest text-muted">Level 2 · Companies</p>
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {sector.companies.map((c) => (
-          <CompanyCard key={c.company_id} company={c} />
+          <CompanyCard key={c.company_id} company={c} onClick={() => onToggle(c.company_id)} selected={selectedId === c.company_id} />
         ))}
       </div>
     </div>
   );
 }
 
-function SubSectorBlock({ subSector }: { subSector: SubSectorGroup }) {
+function SubSectorBlock({
+  subSector, selectedId, onToggle,
+}: {
+  subSector: SubSectorGroup; selectedId: number | null; onToggle: (id: number) => void;
+}) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <LevelHeader level="Level 3 · Indirect Ripple" name={subSector.label} count={subSector.companies.length} />
@@ -89,7 +99,7 @@ function SubSectorBlock({ subSector }: { subSector: SubSectorGroup }) {
       <p className="font-data text-[10px] uppercase tracking-widest text-muted">Level 4 · Companies</p>
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {subSector.companies.map((c) => (
-          <CompanyCard key={c.company_id} company={c} />
+          <CompanyCard key={c.company_id} company={c} onClick={() => onToggle(c.company_id)} selected={selectedId === c.company_id} />
         ))}
       </div>
     </div>
@@ -100,14 +110,17 @@ export default function ImpactTree({
   companies,
   article,
   alertCreatedAt,
+  eventType,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
+  eventType?: string | null;
 }) {
   const direct = companies.filter((c) => impactLevelKey(c) === 'direct');
   const sectorGroups = groupBySector(direct);
   const subSectorGroups = groupIndirectBySubSector(companies);
+  const { toggle, selected, selectedId } = useCompanySelection(companies);
 
   return (
     <ChartCardShell
@@ -123,7 +136,7 @@ export default function ImpactTree({
         ) : (
           <div className="flex w-full flex-col gap-6">
             {sectorGroups.map((sector) => (
-              <SectorBlock key={sector.key} sector={sector} />
+              <SectorBlock key={sector.key} sector={sector} selectedId={selectedId} onToggle={toggle} />
             ))}
           </div>
         )}
@@ -133,10 +146,11 @@ export default function ImpactTree({
         ) : (
           <div className="flex w-full flex-col gap-6">
             {subSectorGroups.map((subSector) => (
-              <SubSectorBlock key={subSector.key} subSector={subSector} />
+              <SubSectorBlock key={subSector.key} subSector={subSector} selectedId={selectedId} onToggle={toggle} />
             ))}
           </div>
         )}
+        {selected && <ReasoningPanel company={selected} eventType={eventType} />}
       </div>
     </ChartCardShell>
   );

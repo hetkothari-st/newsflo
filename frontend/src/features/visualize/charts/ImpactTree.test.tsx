@@ -1,7 +1,18 @@
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import ImpactTree from './ImpactTree';
 import type { AlertArticle, AlertCompany } from '../../../lib/api';
+import { LanguageProvider } from '../../../lib/language';
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <MemoryRouter>
+      <LanguageProvider>{ui}</LanguageProvider>
+    </MemoryRouter>,
+  );
+}
 
 function company(overrides: Partial<AlertCompany>): AlertCompany {
   return {
@@ -107,5 +118,40 @@ describe('ImpactTree', () => {
       />,
     );
     expect(screen.getByText('NBFCs face higher funding costs as rates rise.')).toBeInTheDocument();
+  });
+
+  it('expands a ReasoningPanel when a direct company is tapped', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(
+      <ImpactTree
+        companies={[company({ company_id: 1, ticker: 'HDFCBANK', sector: 'banking', impact_level: 'direct', rationale: 'Lower rates lift loan demand.' })]}
+        article={article}
+        alertCreatedAt="2026-07-17T10:30:00Z"
+      />,
+    );
+    // The sole company's rationale is already shown once, unconditionally, by
+    // the sector's WhyExplanation summary -- so a plain getByText match would
+    // pass even without any click wiring. Assert on the second occurrence
+    // that only the expanded ReasoningPanel adds.
+    await userEvent.click(screen.getByText('HDFCBANK'));
+    expect(screen.getAllByText(/Lower rates lift loan demand/)).toHaveLength(2);
+  });
+
+  it('expands a ReasoningPanel when an indirect (sub-sector) company is tapped', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(
+      <ImpactTree
+        companies={[company({
+          company_id: 1, ticker: 'ULTRACEMCO', sector: 'infra', impact_level: 'indirect_l1',
+          parent_company_id: 99, rationale: 'Cement demand rises with construction activity.',
+        })]}
+        article={article}
+        alertCreatedAt="2026-07-17T10:30:00Z"
+      />,
+    );
+    // Same reasoning as the direct-company case above: the sub-sector's
+    // WhyExplanation already shows this sole company's rationale unconditionally.
+    await userEvent.click(screen.getByText('ULTRACEMCO'));
+    expect(screen.getAllByText(/Cement demand rises/)).toHaveLength(2);
   });
 });
