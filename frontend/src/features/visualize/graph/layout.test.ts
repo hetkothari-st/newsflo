@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ripplePositions } from './layout';
+import { forceDirectedPositions, ripplePositions } from './layout';
 import type { ImpactGraph } from '../../../lib/api';
 
 const graph: ImpactGraph = {
@@ -43,5 +43,37 @@ describe('ripplePositions', () => {
   it('handles a graph with no news node without throwing', () => {
     const noNews: ImpactGraph = { nodes: [{ id: 'sector:banking', kind: 'sector', label: 'banking' }], edges: [], gaps: [] };
     expect(() => ripplePositions(noNews)).not.toThrow();
+  });
+});
+
+describe('forceDirectedPositions', () => {
+  const smallGraph: ImpactGraph = {
+    nodes: [
+      { id: 'news', kind: 'news', label: 'x' },
+      { id: 'sector:banking', kind: 'sector', label: 'banking' },
+      { id: 'company:1', kind: 'company', company_id: 1, ticker: 'AAA', label: 'Alpha', name: 'Alpha', direction: 'bullish', confidence_score: 50 },
+    ],
+    edges: [
+      { from: 'news', to: 'sector:banking', relation: 'correlation', direction: 'bullish', note: 'n', source: 'llm_only' },
+      { from: 'sector:banking', to: 'company:1', relation: 'demand', direction: 'bullish', note: 'n', source: 'llm_only' },
+    ],
+    gaps: [],
+  };
+
+  it('returns a finite, non-NaN position for every node', () => {
+    const positions = forceDirectedPositions(smallGraph);
+    for (const node of smallGraph.nodes) {
+      expect(Number.isFinite(positions[node.id].x)).toBe(true);
+      expect(Number.isFinite(positions[node.id].y)).toBe(true);
+    }
+  });
+
+  it('does not throw on a graph with no edges (isolated nodes)', () => {
+    const isolated: ImpactGraph = { nodes: smallGraph.nodes, edges: [], gaps: [] };
+    expect(() => forceDirectedPositions(isolated)).not.toThrow();
+  });
+
+  it('does not throw on an empty graph', () => {
+    expect(() => forceDirectedPositions({ nodes: [], edges: [], gaps: [] })).not.toThrow();
   });
 });
