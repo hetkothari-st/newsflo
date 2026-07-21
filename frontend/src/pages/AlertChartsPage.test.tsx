@@ -31,29 +31,6 @@ function alert(overrides: Partial<Alert> = {}): Alert {
   };
 }
 
-// --- Chart system disabled: blank slate, chart rebuild pending ---
-// (fixtures below only used by the commented-out chart tests further down)
-// const directCompany = {
-//   company_id: 1, ticker: 'RIL', name: 'Reliance Industries', index_tier: 'NIFTY50', sector: 'oil_gas',
-//   direction: 'bullish' as const, magnitude_low: 2, magnitude_high: 4, rationale: 'Refiner margins widen.',
-//   key_points: [], confidence_score: 50, time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN' as const,
-//   in_my_holdings: false, past_mentions: [],
-// };
-//
-// const inferredCompany = {
-//   company_id: 2, ticker: 'ONGC', name: 'Oil and Natural Gas Corporation', index_tier: 'NIFTY50', sector: 'oil_gas',
-//   direction: 'bearish' as const, magnitude_low: 1, magnitude_high: 2, rationale: 'Sector-wide pressure on crude producers.',
-//   key_points: [], confidence_score: 30, time_horizon: 'Short-Term', basis: 'sector_inference', confidence: 'llm_estimate', market: 'IN' as const,
-//   in_my_holdings: false, past_mentions: [],
-// };
-//
-// const indirectCompany = {
-//   company_id: 3, ticker: 'TSM', name: 'TSMC', index_tier: 'NIFTY50', sector: 'it',
-//   direction: 'bearish' as const, magnitude_low: 1, magnitude_high: 2, rationale: 'Fabs Reliance-adjacent chips.',
-//   key_points: [], confidence_score: 20, time_horizon: 'Medium-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN' as const,
-//   in_my_holdings: false, past_mentions: [], impact_level: 'indirect_l1', parent_company_id: 1,
-// };
-
 function renderPage(id = '1') {
   return render(
     <LanguageProvider>
@@ -84,120 +61,33 @@ describe('AlertChartsPage', () => {
     await waitFor(() => expect(screen.getByText('Alert not found')).toBeInTheDocument());
   });
 
-  it('links to the dedicated Cascade Levels page instead of rendering it inline', async () => {
-    vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
+  it('renders all six grouping charts for an alert with mixed direct/indirect, bullish/bearish, multi-sector companies', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert({
+      event_type: 'crude_oil',
+      companies: [
+        {
+          company_id: 1, ticker: 'RELIANCE.NS', name: 'Reliance Industries', index_tier: 'NIFTY50',
+          sector: 'oil_gas', direction: 'bullish', magnitude_low: 2, magnitude_high: 4,
+          rationale: 'Refiner margins widen.', key_points: ['Crude eases'], confidence_score: 80,
+          time_horizon: 'Short-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+          in_my_holdings: false, past_mentions: [], impact_level: 'direct', parent_company_id: null,
+        },
+        {
+          company_id: 2, ticker: 'INDIGO.NS', name: 'InterGlobe Aviation', index_tier: 'NIFTY50',
+          sector: 'railways_transport', direction: 'bearish', magnitude_low: 1, magnitude_high: 3,
+          rationale: 'Fuel costs rise.', key_points: ['ATF costs up'], confidence_score: 55,
+          time_horizon: 'Medium-Term', basis: 'direct_mention', confidence: 'llm_estimate', market: 'IN',
+          in_my_holdings: true, past_mentions: [], impact_level: 'indirect_l1', parent_company_id: 1,
+        },
+      ],
+    }));
     renderPage('1');
 
-    await waitFor(() => expect(screen.getByText('View Cascade Levels →')).toBeInTheDocument());
-    expect(screen.getByText('View Cascade Levels →').closest('a')).toHaveAttribute('href', '/alerts/1/charts/cascade');
-    expect(screen.queryByText('Cascade Levels')).not.toBeInTheDocument();
+    expect(await screen.findByText('Multi-Level Impact Tree')).toBeInTheDocument();
+    expect(screen.getByText('Cascade Levels')).toBeInTheDocument();
+    expect(screen.getByText('Confidence Tree')).toBeInTheDocument();
+    expect(screen.getByText('Positive / Negative Split')).toBeInTheDocument();
+    expect(screen.getByText('Timeline Tree')).toBeInTheDocument();
+    expect(screen.getByText('Sector Tree')).toBeInTheDocument();
   });
-
-  // --- Chart system disabled: blank slate, chart rebuild pending ---
-  // it('shows the pager labels for all six chart types', async () => {
-  //   vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
-  //   renderPage('1');
-  //   await waitFor(() => expect(screen.getByText('8 · Sector')).toBeInTheDocument());
-  //   expect(screen.getByText('Tier')).toBeInTheDocument();
-  //   expect(screen.getByText('Impact')).toBeInTheDocument();
-  //   expect(screen.getByText('6 · Split')).toBeInTheDocument();
-  //   expect(screen.getByText('5 · Confidence')).toBeInTheDocument();
-  //   expect(screen.getByText('7 · Timeline')).toBeInTheDocument();
-  // });
-  //
-  // it('advances to the next chart type when the pager control is clicked', async () => {
-  //   vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
-  //   renderPage('1');
-  //   await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
-  //   fireEvent.click(screen.getByText('Tier'));
-  //   await waitFor(() => expect(screen.getByText('Nifty 50')).toBeInTheDocument());
-  // });
-  //
-  // it('Normal view shows direct and sector-inferred companies (both impact_level=direct); Drilldown adds indirect ones too', async () => {
-  //   vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, inferredCompany, indirectCompany] }));
-  //   renderPage('1');
-  //   await waitFor(() => expect(screen.getAllByText('RIL')).toHaveLength(2));
-  //   expect(screen.getAllByText('ONGC')).toHaveLength(2);
-  //   expect(screen.queryByText('TSM')).not.toBeInTheDocument();
-  //
-  //   fireEvent.click(screen.getByText('Drilldown'));
-  //   await waitFor(() => expect(screen.getAllByText('TSM')).toHaveLength(2));
-  //   expect(screen.getAllByText('RIL')).toHaveLength(2);
-  //   expect(screen.getAllByText('ONGC')).toHaveLength(2);
-  // });
-  //
-  // it('shows the no-direct-companies message in Normal view when every company is indirect', async () => {
-  //   vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [indirectCompany] }));
-  //   renderPage('1');
-  //   await waitFor(() =>
-  //     expect(
-  //       screen.getByText('No directly-confirmed companies for this alert — try Drilldown for the wider sector picture.'),
-  //     ).toBeInTheDocument(),
-  //   );
-  // });
-  //
-  // it('shows the Levels tab and groups an indirect company under its parent', async () => {
-  //   vi.spyOn(api, 'getAlert').mockResolvedValue(alert({ companies: [directCompany, indirectCompany] }));
-  //   renderPage('1');
-  //   await waitFor(() => expect(screen.getByText('1 · Impact Tree')).toBeInTheDocument());
-  //   fireEvent.click(screen.getByText('Drilldown'));
-  //   fireEvent.click(screen.getByText('1 · Impact Tree'));
-  //   await waitFor(() => expect(screen.getAllByText('Direct Impact')).toHaveLength(4));
-  //   expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(4);
-  //   expect(screen.getAllByText(/via Reliance Industries/i)).toHaveLength(2);
-  // });
 });
-
-// describe('AlertChartsPage Normal View', () => {
-//   it('renders a Directly Affected Sectors section and an Impact Summary banner from real alert data', async () => {
-//     vi.spyOn(api, 'getAlert').mockResolvedValue(
-//       alert({
-//         event_type: 'repo_rate_change',
-//         companies: [
-//           {
-//             company_id: 1, ticker: 'HDFCBANK', name: 'HDFC Bank', index_tier: 'NIFTY50', sector: 'banking',
-//             direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'lower funding cost',
-//             key_points: [], confidence_score: 90, time_horizon: 'Short-Term', basis: 'direct_mention',
-//             confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [], impact_level: 'direct',
-//           },
-//         ],
-//       }),
-//     );
-//
-//     renderPage();
-//
-//     await waitFor(() => expect(screen.getByText('Directly Affected Sectors')).toBeInTheDocument());
-//     expect(screen.getByText('Impact Summary')).toBeInTheDocument();
-//     expect(screen.getAllByText('HDFCBANK')).toHaveLength(2);
-//   });
-// });
-//
-// describe('AlertChartsPage Drilldown View', () => {
-//   it('shows Expand All / Collapse All controls and a Full Impact Summary banner', async () => {
-//     vi.spyOn(api, 'getAlert').mockResolvedValue({
-//       id: 1,
-//       category: 'banking',
-//       category_label: 'Banking',
-//       created_at: '2026-07-17T00:00:00Z',
-//       article: { id: 1, title: 'RBI cuts repo rate', url: 'https://example.com', image_url: null },
-//       event_type: 'repo_rate_change',
-//       companies: [
-//         {
-//           company_id: 1, ticker: 'HDFCBANK', name: 'HDFC Bank', index_tier: 'NIFTY50', sector: 'banking',
-//           direction: 'bullish', magnitude_low: 2, magnitude_high: 4, rationale: 'lower funding cost',
-//           key_points: [], confidence_score: 90, time_horizon: 'Short-Term', basis: 'direct_mention',
-//           confidence: 'llm_estimate', market: 'IN', in_my_holdings: false, past_mentions: [], impact_level: 'direct',
-//         },
-//       ],
-//     } as api.Alert);
-//
-//     renderPage();
-//     await waitFor(() => expect(screen.getByText('RBI cuts repo rate')).toBeInTheDocument());
-//
-//     fireEvent.click(screen.getByRole('button', { name: /drilldown/i }));
-//
-//     expect(screen.getByRole('button', { name: /expand all/i })).toBeInTheDocument();
-//     expect(screen.getByRole('button', { name: /collapse all/i })).toBeInTheDocument();
-//     expect(screen.getByText('Full Impact Summary')).toBeInTheDocument();
-//   });
-// });

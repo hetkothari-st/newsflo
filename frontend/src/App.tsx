@@ -5,7 +5,6 @@ import CalendarModal from './components/CalendarModal';
 import NavBar from './components/NavBar';
 import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
-import AlertCascadePage from './pages/AlertCascadePage';
 import AlertChartsPage from './pages/AlertChartsPage';
 import AlertCompanyAnalysisPage from './pages/AlertCompanyAnalysisPage';
 import CompanyPage from './pages/CompanyPage';
@@ -31,7 +30,6 @@ export default function App() {
         <Route path="/" element={<FeedPage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
         <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
-        <Route path="/alerts/:id/charts/cascade" element={<AlertCascadePage />} />
         <Route path="/alerts/:id/company/:companyId" element={<AlertCompanyAnalysisPage />} />
         <Route
           path="/holdings"
