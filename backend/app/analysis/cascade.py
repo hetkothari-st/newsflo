@@ -28,7 +28,7 @@ import logging
 from openai import RateLimitError
 
 from app.reasoning.playbooks import PLAYBOOKS_TEXT
-from app.reasoning.rulebook import RULEBOOK_TEXT
+from app.reasoning.rulebook import CHAINS, EDGE_RELATIONS, NODE_SECTOR, RULEBOOK_TEXT, get_chain
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
 from app.analysis.schemas import (
@@ -607,6 +607,169 @@ def _identify_cascade_companies_per_sector(
     return mentions, gaps
 
 
+_EDGE_VERIFY_FRAMING = (
+    "For each proposed transmission-chain edge below, decide whether it "
+    "genuinely applies to THIS specific article -- return applicable=true "
+    "if the mechanism it describes is genuinely at play here, or "
+    "applicable=false with a one-line pruned_reason if it does not "
+    "(e.g. the article doesn't actually support that specific link, or "
+    "explicitly contradicts it). Do NOT invent a new mechanism, sector, or "
+    "edge beyond what's proposed below -- your job here is to verify, not "
+    "to expand the chain.\n\n"
+    "You MAY additionally propose direct company-to-company edges, but "
+    "ONLY between the companies listed below (using their exact ticker "
+    "strings) and ONLY where you have a specific, genuine economic link "
+    "(supplier, customer, or close competitor) between those two named "
+    "companies -- never a company not in this list, and never a vague or "
+    "generic connection. Zero additional edges is the correct, honest "
+    "answer when no genuine company-to-company link exists -- do not force "
+    "one to look thorough."
+)
+
+
+def build_edge_verify_tool(valid_tickers: list[str]) -> dict:
+    """valid_tickers: every already-resolved company's ticker in this
+    article's cascade -- both endpoints of any llm_only company edge are
+    enum-constrained to this list (same enum-constraint discipline as
+    build_company_tool's parent_ticker), so the model can never invent a
+    company. Omitted entirely when fewer than 2 tickers are available (no
+    two distinct companies to link)."""
+    properties = {
+        "verifications": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "applicable": {"type": "boolean"},
+                    "pruned_reason": {"type": "string"},
+                },
+                "required": ["index", "applicable"],
+            },
+        },
+    }
+    required = ["verifications"]
+    if len(valid_tickers) >= 2:
+        properties["llm_only_edges"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "from_ticker": {"type": "string", "enum": valid_tickers},
+                    "to_ticker": {"type": "string", "enum": valid_tickers},
+                    "relation": {"type": "string", "enum": EDGE_RELATIONS},
+                    "direction": {"type": "string", "enum": ["bullish", "bearish"]},
+                    "note": {"type": "string"},
+                },
+                "required": ["from_ticker", "to_ticker", "relation", "direction", "note"],
+            },
+        }
+    return {
+        "type": "function",
+        "function": {
+            "name": "record_edge_verification",
+            "description": "Verify proposed transmission-chain edges and optionally add company-to-company edges.",
+            "parameters": {"type": "object", "properties": properties, "required": required},
+        },
+    }
+
+
+def _sector_attachment_edges(companies: list[CompanyMention]) -> list[dict]:
+    """Purely programmatic -- no LLM call. Connects every resolved company
+    to its own sector node so the graph is fully traversable news ->
+    mechanism -> sector -> company, regardless of whether this article's
+    event_type has a CHAINS entry at all. Tagged source="llm_only" per this
+    plan's Global Constraints (the source enum has no 4th value for
+    "programmatic", not a claim the LLM produced these specific edges)."""
+    edges = []
+    for company in companies:
+        if not company.sector or not company.ticker:
+            continue
+        edges.append({
+            "from": {"kind": NODE_SECTOR, "label": company.sector},
+            "to": {"kind": "company", "label": company.ticker},
+            "relation": "demand",
+            "direction": company.direction,
+            "note": f"{company.name} is one of the companies the {company.sector} sector's cascade reaches.",
+            "source": "llm_only",
+        })
+    return edges
+
+
+def _generate_edges(client, facts: str, event_type: str | None, companies: list[CompanyMention]) -> list[dict]:
+    """Propose (via CHAINS), verify (via one LLM call, never invents), and
+    always attach every company to its sector node. See this plan's Global
+    Constraints for the edge dict shape and the degrade-safely contract."""
+    edges: list[dict] = []
+    proposed = get_chain(event_type)
+
+    if proposed:
+        valid_tickers = [c.ticker for c in companies if c.ticker]
+        tool = build_edge_verify_tool(valid_tickers)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"{_EDGE_VERIFY_FRAMING}\n\n"
+                    f"Facts: {facts}\n\n"
+                    "Proposed edges:\n" + "\n".join(
+                        f'{i}. {e["from"]["label"]} -[{e["relation"]}]-> {e["to"]["label"]} ({e["direction"]}): {e["note"]}'
+                        for i, e in enumerate(proposed)
+                    ) + "\n\n"
+                    "Companies available for llm_only edges:\n" + "\n".join(
+                        f"- {c.ticker} ({c.name}, {c.sector})" for c in companies if c.ticker
+                    )
+                ),
+            },
+        ]
+        try:
+            response = client.chat.completions.create(
+                model=FALLBACK_MODEL, max_tokens=2048, tools=[tool],
+                tool_choice={"type": "function", "function": {"name": "record_edge_verification"}},
+                messages=messages,
+            )
+            message = response.choices[0].message
+            tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_edge_verification"), None)
+            if tool_call is None:
+                raise ValueError("No record_edge_verification tool_use block")
+            arguments = json.loads(tool_call.function.arguments)
+            verifications = {v["index"]: v for v in arguments.get("verifications", [])}
+
+            for i, proposed_edge in enumerate(proposed):
+                v = verifications.get(i)
+                if v is None:
+                    edges.append({
+                        **proposed_edge, "source": "rulebook_verified",
+                        "note": f"{proposed_edge['note']} [UNVERIFIED: model returned no verification for this edge]",
+                    })
+                elif v.get("applicable", True):
+                    edges.append({**proposed_edge, "source": "rulebook_verified"})
+                else:
+                    pruned_reason = v.get("pruned_reason") or "marked not applicable"
+                    edges.append({
+                        **proposed_edge, "source": "rulebook_pruned",
+                        "note": f"{proposed_edge['note']} [PRUNED: {pruned_reason}]",
+                    })
+
+            for llm_edge in arguments.get("llm_only_edges", []):
+                edges.append({
+                    "from": {"kind": "company", "label": llm_edge["from_ticker"]},
+                    "to": {"kind": "company", "label": llm_edge["to_ticker"]},
+                    "relation": llm_edge["relation"], "direction": llm_edge["direction"],
+                    "note": llm_edge["note"], "source": "llm_only",
+                })
+        except Exception as exc:
+            logger.warning("edge verification call failed, falling back to unverified proposed chain: %s", exc)
+            edges = [
+                {**e, "source": "rulebook_verified", "note": f"{e['note']} [UNVERIFIED: verification call failed]"}
+                for e in proposed
+            ]
+
+    edges.extend(_sector_attachment_edges(companies))
+    return edges
+
+
 def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     """Runs the sector-cascade chain (see module docstring for why the call
     count now scales with cascade sector count) and composes the result into the
@@ -675,7 +838,13 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             all_companies.extend(l2_companies)
             all_gaps.extend(l2_gaps)
 
+    try:
+        edges = _generate_edges(client, facts_result.facts, facts_result.event_type, all_companies)
+    except Exception as exc:
+        logger.warning("edge generation failed entirely, returning no edges: %s", exc)
+        edges = []
+
     return AnalysisOutput(
         category=facts_result.category, event_type=facts_result.event_type,
-        companies=all_companies, gaps=all_gaps,
+        companies=all_companies, gaps=all_gaps, edges=edges,
     )

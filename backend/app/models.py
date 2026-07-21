@@ -169,6 +169,34 @@ class CascadeGap(Base):
     alert = relationship("Alert")
 
 
+class ImpactEdge(Base):
+    """One verified or pruned edge in an alert's transmission-chain graph
+    (see app.analysis.cascade._generate_edges). from_company_id/
+    to_company_id are set only when the corresponding node is a company AND
+    that ticker resolved to a real Company row at persist time -- null
+    otherwise (the edge still renders with its label, just without a
+    company link). See app.reasoning.rulebook.EDGE_RELATIONS for valid
+    `relation` values."""
+    __tablename__ = "impact_edges"
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    from_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    from_node_kind = Column(String, nullable=False)  # company | sector | mechanism
+    from_label = Column(String, nullable=False)
+    to_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    to_node_kind = Column(String, nullable=False)
+    to_label = Column(String, nullable=False)
+    relation = Column(String, nullable=False)
+    direction = Column(String, nullable=False)  # bullish | bearish
+    note = Column(Text, nullable=False)
+    source = Column(String, nullable=False)  # rulebook_verified | rulebook_pruned | llm_only
+    confidence_score = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    alert = relationship("Alert")
+
+
 class CalibrationSample(Base):
     __tablename__ = "calibration_samples"
     __table_args__ = (

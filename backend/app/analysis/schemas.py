@@ -141,3 +141,9 @@ class AnalysisOutput(BaseModel):
     # last_error. Defaults to [] so every existing caller (older tests,
     # the dedup-reuse path in pipeline.py) still validates without change.
     gaps: list[dict] = []
+    # Verified/pruned transmission-chain edges for this article (see
+    # app.analysis.cascade._generate_edges). Each dict has keys: from, to
+    # (each {"kind", "label"}), relation, direction, note, source. Defaults
+    # to [] so every existing caller (older tests, the dedup-reuse path in
+    # pipeline.py) still validates without change.
+    edges: list[dict] = []

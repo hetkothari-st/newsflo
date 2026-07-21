@@ -4,10 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.analysis.cascade import (
-    analyze_article, _extract_facts, _identify_cascade_companies_per_sector, _identify_companies,
-    _identify_sectors, build_company_tool, build_sector_tool,
+    analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
+    _identify_companies, _identify_sectors, build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
+from app.reasoning.rulebook import CHAINS
 
 
 class FakeToolCall:
@@ -26,6 +27,7 @@ class ScriptedClient:
     def __init__(self, responses: dict):
         self._responses = responses
         self.calls = []
+        self.last_tool = None
 
     class _Completions:
         def __init__(self, outer):
@@ -34,6 +36,7 @@ class ScriptedClient:
         def create(self, **kwargs):
             name = kwargs["tool_choice"]["function"]["name"]
             self._outer.calls.append({"name": name, "model": kwargs.get("model")})
+            self._outer.last_tool = kwargs["tools"][0]
             if name not in self._outer._responses:
                 raise AssertionError(f"unscripted stage called: {name}")
             response = self._outer._responses[name]
@@ -468,6 +471,19 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
                 elif name == "record_sector_companies":
                     response = self._outer._company_responses[self._outer._company_call_count]
                     self._outer._company_call_count += 1
+                elif name == "record_edge_verification":
+                    # currency_move has a CHAINS entry, so analyze_article's
+                    # final stage (_generate_edges) makes one verification
+                    # call -- not itself under test here, just needs a
+                    # well-formed response so this end-to-end test isn't
+                    # coupled to edge-verification behavior.
+                    from app.reasoning.rulebook import CHAINS
+                    response = {
+                        "verifications": [
+                            {"index": i, "applicable": True} for i in range(len(CHAINS["currency_move"]))
+                        ],
+                        "llm_only_edges": [],
+                    }
                 else:
                     raise AssertionError(f"unexpected tool: {name}")
                 message = SimpleNamespace(tool_calls=[FakeToolCall(name, response)])
@@ -491,14 +507,16 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
     assert cascade.ticker == "IRCTC.NS"
     assert cascade.impact_level == "indirect_l1"
     assert cascade.parent_ticker == "HDFCBANK.NS"
-    # 6 calls: facts, primary sectors, primary companies, L1 sectors, L1
+    # 7 calls: facts, primary sectors, primary companies, L1 sectors, L1
     # companies, L2 sectors -- the L2-sector call DOES run (L1 sectors and
     # L1 companies-with-tickers are both non-empty, so the orchestrator's
     # guards let it through), but it returns zero L2 sectors, so stage 7
-    # (L2 companies) never runs.
+    # (L2 companies) never runs -- then one final edge-verification call
+    # (currency_move has a CHAINS entry) before edges are returned.
     assert client.calls == [
         "record_facts", "record_sectors", "record_sector_companies",
         "record_sectors", "record_sector_companies", "record_sectors",
+        "record_edge_verification",
     ]
 
 
@@ -557,3 +575,143 @@ def test_analyze_article_stops_cascade_when_primary_sectors_are_empty():
     # No company stage should have run at all -- nothing to find companies
     # within when there are zero primary sectors.
     assert [c["name"] for c in client.calls] == ["record_facts", "record_sectors"]
+
+
+def test_generate_edges_keeps_a_pruned_edge():
+    proposed = CHAINS["repo_rate_change"]  # real chain, 6 edges, from Phase 2
+
+    verifications = [{"index": 0, "applicable": False, "pruned_reason": "no lending angle in this specific article"}]
+    verifications += [{"index": i, "applicable": True} for i in range(1, len(proposed))]
+
+    client = ScriptedClient({
+        "record_edge_verification": {"verifications": verifications, "llm_only_edges": []},
+    })
+
+    edges = _generate_edges(client, facts="Repo rate cut announced.", event_type="repo_rate_change", companies=[])
+
+    pruned = [e for e in edges if e["source"] == "rulebook_pruned"]
+    assert len(pruned) == 1
+    assert pruned[0]["from"] == proposed[0]["from"]
+    assert pruned[0]["to"] == proposed[0]["to"]
+    assert "no lending angle in this specific article" in pruned[0]["note"]
+    verified = [e for e in edges if e["source"] == "rulebook_verified"]
+    assert len(verified) == len(proposed) - 1
+
+
+def test_generate_edges_connects_every_company_to_its_sector():
+    companies = [
+        CompanyMention(
+            name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, sector="banking",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        ),
+        CompanyMention(
+            name="Maruti Suzuki", ticker="MARUTI.NS", is_direct=False, sector="auto",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+            impact_level="indirect_l1",
+        ),
+    ]
+    # earnings has no CHAINS entry -- no verify call should even be attempted.
+    client = ScriptedClient({})
+
+    edges = _generate_edges(client, facts="f", event_type="earnings", companies=companies)
+
+    sector_edges = {e["to"]["label"]: e for e in edges if e["from"]["kind"] == "sector"}
+    assert sector_edges["HDFCBANK.NS"]["from"]["label"] == "banking"
+    assert sector_edges["HDFCBANK.NS"]["direction"] == "bullish"
+    assert sector_edges["HDFCBANK.NS"]["source"] == "llm_only"
+    assert sector_edges["MARUTI.NS"]["from"]["label"] == "auto"
+
+
+def test_generate_edges_no_chain_event_type_produces_only_sector_attachment_edges():
+    companies = [CompanyMention(
+        name="Reliance", ticker="RELIANCE.NS", is_direct=True, sector="oil_gas",
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+    )]
+    client = ScriptedClient({})  # asserts nothing gets called -- earnings has no CHAINS entry
+
+    edges = _generate_edges(client, facts="f", event_type="earnings", companies=companies)
+
+    assert len(edges) == 1
+    assert all(e["source"] == "llm_only" for e in edges)
+
+
+def test_generate_edges_llm_only_company_edge_enum_constrained_to_resolved_tickers():
+    companies = [
+        CompanyMention(
+            name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, sector="banking",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        ),
+        CompanyMention(
+            name="Maruti Suzuki", ticker="MARUTI.NS", is_direct=False, sector="auto",
+            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+            impact_level="indirect_l1",
+        ),
+    ]
+    proposed = CHAINS["repo_rate_change"]
+    verifications = [{"index": i, "applicable": True} for i in range(len(proposed))]
+    client = ScriptedClient({
+        "record_edge_verification": {
+            "verifications": verifications,
+            "llm_only_edges": [{
+                "from_ticker": "HDFCBANK.NS", "to_ticker": "MARUTI.NS", "relation": "credit_cost",
+                "direction": "bullish", "note": "Auto financing flows through HDFC Bank's lending book.",
+            }],
+        },
+    })
+
+    edges = _generate_edges(client, facts="f", event_type="repo_rate_change", companies=companies)
+
+    llm_company_edges = [
+        e for e in edges
+        if e["source"] == "llm_only" and e["from"]["kind"] == "company" and e["to"]["kind"] == "company"
+    ]
+    assert len(llm_company_edges) == 1
+    assert llm_company_edges[0]["from"]["label"] == "HDFCBANK.NS"
+    assert llm_company_edges[0]["to"]["label"] == "MARUTI.NS"
+
+    # The tool schema actually sent must enum-constrain both ticker fields
+    # to the resolved companies -- verify the real constraint was sent, not
+    # just that the scripted response happened to be accepted.
+    sent_tool = client.last_tool
+    props = sent_tool["function"]["parameters"]["properties"]["llm_only_edges"]["items"]["properties"]
+    assert set(props["from_ticker"]["enum"]) == {"HDFCBANK.NS", "MARUTI.NS"}
+    assert set(props["to_ticker"]["enum"]) == {"HDFCBANK.NS", "MARUTI.NS"}
+
+
+def test_generate_edges_verify_call_failure_falls_back_to_unverified_proposed_chain():
+    proposed = CHAINS["crude_oil"]
+
+    class FailingClient:
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self)
+
+        def create(self, **kwargs):
+            raise RuntimeError("provider down")
+
+    edges = _generate_edges(FailingClient(), facts="f", event_type="crude_oil", companies=[])
+
+    rulebook_edges = [e for e in edges if e["source"] == "rulebook_verified"]
+    assert len(rulebook_edges) == len(proposed)
+    assert all("[UNVERIFIED" in e["note"] for e in rulebook_edges)
+
+
+def test_generate_edges_missing_verification_for_one_index_kept_unverified_not_dropped():
+    proposed = CHAINS["inflation"]  # 3 edges
+    # Only verify index 0 and 2 -- index 1 is missing from the response entirely.
+    client = ScriptedClient({
+        "record_edge_verification": {
+            "verifications": [
+                {"index": 0, "applicable": True},
+                {"index": 2, "applicable": True},
+            ],
+            "llm_only_edges": [],
+        },
+    })
+
+    edges = _generate_edges(client, facts="f", event_type="inflation", companies=[])
+
+    assert len(edges) == len(proposed)  # nothing silently dropped
+    missing = [e for e in edges if "[UNVERIFIED" in e["note"]]
+    assert len(missing) == 1
+    assert missing[0]["from"] == proposed[1]["from"]
