@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confidenceColor, confidenceBandColor, sectorColor } from './colors';
+import { confidenceColor, confidenceBandColor, sectorColor, EDGE_RELATIONS, relationColor } from './colors';
 
 describe('sectorColor', () => {
   it('assigns a fixed color to each known sector, not a hash', () => {
@@ -63,5 +63,16 @@ describe('confidenceBandColor', () => {
 
   it('falls back to the MODERATE color for an unrecognized band string', () => {
     expect(confidenceBandColor('not_a_real_band')).toBe(confidenceBandColor('MODERATE'));
+  });
+});
+
+describe('relationColor', () => {
+  it('returns a distinct color for each of the 10 EDGE_RELATIONS values', () => {
+    const colors = new Set(EDGE_RELATIONS.map((r) => relationColor(r)));
+    expect(colors.size).toBe(10);
+  });
+
+  it('falls back to the "other" sector color for an unrecognized relation', () => {
+    expect(relationColor('not_a_real_relation')).toBe(sectorColor('other'));
   });
 });

@@ -32,6 +32,36 @@ export function sectorColor(sector: string): string {
   return SECTOR_COLOR[sector] ?? FALLBACK_COLOR;
 }
 
+// Mirrors backend/app/reasoning/rulebook.py's EDGE_RELATIONS exactly (the
+// frontend has no equivalent constant yet -- GraphEdge.relation is typed
+// as a plain string, not a literal union, so this is the closest thing to
+// a canonical list on this side).
+export const EDGE_RELATIONS = [
+  'input_cost', 'credit_cost', 'demand', 'supplier', 'customer',
+  'competitor', 'commodity', 'regulation', 'currency', 'correlation',
+] as const;
+
+// Same 10 already-validated hex values as SECTOR_COLOR above (see its own
+// validation comment), reassigned to EDGE_RELATIONS positionally -- both
+// lists have exactly 10 entries, so no new hex/no new validator run is
+// needed.
+const RELATION_COLOR: Record<string, string> = {
+  input_cost: '#E85D4C',
+  credit_cost: '#4A90D9',
+  demand: '#C97F0E',
+  supplier: '#12A08C',
+  customer: '#9B7EDE',
+  competitor: '#3E9B5C',
+  commodity: '#A0522D',
+  regulation: '#D4708C',
+  currency: '#6C8CD5',
+  correlation: '#557C30',
+};
+
+export function relationColor(relation: string): string {
+  return RELATION_COLOR[relation] ?? FALLBACK_COLOR;
+}
+
 // Sequential single-hue ramp, light -> dark, for confidence_score (0-100).
 // Never a rainbow, never reused for anything but a magnitude/confidence
 // scale -- see the dataviz skill's color-formula rules.

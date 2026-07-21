@@ -7,3 +7,14 @@ import '@testing-library/jest-dom';
 // their own spy/mock to assert on call args.
 Element.prototype.scrollTo = function scrollTo() {};
 window.scrollTo = function scrollTo() {};
+
+// jsdom has no ResizeObserver; @xyflow/react (RippleGraph, Task 3) calls it
+// internally on mount and needs one present, even though nothing in tests
+// asserts on its behavior -- a no-op polyfill is sufficient.
+class ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+// @ts-expect-error -- jsdom has no ResizeObserver; @xyflow/react needs one present to mount.
+global.ResizeObserver = ResizeObserver;
