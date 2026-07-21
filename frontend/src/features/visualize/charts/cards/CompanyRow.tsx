@@ -52,8 +52,10 @@ export default function CompanyRow({
     </>
   );
 
+  const ringClass = company.in_my_holdings ? 'ring-2 ring-accent-secondary' : '';
+
   if (!onClick) {
-    return <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">{content}</div>;
+    return <div className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 ${ringClass}`}>{content}</div>;
   }
 
   return (
@@ -62,8 +64,8 @@ export default function CompanyRow({
       onClick={onClick}
       aria-pressed={selected}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-page ${
-        selected ? 'bg-page ring-1 ring-inset ring-hairline' : ''
-      }`}
+        selected ? 'bg-page' : ''
+      } ${ringClass}`}
     >
       {content}
     </button>

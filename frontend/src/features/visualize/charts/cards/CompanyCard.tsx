@@ -41,7 +41,7 @@ export default function CompanyCard({
 
   const className = `flex flex-col gap-0.5 rounded-lg border p-2.5 text-left theme-light:shadow-neu-sm ${
     selected ? 'border-ink theme-light:border-ink' : 'border-hairline theme-light:border-transparent'
-  }`;
+  } ${company.in_my_holdings ? 'ring-2 ring-accent-secondary' : ''}`;
 
   if (!onClick) {
     return <div className={className}>{content}</div>;
