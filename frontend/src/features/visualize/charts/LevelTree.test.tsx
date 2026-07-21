@@ -41,24 +41,23 @@ describe('LevelTree', () => {
     expect(screen.getByText('NVDA')).toBeInTheDocument();
   });
 
-  it('groups indirect_l1 companies under a branch labeled with their parent', () => {
+  it('shows every company flat within its level, with no parent-company grouping label', () => {
     render(
       <LevelTree
         companies={[
           company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
-          company({
-            company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1,
-          }),
+          company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
+          company({ company_id: 3, ticker: 'QCOM', name: 'Qualcomm', impact_level: 'indirect_l1', parent_company_id: 1 }),
         ]}
       />,
     );
-    expect(screen.getAllByText('Direct Impact')).toHaveLength(2);
     expect(screen.getAllByText('Indirect Impact — Level 1')).toHaveLength(2);
-    expect(screen.getByText(/via Alpha Co \(NVDA\)/i)).toBeInTheDocument();
     expect(screen.getByText('TSM')).toBeInTheDocument();
+    expect(screen.getByText('QCOM')).toBeInTheDocument();
+    expect(screen.queryByText(/via/i)).not.toBeInTheDocument();
   });
 
-  it('chains indirect_l2 companies under their indirect_l1 parent, not the top-level direct company', () => {
+  it('shows indirect_l2 companies under their own level, flat like every other level', () => {
     render(
       <LevelTree
         companies={[
@@ -69,7 +68,6 @@ describe('LevelTree', () => {
       />,
     );
     expect(screen.getAllByText('Indirect Impact — Level 2')).toHaveLength(2);
-    expect(screen.getByText(/via TSMC \(TSM\)/i)).toBeInTheDocument();
     expect(screen.getByText('ASML.NS')).toBeInTheDocument();
   });
 
@@ -79,7 +77,8 @@ describe('LevelTree', () => {
     expect(screen.getByText('Cascade Levels')).toBeInTheDocument();
   });
 
-  it('shows no full rationale text anywhere, only key_points behind a Why linked? disclosure', () => {
+  it('shows no full rationale text anywhere, before or after clicking a card', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
     render(
       <LevelTree
         companies={[
@@ -92,38 +91,44 @@ describe('LevelTree', () => {
       />,
     );
     expect(screen.queryByText('Full paragraph rationale text.')).not.toBeInTheDocument();
-    expect(screen.queryByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).not.toBeInTheDocument();
-    expect(screen.getByText('Why linked?')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('TSM'));
+    expect(screen.queryByText('Full paragraph rationale text.')).not.toBeInTheDocument();
+    expect(screen.getByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).toBeInTheDocument();
   });
 
-  it('reveals a cascade group key_point only after clicking Why linked?', async () => {
+  it('reveals which parent a cascade company is linked via, only after clicking it', async () => {
     const { default: userEvent } = await import('@testing-library/user-event');
     render(
       <LevelTree
         companies={[
-          company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
+          company({ company_id: 1, ticker: 'NVDA', name: 'Nvidia', impact_level: 'direct' }),
           company({
             company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1,
-            key_points: ['TSMC makes Nvidia chips; fewer orders means less revenue.'],
+            key_points: ['Fabs Nvidia chips.'],
           }),
         ]}
       />,
     );
-    expect(screen.queryByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByText('Why linked?'));
-    expect(screen.getByText('TSMC makes Nvidia chips; fewer orders means less revenue.')).toBeInTheDocument();
+    expect(screen.queryByText(/Linked via NVDA/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('TSM'));
+    expect(screen.getByText(/Linked via NVDA · Nvidia/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('TSM'));
+    expect(screen.queryByText(/Linked via NVDA/)).not.toBeInTheDocument();
   });
 
-  it('does not show a Why linked? disclosure on a direct-level card', () => {
+  it('does not make a direct-level card clickable', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
     render(
       <LevelTree
         companies={[company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct', key_points: ['Some point.'] })]}
       />,
     );
-    expect(screen.queryByText('Why linked?')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('NVDA'));
+    expect(screen.queryByText('Some point.')).not.toBeInTheDocument();
   });
 
-  it('shows a sector chip on every company row, including cascade companies', () => {
+  it('shows a sector chip on every company card, including cascade companies', () => {
     render(
       <LevelTree
         companies={[
@@ -134,34 +139,5 @@ describe('LevelTree', () => {
     );
     expect(screen.getAllByText('IT').length).toBeGreaterThan(0);
     expect(screen.getByText('Metals')).toBeInTheDocument();
-  });
-
-  it('forceCollapse with mode collapse hides every card, mode expand shows them again', () => {
-    const companies = [
-      company({ company_id: 1, ticker: 'NVDA', impact_level: 'direct' }),
-      company({ company_id: 2, ticker: 'TSM', name: 'TSMC', impact_level: 'indirect_l1', parent_company_id: 1 }),
-    ];
-    const { rerender } = render(<LevelTree companies={companies} />);
-    expect(screen.getByText('NVDA')).toBeInTheDocument();
-
-    rerender(
-      <MemoryRouter>
-        <LanguageProvider>
-          <LevelTree companies={companies} forceCollapse={{ mode: 'collapse', version: 1 }} />
-        </LanguageProvider>
-      </MemoryRouter>,
-    );
-    expect(screen.queryByText('NVDA')).not.toBeInTheDocument();
-    expect(screen.queryByText('TSM')).not.toBeInTheDocument();
-
-    rerender(
-      <MemoryRouter>
-        <LanguageProvider>
-          <LevelTree companies={companies} forceCollapse={{ mode: 'expand', version: 2 }} />
-        </LanguageProvider>
-      </MemoryRouter>,
-    );
-    expect(screen.getByText('NVDA')).toBeInTheDocument();
-    expect(screen.getByText('TSM')).toBeInTheDocument();
   });
 });

@@ -2,6 +2,7 @@ import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { impactLevelKey } from '../impactLevels';
 import { groupBySector, groupIndirectBySubSector, rankByConfidence, type CompanyGroup, type SubSectorGroup } from '../transforms';
 import ChartCardShell from './ChartCardShell';
+import CompanyCard from './cards/CompanyCard';
 
 function truncatedRationale(rationale: string): string {
   const firstSentence = rationale.split(/(?<=[.!?])\s+/)[0];
@@ -59,19 +60,6 @@ function LevelHeader({ level, name, count, color }: { level: string; name: strin
           {name} <span className="font-data text-xs text-muted">({count})</span>
         </span>
       </div>
-    </div>
-  );
-}
-
-function CompanyCard({ company }: { company: AlertCompany }) {
-  const bearish = company.direction === 'bearish';
-  return (
-    <div className="flex flex-col gap-0.5 rounded-lg border border-hairline p-2.5 theme-light:border-transparent theme-light:shadow-neu-sm">
-      <span className="font-data text-xs font-semibold text-ink">{company.ticker}</span>
-      <span className="truncate font-editorial text-sm text-ink">{company.name}</span>
-      <span className={`font-data text-xs ${bearish ? 'text-bearish' : 'text-bullish'}`}>
-        <span aria-hidden="true">{bearish ? '▼' : '▲'}</span> {company.confidence_score}%
-      </span>
     </div>
   );
 }
