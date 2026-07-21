@@ -706,14 +706,75 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     assert reused_indirect.parent_company_id == direct.id
 
 
-def test_process_new_articles_analysis_cache_deterministic(db_session, monkeypatch):
-    """Same content -> the LLM is called at most once; a second article
-    with byte-identical (title, content) reuses the cached output instead
-    of calling analyze_article again, even if analyze_article would have
-    returned something different on a second call."""
+def test_process_new_articles_cache_hit_skips_llm_call_and_throttle_sleep(db_session, monkeypatch):
+    """A single article whose content hash is already cached must never
+    reach analyze_article or the retry loop's throttle sleep. This is a
+    single-article test specifically so _find_reusable_alert (the
+    unrelated, title-based dedup path in the same file) has no second
+    same-titled article to match against -- it cannot be the explanation
+    for any pass here, only the content-hash cache can be."""
     company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
     db_session.add(company)
     db_session.commit()
+
+    # status="CATEGORIZED" (not the default "NEW") so filter_new_articles's
+    # per-NEW-article loop -- which has its own unrelated throttle_seconds
+    # sleep -- never touches this article. The only sleep call that could
+    # occur is the one inside process_new_articles' own analyze/retry loop,
+    # which a genuine cache hit must skip entirely.
+    article = Article(
+        source="test", url="https://example.com/cachehit", title="Crude oil spikes",
+        content="Oil prices jump 5%.", status="CATEGORIZED",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    cached_output = AnalysisOutput(category="oil_gas", companies=[CompanyMention(
+        name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+        direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+        key_points=["Crude eases"], time_horizon="Short-Term",
+    )])
+    pipeline_module.store_analysis_cache(db_session, article, cached_output)
+    db_session.commit()
+
+    def fail_if_called(client, title, content):
+        raise AssertionError("analyze_article must not be called on a cache hit")
+    monkeypatch.setattr(pipeline_module, "analyze_article", fail_if_called)
+
+    sleep_calls = {"n": 0}
+    monkeypatch.setattr(pipeline_module.time, "sleep", lambda s: sleep_calls.__setitem__("n", sleep_calls["n"] + 1))
+
+    created = process_new_articles(db_session, claude_client=object(), throttle_seconds=5)
+
+    assert created == 1
+    assert sleep_calls["n"] == 0
+    alert = db_session.query(Alert).one()
+    assert alert.category == "oil_gas"
+    assert len(alert.companies) == 1
+    assert alert.companies[0].company_id == company.id
+    assert alert.companies[0].direction == "bullish"
+    refreshed_article = db_session.query(Article).filter_by(id=article.id).one()
+    assert refreshed_article.status == "ANALYZED"
+
+
+def test_process_new_articles_analysis_cache_deterministic(db_session, monkeypatch):
+    """Same content -> the LLM is called at most once; a second, DIFFERENT
+    article with byte-identical (title, content) reuses the cached output
+    instead of calling analyze_article again, even if analyze_article would
+    have returned something different on a second call.
+
+    _find_reusable_alert (the unrelated, title-based dedup path) is
+    explicitly neutralized here so this test can only pass via the
+    content-hash cache, never via title dedup -- the two articles
+    deliberately share a title (as a real republished-wire-story pair
+    would), which would otherwise let dedup silently explain a pass here
+    even with a completely broken cache.
+    """
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    monkeypatch.setattr(pipeline_module, "_find_reusable_alert", lambda session, article: None)
 
     article1 = Article(source="test", url="https://example.com/a1", title="Crude oil spikes", content="Oil prices jump 5%.")
     article2 = Article(source="test", url="https://example.com/a2", title="Crude oil spikes", content="Oil prices jump 5%.")
