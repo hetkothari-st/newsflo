@@ -1,15 +1,16 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   Background, Controls, Handle, Position, ReactFlow,
-  type Edge, type Node, type NodeProps, type ReactFlowInstance,
+  type Edge, type EdgeMouseHandler, type Node, type NodeProps, type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { AlertCompany, GraphNode, ImpactGraph } from '../../../lib/api';
+import type { AlertArticle, AlertCompany, GraphNode, ImpactGraph } from '../../../lib/api';
 import { useTheme } from '../../../lib/theme';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { ripplePositions } from '../graph/layout';
 import ChartCardShell from './ChartCardShell';
-import GraphNodeChip from './cards/GraphNodeChip';
+import GraphFlowNode from './primitives/GraphFlowNode';
+import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
 
 interface FlowNodeData {
@@ -31,7 +32,7 @@ function FlowNode({ data }: NodeProps<Node<FlowNodeData>>) {
           (event.view unset on synthetic MouseEvents), throws inside
           d3-drag's nodrag() helper. */}
       <div className="nodrag nopan">
-        <GraphNodeChip node={data.node} onClick={data.onClick} selected={data.selected} />
+        <GraphFlowNode node={data.node} onClick={data.onClick} selected={data.selected} />
       </div>
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
     </>
@@ -43,15 +44,23 @@ const nodeTypes = { graphNode: FlowNode };
 export default function RippleGraph({
   graph,
   companies,
+  article,
+  alertCreatedAt,
   eventType,
 }: {
   graph: ImpactGraph;
   companies: AlertCompany[];
+  article: AlertArticle;
+  alertCreatedAt: string;
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
   const { theme } = useTheme();
   const [showPruned, setShowPruned] = useState(false);
+  // Relation labels only on hover (reference: docs/charts-reference.png) --
+  // a permanent label on every edge is what made the reference call the
+  // old build "spaghetti"; only the hovered edge's label shows.
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
 
   const positions = useMemo(() => ripplePositions(graph), [graph]);
   const hasPruned = graph.edges.some((e) => e.source === 'rulebook_pruned');
@@ -75,17 +84,27 @@ export default function RippleGraph({
     [graph.nodes, positions, selectedId, toggle],
   );
 
-  const flowEdges: Edge[] = visibleEdges.map((edge, i) => ({
-    id: `${edge.from}-${edge.to}-${i}`,
-    source: edge.from,
-    target: edge.to,
-    label: edge.relation,
-    style: {
-      stroke: edge.direction === 'bearish' ? 'rgb(var(--color-bearish))' : 'rgb(var(--color-bullish))',
-      strokeDasharray: edge.source === 'rulebook_pruned' ? '4 4' : undefined,
-      opacity: edge.source === 'rulebook_pruned' ? 0.4 : 1,
-    },
-  }));
+  const flowEdges: Edge[] = visibleEdges.map((edge, i) => {
+    const id = `${edge.from}-${edge.to}-${i}`;
+    return {
+      id,
+      source: edge.from,
+      target: edge.to,
+      // Straight, not curved -- a radial ripple layout reads as spokes from
+      // a center, which a bezier curve (React Flow's default) distorts into
+      // the "spaghetti" the reference calls out.
+      type: 'straight',
+      label: hoveredEdgeId === id ? edge.relation : undefined,
+      style: {
+        stroke: edge.direction === 'bearish' ? 'rgb(var(--color-bearish))' : 'rgb(var(--color-bullish))',
+        strokeDasharray: edge.source === 'rulebook_pruned' ? '4 4' : undefined,
+        opacity: edge.source === 'rulebook_pruned' ? 0.4 : 1,
+      },
+    };
+  });
+
+  const onEdgeMouseEnter = useCallback<EdgeMouseHandler>((_event, edge) => setHoveredEdgeId(edge.id), []);
+  const onEdgeMouseLeave = useCallback<EdgeMouseHandler>(() => setHoveredEdgeId(null), []);
 
   // The declarative `fitView` prop computes its transform against the
   // container's size at React Flow's own mount instant -- on a long page
@@ -107,8 +126,10 @@ export default function RippleGraph({
       number={2}
       title="Ripple Effect Graph"
       description="News radiating outward through mechanisms, sectors, and companies"
+      accentColor="#4A90D9"
     >
-      <div className="flex flex-col gap-2 p-4">
+      <div className="flex flex-col items-center gap-4">
+        <NewsHeaderBlock article={article} alertCreatedAt={alertCreatedAt} />
         {hasPruned && (
           <button
             type="button"
@@ -118,15 +139,7 @@ export default function RippleGraph({
             {showPruned ? 'Hide pruned edges' : 'Show pruned edges'}
           </button>
         )}
-        {/* h-[280px] sm:h-[420px]: fixed 420px on mobile left a huge dead
-            zone above/below a ripple layout that's wide, not tall -- most
-            of the pane's height went unused. minZoom raised 0.3->0.55:
-            with 5+ nodes at a fixed 160px chip width, fitView on a ~340px-
-            wide phone screen was clamping toward 0.3, shrinking node text
-            to a few px (confirmed live: illegible). 0.55 keeps text
-            readable; wide graphs pan/scroll horizontally instead of
-            shrinking to fit, same tradeoff any node-link diagram makes. */}
-        <div className="h-[280px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[420px]">
+        <div className="h-[320px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[480px]">
           {/* colorMode: @xyflow/react defaults to "light" and stamps that
               literal string as a class on its root div -- this app's own
               theming stylesheet defines `.light { --color-ink: ...; }` as a
@@ -137,7 +150,17 @@ export default function RippleGraph({
               near-black canvas -- confirmed nearly invisible live). Passing
               the app's real theme keeps the two "light" class users in
               sync instead of colliding. */}
-          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} colorMode={theme} minZoom={0.55} maxZoom={1.5}>
+          <ReactFlow
+            nodes={flowNodes}
+            edges={flowEdges}
+            nodeTypes={nodeTypes}
+            onInit={onInit}
+            onEdgeMouseEnter={onEdgeMouseEnter}
+            onEdgeMouseLeave={onEdgeMouseLeave}
+            colorMode={theme}
+            minZoom={0.55}
+            maxZoom={1.5}
+          >
             <Background />
             <Controls showInteractive={false} />
           </ReactFlow>

@@ -74,11 +74,19 @@ export function forceDirectedPositions(graph: ImpactGraph): Record<string, { x: 
     .filter((e) => graph.nodes.some((n) => n.id === e.from) && graph.nodes.some((n) => n.id === e.to))
     .map((e) => ({ source: e.from, target: e.to }));
 
+  // forceCollide's radius must clear the WIDEST node this graph can render,
+  // or high-confidence company nodes (KnowledgeGraph.tsx sizes them up to
+  // 120 + 100*0.6 = 180px wide, half-width 90px) can still settle closer
+  // than their own half-width apart and visually overlap -- 70 (half of
+  // GraphFlowNode's old flat 160px chip) was already too small for that,
+  // and is smaller still now that the widest node can reach 180px.
+  const COLLIDE_RADIUS = 100;
+
   const simulation = forceSimulation(nodes)
     .force('link', forceLink(links).id((d) => (d as SimNode).id).distance(140))
     .force('charge', forceManyBody().strength(-260))
     .force('center', forceCenter(0, 0))
-    .force('collide', forceCollide(70))
+    .force('collide', forceCollide(COLLIDE_RADIUS))
     .stop();
 
   for (let i = 0; i < 300; i += 1) simulation.tick();

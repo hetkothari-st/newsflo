@@ -3,16 +3,19 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import RippleGraph from './RippleGraph';
-import type { AlertCompany, ImpactGraph } from '../../../lib/api';
+import type { AlertArticle, AlertCompany, ImpactGraph } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
 import { ThemeProvider } from '../../../lib/theme';
+
+const article: AlertArticle = { id: 1, title: 'Repo rate cut announced', url: 'https://example.com', image_url: null };
+const alertCreatedAt = '2026-07-20T10:30:00Z';
 
 function render(graph: ImpactGraph, companies: AlertCompany[] = [], eventType?: string | null) {
   return rtlRender(
     <MemoryRouter>
       <ThemeProvider>
         <LanguageProvider>
-          <RippleGraph graph={graph} companies={companies} eventType={eventType} />
+          <RippleGraph graph={graph} companies={companies} article={article} alertCreatedAt={alertCreatedAt} eventType={eventType} />
         </LanguageProvider>
       </ThemeProvider>
     </MemoryRouter>,
@@ -72,5 +75,12 @@ describe('RippleGraph', () => {
     render(graph, [alertCompany({ company_id: 1, rationale: 'Lower rates lift loan demand.' })]);
     await userEvent.click(screen.getByText('HDFCBANK.NS'));
     expect(screen.getByText(/Lower rates lift loan demand/)).toBeInTheDocument();
+  });
+
+  it('does not show a relation label on any edge before it is hovered', () => {
+    render(graph);
+    // "correlation" (news -> sector:banking) is visible by default (not a
+    // pruned edge); its label must still stay hidden until hovered.
+    expect(screen.queryByText('correlation')).not.toBeInTheDocument();
   });
 });

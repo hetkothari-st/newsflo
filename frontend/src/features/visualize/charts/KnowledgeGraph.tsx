@@ -10,7 +10,7 @@ import ReasoningPanel from '../../../components/ReasoningPanel';
 import { EDGE_RELATIONS, relationColor } from '../colors';
 import { forceDirectedPositions } from '../graph/layout';
 import ChartCardShell from './ChartCardShell';
-import GraphNodeChip from './cards/GraphNodeChip';
+import GraphFlowNode from './primitives/GraphFlowNode';
 import { useCompanySelection } from './useCompanySelection';
 
 interface FlowNodeData {
@@ -34,11 +34,9 @@ function FlowNode({ data }: NodeProps<Node<FlowNodeData>>) {
           d3-drag's nodrag() helper. Same fix RippleGraph.tsx (Task 3)
           already needed for the identical GraphNodeChip-in-FlowNode shape. */}
       <div className="nodrag nopan">
-        {/* width passed through to GraphNodeChip itself (not an outer
-            wrapper div) -- the chip's own w-40 class previously overrode
-            any container width, making confidence-based sizing a no-op.
-            Caught by review. */}
-        <GraphNodeChip node={data.node} onClick={data.onClick} selected={data.selected} width={data.size} />
+        {/* width only affects company nodes (see GraphFlowNode) -- only
+            company nodes carry a real confidence_score to size by. */}
+        <GraphFlowNode node={data.node} onClick={data.onClick} selected={data.selected} width={data.size} />
       </div>
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
     </>
@@ -89,6 +87,8 @@ export default function KnowledgeGraph({
     id: `${edge.from}-${edge.to}-${i}`,
     source: edge.from,
     target: edge.to,
+    // Straight, not curved -- see RippleGraph.tsx's identical note.
+    type: 'straight',
     style: {
       stroke: relationColor(edge.relation),
       strokeDasharray: edge.source === 'rulebook_pruned' ? '4 4' : undefined,
@@ -116,12 +116,13 @@ export default function KnowledgeGraph({
       title="Knowledge Graph"
       description="The full picture -- every node and verified edge, laid out by real connection strength"
       legend={legend}
+      accentColor="#557C30"
     >
       {/* Same mobile fix as RippleGraph.tsx (#2): responsive height instead
           of a fixed 480px dead zone, and minZoom raised so force-directed
           layout's spread doesn't shrink node text to illegible on a narrow
           screen. */}
-      <div className="h-[300px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[480px]">
+      <div className="h-[320px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[480px]">
         {/* colorMode: same theme-class collision fix as RippleGraph.tsx
             (#2) -- see its comment. */}
         <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} colorMode={theme} minZoom={0.55} maxZoom={1.5}>
