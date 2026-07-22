@@ -5,6 +5,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { AlertCompany, GraphNode, ImpactGraph } from '../../../lib/api';
+import { useTheme } from '../../../lib/theme';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { ripplePositions } from '../graph/layout';
 import ChartCardShell from './ChartCardShell';
@@ -49,6 +50,7 @@ export default function RippleGraph({
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
+  const { theme } = useTheme();
   const [showPruned, setShowPruned] = useState(false);
 
   const positions = useMemo(() => ripplePositions(graph), [graph]);
@@ -125,7 +127,17 @@ export default function RippleGraph({
             readable; wide graphs pan/scroll horizontally instead of
             shrinking to fit, same tradeoff any node-link diagram makes. */}
         <div className="h-[280px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[420px]">
-          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.55} maxZoom={1.5}>
+          {/* colorMode: @xyflow/react defaults to "light" and stamps that
+              literal string as a class on its root div -- this app's own
+              theming stylesheet defines `.light { --color-ink: ...; }` as a
+              plain (unscoped) class selector, so React Flow's own default
+              class silently collided with it and reset every themed color
+              inside the canvas to the LIGHT palette even while the rest of
+              the page was in dark mode (text-ink resolved near-black on a
+              near-black canvas -- confirmed nearly invisible live). Passing
+              the app's real theme keeps the two "light" class users in
+              sync instead of colliding. */}
+          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} colorMode={theme} minZoom={0.55} maxZoom={1.5}>
             <Background />
             <Controls showInteractive={false} />
           </ReactFlow>

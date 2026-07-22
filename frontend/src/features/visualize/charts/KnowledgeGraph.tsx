@@ -5,6 +5,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { AlertCompany, GraphNode, ImpactGraph } from '../../../lib/api';
+import { useTheme } from '../../../lib/theme';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { EDGE_RELATIONS, relationColor } from '../colors';
 import { forceDirectedPositions } from '../graph/layout';
@@ -60,6 +61,7 @@ export default function KnowledgeGraph({
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
+  const { theme } = useTheme();
 
   const positions = useMemo(() => forceDirectedPositions(graph), [graph]);
 
@@ -120,7 +122,9 @@ export default function KnowledgeGraph({
           layout's spread doesn't shrink node text to illegible on a narrow
           screen. */}
       <div className="h-[300px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[480px]">
-        <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.55} maxZoom={1.5}>
+        {/* colorMode: same theme-class collision fix as RippleGraph.tsx
+            (#2) -- see its comment. */}
+        <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} colorMode={theme} minZoom={0.55} maxZoom={1.5}>
           <Background />
           <Controls showInteractive={false} />
         </ReactFlow>

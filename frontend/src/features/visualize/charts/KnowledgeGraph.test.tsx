@@ -5,13 +5,16 @@ import { MemoryRouter } from 'react-router-dom';
 import KnowledgeGraph from './KnowledgeGraph';
 import type { AlertCompany, ImpactGraph } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+import { ThemeProvider } from '../../../lib/theme';
 
 function render(graph: ImpactGraph, companies: AlertCompany[] = [], eventType?: string | null) {
   return rtlRender(
     <MemoryRouter>
-      <LanguageProvider>
-        <KnowledgeGraph graph={graph} companies={companies} eventType={eventType} />
-      </LanguageProvider>
+      <ThemeProvider>
+        <LanguageProvider>
+          <KnowledgeGraph graph={graph} companies={companies} eventType={eventType} />
+        </LanguageProvider>
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }

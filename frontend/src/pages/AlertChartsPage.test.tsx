@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import AlertChartsPage from './AlertChartsPage';
 import { AuthProvider } from '../lib/auth';
 import { LanguageProvider } from '../lib/language';
+import { ThemeProvider } from '../lib/theme';
 import * as api from '../lib/api';
 import type { Alert } from '../lib/api';
 
@@ -33,15 +34,17 @@ function alert(overrides: Partial<Alert> = {}): Alert {
 
 function renderPage(id = '1') {
   return render(
-    <LanguageProvider>
-      <AuthProvider>
-        <MemoryRouter initialEntries={[`/alerts/${id}/charts`]}>
-          <Routes>
-            <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
-          </Routes>
-        </MemoryRouter>
-      </AuthProvider>
-    </LanguageProvider>,
+    <ThemeProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <MemoryRouter initialEntries={[`/alerts/${id}/charts`]}>
+            <Routes>
+              <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
+            </Routes>
+          </MemoryRouter>
+        </AuthProvider>
+      </LanguageProvider>
+    </ThemeProvider>,
   );
 }
 
