@@ -88,3 +88,40 @@ def test_generate_event_summary_returns_none_when_no_tool_call():
             return SimpleNamespace(completions=self._Completions())
 
     assert generate_event_summary(NoToolCallClient(), "t", "c") is None
+
+
+def test_generate_event_summary_returns_none_on_client_exception():
+    """A client whose create() raises (e.g. a network error, or any other
+    non-RateLimitError failure) must degrade to None, not propagate --
+    same 'never raise' contract as measure_company_move."""
+    class ExplodingClient:
+        class _Completions:
+            def create(self, **kwargs):
+                raise Exception("boom: connection reset")
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions())
+
+    assert generate_event_summary(ExplodingClient(), "t", "c") is None
+
+
+def test_generate_event_summary_returns_none_on_malformed_json_arguments():
+    """A tool call whose arguments are truncated/malformed JSON (plausible
+    from the small FALLBACK_MODEL) must degrade to None rather than
+    letting json.JSONDecodeError propagate."""
+    class MalformedToolCall:
+        def __init__(self):
+            self.function = SimpleNamespace(name="record_event_summary", arguments='{"summary_short": "oops",')
+
+    class MalformedJsonClient:
+        class _Completions:
+            def create(self, **kwargs):
+                message = SimpleNamespace(tool_calls=[MalformedToolCall()])
+                return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions())
+
+    assert generate_event_summary(MalformedJsonClient(), "t", "c") is None

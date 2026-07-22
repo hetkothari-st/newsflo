@@ -50,28 +50,36 @@ def build_event_summary_tool() -> dict:
 
 
 def _call_event_summary_tool(client, title: str, content: str) -> dict | None:
+    """Returns the parsed tool-call arguments, or None on any failure --
+    a malformed/truncated JSON response, an exhausted RateLimitError
+    fallback, or any other client error all degrade to None rather than
+    raising, same "never crash the alert" discipline as
+    app.market.measure.measure_company_move."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"{EVENT_SUMMARY_FRAMING}\n\nTitle: {title}\n\nContent: {content}"},
     ]
     tool = build_event_summary_tool()
+
+    def _call(model: str):
+        return client.chat.completions.create(
+            model=model, max_tokens=512, tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_event_summary"}},
+            messages=messages,
+        )
+
     try:
-        response = client.chat.completions.create(
-            model=MODEL, max_tokens=512, tools=[tool],
-            tool_choice={"type": "function", "function": {"name": "record_event_summary"}},
-            messages=messages,
-        )
-    except RateLimitError:
-        response = client.chat.completions.create(
-            model=FALLBACK_MODEL, max_tokens=512, tools=[tool],
-            tool_choice={"type": "function", "function": {"name": "record_event_summary"}},
-            messages=messages,
-        )
-    message = response.choices[0].message
-    tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_event_summary"), None)
-    if tool_call is None:
+        try:
+            response = _call(MODEL)
+        except RateLimitError:
+            response = _call(FALLBACK_MODEL)
+        message = response.choices[0].message
+        tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_event_summary"), None)
+        if tool_call is None:
+            return None
+        return json.loads(tool_call.function.arguments)
+    except Exception:
         return None
-    return json.loads(tool_call.function.arguments)
 
 
 def generate_event_summary(client, title: str, content: str) -> dict | None:
@@ -90,8 +98,10 @@ def generate_event_summary(client, title: str, content: str) -> dict | None:
     if summary_short is None or summary_long is None:
         retry = _call_event_summary_tool(client, title, content)
         if retry is not None:
-            summary_short = summary_short or validate_or_none(retry.get("summary_short"))
-            summary_long = summary_long or validate_or_none(retry.get("summary_long"))
+            if summary_short is None:
+                summary_short = validate_or_none(retry.get("summary_short"))
+            if summary_long is None:
+                summary_long = validate_or_none(retry.get("summary_long"))
 
     if summary_short is None and summary_long is None:
         return None
