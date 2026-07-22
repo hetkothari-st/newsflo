@@ -11,7 +11,7 @@ from typing import NamedTuple
 _PERCENT_RE = re.compile(r"-?\d+(\.\d+)?\s*%")
 _TARGET_PRICE_RE = re.compile(r"\btarget\s+price\b|\bprice\s+target\b", re.IGNORECASE)
 _ADVICE_WORDS_RE = re.compile(
-    r"\b(buy|sell|hold|overweight|underweight|outperform|underperform)\b", re.IGNORECASE
+    r"\b(bought|buying|buys|buy|sold|selling|sells|sell|held|holding|holds|hold|overweight|underweight|outperform|underperform)\b", re.IGNORECASE
 )
 
 

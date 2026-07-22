@@ -29,6 +29,38 @@ def test_rejects_buy_sell_hold_language():
         assert result.is_valid is False, f"{word!r} should have been rejected"
 
 
+def test_rejects_inflected_forms_of_advice_words():
+    """Ensures inflected forms (buying, sold, holding, etc.) are also caught."""
+    test_cases = [
+        ("We recommend buying this stock", "buying"),
+        ("Analysts suggest holding for now", "holding"),
+        ("the position was sold off", "sold"),
+        ("Investors are actively buying shares", "buying"),
+        ("The firm holds a neutral stance", "holds"),
+        ("He bought at the peak", "bought"),
+        ("She sells regularly", "sells"),
+        ("We held for three years", "held"),
+    ]
+    for text, inflected_word in test_cases:
+        result = validate_no_advice_language(text)
+        assert result.is_valid is False, f"{inflected_word!r} in {text!r} should have been rejected"
+        assert inflected_word.lower() in result.reason.lower()
+
+
+def test_accepts_words_containing_advice_roots_as_substrings():
+    """Ensures word boundaries prevent false positives on words like 'holder', 'reseller'."""
+    # These should pass validation even though they contain "hold" and "sell"
+    # as substrings, because word boundaries prevent matching them
+    test_cases = [
+        "The fund holder is responsible",
+        "A reseller must track inventory",
+        "The beholder of the deed owns it",
+    ]
+    for text in test_cases:
+        result = validate_no_advice_language(text)
+        assert result.is_valid is True, f"{text!r} should have passed validation (no false positive)"
+
+
 def test_accepts_clean_causal_text():
     result = validate_no_advice_language(
         "A weaker rupee raises the value of this company's dollar-denominated export revenue."
