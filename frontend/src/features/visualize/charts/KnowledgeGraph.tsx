@@ -115,8 +115,12 @@ export default function KnowledgeGraph({
       description="The full picture -- every node and verified edge, laid out by real connection strength"
       legend={legend}
     >
-      <div style={{ height: 480 }} className="w-full overflow-hidden rounded-lg border border-hairline">
-        <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.2} maxZoom={1.5}>
+      {/* Same mobile fix as RippleGraph.tsx (#2): responsive height instead
+          of a fixed 480px dead zone, and minZoom raised so force-directed
+          layout's spread doesn't shrink node text to illegible on a narrow
+          screen. */}
+      <div className="h-[300px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[480px]">
+        <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.55} maxZoom={1.5}>
           <Background />
           <Controls showInteractive={false} />
         </ReactFlow>

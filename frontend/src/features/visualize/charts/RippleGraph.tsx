@@ -116,8 +116,16 @@ export default function RippleGraph({
             {showPruned ? 'Hide pruned edges' : 'Show pruned edges'}
           </button>
         )}
-        <div style={{ height: 420 }} className="w-full overflow-hidden rounded-lg border border-hairline">
-          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.3} maxZoom={1.5}>
+        {/* h-[280px] sm:h-[420px]: fixed 420px on mobile left a huge dead
+            zone above/below a ripple layout that's wide, not tall -- most
+            of the pane's height went unused. minZoom raised 0.3->0.55:
+            with 5+ nodes at a fixed 160px chip width, fitView on a ~340px-
+            wide phone screen was clamping toward 0.3, shrinking node text
+            to a few px (confirmed live: illegible). 0.55 keeps text
+            readable; wide graphs pan/scroll horizontally instead of
+            shrinking to fit, same tradeoff any node-link diagram makes. */}
+        <div className="h-[280px] w-full overflow-hidden rounded-lg border border-hairline sm:h-[420px]">
+          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.55} maxZoom={1.5}>
             <Background />
             <Controls showInteractive={false} />
           </ReactFlow>
