@@ -320,11 +320,28 @@ def _persist_alert(
         ))
 
     for edge in (edges or []):
+        from_company_id = _resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"])
+        to_company_id = _resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"])
+        from_label = edge["from"]["label"]
+        # A sector->company attachment edge (app.analysis.cascade.
+        # _sector_attachment_edges) labels the sector node with the
+        # CompanyMention's own per-call sector classification, which can
+        # diverge from the company's actual, authoritative Company.sector
+        # (e.g. a cascade stage bucketing a company under "other" while its
+        # real DB sector is "defense") -- every other chart (Cascade Levels,
+        # Sector Tree) reads company.sector directly, so this edge's label
+        # must match that same ground truth rather than the LLM's transient
+        # classification, or the graph shows a different sector than the
+        # rest of the page for the same company.
+        if edge["from"]["kind"] == "sector" and edge["to"]["kind"] == "company" and to_company_id is not None:
+            company = session.get(Company, to_company_id)
+            if company is not None and company.sector:
+                from_label = company.sector
         session.add(ImpactEdge(
             alert_id=alert.id,
-            from_company_id=_resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"]),
-            from_node_kind=edge["from"]["kind"], from_label=edge["from"]["label"],
-            to_company_id=_resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"]),
+            from_company_id=from_company_id,
+            from_node_kind=edge["from"]["kind"], from_label=from_label,
+            to_company_id=to_company_id,
             to_node_kind=edge["to"]["kind"], to_label=edge["to"]["label"],
             relation=edge["relation"], direction=edge["direction"], note=edge["note"], source=edge["source"],
         ))

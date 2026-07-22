@@ -38,7 +38,7 @@ from app.analysis.claude_client import build_client
 from app.companies.resolution import resolve_companies
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import Alert, AlertCompanyTranslation, CascadeGap, ImpactEdge
+from app.models import Alert, AlertCompanyTranslation, CascadeGap, Company, ImpactEdge
 from app.pipeline import (
     _build_alert_company, _resolve_edge_endpoint_company_id, article_text,
     clear_analysis_cache, get_cached_analysis, store_analysis_cache,
@@ -91,11 +91,21 @@ def main(limit: int, force: bool) -> None:
         for entry in resolved:
             session.add(_build_alert_company(session, alert.id, article, result.category, entry))
         for edge in result.edges:
+            from_company_id = _resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"])
+            to_company_id = _resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"])
+            from_label = edge["from"]["label"]
+            # Same ground-truth-sector fix as app.pipeline._persist_alert --
+            # see its comment. Duplicated here because this script persists
+            # edges independently rather than calling _persist_alert.
+            if edge["from"]["kind"] == "sector" and edge["to"]["kind"] == "company" and to_company_id is not None:
+                company = session.get(Company, to_company_id)
+                if company is not None and company.sector:
+                    from_label = company.sector
             session.add(ImpactEdge(
                 alert_id=alert.id,
-                from_company_id=_resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"]),
-                from_node_kind=edge["from"]["kind"], from_label=edge["from"]["label"],
-                to_company_id=_resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"]),
+                from_company_id=from_company_id,
+                from_node_kind=edge["from"]["kind"], from_label=from_label,
+                to_company_id=to_company_id,
                 to_node_kind=edge["to"]["kind"], to_label=edge["to"]["label"],
                 relation=edge["relation"], direction=edge["direction"], note=edge["note"], source=edge["source"],
             ))
