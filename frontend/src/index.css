@@ -9,6 +9,13 @@
      anything else while React mounts. */
   --color-page: 10 10 10;
   --color-surface: 22 22 22;
+  /* One tier lighter than --color-surface -- for elements that must read as
+     "floating" on top of an already-surface-colored card (company/sector
+     nodes, graph chips), which plain surface or transparent both fail:
+     transparent blends into whatever's behind it (the graph-chip dark-mode
+     bug), and reusing surface itself gives zero contrast against its own
+     parent card. */
+  --color-elevated: 34 34 34;
   --color-hairline: 38 38 38;
   --color-ink: 242 242 242;
   --color-muted: 142 142 147;
@@ -21,6 +28,7 @@
 .light {
   --color-page: 228 232 241;
   --color-surface: 237 240 247;
+  --color-elevated: 246 248 252;
   --color-hairline: 213 219 232;
   --color-ink: 58 63 82;
   --color-muted: 136 145 168;

@@ -7,6 +7,7 @@ export default {
       colors: {
         page: 'rgb(var(--color-page) / <alpha-value>)',
         surface: 'rgb(var(--color-surface) / <alpha-value>)',
+        elevated: 'rgb(var(--color-elevated) / <alpha-value>)',
         hairline: 'rgb(var(--color-hairline) / <alpha-value>)',
         ink: 'rgb(var(--color-ink) / <alpha-value>)',
         muted: 'rgb(var(--color-muted) / <alpha-value>)',

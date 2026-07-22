@@ -124,32 +124,16 @@ export default function AlertChartsPage() {
       </div>
       <StatBar companies={alert.companies} breadth={breadth} />
       <div className="flex-1 overflow-y-auto">
-        <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-        <div className="border-t border-hairline">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4">
+          <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <RippleGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <SupplyChainGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <LevelTree companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <ConfidenceTree companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <SplitTree companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <TimelineTree companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <SectorTree companies={alert.companies} eventType={alert.event_type} />
-        </div>
-        <div className="border-t border-hairline">
           <EconomicChain graph={graph} companies={alert.companies} />
-        </div>
-        <div className="border-t border-hairline">
           <KnowledgeGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
         </div>
       </div>
