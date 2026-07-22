@@ -128,8 +128,8 @@ export default function AlertChartsPage() {
           <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <RippleGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
           <SupplyChainGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
-          <LevelTree companies={alert.companies} eventType={alert.event_type} />
-          <ConfidenceTree companies={alert.companies} eventType={alert.event_type} />
+          <LevelTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
+          <ConfidenceTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <SplitTree companies={alert.companies} eventType={alert.event_type} />
           <TimelineTree companies={alert.companies} eventType={alert.event_type} />
           <SectorTree companies={alert.companies} eventType={alert.event_type} />

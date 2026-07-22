@@ -3,14 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import LevelTree from './LevelTree';
-import type { AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+
+const article: AlertArticle = { id: 1, title: 'Chip export restrictions announced', url: 'https://example.com', image_url: null };
 
 function render(companies: AlertCompany[], eventType?: string | null) {
   return rtlRender(
     <MemoryRouter>
       <LanguageProvider>
-        <LevelTree companies={companies} eventType={eventType} />
+        <LevelTree companies={companies} article={article} alertCreatedAt="2026-07-20T10:30:00Z" eventType={eventType} />
       </LanguageProvider>
     </MemoryRouter>,
   );
@@ -97,12 +99,15 @@ describe('LevelTree', () => {
     expect(screen.getByText(/Foundry capacity is the binding constraint/)).toBeInTheDocument();
   });
 
-  it('shows a sector chip on every company card, including cascade companies', () => {
+  // The design-fidelity rebuild fixed one company-node design across every
+  // chart (name, ticker, magnitude -- see CompanyNode) -- a per-chart sector
+  // chip is no longer part of it, so this replaces the old sector-chip
+  // assertion with a check on the shared design's own magnitude display.
+  it('shows the magnitude range, not confidence_score, on every company card', () => {
     render([
-      company({ company_id: 1, ticker: 'NVDA', sector: 'it', impact_level: 'direct' }),
-      company({ company_id: 2, ticker: 'TSM', name: 'TSMC', sector: 'metals', impact_level: 'indirect_l1', parent_company_id: 1 }),
+      company({ company_id: 1, ticker: 'NVDA', direction: 'bearish', magnitude_low: -23, magnitude_high: -21, confidence_score: 88, impact_level: 'direct' }),
     ]);
-    expect(screen.getAllByText('IT').length).toBeGreaterThan(0);
-    expect(screen.getByText('Metals')).toBeInTheDocument();
+    expect(screen.getByText('▼ -23%–-21%')).toBeInTheDocument();
+    expect(screen.queryByText(/88/)).not.toBeInTheDocument();
   });
 });

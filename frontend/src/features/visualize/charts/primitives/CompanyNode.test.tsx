@@ -22,6 +22,17 @@ describe('CompanyNode', () => {
     expect(screen.getByText('▼')).toBeInTheDocument();
   });
 
+  it('shows confidence only as a separate, explicitly labeled line -- never folded into the glyph line', () => {
+    render(
+      <CompanyNode
+        name="Reliance Industries" ticker="RELIANCE" direction="bullish"
+        magnitudeLow={2} magnitudeHigh={4} confidenceScore={95}
+      />,
+    );
+    expect(screen.getByText('▲ +2%–+4%')).toBeInTheDocument();
+    expect(screen.getByText('Confidence: 95%')).toBeInTheDocument();
+  });
+
   it('calls onClick and reflects selected state when interactive', async () => {
     const onClick = vi.fn();
     render(<CompanyNode name="RIL" ticker="RELIANCE.NS" direction="bullish" onClick={onClick} selected />);

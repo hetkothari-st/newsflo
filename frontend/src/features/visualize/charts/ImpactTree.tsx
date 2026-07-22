@@ -2,8 +2,11 @@ import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { impactLevelKey } from '../impactLevels';
 import { groupBySector, groupIndirectBySubSector, rankByConfidence, type CompanyGroup, type SubSectorGroup } from '../transforms';
 import ChartCardShell from './ChartCardShell';
-import CompanyCard from './cards/CompanyCard';
 import ReasoningPanel from '../../../components/ReasoningPanel';
+import CompanyNode from './primitives/CompanyNode';
+import ElbowConnector from './primitives/ElbowConnector';
+import LevelBand from './primitives/LevelBand';
+import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
 
 function truncatedRationale(rationale: string): string {
@@ -22,47 +25,49 @@ function WhyExplanation({ companies }: { companies: AlertCompany[] }) {
   );
 }
 
-function Connector() {
-  return (
-    <div aria-hidden="true" className="flex flex-col items-center text-muted">
-      <span className="h-3 w-px bg-hairline" />
-      <span className="text-xs leading-none">▼</span>
-    </div>
-  );
-}
-
 function EmptyLevelNote({ text }: { text: string }) {
   return <p className="px-1 font-data text-xs uppercase tracking-widest text-muted">{text}</p>;
 }
 
-function NewsNode({ article, alertCreatedAt }: { article: AlertArticle; alertCreatedAt: string }) {
+// Sector/sub-sector identity sits above its LevelBand rather than inside
+// the band's own label -- a sector name needs to stay independently
+// queryable ("Banking" alone, not "Level 1 · Direct Impact · Banking"),
+// and this chart can have more than one sector's band at the same level.
+function GroupHeading({ level, label, count, color }: { level: string; label: string; count: number; color?: string }) {
   return (
-    <div className="flex flex-col gap-1 rounded-xl border border-hairline p-4 theme-light:border-transparent theme-light:shadow-neu">
-      <span className="font-data text-[11px] uppercase tracking-widest text-muted">News</span>
-      <p className="font-editorial text-base text-ink">{article.title}</p>
-      <span className="font-data text-[11px] text-muted">
-        {new Date(alertCreatedAt).toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        })}
-      </span>
+    <div className="flex flex-col items-center gap-0.5">
+      <span className="font-data text-[10px] uppercase tracking-widest text-muted">{level}</span>
+      <div className="flex items-center gap-2">
+        {color && <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
+        <span className="text-sm text-ink">
+          {label} <span className="font-data text-xs text-muted">({count})</span>
+        </span>
+      </div>
     </div>
   );
 }
 
-function LevelHeader({ level, name, count, color }: { level: string; name: string; count: number; color?: string }) {
+function CompanyNodeRow({
+  companies, selectedId, onToggle,
+}: {
+  companies: AlertCompany[]; selectedId: number | null; onToggle: (id: number) => void;
+}) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-hairline px-3 py-2 theme-light:border-transparent theme-light:shadow-neu-sm">
-      {color && <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
-      <div className="flex flex-col">
-        <span className="font-data text-[10px] uppercase tracking-widest text-muted">{level}</span>
-        <span className="text-sm text-ink">
-          {name} <span className="font-data text-xs text-muted">({count})</span>
-        </span>
-      </div>
-    </div>
+    <>
+      {companies.map((c) => (
+        <CompanyNode
+          key={c.company_id}
+          name={c.name}
+          ticker={c.ticker}
+          direction={c.direction}
+          magnitudeLow={c.magnitude_low}
+          magnitudeHigh={c.magnitude_high}
+          inMyHoldings={c.in_my_holdings}
+          onClick={() => onToggle(c.company_id)}
+          selected={selectedId === c.company_id}
+        />
+      ))}
+    </>
   );
 }
 
@@ -73,15 +78,12 @@ function SectorBlock({
 }) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
-      <LevelHeader level="Level 1 · Direct Impact" name={sector.label} count={sector.companies.length} color={sector.color} />
+      <GroupHeading level="Level 1 · Direct Impact" label={sector.label} count={sector.companies.length} color={sector.color} />
       <WhyExplanation companies={sector.companies} />
-      <Connector />
-      <p className="font-data text-[10px] uppercase tracking-widest text-muted">Level 2 · Companies</p>
-      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {sector.companies.map((c) => (
-          <CompanyCard key={c.company_id} company={c} onClick={() => onToggle(c.company_id)} selected={selectedId === c.company_id} />
-        ))}
-      </div>
+      <ElbowConnector />
+      <LevelBand label="Level 2 · Companies">
+        <CompanyNodeRow companies={sector.companies} selectedId={selectedId} onToggle={onToggle} />
+      </LevelBand>
     </div>
   );
 }
@@ -93,15 +95,12 @@ function SubSectorBlock({
 }) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
-      <LevelHeader level="Level 3 · Indirect Ripple" name={subSector.label} count={subSector.companies.length} />
+      <GroupHeading level="Level 3 · Indirect Ripple" label={subSector.label} count={subSector.companies.length} />
       <WhyExplanation companies={subSector.companies} />
-      <Connector />
-      <p className="font-data text-[10px] uppercase tracking-widest text-muted">Level 4 · Companies</p>
-      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {subSector.companies.map((c) => (
-          <CompanyCard key={c.company_id} company={c} onClick={() => onToggle(c.company_id)} selected={selectedId === c.company_id} />
-        ))}
-      </div>
+      <ElbowConnector />
+      <LevelBand label="Level 4 · Companies">
+        <CompanyNodeRow companies={subSector.companies} selectedId={selectedId} onToggle={onToggle} />
+      </LevelBand>
     </div>
   );
 }
@@ -127,10 +126,11 @@ export default function ImpactTree({
       number={1}
       title="Multi-Level Impact Tree"
       description="Sectors and companies affected, from direct impact down to indirect ripple effects"
+      accentColor="#E85D4C"
     >
-      <div className="flex flex-col items-center gap-4 p-4">
-        <NewsNode article={article} alertCreatedAt={alertCreatedAt} />
-        <Connector />
+      <div className="flex flex-col items-center gap-4">
+        <NewsHeaderBlock article={article} alertCreatedAt={alertCreatedAt} />
+        <ElbowConnector />
         {sectorGroups.length === 0 ? (
           <EmptyLevelNote text="No direct impact identified." />
         ) : (

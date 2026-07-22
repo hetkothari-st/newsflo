@@ -28,6 +28,13 @@ export interface CompanyNodeProps {
   direction?: string | null;
   magnitudeLow?: number | null;
   magnitudeHigh?: number | null;
+  // Confidence Tree (#5) only -- every other chart's percentage line is
+  // magnitude, never confidence (see the file-level comment). Confidence
+  // Tree's entire purpose is grading companies BY confidence, so it needs
+  // the number too; passing it here adds a separate, explicitly labeled
+  // "Confidence: N%" line rather than substituting it into the direction-
+  // glyph line, so it can never be mistaken for a magnitude reading.
+  confidenceScore?: number | null;
   inMyHoldings?: boolean;
   onClick?: () => void;
   selected?: boolean;
@@ -42,6 +49,7 @@ export default function CompanyNode({
   direction,
   magnitudeLow,
   magnitudeHigh,
+  confidenceScore,
   inMyHoldings = false,
   onClick,
   selected = false,
@@ -59,6 +67,9 @@ export default function CompanyNode({
       <span className={`font-data text-[11px] ${toneClass}`}>
         {glyph} {hasMagnitude ? magnitudeLabel(magnitudeLow, magnitudeHigh) : null}
       </span>
+      {confidenceScore != null && (
+        <span className="font-data text-[10px] text-muted">Confidence: {confidenceScore}%</span>
+      )}
     </>
   );
 

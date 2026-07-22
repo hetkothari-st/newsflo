@@ -1,18 +1,13 @@
 import { useMemo } from 'react';
-import type { AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { IMPACT_LEVEL_ORDER, impactLevelColor, impactLevelKey, impactLevelLabel } from '../impactLevels';
 import ChartCardShell from './ChartCardShell';
-import CompanyCard from './cards/CompanyCard';
+import CompanyNode from './primitives/CompanyNode';
+import ElbowConnector from './primitives/ElbowConnector';
+import LevelBand from './primitives/LevelBand';
+import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
-
-function LevelConnector() {
-  return (
-    <div aria-hidden="true" className="flex justify-center py-0.5">
-      <span className="text-muted">↓</span>
-    </div>
-  );
-}
 
 const LEGEND = [
   { label: impactLevelLabel('direct'), color: impactLevelColor('direct') },
@@ -22,9 +17,13 @@ const LEGEND = [
 
 export default function LevelTree({
   companies,
+  article,
+  alertCreatedAt,
   eventType,
 }: {
   companies: AlertCompany[];
+  article: AlertArticle;
+  alertCreatedAt: string;
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
@@ -46,32 +45,30 @@ export default function LevelTree({
       title="Cascade Levels"
       description="Companies affected at each cascade level -- direct, and the ripple effects it triggers"
       legend={LEGEND}
+      accentColor="#4A90D9"
     >
-      <div className="flex flex-col p-4">
-        {levels.map(({ level, companies: levelCompanies }, i) => {
-          const color = impactLevelColor(level);
-          return (
-            <div key={level} className="flex flex-col">
-              {i > 0 && <LevelConnector />}
-              <div className="mb-2 flex items-center gap-2">
-                <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-                <p className="text-xs uppercase tracking-widest text-ink">{impactLevelLabel(level)}</p>
-                <p className="text-xs text-muted">({levelCompanies.length})</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {levelCompanies.map((c) => (
-                  <CompanyCard
-                    key={c.company_id}
-                    company={c}
-                    showSector
-                    onClick={() => toggle(c.company_id)}
-                    selected={selectedId === c.company_id}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+      <div className="flex flex-col items-center gap-4">
+        <NewsHeaderBlock article={article} alertCreatedAt={alertCreatedAt} />
+        {levels.map(({ level, companies: levelCompanies }, i) => (
+          <div key={level} className="flex w-full flex-col items-center gap-3">
+            {i > 0 && <ElbowConnector />}
+            <LevelBand label={impactLevelLabel(level)}>
+              {levelCompanies.map((c) => (
+                <CompanyNode
+                  key={c.company_id}
+                  name={c.name}
+                  ticker={c.ticker}
+                  direction={c.direction}
+                  magnitudeLow={c.magnitude_low}
+                  magnitudeHigh={c.magnitude_high}
+                  inMyHoldings={c.in_my_holdings}
+                  onClick={() => toggle(c.company_id)}
+                  selected={selectedId === c.company_id}
+                />
+              ))}
+            </LevelBand>
+          </div>
+        ))}
         {selected && <ReasoningPanel company={selected} eventType={eventType} />}
       </div>
     </ChartCardShell>
