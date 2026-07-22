@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from app.analysis.refinement import generate_event_summary, generate_impact_whys
+from app.analysis.refinement import HORIZONS, generate_event_summary, generate_impact_whys, generate_timeline_effects
 
 
 class FakeToolCall:
@@ -188,3 +188,54 @@ def test_generate_impact_whys_ticker_the_model_never_answers_is_not_retried():
 
 def test_generate_impact_whys_returns_empty_dict_for_no_companies():
     assert generate_impact_whys(QueuedFakeClient([]), "t", "c", []) == {}
+
+
+def test_generate_timeline_effects_returns_valid_entries():
+    client = QueuedFakeClient([
+        ("record_timeline_effects", {"effects": [
+            {"horizon": "TODAY", "description": "Markets react immediately to the rate decision."},
+            {"horizon": "QUARTERS", "description": "Lower rates gradually filter through to loan demand over time."},
+        ]}),
+    ])
+    result = generate_timeline_effects(client, "t", "c")
+    assert result == [
+        {"horizon": "TODAY", "description": "Markets react immediately to the rate decision."},
+        {"horizon": "QUARTERS", "description": "Lower rates gradually filter through to loan demand over time."},
+    ]
+    assert client.calls == 1
+
+
+def test_generate_timeline_effects_can_return_zero_entries():
+    client = QueuedFakeClient([("record_timeline_effects", {"effects": []})])
+    assert generate_timeline_effects(client, "t", "c") == []
+
+
+def test_generate_timeline_effects_drops_unrecognized_horizon():
+    client = QueuedFakeClient([
+        ("record_timeline_effects", {"effects": [
+            {"horizon": "NEXT_WEEK", "description": "Not a real horizon value."},
+            {"horizon": "DAYS", "description": "A genuine short-term effect description here."},
+        ]}),
+    ])
+    result = generate_timeline_effects(client, "t", "c")
+    assert result == [{"horizon": "DAYS", "description": "A genuine short-term effect description here."}]
+
+
+def test_generate_timeline_effects_retries_only_invalid_horizons():
+    client = QueuedFakeClient([
+        ("record_timeline_effects", {"effects": [
+            {"horizon": "TODAY", "description": "Expect ~5% move today."},  # rejected
+            {"horizon": "WEEKS", "description": "A genuine weeks-long effect plays out here."},  # valid
+        ]}),
+        ("record_timeline_effects", {"effects": [
+            {"horizon": "TODAY", "description": "Markets react immediately to the news."},
+        ]}),
+    ])
+    result = generate_timeline_effects(client, "t", "c")
+    assert {"horizon": "TODAY", "description": "Markets react immediately to the news."} in result
+    assert {"horizon": "WEEKS", "description": "A genuine weeks-long effect plays out here."} in result
+    assert client.calls == 2
+
+
+def test_all_five_horizon_values_are_recognized():
+    assert HORIZONS == ["TODAY", "DAYS", "WEEKS", "MONTHS", "QUARTERS"]

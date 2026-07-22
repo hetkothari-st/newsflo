@@ -236,3 +236,117 @@ def generate_impact_whys(client, title: str, content: str, companies: list[dict]
                 result[ticker] = text
 
     return result
+
+
+HORIZONS = ["TODAY", "DAYS", "WEEKS", "MONTHS", "QUARTERS"]
+
+TIMELINE_FRAMING = (
+    "Describe how this news event's effect plays out over time -- one "
+    "entry per horizon that genuinely has something distinct to say "
+    "(TODAY = immediate market reaction, DAYS = next few trading days, "
+    "WEEKS = next few weeks, MONTHS = next few months, QUARTERS = "
+    "multi-quarter/structural). Skip a horizon entirely if you have "
+    "nothing genuinely distinct to add for it -- zero, one, or several "
+    "entries are all correct depending on the story. Plain language, no "
+    "jargon, no percentage, price, or buy/sell/hold language -- describe "
+    "what unfolds, not whether to trade on it."
+)
+
+
+def build_timeline_tool() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "record_timeline_effects",
+            "description": "Describe how this news event's effect unfolds over time, one entry per relevant horizon.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "effects": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "horizon": {"type": "string", "enum": HORIZONS},
+                                "description": {"type": "string"},
+                            },
+                            "required": ["horizon", "description"],
+                        },
+                    },
+                },
+                "required": ["effects"],
+            },
+        },
+    }
+
+
+def _call_timeline_tool(client, title: str, content: str) -> list[dict]:
+    """Returns [{"horizon", "description"}, ...] parsed from the tool
+    call, dropping any entry whose horizon isn't one of the five
+    recognized values or whose description is empty -- or [] on any
+    failure -- a malformed/truncated JSON response, an exhausted
+    RateLimitError fallback, a missing tool-call, or any other client
+    error all degrade to [] rather than raising, same "never crash the
+    alert" discipline as app.market.measure.measure_company_move. The
+    entire attempt (both model attempts, response parsing, and
+    json.loads) is wrapped in one outer try/except so nothing here can
+    ever propagate."""
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"{TIMELINE_FRAMING}\n\nTitle: {title}\n\nContent: {content}"},
+    ]
+    tool = build_timeline_tool()
+
+    def _call(model: str):
+        return client.chat.completions.create(
+            model=model, max_tokens=1536, tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_timeline_effects"}},
+            messages=messages,
+        )
+
+    try:
+        try:
+            response = _call(MODEL)
+        except RateLimitError:
+            response = _call(FALLBACK_MODEL)
+        message = response.choices[0].message
+        tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_timeline_effects"), None)
+        if tool_call is None:
+            return []
+        arguments = json.loads(tool_call.function.arguments)
+        return [
+            {"horizon": e["horizon"], "description": e["description"]}
+            for e in arguments.get("effects", [])
+            if e.get("horizon") in HORIZONS and e.get("description")
+        ]
+    except Exception:
+        return []
+
+
+def generate_timeline_effects(client, title: str, content: str) -> list[dict]:
+    """Returns [{"horizon", "description"}, ...], zero or more -- only for
+    horizons the model gave genuine distinct content for AND whose
+    description passes validation, retrying once (batched) for any
+    horizon that failed validation, then dropping it if still invalid.
+    Unrecognized horizon values are dropped during parsing in
+    _call_timeline_tool and never reach here, so they are never
+    persisted or retried. Never raises -- see _call_timeline_tool."""
+    first = _call_timeline_tool(client, title, content)
+
+    valid = []
+    invalid_horizons = []
+    for entry in first:
+        text = validate_or_none(entry["description"])
+        if text is not None:
+            valid.append({"horizon": entry["horizon"], "description": text})
+        else:
+            invalid_horizons.append(entry["horizon"])
+
+    if invalid_horizons:
+        retry_by_horizon = {e["horizon"]: e["description"] for e in _call_timeline_tool(client, title, content)}
+        for horizon in invalid_horizons:
+            text = validate_or_none(retry_by_horizon.get(horizon))
+            if text is not None:
+                valid.append({"horizon": horizon, "description": text})
+
+    return valid
