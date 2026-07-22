@@ -215,6 +215,35 @@ class CalibrationSample(Base):
     sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class MarketMove(Base):
+    """One row per (event, ticker) -- the measured facts backing every
+    user-facing number (docs/NEWS_IMPACT_APP_SPEC.md §3.1, §3.2). ``event``
+    here is an Alert row (this codebase's NewsEvent). Arithmetic on
+    observed prices only -- no LLM ever writes to this table. A row always
+    exists once an alert is persisted (one per resolved company), even when
+    measurement failed -- measurement_status='no_data' with null metric
+    columns records that honestly rather than omitting the row.
+    """
+    __tablename__ = "market_moves"
+    __table_args__ = (UniqueConstraint("alert_id", "company_id", name="uq_market_move_alert_company"),)
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    raw_move_pct = Column(Float, nullable=True)
+    sector_move_pct = Column(Float, nullable=True)
+    benchmark_ticker = Column(String, nullable=False)
+    excess_move_pct = Column(Float, nullable=True)
+    volume = Column(Float, nullable=True)
+    avg_volume_20d = Column(Float, nullable=True)
+    volume_multiple = Column(Float, nullable=True)
+    measured_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    measurement_status = Column(String, nullable=False)  # ok | no_data | stale
+
+    alert = relationship("Alert")
+    company = relationship("Company")
+
+
 class FinancialSnapshot(Base):
     """Cached price/return data for a ticker, refreshed on a TTL by
     app.reasoning.financial_context.get_or_fetch_financial_snapshot -- avoids
