@@ -8,11 +8,25 @@ import { ringsByImpactLevel } from './model';
 // can't be checked in a browser in this environment).
 const RING_SPACING = 240;
 
+// Bug (found comparing a live render to the reference mockup): angle was
+// (2*PI*i)/count with no per-ring term, so a single-node ring (the common
+// sparse-data case -- one company at a given impact level) always placed
+// its lone node at angle 0 regardless of ringIndex. Every ring's i=0 node
+// then landed on the positive x-axis, so a chain of single-node rings
+// produced a perfectly flat, collinear row (y=0 for every node) instead of
+// a ripple. RING_ANGLE_OFFSET staggers each ring by 30 degrees, keyed off
+// (ringIndex + 1) so the offset is never zero even for ringIndex 0 --
+// guaranteeing a non-zero angle (and therefore non-zero y) for a
+// single-node ring at any ring index, not just the ones this app's real
+// callers happen to use today.
+const RING_ANGLE_OFFSET = Math.PI / 6;
+
 function placeRing(positions: Record<string, { x: number; y: number }>, ids: string[], ringIndex: number) {
   const radius = ringIndex * RING_SPACING;
   const count = ids.length;
+  const ringOffset = ((ringIndex + 1) * RING_ANGLE_OFFSET) % (2 * Math.PI);
   ids.forEach((id, i) => {
-    const angle = (2 * Math.PI * i) / count;
+    const angle = ringOffset + (2 * Math.PI * i) / count;
     positions[id] = { x: radius * Math.cos(angle), y: radius * Math.sin(angle) };
   });
 }
