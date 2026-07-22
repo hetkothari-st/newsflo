@@ -93,3 +93,16 @@ def _no_real_market_move_fetch(monkeypatch):
         )
 
     monkeypatch.setattr("app.pipeline.measure_company_move", fake_measure)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_refinement_call(monkeypatch):
+    # process_new_articles now threads `client` into _persist_alert, which
+    # calls refine_alert (LLM summary/why/timeline generation) whenever a
+    # client is provided -- real in production, but most existing pipeline
+    # tests pass a bare `object()` sentinel as claude_client (no
+    # chat.completions attribute at all), which would raise AttributeError
+    # the instant refine_alert tried to use it. Stub it to a no-op by
+    # default -- tests that DO care about refinement override this via
+    # their own monkeypatch.setattr, which takes precedence.
+    monkeypatch.setattr("app.pipeline.refine_alert", lambda *args, **kwargs: None)

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.cascade import analyze_article
+from app.analysis.refinement import refine_alert
 from app.analysis.schemas import AnalysisOutput, CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
@@ -287,7 +288,7 @@ def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: s
 
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
-    gaps: list[dict] | None = None, edges: list[dict] | None = None,
+    gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -311,15 +312,23 @@ def _persist_alert(
     session.add(alert)
     session.flush()
 
+    alert_companies = []
     for entry in entries:
-        session.add(_build_alert_company(session, alert.id, article, category, entry))
+        alert_company = _build_alert_company(session, alert.id, article, category, entry)
+        session.add(alert_company)
+        alert_companies.append(alert_company)
 
+    market_moves = []
     for entry in entries:
         company_obj = session.get(Company, entry["company_id"])
         if company_obj is not None:
             move = measure_company_move(session, company_obj)
             move.alert_id = alert.id
             session.add(move)
+            market_moves.append(move)
+
+    if client is not None:
+        refine_alert(client, session, alert, article, alert_companies, market_moves)
 
     for gap in (gaps or []):
         session.add(CascadeGap(
@@ -408,7 +417,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "impact_level": ac.impact_level,
                 "parent_company_id": ac.parent_company_id,
             } for ac in reusable_alert.companies]
-            _persist_alert(session, article, reusable_alert.category, entries, event_type=reusable_alert.event_type)
+            _persist_alert(session, article, reusable_alert.category, entries, event_type=reusable_alert.event_type, client=claude_client)
             alerts_created += 1
             continue
 
@@ -434,7 +443,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         resolved = resolve_companies(session, analysis.companies)
         _persist_alert(
             session, article, analysis.category, resolved,
-            event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges,
+            event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges, client=claude_client,
         )
         alerts_created += 1
 

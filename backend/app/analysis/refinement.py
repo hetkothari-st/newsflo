@@ -12,6 +12,7 @@ import json
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
+from app.models import Company, TimelineEffect
 from app.reasoning.compliance import validate_or_none
 
 EVENT_SUMMARY_FRAMING = (
@@ -350,3 +351,47 @@ def generate_timeline_effects(client, title: str, content: str) -> list[dict]:
                 valid.append({"horizon": horizon, "description": text})
 
     return valid
+
+
+def refine_alert(client, session, alert, article, alert_companies: list, market_moves: list) -> None:
+    """Populate the LLM-explanation fields on an already-measured,
+    already-persisted alert: Alert.summary_short/summary_long,
+    AlertCompany.why (only for companies with a real measured excess
+    move), and TimelineEffect rows. Called from app.pipeline._persist_alert
+    once measurement (MarketMove) already exists for this alert's
+    companies -- never before. Never raises: any generation function
+    returning None/empty simply leaves the corresponding field(s) unset,
+    same "omit rather than fabricate" discipline as the rest of this
+    pipeline.
+    """
+    text = article.full_content or article.content
+
+    summary = generate_event_summary(client, article.title, text)
+    if summary:
+        alert.summary_short = summary.get("summary_short")
+        alert.summary_long = summary.get("summary_long")
+
+    moves_by_company_id = {m.company_id: m for m in market_moves}
+    measured = []
+    for ac in alert_companies:
+        move = moves_by_company_id.get(ac.company_id)
+        if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
+            company = session.get(Company, ac.company_id)
+            if company is not None:
+                measured.append({
+                    "ticker": company.ticker, "name": company.name,
+                    "direction": ac.direction, "excess_move_pct": move.excess_move_pct,
+                    "_alert_company": ac,
+                })
+
+    if measured:
+        whys = generate_impact_whys(client, article.title, text, [
+            {k: v for k, v in m.items() if k != "_alert_company"} for m in measured
+        ])
+        for m in measured:
+            why = whys.get(m["ticker"])
+            if why:
+                m["_alert_company"].why = why
+
+    for effect in generate_timeline_effects(client, article.title, text):
+        session.add(TimelineEffect(alert_id=alert.id, horizon=effect["horizon"], description=effect["description"]))
