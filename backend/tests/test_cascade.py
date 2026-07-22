@@ -5,7 +5,7 @@ import pytest
 
 from app.analysis.cascade import (
     analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
-    _identify_companies, _identify_sectors, build_company_tool, build_sector_tool,
+    _identify_companies, _identify_sectors, _sector_mechanism_edges, build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
 from app.reasoning.rulebook import CHAINS
@@ -518,6 +518,12 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
         "record_sectors", "record_sector_companies", "record_sectors",
         "record_edge_verification",
     ]
+    # Both real sectors found across the run (banking primary, railways_transport
+    # L1) get their own news->sector mechanism edge, carrying the actual
+    # per-article reasoning text from the scripted record_sectors responses.
+    mechanism_edges = {e["to"]["label"]: e for e in result.edges if e["from"]["label"] == "news" and e["to"]["kind"] == "sector"}
+    assert mechanism_edges["banking"]["note"] == "FX exposure."
+    assert mechanism_edges["railways_transport"]["note"] == "Import costs rise."
 
 
 def test_analyze_article_propagates_facts_stage_failure():
@@ -633,6 +639,42 @@ def test_generate_edges_no_chain_event_type_produces_only_sector_attachment_edge
 
     assert len(edges) == 1
     assert all(e["source"] == "llm_only" for e in edges)
+
+
+def test_sector_mechanism_edges_carries_the_real_per_sector_mechanism_text():
+    sectors = [
+        SectorFinding(sector="banking", direction="bearish", mechanism="Higher funding costs squeeze NIMs."),
+        SectorFinding(sector="auto", direction="bullish", mechanism="Cheaper credit lifts vehicle financing demand.", parent_sector="banking"),
+    ]
+
+    edges = _sector_mechanism_edges(sectors)
+
+    assert len(edges) == 2
+    by_sector = {e["to"]["label"]: e for e in edges}
+    assert by_sector["banking"]["from"] == {"kind": "news", "label": "news"}
+    assert by_sector["banking"]["to"] == {"kind": "sector", "label": "banking"}
+    assert by_sector["banking"]["note"] == "Higher funding costs squeeze NIMs."
+    assert by_sector["banking"]["direction"] == "bearish"
+    assert by_sector["auto"]["note"] == "Cheaper credit lifts vehicle financing demand."
+
+
+def test_sector_mechanism_edges_deduplicates_a_sector_named_at_multiple_stages():
+    # A sector can legitimately be found both as primary AND later as an L1
+    # ripple target (e.g. of a different primary sector) -- only its FIRST
+    # (most direct) mechanism should end up on the node, not a second one.
+    sectors = [
+        SectorFinding(sector="banking", direction="bearish", mechanism="Primary-stage mechanism."),
+        SectorFinding(sector="banking", direction="bearish", mechanism="L1-stage mechanism.", parent_sector="oil_gas"),
+    ]
+
+    edges = _sector_mechanism_edges(sectors)
+
+    assert len(edges) == 1
+    assert edges[0]["note"] == "Primary-stage mechanism."
+
+
+def test_sector_mechanism_edges_empty_for_no_sectors():
+    assert _sector_mechanism_edges([]) == []
 
 
 def test_generate_edges_llm_only_company_edge_enum_constrained_to_resolved_tickers():

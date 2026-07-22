@@ -696,6 +696,47 @@ def _sector_attachment_edges(companies: list[CompanyMention]) -> list[dict]:
     return edges
 
 
+def _sector_mechanism_edges(sectors: list[SectorFinding]) -> list[dict]:
+    """One edge per distinct sector actually found, from "news" straight to
+    that sector node, carrying the sector's own real one-line `mechanism`
+    text (see build_sector_tool: "One-line explanation of why this sector
+    is affected") as its note -- purely programmatic, reusing text the LLM
+    already generated at whichever cascade stage (primary/L1/L2) first
+    named this sector, not a new call.
+
+    This is the ONLY edge in the graph that carries genuine, per-article,
+    sector-level reasoning. Every other sector-touching edge is either
+    static (CHAINS' hardcoded per-event-type text) or company-specific
+    (_sector_attachment_edges' generic per-company template, and each
+    company's own rationale, which explains that company's OWN exposure,
+    not the sector's). Reported live bug: the frontend's sector-level WHY
+    explanation was reading a single company's rationale and showing it as
+    if it were the sector's own reasoning -- misleading when a sector has
+    several companies with different individual angles. This edge gives it
+    a real sector-level source to read instead.
+
+    Deduplicated by sector (first occurrence wins, i.e. the most direct
+    stage a sector was named at) so a sector reached at multiple cascade
+    stages -- e.g. also as an L1 ripple target after being primary -- gets
+    exactly one mechanism note on its node, not several competing ones.
+    """
+    edges = []
+    seen_sectors: set[str] = set()
+    for finding in sectors:
+        if finding.sector in seen_sectors:
+            continue
+        seen_sectors.add(finding.sector)
+        edges.append({
+            "from": {"kind": "news", "label": "news"},
+            "to": {"kind": NODE_SECTOR, "label": finding.sector},
+            "relation": "correlation",
+            "direction": finding.direction,
+            "note": finding.mechanism,
+            "source": "llm_only",
+        })
+    return edges
+
+
 def _generate_edges(client, facts: str, event_type: str | None, companies: list[CompanyMention]) -> list[dict]:
     """Propose (via CHAINS), verify (via one LLM call, never invents), and
     always attach every company to its sector node. See this plan's Global
@@ -789,6 +830,11 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
 
     all_companies: list = []
     all_gaps: list[dict] = []
+    # Every SectorFinding this article's cascade names, across all stages --
+    # feeds _sector_mechanism_edges below so each sector node's WHY note is
+    # the real, per-article reasoning the LLM already gave for THAT sector,
+    # not a company's own rationale mislabeled as the sector's.
+    all_sectors: list[SectorFinding] = list(primary_sectors)
     if not primary_sectors:
         return AnalysisOutput(
             category=facts_result.category, event_type=facts_result.event_type,
@@ -811,6 +857,7 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         except Exception as exc:
             logger.warning("cascade stage 4 (L1 cascade sectors) failed, truncating: %s", exc)
             l1_sectors = []
+        all_sectors.extend(l1_sectors)
         if l1_sectors:
             l1_companies, l1_gaps = _identify_cascade_companies_per_sector(
                 client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
@@ -828,6 +875,7 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             except Exception as exc:
                 logger.warning("cascade stage 6 (L2 cascade sectors) failed, truncating: %s", exc)
                 l2_sectors = []
+            all_sectors.extend(l2_sectors)
             if l2_sectors:
                 l2_companies, l2_gaps = _identify_cascade_companies_per_sector(
                     client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
@@ -843,6 +891,7 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
     except Exception as exc:
         logger.warning("edge generation failed entirely, returning no edges: %s", exc)
         edges = []
+    edges.extend(_sector_mechanism_edges(all_sectors))
 
     return AnalysisOutput(
         category=facts_result.category, event_type=facts_result.event_type,

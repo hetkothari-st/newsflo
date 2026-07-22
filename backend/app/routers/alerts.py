@@ -53,6 +53,8 @@ def _graph_node_id(node_kind: str, label: str, company_id: int | None) -> str:
         return f"company:{company_id}"
     if node_kind == "sector":
         return f"sector:{label}"
+    if node_kind == "news":
+        return "news"
     return f"mech:{_slugify_mechanism(label)}"
 
 

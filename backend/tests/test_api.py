@@ -797,6 +797,33 @@ def test_build_graph_legacy_alert_with_no_edges_still_has_news_and_company_nodes
     assert any(e["from"] == "news" and e["to"] == f"company:{alert.companies[0].company_id}" for e in graph["edges"])
 
 
+def test_build_graph_news_kind_edge_resolves_to_the_real_news_node_id(db_session):
+    # Regression: _graph_node_id had no case for node_kind == "news" and
+    # fell through to the mechanism branch, producing "mech:news" instead
+    # of the literal "news" id the news node itself is always keyed under
+    # -- a persisted app.analysis.cascade._sector_mechanism_edges row (the
+    # real per-sector WHY reasoning) would have silently failed to connect
+    # to the actual news node.
+    alert = _make_alert_with_companies(db_session, [("HDFCBANK.NS", "HDFC Bank", "banking", "bullish")])
+    db_session.add(ImpactEdge(
+        alert_id=alert.id,
+        from_node_kind="news", from_label="news", from_company_id=None,
+        to_node_kind="sector", to_label="banking", to_company_id=None,
+        relation="correlation", direction="bearish", note="Higher funding costs squeeze NIMs.", source="llm_only",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    graph = _build_graph(alert, held_company_ids=set())
+
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert "news" in node_ids
+    assert "mech:news" not in node_ids
+    assert len([n for n in graph["nodes"] if n["id"] == "news"]) == 1
+    mechanism_edge = next(e for e in graph["edges"] if e["to"] == "sector:banking" and e["from"] == "news")
+    assert mechanism_edge["note"] == "Higher funding costs squeeze NIMs."
+
+
 def test_build_graph_dedupes_sector_node_reached_by_multiple_edges(db_session):
     alert = _make_alert_with_companies(db_session, [
         ("HDFCBANK.NS", "HDFC Bank", "banking", "bullish"),

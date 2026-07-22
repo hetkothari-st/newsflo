@@ -1,4 +1,4 @@
-import type { AlertArticle, AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany, ImpactGraph } from '../../../lib/api';
 import { impactLevelKey } from '../impactLevels';
 import { groupBySector, groupIndirectBySubSector, rankByConfidence, type CompanyGroup, type SubSectorGroup } from '../transforms';
 import ChartCardShell from './ChartCardShell';
@@ -15,12 +15,29 @@ function truncatedRationale(rationale: string): string {
   return `${firstSentence.slice(0, 157)}…`;
 }
 
-function WhyExplanation({ companies }: { companies: AlertCompany[] }) {
+// The real, per-article, sector-level reasoning (backend
+// app.analysis.cascade._sector_mechanism_edges) -- a dedicated news->sector
+// edge whose note is the sector's own "why is this sector affected" text,
+// not any one company's rationale. Reported live bug: this WHY block used
+// to show the highest-confidence COMPANY's own rationale as if it were the
+// sector's explanation, misleading whenever companies in the same sector
+// had different individual angles.
+function sectorMechanism(graph: ImpactGraph | undefined, sectorKey: string | undefined): string | null {
+  if (!graph || !sectorKey) return null;
+  const edge = graph.edges.find((e) => e.from === 'news' && e.to === `sector:${sectorKey}`);
+  return edge?.note ?? null;
+}
+
+function WhyExplanation({ companies, mechanism }: { companies: AlertCompany[]; mechanism: string | null }) {
+  // Fallback to the top company's own rationale only when no sector-level
+  // edge exists at all (shouldn't normally happen -- _build_graph's root-
+  // backfill guarantees a news->sector edge -- but never show a blank WHY).
   const top = rankByConfidence(companies)[0];
+  const text = mechanism ?? truncatedRationale(top.rationale);
   return (
     <div className="flex max-w-md flex-col items-center gap-1 px-2 text-center">
       <span className="font-data text-[10px] uppercase tracking-widest text-muted">Why</span>
-      <p className="font-editorial text-sm text-ink">{truncatedRationale(top.rationale)}</p>
+      <p className="font-editorial text-sm text-ink">{text}</p>
     </div>
   );
 }
@@ -72,14 +89,14 @@ function CompanyNodeRow({
 }
 
 function SectorBlock({
-  sector, selectedId, onToggle,
+  sector, graph, selectedId, onToggle,
 }: {
-  sector: CompanyGroup; selectedId: number | null; onToggle: (id: number) => void;
+  sector: CompanyGroup; graph: ImpactGraph; selectedId: number | null; onToggle: (id: number) => void;
 }) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <GroupHeading level="Level 1 · Direct Impact" label={sector.label} count={sector.companies.length} color={sector.color} />
-      <WhyExplanation companies={sector.companies} />
+      <WhyExplanation companies={sector.companies} mechanism={sectorMechanism(graph, sector.key)} />
       <ElbowConnector />
       <LevelBand label="Level 2 · Companies">
         <CompanyNodeRow companies={sector.companies} selectedId={selectedId} onToggle={onToggle} />
@@ -89,14 +106,18 @@ function SectorBlock({
 }
 
 function SubSectorBlock({
-  subSector, selectedId, onToggle,
+  subSector, graph, selectedId, onToggle,
 }: {
-  subSector: SubSectorGroup; selectedId: number | null; onToggle: (id: number) => void;
+  subSector: SubSectorGroup; graph: ImpactGraph; selectedId: number | null; onToggle: (id: number) => void;
 }) {
+  // A sub-sector (e.g. "NBFC") isn't itself a SectorFinding -- fall back to
+  // its companies' own (shared, in the normal case) parent sector to find
+  // the real mechanism edge for that broader sector.
+  const sectorKey = subSector.companies[0]?.sector;
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <GroupHeading level="Level 3 · Indirect Ripple" label={subSector.label} count={subSector.companies.length} />
-      <WhyExplanation companies={subSector.companies} />
+      <WhyExplanation companies={subSector.companies} mechanism={sectorMechanism(graph, sectorKey)} />
       <ElbowConnector />
       <LevelBand label="Level 4 · Companies">
         <CompanyNodeRow companies={subSector.companies} selectedId={selectedId} onToggle={onToggle} />
@@ -107,11 +128,13 @@ function SubSectorBlock({
 
 export default function ImpactTree({
   companies,
+  graph,
   article,
   alertCreatedAt,
   eventType,
 }: {
   companies: AlertCompany[];
+  graph: ImpactGraph;
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
@@ -136,7 +159,7 @@ export default function ImpactTree({
         ) : (
           <div className="flex w-full flex-col gap-6">
             {sectorGroups.map((sector) => (
-              <SectorBlock key={sector.key} sector={sector} selectedId={selectedId} onToggle={toggle} />
+              <SectorBlock key={sector.key} sector={sector} graph={graph} selectedId={selectedId} onToggle={toggle} />
             ))}
           </div>
         )}
@@ -146,7 +169,7 @@ export default function ImpactTree({
         ) : (
           <div className="flex w-full flex-col gap-6">
             {subSectorGroups.map((subSector) => (
-              <SubSectorBlock key={subSector.key} subSector={subSector} selectedId={selectedId} onToggle={toggle} />
+              <SubSectorBlock key={subSector.key} subSector={subSector} graph={graph} selectedId={selectedId} onToggle={toggle} />
             ))}
           </div>
         )}
