@@ -82,6 +82,48 @@ export function longestChainPath(graph: ImpactGraph): GraphNode[] {
     .filter((n): n is GraphNode => n !== undefined);
 }
 
+export interface ChainTree {
+  direct: GraphNode | null;
+  upstream: GraphNode[];
+  downstream: GraphNode[];
+}
+
+// Supply Chain Graph (#3), columnar layout: Upstream (Suppliers) / Direct
+// Company / Downstream (Customers). `direct` is the company node whose OWN
+// impact_level is "direct" (a real, backend-assigned marker of directly-
+// affected companies -- see app.analysis.schemas), not a path-derived
+// heuristic: reusing longestChainPath's terminal node would make "direct"
+// shift onto whatever company a downstream customer edge happens to reach
+// (the longest path simply extends past it), which is backwards -- the
+// company a customer edge points AWAY FROM is the direct one, not the one
+// it points TO. Falls back to the first company node when none is marked
+// "direct" (a legacy/synthesized graph might not carry impact_level) so
+// this never returns null just because that one field is missing.
+//
+// upstream/downstream are populated ONLY from real "supplier"/"customer"
+// relation edges already in the graph (see backend app.reasoning.rulebook
+// EDGE_RELATIONS) -- never inferred or guessed. Most alerts' cascade edges
+// are mechanism/sector/demand-shaped, not literal supplier/customer links,
+// so an empty upstream or downstream column is the normal, honest case,
+// not a bug (Sparse Data Rule: the column still renders, with a quiet "--").
+export function chainTree(graph: ImpactGraph): ChainTree {
+  const companyNodes = graph.nodes.filter((n) => n.kind === 'company');
+  const direct = companyNodes.find((n) => n.impact_level === 'direct') ?? companyNodes[0] ?? null;
+  if (!direct) return { direct: null, upstream: [], downstream: [] };
+
+  const nodesById = new Map(graph.nodes.map((n) => [n.id, n]));
+  const upstream = graph.edges
+    .filter((e) => e.to === direct.id && e.relation === 'supplier')
+    .map((e) => nodesById.get(e.from))
+    .filter((n): n is GraphNode => n !== undefined && n.kind === 'company');
+  const downstream = graph.edges
+    .filter((e) => e.from === direct.id && e.relation === 'customer')
+    .map((e) => nodesById.get(e.to))
+    .filter((n): n is GraphNode => n !== undefined && n.kind === 'company');
+
+  return { direct, upstream, downstream };
+}
+
 // Economic Chain (#9): mechanism-kind nodes only, in their existing order
 // (the order _build_graph/synthesizeLegacyGraph already inserted them in --
 // insertion order for a dict-backed structure is stable, matching the

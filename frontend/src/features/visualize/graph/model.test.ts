@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGraph, longestChainPath, mechanismBackbone, ringsByImpactLevel } from './model';
+import { buildGraph, chainTree, longestChainPath, mechanismBackbone, ringsByImpactLevel } from './model';
 import type { Alert, AlertCompany, ImpactGraph } from '../../../lib/api';
 
 function alertCompany(overrides: Partial<AlertCompany>): AlertCompany {
@@ -119,6 +119,60 @@ describe('longestChainPath', () => {
     const graph: ImpactGraph = { nodes: [], edges: [], gaps: [] };
 
     expect(longestChainPath(graph)).toEqual([]);
+  });
+});
+
+describe('chainTree', () => {
+  const baseNodes = [
+    { id: 'news', kind: 'news' as const, label: 'x' },
+    { id: 'sector:banking', kind: 'sector' as const, label: 'banking' },
+    { id: 'company:1', kind: 'company' as const, label: 'C1', company_id: 1, ticker: 'C1', impact_level: 'direct' },
+  ];
+  const baseEdges = [
+    { from: 'news', to: 'sector:banking', relation: 'correlation', direction: 'bullish', note: 'n', source: 'llm_only' },
+    { from: 'sector:banking', to: 'company:1', relation: 'demand', direction: 'bullish', note: 'n', source: 'llm_only' },
+  ];
+
+  it('picks the company node whose own impact_level is "direct"', () => {
+    const graph: ImpactGraph = { nodes: baseNodes, edges: baseEdges, gaps: [] };
+    const result = chainTree(graph);
+    expect(result.direct?.id).toBe('company:1');
+  });
+
+  it('renders both upstream and downstream empty when no supplier/customer edges exist', () => {
+    const graph: ImpactGraph = { nodes: baseNodes, edges: baseEdges, gaps: [] };
+    const result = chainTree(graph);
+    expect(result.upstream).toEqual([]);
+    expect(result.downstream).toEqual([]);
+  });
+
+  it('populates upstream from real supplier edges into the direct company', () => {
+    const graph: ImpactGraph = {
+      nodes: [...baseNodes, { id: 'company:2', kind: 'company', label: 'Supplier Co', company_id: 2, ticker: 'SUP' }],
+      edges: [...baseEdges, { from: 'company:2', to: 'company:1', relation: 'supplier', direction: 'bullish', note: 'n', source: 'llm_only' }],
+      gaps: [],
+    };
+    const result = chainTree(graph);
+    expect(result.upstream.map((n) => n.id)).toEqual(['company:2']);
+    expect(result.downstream).toEqual([]);
+  });
+
+  it('populates downstream from real customer edges out of the direct company, without shifting which company is "direct"', () => {
+    const graph: ImpactGraph = {
+      nodes: [...baseNodes, { id: 'company:2', kind: 'company', label: 'Customer Co', company_id: 2, ticker: 'CUST' }],
+      edges: [...baseEdges, { from: 'company:1', to: 'company:2', relation: 'customer', direction: 'bullish', note: 'n', source: 'llm_only' }],
+      gaps: [],
+    };
+    const result = chainTree(graph);
+    expect(result.direct?.id).toBe('company:1');
+    expect(result.downstream.map((n) => n.id)).toEqual(['company:2']);
+    expect(result.upstream).toEqual([]);
+  });
+
+  it('returns a null direct and empty columns when the graph has no company node', () => {
+    const graph: ImpactGraph = { nodes: [{ id: 'news', kind: 'news', label: 'x' }], edges: [], gaps: [] };
+    const result = chainTree(graph);
+    expect(result).toEqual({ direct: null, upstream: [], downstream: [] });
   });
 });
 

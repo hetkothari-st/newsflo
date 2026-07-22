@@ -1,7 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import EconomicChain, { reachableCompanyIds } from './EconomicChain';
-import type { AlertCompany, ImpactGraph } from '../../../lib/api';
+import type { AlertArticle, AlertCompany, ImpactGraph } from '../../../lib/api';
+
+const article: AlertArticle = { id: 1, title: 'RBI increases repo rate by 25 bps to 6.75%', url: 'https://example.com', image_url: null };
+const alertCreatedAt = '2026-07-20T10:30:00Z';
 
 function alertCompany(overrides: Partial<AlertCompany>): AlertCompany {
   return {
@@ -32,19 +35,19 @@ const chainGraph: ImpactGraph = {
 
 describe('EconomicChain', () => {
   it('renders wrapped in ChartCardShell with number 9', () => {
-    render(<EconomicChain graph={chainGraph} companies={[]} />);
+    render(<EconomicChain graph={chainGraph} companies={[]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getByText('9')).toBeInTheDocument();
     expect(screen.getByText('Economic Chain')).toBeInTheDocument();
   });
 
   it('renders every mechanism-kind node vertically', () => {
-    render(<EconomicChain graph={chainGraph} companies={[]} />);
+    render(<EconomicChain graph={chainGraph} companies={[]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getByText('Repo Rate ↓')).toBeInTheDocument();
     expect(screen.getByText('Borrowing Costs ↓')).toBeInTheDocument();
   });
 
   it('never renders sector/company/news nodes', () => {
-    render(<EconomicChain graph={chainGraph} companies={[]} />);
+    render(<EconomicChain graph={chainGraph} companies={[]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.queryByText('Banking')).not.toBeInTheDocument();
     expect(screen.queryByText('HDFCBANK.NS')).not.toBeInTheDocument();
   });
@@ -54,19 +57,30 @@ describe('EconomicChain', () => {
       <EconomicChain
         graph={chainGraph}
         companies={[alertCompany({ company_id: 1, time_horizon: 'Medium-Term' })]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     expect(screen.getAllByText('Medium-Term').length).toBeGreaterThan(0);
   });
 
-  it('renders nothing when the graph has no mechanism nodes', () => {
-    const { container } = render(
+  // This event type genuinely has no rulebook chain (backend
+  // app.reasoning.rulebook.CHAINS only covers 5 event types by design --
+  // confirmed while diagnosing this chart per
+  // CLAUDE_TASK_charts_design_fidelity.md's Phase 5 instructions). The
+  // chart must never silently disappear -- it stays mounted with an
+  // honest note explaining why there's no chain to show.
+  it('shows an honest empty-state note, not nothing, when the graph has no mechanism nodes', () => {
+    render(
       <EconomicChain
         graph={{ nodes: [{ id: 'news', kind: 'news', label: 'x' }], edges: [], gaps: [] }}
         companies={[]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.getByText('No mechanism chain modeled for this event type yet')).toBeInTheDocument();
   });
 });
 

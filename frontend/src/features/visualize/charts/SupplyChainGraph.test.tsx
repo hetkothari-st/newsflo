@@ -3,14 +3,17 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import SupplyChainGraph, { edgeBetween } from './SupplyChainGraph';
-import type { AlertCompany, ImpactGraph } from '../../../lib/api';
+import type { AlertArticle, AlertCompany, ImpactGraph } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+
+const article: AlertArticle = { id: 1, title: 'Repo rate cut announced', url: 'https://example.com', image_url: null };
+const alertCreatedAt = '2026-07-20T10:30:00Z';
 
 function render(graph: ImpactGraph, companies: AlertCompany[] = [], eventType?: string | null) {
   return rtlRender(
     <MemoryRouter>
       <LanguageProvider>
-        <SupplyChainGraph graph={graph} companies={companies} eventType={eventType} />
+        <SupplyChainGraph graph={graph} companies={companies} article={article} alertCreatedAt={alertCreatedAt} eventType={eventType} />
       </LanguageProvider>
     </MemoryRouter>,
   );
@@ -48,30 +51,35 @@ describe('SupplyChainGraph', () => {
     expect(screen.getByText('Supply Chain Graph')).toBeInTheDocument();
   });
 
-  it('renders the longest chain path left-to-right with relation labels on connectors', () => {
+  it('renders the direct company column always, and shows a quiet -- for upstream/downstream with no supplier/customer edges', () => {
     render(chainGraph);
-    expect(screen.getByText('Repo Rate ↓')).toBeInTheDocument();
-    expect(screen.getByText('Banking')).toBeInTheDocument();
+    expect(screen.getByText('HDFC Bank')).toBeInTheDocument();
     expect(screen.getByText('HDFCBANK.NS')).toBeInTheDocument();
-    expect(screen.getByText('credit_cost')).toBeInTheDocument();
-    expect(screen.getByText('demand')).toBeInTheDocument();
+    // No real supplier/customer edges in this fixture -- both side columns
+    // stay visible with an honest empty placeholder (Sparse Data Rule).
+    expect(screen.getAllByText('—')).toHaveLength(2);
   });
 
-  it('renders nothing when the graph has no real path (news node only)', () => {
+  it('populates the Upstream column from a real supplier edge into the direct company', () => {
+    const graphWithSupplier: ImpactGraph = {
+      nodes: [...chainGraph.nodes, { id: 'company:2', kind: 'company', label: 'Supplier Co', company_id: 2, ticker: 'SUP', name: 'Supplier Co' }],
+      edges: [...chainGraph.edges, { from: 'company:2', to: 'company:1', relation: 'supplier', direction: 'bullish', note: 'n3', source: 'llm_only' }],
+      gaps: [],
+    };
+    render(graphWithSupplier);
+    expect(screen.getByText('Supplier Co')).toBeInTheDocument();
+    expect(screen.getByText('SUP')).toBeInTheDocument();
+  });
+
+  it('renders nothing when the graph has no company node at all', () => {
     const { container } = render({ nodes: [{ id: 'news', kind: 'news', label: 'x' }], edges: [], gaps: [] });
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('opens the ReasoningPanel when the terminal company node is tapped', async () => {
+  it('opens the ReasoningPanel when the direct company node is tapped', async () => {
     render(chainGraph, [alertCompany({ company_id: 1, rationale: 'Lower rates lift loan demand.' })]);
     await userEvent.click(screen.getByText('HDFCBANK.NS'));
     expect(screen.getByText(/Lower rates lift loan demand/)).toBeInTheDocument();
-  });
-
-  it('does not make mechanism/sector nodes clickable', () => {
-    render(chainGraph);
-    expect(screen.getByText('Repo Rate ↓').closest('button')).toBeNull();
-    expect(screen.getByText('Banking').closest('button')).toBeNull();
   });
 });
 

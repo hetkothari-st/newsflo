@@ -127,13 +127,13 @@ export default function AlertChartsPage() {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4">
           <ImpactTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <RippleGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
-          <SupplyChainGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
+          <SupplyChainGraph graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <LevelTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <ConfidenceTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <SplitTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <TimelineTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <SectorTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <EconomicChain graph={graph} companies={alert.companies} />
+          <EconomicChain graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} />
           <KnowledgeGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
         </div>
       </div>
