@@ -70,3 +70,71 @@ def test_fetch_price_series_returns_none_on_exception(monkeypatch):
     monkeypatch.setattr(price_series.yf, "Ticker", boom)
 
     assert price_series.fetch_price_series("RELIANCE.NS", period="1mo") is None
+
+
+class FakeTickerWithVolume:
+    def __init__(self, df):
+        self._df = df
+
+    def history(self, period, interval):
+        return self._df
+
+
+def test_fetch_daily_bars_returns_date_close_volume_points(monkeypatch):
+    df = pd.DataFrame(
+        {"Close": [100.0, 105.0], "Volume": [1000.0, 2000.0]},
+        index=pd.to_datetime(["2026-01-01", "2026-01-02"]),
+    )
+    monkeypatch.setattr(price_series.yf, "Ticker", lambda ticker: FakeTickerWithVolume(df))
+
+    result = price_series.fetch_daily_bars("RELIANCE.NS", period="2mo")
+
+    assert result == [
+        {"date": "2026-01-01", "close": 100.0, "volume": 1000.0},
+        {"date": "2026-01-02", "close": 105.0, "volume": 2000.0},
+    ]
+
+
+def test_fetch_daily_bars_drops_nan_close_days(monkeypatch):
+    df = pd.DataFrame(
+        {"Close": [100.0, float("nan")], "Volume": [1000.0, 2000.0]},
+        index=pd.to_datetime(["2026-01-01", "2026-01-02"]),
+    )
+    monkeypatch.setattr(price_series.yf, "Ticker", lambda ticker: FakeTickerWithVolume(df))
+
+    result = price_series.fetch_daily_bars("RELIANCE.NS", period="2mo")
+
+    assert result == [{"date": "2026-01-01", "close": 100.0, "volume": 1000.0}]
+
+
+def test_fetch_daily_bars_treats_nan_volume_as_zero_not_a_dropped_day(monkeypatch):
+    # A close price with no reliable volume that day must still be usable
+    # for excess-move math -- only a bad CLOSE should drop the day.
+    df = pd.DataFrame(
+        {"Close": [100.0, 105.0], "Volume": [1000.0, float("nan")]},
+        index=pd.to_datetime(["2026-01-01", "2026-01-02"]),
+    )
+    monkeypatch.setattr(price_series.yf, "Ticker", lambda ticker: FakeTickerWithVolume(df))
+
+    result = price_series.fetch_daily_bars("RELIANCE.NS", period="2mo")
+
+    assert result == [
+        {"date": "2026-01-01", "close": 100.0, "volume": 1000.0},
+        {"date": "2026-01-02", "close": 105.0, "volume": 0.0},
+    ]
+
+
+def test_fetch_daily_bars_returns_none_for_empty(monkeypatch):
+    df = pd.DataFrame({"Close": [], "Volume": []})
+    monkeypatch.setattr(price_series.yf, "Ticker", lambda ticker: FakeTickerWithVolume(df))
+
+    assert price_series.fetch_daily_bars("RELIANCE.NS", period="2mo") is None
+
+
+def test_fetch_daily_bars_returns_none_on_exception(monkeypatch):
+    def boom(ticker):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(price_series.yf, "Ticker", boom)
+
+    assert price_series.fetch_daily_bars("RELIANCE.NS", period="2mo") is None
