@@ -70,6 +70,47 @@ def test_process_new_articles_populates_summary_and_why_when_measured(db_session
     assert timeline[0].horizon == "TODAY"
 
 
+def test_persist_alert_survives_refine_alert_raising(db_session, monkeypatch):
+    # refine_alert is documented never to raise, but _persist_alert's own
+    # call site must not rely on that -- an unexpected exception there
+    # must degrade to "alert persists without LLM refinement fields",
+    # not crash the whole alert-persistence flow.
+    company = _company()
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+
+    def fake_refine_alert(client, session, alert, article_arg, alert_companies, market_moves):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(pipeline_module, "refine_alert", fake_refine_alert)
+
+    entries = [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 2.0, "magnitude_high": 4.0, "rationale": "r", "basis": "direct_mention",
+        "time_horizon": "Short-Term",
+    }]
+
+    def fake_measure(session, company_obj):
+        from app.models import utcnow
+        return MarketMove(
+            company_id=company_obj.id, benchmark_ticker="^CNXENERGY",
+            excess_move_pct=4.2, measurement_status="ok", measured_at=utcnow(),
+        )
+    monkeypatch.setattr(pipeline_module, "measure_company_move", fake_measure)
+
+    alert = pipeline_module._persist_alert(
+        db_session, article, category="oil_gas", entries=entries, event_type="crude_oil", client=object(),
+    )
+
+    assert alert.id is not None
+    assert alert.summary_short is None
+    assert alert.summary_long is None
+    ac = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    assert ac.why is None
+    move = db_session.query(MarketMove).filter_by(alert_id=alert.id).one()
+    assert move.excess_move_pct == 4.2
+
+
 def test_refine_alert_leaves_why_none_for_a_company_with_no_measured_move(db_session):
     from app.analysis.refinement import refine_alert
     from app.models import utcnow

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import time
 from datetime import timedelta, timezone
 
@@ -25,6 +26,8 @@ from app.reasoning.financial_context import detect_price_contradiction, get_or_f
 from app.reasoning.rulebook import get_rule
 from app.reasoning.versions import KNOWLEDGE_VERSION, PROMPT_VERSION
 from app.ws.manager import manager
+
+logger = logging.getLogger(__name__)
 
 # How far back to look for a reusable analysis of a duplicate/republished
 # story. Bounded so a months-old identical title (a rare coincidence, not a
@@ -328,7 +331,12 @@ def _persist_alert(
             market_moves.append(move)
 
     if client is not None:
-        refine_alert(client, session, alert, article, alert_companies, market_moves)
+        try:
+            refine_alert(client, session, alert, article, alert_companies, market_moves)
+        except Exception:
+            logger.exception(
+                "refine_alert failed for alert_id=%s; persisting without LLM refinement fields", alert.id,
+            )
 
     for gap in (gaps or []):
         session.add(CascadeGap(
