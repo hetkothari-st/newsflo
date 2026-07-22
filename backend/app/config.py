@@ -84,3 +84,35 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# --- Market-impact measurement constants (docs/NEWS_IMPACT_APP_SPEC.md §4) ---
+# Not environment-backed: these are product/algorithm constants tuned via
+# CAR back-validation (spec §4.6, a later phase), not per-deployment
+# secrets -- unlike every Settings field above. Every intensity/verdict/
+# cap-tier function in app/market/ reads its weights and thresholds from
+# here, never hardcodes them (spec §4.2, §10).
+
+# Live-feed intensity weights (spec §4.2) -- must sum to 1.0. The advisory-
+# tier weight profile (adds a fundamental_score term) is out of scope until
+# the FundamentalEstimate/RIA-advisory phase.
+INTENSITY_WEIGHTS_LIVE = {"excess": 0.55, "volume": 0.25, "breadth": 0.20}
+
+# Intensity band thresholds (spec §4.2): >=75 High, 50-74 Moderate, <50 Low.
+INTENSITY_BAND_HIGH = 75
+INTENSITY_BAND_MODERATE = 50
+
+# A move (as % excess) at or above this magnitude is "meaningful" for
+# breadth counting (spec §4.4) -- a linked stock that barely twitched
+# doesn't count as part of the event's spread.
+BREADTH_MEANINGFUL_MOVE_PCT = 1.0
+
+# Verdict threshold (spec §4.3): |excess_move_pct| at or above this ->
+# COMPANY_SPECIFIC, else SECTOR_WIDE (when not UNCONFIRMED). Starting value;
+# retune against CAR outcomes (spec §4.6) once that data exists.
+VERDICT_EXCESS_THRESHOLD_PCT = 2.0
+
+# AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
+# LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live
+# Company.market_cap every call -- never a hardcoded company list.
+AMFI_LARGE_CAP_RANK_CUTOFF = 100
+AMFI_MID_CAP_RANK_CUTOFF = 250
