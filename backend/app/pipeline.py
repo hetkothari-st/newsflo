@@ -14,6 +14,7 @@ from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
+from app.market.measure import measure_company_move
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, utcnow
@@ -312,6 +313,13 @@ def _persist_alert(
 
     for entry in entries:
         session.add(_build_alert_company(session, alert.id, article, category, entry))
+
+    for entry in entries:
+        company_obj = session.get(Company, entry["company_id"])
+        if company_obj is not None:
+            move = measure_company_move(session, company_obj)
+            move.alert_id = alert.id
+            session.add(move)
 
     for gap in (gaps or []):
         session.add(CascadeGap(
