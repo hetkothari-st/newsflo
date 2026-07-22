@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import time
 from datetime import timedelta, timezone
 
@@ -8,12 +9,14 @@ from sqlalchemy.orm import Session
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.cascade import analyze_article
+from app.analysis.refinement import refine_alert
 from app.analysis.schemas import AnalysisOutput, CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
+from app.market.measure import measure_company_move
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, utcnow
@@ -23,6 +26,8 @@ from app.reasoning.financial_context import detect_price_contradiction, get_or_f
 from app.reasoning.rulebook import get_rule
 from app.reasoning.versions import KNOWLEDGE_VERSION, PROMPT_VERSION
 from app.ws.manager import manager
+
+logger = logging.getLogger(__name__)
 
 # How far back to look for a reusable analysis of a duplicate/republished
 # story. Bounded so a months-old identical title (a rare coincidence, not a
@@ -286,7 +291,7 @@ def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: s
 
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
-    gaps: list[dict] | None = None, edges: list[dict] | None = None,
+    gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -310,8 +315,28 @@ def _persist_alert(
     session.add(alert)
     session.flush()
 
+    alert_companies = []
     for entry in entries:
-        session.add(_build_alert_company(session, alert.id, article, category, entry))
+        alert_company = _build_alert_company(session, alert.id, article, category, entry)
+        session.add(alert_company)
+        alert_companies.append(alert_company)
+
+    market_moves = []
+    for entry in entries:
+        company_obj = session.get(Company, entry["company_id"])
+        if company_obj is not None:
+            move = measure_company_move(session, company_obj)
+            move.alert_id = alert.id
+            session.add(move)
+            market_moves.append(move)
+
+    if client is not None:
+        try:
+            refine_alert(client, session, alert, article, alert_companies, market_moves)
+        except Exception:
+            logger.exception(
+                "refine_alert failed for alert_id=%s; persisting without LLM refinement fields", alert.id,
+            )
 
     for gap in (gaps or []):
         session.add(CascadeGap(
@@ -400,7 +425,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "impact_level": ac.impact_level,
                 "parent_company_id": ac.parent_company_id,
             } for ac in reusable_alert.companies]
-            _persist_alert(session, article, reusable_alert.category, entries, event_type=reusable_alert.event_type)
+            _persist_alert(session, article, reusable_alert.category, entries, event_type=reusable_alert.event_type, client=claude_client)
             alerts_created += 1
             continue
 
@@ -426,7 +451,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         resolved = resolve_companies(session, analysis.companies)
         _persist_alert(
             session, article, analysis.category, resolved,
-            event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges,
+            event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges, client=claude_client,
         )
         alerts_created += 1
 

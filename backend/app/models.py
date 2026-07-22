@@ -25,6 +25,12 @@ class Company(Base):
     market_cap = Column(Float, nullable=True)
     isin = Column(String, nullable=True, unique=True)
     instrument_token = Column(Integer, nullable=True)  # Zerodha Kite instrument ID; null until matched
+    # Plain-language "what they do" for the (i) button, plus supply-chain
+    # suppliers/customers (spec §3.1) -- one-time LLM enrichment, see
+    # backend/backfill_business_profiles.py. NULL until enriched.
+    business_desc = Column(Text, nullable=True)
+    supply_chain_suppliers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
+    supply_chain_customers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
 
 
 class CompanyIndexMembership(Base):
@@ -85,6 +91,11 @@ class Alert(Base):
     event_type = Column(String, nullable=True)
     prompt_version = Column(String, nullable=True)
     knowledge_version = Column(String, nullable=True)
+    # LLM-generated, plain-language event summary (spec §5.2) -- populated
+    # post-persist by app.analysis.refinement.refine_alert, never by the
+    # cascade stages that produce per-company rationale/magnitude.
+    summary_short = Column(String, nullable=True)  # <= 12 words, the one-line "why"
+    summary_long = Column(Text, nullable=True)  # 2 sentences, plain language
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -142,6 +153,11 @@ class AlertCompany(Base):
     # economically linked through (a direct company for indirect_l1, an
     # indirect_l1 company for indirect_l2). NULL for impact_level="direct".
     parent_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    # The causal link written AGAINST the already-measured excess_move_pct
+    # (see app.market.measure.MarketMove) -- never a prediction. Populated
+    # only for companies with measurement_status == "ok"; NULL for a
+    # ripple company with no real measured move (never fabricated).
+    why = Column(Text, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
@@ -213,6 +229,54 @@ class CalibrationSample(Base):
     magnitude_actual = Column(Float, nullable=False)  # actual % price move over the horizon
     horizon_days = Column(Integer, nullable=False)  # 1 | 3 | 7
     sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class MarketMove(Base):
+    """One row per (event, ticker) -- the measured facts backing every
+    user-facing number (docs/NEWS_IMPACT_APP_SPEC.md §3.1, §3.2). ``event``
+    here is an Alert row (this codebase's NewsEvent). Arithmetic on
+    observed prices only -- no LLM ever writes to this table. A row always
+    exists once an alert is persisted (one per resolved company), even when
+    measurement failed -- measurement_status='no_data' with null metric
+    columns records that honestly rather than omitting the row.
+    """
+    __tablename__ = "market_moves"
+    __table_args__ = (UniqueConstraint("alert_id", "company_id", name="uq_market_move_alert_company"),)
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    raw_move_pct = Column(Float, nullable=True)
+    sector_move_pct = Column(Float, nullable=True)
+    benchmark_ticker = Column(String, nullable=False)
+    excess_move_pct = Column(Float, nullable=True)
+    volume = Column(Float, nullable=True)
+    avg_volume_20d = Column(Float, nullable=True)
+    volume_multiple = Column(Float, nullable=True)
+    measured_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    measurement_status = Column(String, nullable=False)  # ok | no_data | stale
+
+    alert = relationship("Alert")
+    company = relationship("Company")
+
+
+class TimelineEffect(Base):
+    """One row per (alert, horizon) -- how the event's effect unfolds over
+    time (docs/NEWS_IMPACT_APP_SPEC.md §3.1, §4 Level 3). Only horizons the
+    LLM refinement layer found genuine, distinct content for get a row --
+    zero, one, or several rows per alert, never a fixed five. Populated by
+    app.analysis.refinement.refine_alert, same call as Alert.summary_short/
+    summary_long and AlertCompany.why.
+    """
+    __tablename__ = "timeline_effects"
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    horizon = Column(String, nullable=False)  # TODAY | DAYS | WEEKS | MONTHS | QUARTERS
+    description = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    alert = relationship("Alert")
 
 
 class FinancialSnapshot(Base):

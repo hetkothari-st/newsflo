@@ -73,3 +73,36 @@ def _no_real_financial_snapshot_fetch(monkeypatch):
     # care about financial-context behavior override this via their own
     # monkeypatch.setattr, which takes precedence over this autouse default.
     monkeypatch.setattr("app.pipeline.get_or_fetch_financial_snapshot", lambda session, ticker: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_market_move_fetch(monkeypatch):
+    # process_new_articles now calls measure_company_move for every resolved
+    # company, which would otherwise make real yfinance network calls in
+    # every pipeline test that doesn't care about this feature. Stub it to
+    # a no_data MarketMove by default -- tests that DO care about
+    # measurement behavior (test_measure.py, test_market_move_wiring.py)
+    # override this via their own monkeypatch.setattr, which takes
+    # precedence over this autouse default.
+    from app.models import MarketMove, utcnow
+
+    def fake_measure(session, company):
+        return MarketMove(
+            company_id=company.id, benchmark_ticker="^NSEI",
+            measurement_status="no_data", measured_at=utcnow(),
+        )
+
+    monkeypatch.setattr("app.pipeline.measure_company_move", fake_measure)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_refinement_call(monkeypatch):
+    # process_new_articles now threads `client` into _persist_alert, which
+    # calls refine_alert (LLM summary/why/timeline generation) whenever a
+    # client is provided -- real in production, but most existing pipeline
+    # tests pass a bare `object()` sentinel as claude_client (no
+    # chat.completions attribute at all), which would raise AttributeError
+    # the instant refine_alert tried to use it. Stub it to a no-op by
+    # default -- tests that DO care about refinement override this via
+    # their own monkeypatch.setattr, which takes precedence.
+    monkeypatch.setattr("app.pipeline.refine_alert", lambda *args, **kwargs: None)
