@@ -15,11 +15,20 @@ MODEL = "llama-3.3-70b-versatile"
 # Groq enforces daily token quotas PER MODEL, not per key -- multiple keys on
 # the same org share one quota bucket for a given model (confirmed: 3 keys
 # from the same org all hit the same "org_..." rate-limit error for MODEL at
-# the same time). FALLBACK_MODEL is a smaller model with its own SEPARATE
-# quota bucket, used only when MODEL is rate-limited -- best quality when
-# available, still available (slightly less reliable on strict schema
-# adherence) when the primary model's daily budget is exhausted.
-FALLBACK_MODEL = "llama-3.1-8b-instant"
+# the same time). FALLBACK_MODEL is a different model family (its own
+# SEPARATE quota bucket), used only when MODEL is rate-limited -- best
+# quality when available, still available when the primary model's daily
+# budget is exhausted.
+#
+# Was llama-3.1-8b-instant (8B) -- confirmed live (both in production logs
+# and this app's own reanalysis runs) to fail record_sectors/
+# record_sector_companies' schema constantly: wrong field types, missing
+# required properties, invented enum values. openai/gpt-oss-20b is still a
+# distinct model/quota bucket from MODEL, but OpenAI's gpt-oss family is
+# specifically built for reliable native tool/function calling, a much
+# better fit for this app's strict, deeply-nested tool schemas than a
+# generic small Llama model.
+FALLBACK_MODEL = "openai/gpt-oss-20b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 SYSTEM_PROMPT = (
