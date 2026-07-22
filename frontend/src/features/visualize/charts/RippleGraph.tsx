@@ -1,5 +1,8 @@
-import { useMemo, useState } from 'react';
-import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  Background, Controls, Handle, Position, ReactFlow,
+  type Edge, type Node, type NodeProps, type ReactFlowInstance,
+} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { AlertCompany, GraphNode, ImpactGraph } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
@@ -82,6 +85,19 @@ export default function RippleGraph({
     },
   }));
 
+  // The declarative `fitView` prop computes its transform against the
+  // container's size at React Flow's own mount instant -- on a long page
+  // with several charts above this one (fonts/images/other cards still
+  // settling), that size isn't always final yet, producing a transform
+  // that places every node outside the visible, overflow-hidden pane
+  // (confirmed live: nodes existed in the DOM with correct content, just
+  // positioned off-screen). Deferring the real fitView call to onInit,
+  // inside a requestAnimationFrame, runs it after the browser's layout/
+  // paint has genuinely settled instead.
+  const onInit = useCallback((instance: ReactFlowInstance<Node<FlowNodeData>, Edge>) => {
+    requestAnimationFrame(() => instance.fitView({ padding: 0.2 }));
+  }, []);
+
   if (graph.nodes.length <= 1) return null;
 
   return (
@@ -101,7 +117,7 @@ export default function RippleGraph({
           </button>
         )}
         <div style={{ height: 420 }} className="w-full overflow-hidden rounded-lg border border-hairline">
-          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} fitView minZoom={0.3} maxZoom={1.5}>
+          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.3} maxZoom={1.5}>
             <Background />
             <Controls showInteractive={false} />
           </ReactFlow>

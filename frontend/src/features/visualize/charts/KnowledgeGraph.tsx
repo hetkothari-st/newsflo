@@ -1,5 +1,8 @@
-import { useMemo } from 'react';
-import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { useCallback, useMemo } from 'react';
+import {
+  Background, Controls, Handle, Position, ReactFlow,
+  type Edge, type Node, type NodeProps, type ReactFlowInstance,
+} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { AlertCompany, GraphNode, ImpactGraph } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
@@ -91,6 +94,13 @@ export default function KnowledgeGraph({
     },
   }));
 
+  // Same fitView mount-timing bug as RippleGraph.tsx (#2): the declarative
+  // `fitView` prop measures the container before the page's layout has
+  // settled, placing nodes outside the visible pane. Defer to onInit.
+  const onInit = useCallback((instance: ReactFlowInstance<Node<FlowNodeData>, Edge>) => {
+    requestAnimationFrame(() => instance.fitView({ padding: 0.2 }));
+  }, []);
+
   if (graph.nodes.length <= 1) return null;
 
   const legend = EDGE_RELATIONS.filter((r) => presentRelations.has(r)).map((r) => ({
@@ -106,7 +116,7 @@ export default function KnowledgeGraph({
       legend={legend}
     >
       <div style={{ height: 480 }} className="w-full overflow-hidden rounded-lg border border-hairline">
-        <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={1.5}>
+        <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={onInit} minZoom={0.2} maxZoom={1.5}>
           <Background />
           <Controls showInteractive={false} />
         </ReactFlow>
