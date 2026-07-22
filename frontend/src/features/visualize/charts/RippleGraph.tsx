@@ -106,17 +106,29 @@ export default function RippleGraph({
   const onEdgeMouseEnter = useCallback<EdgeMouseHandler>((_event, edge) => setHoveredEdgeId(edge.id), []);
   const onEdgeMouseLeave = useCallback<EdgeMouseHandler>(() => setHoveredEdgeId(null), []);
 
-  // The declarative `fitView` prop computes its transform against the
-  // container's size at React Flow's own mount instant -- on a long page
-  // with several charts above this one (fonts/images/other cards still
-  // settling), that size isn't always final yet, producing a transform
-  // that places every node outside the visible, overflow-hidden pane
-  // (confirmed live: nodes existed in the DOM with correct content, just
-  // positioned off-screen). Deferring the real fitView call to onInit,
-  // inside a requestAnimationFrame, runs it after the browser's layout/
-  // paint has genuinely settled instead.
+  // `fitView` computes a transform that fits the WHOLE graph's bounding box
+  // into the pane -- but ripplePositions() can lay a multi-ring graph out
+  // very wide (RING_SPACING=240 per ring, up to 4 rings = ~1920px across),
+  // while minZoom=0.55 (kept high so node text stays readable -- see below)
+  // forbids fitView from zooming out far enough to actually fit that width.
+  // fitView then clamps to minZoom and centers on the bounding box's
+  // geometric center regardless -- on a narrow mobile pane, that centered
+  // slice can miss every single node (confirmed live: a fresh mobile load
+  // showed a completely empty canvas, just background dots, even though 7
+  // nodes existed in the DOM with correct positions). This was a genuine
+  // graph-shape bug, not the container-measurement-timing bug the original
+  // onInit+rAF fix (and this comment, before this rewrite) targeted --
+  // re-running the same fitView later via ResizeObserver reproduced the
+  // identical empty crop, proving timing was never the cause here.
+  //
+  // setCenter sidesteps this entirely: it centers ONE known point (the news
+  // node, always at the origin per ripplePositions) at a fixed, always-
+  // readable zoom, instead of trying to fit an unbounded, possibly very
+  // wide bounding box. The news node and its innermost ring are always
+  // visible; outer rings are reached by panning, same as any node-link
+  // diagram wider than its viewport.
   const onInit = useCallback((instance: ReactFlowInstance<Node<FlowNodeData>, Edge>) => {
-    requestAnimationFrame(() => instance.fitView({ padding: 0.2 }));
+    requestAnimationFrame(() => instance.setCenter(0, 0, { zoom: 0.7, duration: 0 }));
   }, []);
 
   if (graph.nodes.length <= 1) return null;

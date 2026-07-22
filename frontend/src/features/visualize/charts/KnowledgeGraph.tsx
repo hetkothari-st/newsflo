@@ -96,11 +96,13 @@ export default function KnowledgeGraph({
     },
   }));
 
-  // Same fitView mount-timing bug as RippleGraph.tsx (#2): the declarative
-  // `fitView` prop measures the container before the page's layout has
-  // settled, placing nodes outside the visible pane. Defer to onInit.
+  // Same fitView-vs-minZoom empty-crop bug as RippleGraph.tsx (#2) -- see
+  // its comment for the full story. forceDirectedPositions applies
+  // forceCenter(0,0) to the whole simulation, so (0,0) is the real
+  // centroid; centering there at a fixed, readable zoom is robust
+  // regardless of how far the simulation spread the outer nodes.
   const onInit = useCallback((instance: ReactFlowInstance<Node<FlowNodeData>, Edge>) => {
-    requestAnimationFrame(() => instance.fitView({ padding: 0.2 }));
+    requestAnimationFrame(() => instance.setCenter(0, 0, { zoom: 0.7, duration: 0 }));
   }, []);
 
   if (graph.nodes.length <= 1) return null;
