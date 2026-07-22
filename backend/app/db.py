@@ -51,6 +51,12 @@ _ADDED_COLUMNS = [
     ("alert_companies", "parent_company_id", "INTEGER"),
     ("articles", "full_content", "TEXT"),
     ("articles", "full_content_fetch_attempted_at", "TIMESTAMP"),
+    ("alerts", "summary_short", "VARCHAR"),
+    ("alerts", "summary_long", "TEXT"),
+    ("alert_companies", "why", "TEXT"),
+    ("companies", "business_desc", "TEXT"),
+    ("companies", "supply_chain_suppliers_json", "TEXT"),
+    ("companies", "supply_chain_customers_json", "TEXT"),
 ]
 
 
