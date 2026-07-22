@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from app.analysis.refinement import generate_event_summary
+from app.analysis.refinement import generate_event_summary, generate_impact_whys
 
 
 class FakeToolCall:
@@ -125,3 +125,66 @@ def test_generate_event_summary_returns_none_on_malformed_json_arguments():
             return SimpleNamespace(completions=self._Completions())
 
     assert generate_event_summary(MalformedJsonClient(), "t", "c") is None
+
+
+def _measured_companies():
+    return [
+        {"ticker": "RELIANCE.NS", "name": "Reliance Industries", "direction": "bullish", "excess_move_pct": 3.2},
+        {"ticker": "ONGC.NS", "name": "ONGC", "direction": "bearish", "excess_move_pct": -1.1},
+    ]
+
+
+def test_generate_impact_whys_returns_valid_texts_per_ticker():
+    client = QueuedFakeClient([
+        ("record_impact_whys", {"whys": [
+            {"ticker": "RELIANCE.NS", "why": "Higher crude prices lift refining margins for this company."},
+            {"ticker": "ONGC.NS", "why": "A weaker rupee raises this importer's input costs."},
+        ]}),
+    ])
+    result = generate_impact_whys(client, "t", "c", _measured_companies())
+    assert result["RELIANCE.NS"] == "Higher crude prices lift refining margins for this company."
+    assert result["ONGC.NS"] == "A weaker rupee raises this importer's input costs."
+    assert client.calls == 1
+
+
+def test_generate_impact_whys_retries_only_the_rejected_tickers():
+    client = QueuedFakeClient([
+        ("record_impact_whys", {"whys": [
+            {"ticker": "RELIANCE.NS", "why": "Expect ~5% upside from refining margins."},  # rejected
+            {"ticker": "ONGC.NS", "why": "A weaker rupee raises this importer's input costs."},  # valid
+        ]}),
+        ("record_impact_whys", {"whys": [
+            {"ticker": "RELIANCE.NS", "why": "Higher crude prices lift refining margins for this company."},
+        ]}),
+    ])
+    result = generate_impact_whys(client, "t", "c", _measured_companies())
+    assert result["RELIANCE.NS"] == "Higher crude prices lift refining margins for this company."
+    assert result["ONGC.NS"] == "A weaker rupee raises this importer's input costs."
+    assert client.calls == 2
+
+
+def test_generate_impact_whys_drops_ticker_still_invalid_after_retry():
+    client = QueuedFakeClient([
+        ("record_impact_whys", {"whys": [
+            {"ticker": "RELIANCE.NS", "why": "Buy this stock, expect 5% upside."},
+        ]}),
+        ("record_impact_whys", {"whys": [
+            {"ticker": "RELIANCE.NS", "why": "Sell before the 5% drop."},
+        ]}),
+    ])
+    result = generate_impact_whys(client, "t", "c", [_measured_companies()[0]])
+    assert "RELIANCE.NS" not in result
+    assert client.calls == 2
+
+
+def test_generate_impact_whys_ticker_the_model_never_answers_is_not_retried():
+    client = QueuedFakeClient([
+        ("record_impact_whys", {"whys": []}),  # model answered nothing
+    ])
+    result = generate_impact_whys(client, "t", "c", [_measured_companies()[0]])
+    assert result == {}
+    assert client.calls == 1  # no retry -- ticker was never produced, not rejected
+
+
+def test_generate_impact_whys_returns_empty_dict_for_no_companies():
+    assert generate_impact_whys(QueuedFakeClient([]), "t", "c", []) == {}

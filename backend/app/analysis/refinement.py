@@ -106,3 +106,133 @@ def generate_event_summary(client, title: str, content: str) -> dict | None:
     if summary_short is None and summary_long is None:
         return None
     return {"summary_short": summary_short, "summary_long": summary_long}
+
+
+IMPACT_WHY_FRAMING = (
+    "Each company below already has a MEASURED market reaction to this "
+    "news -- a real, observed price move relative to its sector, already "
+    "computed from market data. Your job is ONLY to explain, in one "
+    "plain-language sentence per company, the causal mechanism: why this "
+    "specific news would move this specific company in that direction. "
+    "You are explaining an observed fact, not predicting one -- never "
+    "restate, estimate, or imply any percentage, price, or magnitude in "
+    "your explanation; the number itself is already measured and shown "
+    "separately. Never use buy/sell/hold, rating, or price-target "
+    "language. If you cannot state a genuine, specific mechanism for a "
+    "company, omit it rather than writing a vague sentence."
+)
+
+
+def build_impact_why_tool(tickers: list[str]) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "record_impact_whys",
+            "description": "Explain, in plain language, why each company's already-measured market reaction happened.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "whys": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ticker": {"type": "string", "enum": tickers},
+                                "why": {"type": "string"},
+                            },
+                            "required": ["ticker", "why"],
+                        },
+                    },
+                },
+                "required": ["whys"],
+            },
+        },
+    }
+
+
+def _call_impact_why_tool(client, title: str, content: str, companies: list[dict]) -> dict[str, str]:
+    """Returns {ticker: why} parsed from the tool call, or {} on any
+    failure -- a malformed/truncated JSON response, an exhausted
+    RateLimitError fallback, a missing tool-call, or any other client
+    error all degrade to {} rather than raising, same "never crash the
+    alert" discipline as app.market.measure.measure_company_move. The
+    entire attempt (both model attempts, response parsing, and
+    json.loads) is wrapped in one outer try/except so nothing here can
+    ever propagate."""
+    tickers = [c["ticker"] for c in companies]
+    company_lines = "\n".join(
+        f"- {c['ticker']} ({c['name']}): moved {c['direction']}, a "
+        f"{'sharp' if abs(c['excess_move_pct']) >= 3 else 'modest'} reaction "
+        "relative to its sector (do not restate any number in your answer)"
+        for c in companies
+    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": f"{IMPACT_WHY_FRAMING}\n\nArticle: {title}\n\n{content}\n\nCompanies:\n{company_lines}",
+        },
+    ]
+    tool = build_impact_why_tool(tickers)
+
+    def _call(model: str):
+        return client.chat.completions.create(
+            model=model, max_tokens=2048, tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_impact_whys"}},
+            messages=messages,
+        )
+
+    try:
+        try:
+            response = _call(MODEL)
+        except RateLimitError:
+            response = _call(FALLBACK_MODEL)
+        message = response.choices[0].message
+        tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_impact_whys"), None)
+        if tool_call is None:
+            return {}
+        arguments = json.loads(tool_call.function.arguments)
+        return {
+            entry["ticker"]: entry["why"] for entry in arguments.get("whys", [])
+            if entry.get("ticker") and entry.get("why") is not None
+        }
+    except Exception:
+        return {}
+
+
+def generate_impact_whys(client, title: str, content: str, companies: list[dict]) -> dict[str, str]:
+    """companies: [{"ticker", "name", "direction", "excess_move_pct"}, ...]
+    -- only companies with a real measured excess_move_pct
+    (measurement_status == "ok") should ever be passed in; this function
+    never invents a why for a company with no measured move. Returns
+    {ticker: why} -- a ticker the model never answered is not retried
+    (same "omit rather than mismatch" discipline as
+    app.companies.sub_sectors.classify_batch); a ticker the model DID
+    answer but whose text fails validation gets one batched retry
+    covering every such ticker, then is dropped if still invalid. Never
+    raises -- see _call_impact_why_tool."""
+    if not companies:
+        return {}
+    tickers = [c["ticker"] for c in companies]
+    first = _call_impact_why_tool(client, title, content, companies)
+
+    result: dict[str, str] = {}
+    retry_tickers = []
+    for ticker in tickers:
+        if ticker not in first:
+            continue  # model never answered -- not retried, simply absent
+        text = validate_or_none(first[ticker])
+        if text is not None:
+            result[ticker] = text
+        else:
+            retry_tickers.append(ticker)
+
+    if retry_tickers:
+        retry_companies = [c for c in companies if c["ticker"] in retry_tickers]
+        retry = _call_impact_why_tool(client, title, content, retry_companies)
+        for ticker in retry_tickers:
+            text = validate_or_none(retry.get(ticker))
+            if text is not None:
+                result[ticker] = text
+
+    return result
