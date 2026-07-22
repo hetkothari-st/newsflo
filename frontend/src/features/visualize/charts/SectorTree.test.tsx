@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import SectorTree from './SectorTree';
-import type { AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+
+const article: AlertArticle = { id: 1, title: 'Crude oil prices surge above $90 on Middle East tensions', url: 'https://example.com', image_url: null };
+const alertCreatedAt = '2026-07-20T10:30:00Z';
 
 function render(ui: ReactElement) {
   return rtlRender(
@@ -27,7 +30,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 
 describe('SectorTree', () => {
   it('renders wrapped in ChartCardShell with number 8 and title Sector Tree', () => {
-    render(<SectorTree companies={[company({})]} />);
+    render(<SectorTree companies={[company({})]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getByText('8')).toBeInTheDocument();
     expect(screen.getByText('Sector Tree')).toBeInTheDocument();
   });
@@ -39,6 +42,8 @@ describe('SectorTree', () => {
           company({ company_id: 1, sector: 'oil_gas', ticker: 'RIL' }),
           company({ company_id: 2, sector: 'banking', ticker: 'HDFCBANK', direction: 'bearish' }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     expect(screen.getByText('Oil & Gas')).toBeInTheDocument();
@@ -48,20 +53,20 @@ describe('SectorTree', () => {
   });
 
   it('collapses a sector branch on tap, hiding its companies', async () => {
-    render(<SectorTree companies={[company({ company_id: 1, sector: 'oil_gas', ticker: 'RIL' })]} />);
+    render(<SectorTree companies={[company({ company_id: 1, sector: 'oil_gas', ticker: 'RIL' })]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getByText('RIL')).toBeInTheDocument();
     await userEvent.click(screen.getByText('Oil & Gas'));
     expect(screen.queryByText('RIL')).not.toBeInTheDocument();
   });
 
   it('expands a ReasoningPanel when a company is tapped', async () => {
-    render(<SectorTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} />);
+    render(<SectorTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} article={article} alertCreatedAt={alertCreatedAt} />);
     await userEvent.click(screen.getByText('AAA'));
     expect(screen.getByText(/Refiner margins widen/)).toBeInTheDocument();
   });
 
   it('renders nothing for an empty company list', () => {
-    const { container } = render(<SectorTree companies={[]} />);
+    const { container } = render(<SectorTree companies={[]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -72,6 +77,8 @@ describe('SectorTree', () => {
           company({ company_id: 1, sector: 'banking', sub_sector: 'private_bank', ticker: 'HDFCBANK' }),
           company({ company_id: 2, sector: 'banking', sub_sector: 'psu_bank', ticker: 'SBIN' }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     expect(screen.getByText('Private Bank')).toBeInTheDocument();
@@ -85,6 +92,8 @@ describe('SectorTree', () => {
           company({ company_id: 1, sector: 'banking', sub_sector: null, ticker: 'HDFCBANK' }),
           company({ company_id: 2, sector: 'banking', sub_sector: null, ticker: 'SBIN' }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     expect(screen.queryByText('Unclassified')).not.toBeInTheDocument();
@@ -99,6 +108,8 @@ describe('SectorTree', () => {
           company({ company_id: 1, sector: 'banking', sub_sector: 'private_bank', ticker: 'HDFCBANK' }),
           company({ company_id: 2, sector: 'banking', sub_sector: null, ticker: 'SBIN' }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     expect(screen.getByText('Private Bank')).toBeInTheDocument();

@@ -130,9 +130,9 @@ export default function AlertChartsPage() {
           <SupplyChainGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
           <LevelTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <ConfidenceTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <SplitTree companies={alert.companies} eventType={alert.event_type} />
-          <TimelineTree companies={alert.companies} eventType={alert.event_type} />
-          <SectorTree companies={alert.companies} eventType={alert.event_type} />
+          <SplitTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
+          <TimelineTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
+          <SectorTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
           <EconomicChain graph={graph} companies={alert.companies} />
           <KnowledgeGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
         </div>

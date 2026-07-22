@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import SplitTree from './SplitTree';
-import type { AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+
+const article: AlertArticle = { id: 1, title: 'Government announces subsidies for EV manufacturing', url: 'https://example.com', image_url: null };
+const alertCreatedAt = '2026-07-20T10:30:00Z';
 
 function render(ui: ReactElement) {
   return rtlRender(
@@ -27,7 +30,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 
 describe('SplitTree', () => {
   it('renders wrapped in ChartCardShell with number 6 and title Positive / Negative Split', () => {
-    render(<SplitTree companies={[company({})]} />);
+    render(<SplitTree companies={[company({})]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getByText('6')).toBeInTheDocument();
     expect(screen.getByText('Positive / Negative Split')).toBeInTheDocument();
   });
@@ -40,6 +43,8 @@ describe('SplitTree', () => {
           company({ company_id: 2, direction: 'bullish', ticker: 'BBB' }),
           company({ company_id: 3, direction: 'bearish', ticker: 'CCC' }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     // "Positive Impact" and "Negative Impact" appear twice (column header + legend), so use getAllByText
@@ -50,12 +55,16 @@ describe('SplitTree', () => {
     expect(screen.getByText('CCC')).toBeInTheDocument();
   });
 
-  it('omits the Negative Impact column entirely when every company is bullish', () => {
-    render(<SplitTree companies={[company({ company_id: 1, direction: 'bullish' })]} />);
-    // Positive Impact appears in both column header and legend
+  // Sparse Data Rule (see CLAUDE_TASK_charts_design_fidelity.md): "Panel
+  // charts still show both panels even if one is empty" -- a column
+  // silently disappearing when one side has zero companies looks broken,
+  // not deliberate. Both panels always render; the empty one shows a
+  // quiet "--" instead of a company list.
+  it('still renders the Negative Impact column, with an honest empty state, when every company is bullish', () => {
+    render(<SplitTree companies={[company({ company_id: 1, direction: 'bullish' })]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getAllByText('Positive Impact')).toHaveLength(2);
-    // Negative Impact only appears in legend, not as a column header
-    expect(screen.getAllByText('Negative Impact')).toHaveLength(1);
+    expect(screen.getAllByText('Negative Impact')).toHaveLength(2);
+    expect(screen.getByText('—')).toBeInTheDocument();
   });
 
   it('ranks companies within each column by magnitude descending', () => {
@@ -65,6 +74,8 @@ describe('SplitTree', () => {
           company({ company_id: 1, ticker: 'WEAK_BULL', direction: 'bullish', magnitude_low: 1, magnitude_high: 2 }),
           company({ company_id: 2, ticker: 'STRONG_BULL', direction: 'bullish', magnitude_low: 20, magnitude_high: 30 }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     const items = screen.getAllByRole('button').map((el) => el.textContent || '');
@@ -74,13 +85,13 @@ describe('SplitTree', () => {
   });
 
   it('expands a ReasoningPanel when a company is tapped', async () => {
-    render(<SplitTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} />);
+    render(<SplitTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} article={article} alertCreatedAt={alertCreatedAt} />);
     await userEvent.click(screen.getByText('AAA'));
     expect(screen.getByText(/Refiner margins widen/)).toBeInTheDocument();
   });
 
   it('renders nothing for an empty company list', () => {
-    const { container } = render(<SplitTree companies={[]} />);
+    const { container } = render(<SplitTree companies={[]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

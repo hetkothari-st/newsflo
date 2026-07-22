@@ -1,16 +1,21 @@
-import type { AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { groupBySectorAndSubSector } from '../transforms';
 import ChartCardShell from './ChartCardShell';
 import ImpactCard from './cards/ImpactCard';
 import CompanyRow from './cards/CompanyRow';
+import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
 
 export default function SectorTree({
   companies,
+  article,
+  alertCreatedAt,
   eventType,
 }: {
   companies: AlertCompany[];
+  article: AlertArticle;
+  alertCreatedAt: string;
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
@@ -19,9 +24,10 @@ export default function SectorTree({
   if (sectors.length === 0) return null;
 
   return (
-    <ChartCardShell number={8} title="Sector Tree" description="Impact organized by sectors and sub-sectors">
-      <div className="flex flex-col gap-4 p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <ChartCardShell number={8} title="Sector Tree" description="Impact organized by sectors and sub-sectors" accentColor="#557C30">
+      <div className="flex flex-col items-center gap-4">
+        <NewsHeaderBlock article={article} alertCreatedAt={alertCreatedAt} />
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {sectors.map((sector) => (
             <ImpactCard
               key={sector.key}

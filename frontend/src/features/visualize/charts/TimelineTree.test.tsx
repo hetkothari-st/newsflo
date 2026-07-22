@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import TimelineTree from './TimelineTree';
-import type { AlertCompany } from '../../../lib/api';
+import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import { LanguageProvider } from '../../../lib/language';
+
+const article: AlertArticle = { id: 1, title: 'Fed signals potential rate cuts starting in Q3 2024', url: 'https://example.com', image_url: null };
+const alertCreatedAt = '2026-07-20T10:30:00Z';
 
 function render(ui: ReactElement) {
   return rtlRender(
@@ -27,7 +30,7 @@ function company(overrides: Partial<AlertCompany>): AlertCompany {
 
 describe('TimelineTree', () => {
   it('renders wrapped in ChartCardShell with number 7 and title Timeline Tree', () => {
-    render(<TimelineTree companies={[company({})]} />);
+    render(<TimelineTree companies={[company({})]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(screen.getByText('7')).toBeInTheDocument();
     expect(screen.getByText('Timeline Tree')).toBeInTheDocument();
   });
@@ -39,6 +42,8 @@ describe('TimelineTree', () => {
           company({ company_id: 1, ticker: 'LONG', time_horizon: 'Long-Term' }),
           company({ company_id: 2, ticker: 'NOW', time_horizon: 'Immediate' }),
         ]}
+        article={article}
+        alertCreatedAt={alertCreatedAt}
       />,
     );
     const labels = screen.getAllByText(/Immediate|Long-Term/).map((el) => el.textContent || '');
@@ -51,13 +56,13 @@ describe('TimelineTree', () => {
   });
 
   it('expands a ReasoningPanel when a company is tapped', async () => {
-    render(<TimelineTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} />);
+    render(<TimelineTree companies={[company({ company_id: 1, rationale: 'Refiner margins widen on lower crude.' })]} article={article} alertCreatedAt={alertCreatedAt} />);
     await userEvent.click(screen.getByText('AAA'));
     expect(screen.getByText(/Refiner margins widen/)).toBeInTheDocument();
   });
 
   it('renders nothing for an empty company list', () => {
-    const { container } = render(<TimelineTree companies={[]} />);
+    const { container } = render(<TimelineTree companies={[]} article={article} alertCreatedAt={alertCreatedAt} />);
     expect(container).toBeEmptyDOMElement();
   });
 });
