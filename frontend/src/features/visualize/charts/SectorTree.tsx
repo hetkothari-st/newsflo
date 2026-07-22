@@ -3,7 +3,7 @@ import ReasoningPanel from '../../../components/ReasoningPanel';
 import { groupBySectorAndSubSector } from '../transforms';
 import ChartCardShell from './ChartCardShell';
 import ImpactCard from './cards/ImpactCard';
-import CompanyRow from './cards/CompanyRow';
+import CompanyNode from './primitives/CompanyNode';
 import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
 
@@ -36,18 +36,44 @@ export default function SectorTree({
               signal={sector.netSignal}
               companyCount={sector.companies.length}
             >
-              {sector.subSectorGroups.length <= 1
-                ? sector.companies.map((c) => (
-                    <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
-                  ))
-                : sector.subSectorGroups.map((sub) => (
-                    <div key={sub.key} className="flex flex-col gap-0.5">
-                      <p className="px-2 pt-1.5 text-[11px] uppercase tracking-widest text-muted">{sub.label}</p>
+              {sector.subSectorGroups.length <= 1 ? (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {sector.companies.map((c) => (
+                    <CompanyNode
+                      key={c.company_id}
+                      name={c.name}
+                      ticker={c.ticker}
+                      direction={c.direction}
+                      magnitudeLow={c.magnitude_low}
+                      magnitudeHigh={c.magnitude_high}
+                      inMyHoldings={c.in_my_holdings}
+                      selected={selectedId === c.company_id}
+                      onClick={() => toggle(c.company_id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                sector.subSectorGroups.map((sub) => (
+                  <div key={sub.key} className="flex flex-col gap-1">
+                    <p className="px-2 pt-1.5 text-[11px] uppercase tracking-widest text-muted">{sub.label}</p>
+                    <div className="flex flex-wrap gap-2">
                       {sub.companies.map((c) => (
-                        <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
+                        <CompanyNode
+                          key={c.company_id}
+                          name={c.name}
+                          ticker={c.ticker}
+                          direction={c.direction}
+                          magnitudeLow={c.magnitude_low}
+                          magnitudeHigh={c.magnitude_high}
+                          inMyHoldings={c.in_my_holdings}
+                          selected={selectedId === c.company_id}
+                          onClick={() => toggle(c.company_id)}
+                        />
                       ))}
                     </div>
-                  ))}
+                  </div>
+                ))
+              )}
             </ImpactCard>
           ))}
         </div>

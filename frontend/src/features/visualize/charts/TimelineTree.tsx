@@ -2,7 +2,7 @@ import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { groupByTimeHorizon } from '../transforms';
 import ChartCardShell from './ChartCardShell';
-import CompanyRow from './cards/CompanyRow';
+import CompanyNode from './primitives/CompanyNode';
 import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
 
@@ -67,9 +67,19 @@ export default function TimelineTree({
               <div className="flex-1 pb-4">
                 <p className="text-xs uppercase tracking-widest text-ink">{group.label}</p>
                 <p className="mt-0.5 text-xs text-muted">{HORIZON_CAPTION[group.key] ?? ''}</p>
-                <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                <div className="mt-2 flex flex-wrap gap-2">
                   {group.companies.map((c) => (
-                    <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => toggle(c.company_id)} />
+                    <CompanyNode
+                      key={c.company_id}
+                      name={c.name}
+                      ticker={c.ticker}
+                      direction={c.direction}
+                      magnitudeLow={c.magnitude_low}
+                      magnitudeHigh={c.magnitude_high}
+                      inMyHoldings={c.in_my_holdings}
+                      selected={selectedId === c.company_id}
+                      onClick={() => toggle(c.company_id)}
+                    />
                   ))}
                 </div>
               </div>

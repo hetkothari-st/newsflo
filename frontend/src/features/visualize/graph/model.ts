@@ -1,4 +1,4 @@
-import type { Alert, GraphEdge, GraphNode, ImpactGraph } from '../../../lib/api';
+import type { Alert, AlertCompany, GraphEdge, GraphNode, ImpactGraph } from '../../../lib/api';
 
 function synthesizeLegacyGraph(alert: Alert): ImpactGraph {
   const nodes: GraphNode[] = [{ id: 'news', kind: 'news', label: alert.article.title }];
@@ -100,26 +100,47 @@ export interface ChainTree {
 // "direct" (a legacy/synthesized graph might not carry impact_level) so
 // this never returns null just because that one field is missing.
 //
-// upstream/downstream are populated ONLY from real "supplier"/"customer"
-// relation edges already in the graph (see backend app.reasoning.rulebook
-// EDGE_RELATIONS) -- never inferred or guessed. Most alerts' cascade edges
-// are mechanism/sector/demand-shaped, not literal supplier/customer links,
-// so an empty upstream or downstream column is the normal, honest case,
-// not a bug (Sparse Data Rule: the column still renders, with a quiet "--").
-export function chainTree(graph: ImpactGraph): ChainTree {
+// upstream is populated ONLY from real "supplier" relation edges (see
+// backend app.reasoning.rulebook EDGE_RELATIONS) -- never inferred. Nothing
+// in this app's data model represents a company genuinely upstream of the
+// direct company except that specific edge relation, so an empty upstream
+// column is the normal, honest case for most alerts, not a bug.
+//
+// downstream first tries the same real "customer" edges; when there are
+// none (the common case -- explicit customer edges are rare), it falls
+// back to the real cascade chain instead: `companies` (AlertCompany[],
+// carries parent_company_id -- GraphNode does not) already records which
+// companies the model chained AS A RIPPLE FROM the direct company
+// (indirect_l1/l2, parent_company_id === direct's company_id). That IS a
+// real downstream effect of the direct company, not a fabrication -- it
+// was empty far more often than not before this fallback existed (live
+// feedback: "upstream downstream has - values" on almost every alert).
+export function chainTree(graph: ImpactGraph, companies: AlertCompany[] = []): ChainTree {
   const companyNodes = graph.nodes.filter((n) => n.kind === 'company');
   const direct = companyNodes.find((n) => n.impact_level === 'direct') ?? companyNodes[0] ?? null;
   if (!direct) return { direct: null, upstream: [], downstream: [] };
 
   const nodesById = new Map(graph.nodes.map((n) => [n.id, n]));
+  const nodeByCompanyId = new Map(
+    companyNodes.filter((n) => n.company_id != null).map((n) => [n.company_id as number, n]),
+  );
+
   const upstream = graph.edges
     .filter((e) => e.to === direct.id && e.relation === 'supplier')
     .map((e) => nodesById.get(e.from))
     .filter((n): n is GraphNode => n !== undefined && n.kind === 'company');
-  const downstream = graph.edges
+
+  const customerEdgeDownstream = graph.edges
     .filter((e) => e.from === direct.id && e.relation === 'customer')
     .map((e) => nodesById.get(e.to))
     .filter((n): n is GraphNode => n !== undefined && n.kind === 'company');
+
+  const downstream = customerEdgeDownstream.length > 0
+    ? customerEdgeDownstream
+    : companies
+        .filter((c) => c.parent_company_id === direct.company_id)
+        .map((c) => nodeByCompanyId.get(c.company_id))
+        .filter((n): n is GraphNode => n !== undefined);
 
   return { direct, upstream, downstream };
 }

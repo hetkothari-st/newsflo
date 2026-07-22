@@ -174,6 +174,58 @@ describe('chainTree', () => {
     const result = chainTree(graph);
     expect(result).toEqual({ direct: null, upstream: [], downstream: [] });
   });
+
+  // Real customer/supplier edges are rare (most cascade edges are
+  // mechanism/sector/demand-shaped) -- live feedback was that upstream and
+  // downstream showed "--" on nearly every alert. The cascade's own
+  // parent_company_id chain (AlertCompany, not present on GraphNode) is
+  // real ripple-from-the-direct-company data and populates downstream far
+  // more often, without fabricating anything.
+  it('falls back to the real cascade parent chain for downstream when there are no customer edges', () => {
+    const graph: ImpactGraph = {
+      nodes: [...baseNodes, { id: 'company:2', kind: 'company', label: 'Indirect Co', company_id: 2, ticker: 'IND', impact_level: 'indirect_l1' }],
+      edges: baseEdges,
+      gaps: [],
+    };
+    const companies = [
+      alertCompany({ company_id: 1, ticker: 'C1', impact_level: 'direct', parent_company_id: null }),
+      alertCompany({ company_id: 2, ticker: 'IND', impact_level: 'indirect_l1', parent_company_id: 1 }),
+    ];
+    const result = chainTree(graph, companies);
+    expect(result.downstream.map((n) => n.id)).toEqual(['company:2']);
+  });
+
+  it('prefers a real customer edge over the cascade parent-chain fallback when both exist', () => {
+    const graph: ImpactGraph = {
+      nodes: [
+        ...baseNodes,
+        { id: 'company:2', kind: 'company', label: 'Customer Co', company_id: 2, ticker: 'CUST' },
+        { id: 'company:3', kind: 'company', label: 'Cascade Co', company_id: 3, ticker: 'CASC', impact_level: 'indirect_l1' },
+      ],
+      edges: [...baseEdges, { from: 'company:1', to: 'company:2', relation: 'customer', direction: 'bullish', note: 'n', source: 'llm_only' }],
+      gaps: [],
+    };
+    const companies = [
+      alertCompany({ company_id: 1, ticker: 'C1', impact_level: 'direct', parent_company_id: null }),
+      alertCompany({ company_id: 3, ticker: 'CASC', impact_level: 'indirect_l1', parent_company_id: 1 }),
+    ];
+    const result = chainTree(graph, companies);
+    expect(result.downstream.map((n) => n.id)).toEqual(['company:2']);
+  });
+
+  it('does not use the fallback for a company chained from a DIFFERENT parent', () => {
+    const graph: ImpactGraph = {
+      nodes: [...baseNodes, { id: 'company:2', kind: 'company', label: 'Unrelated Co', company_id: 2, ticker: 'UNR', impact_level: 'indirect_l1' }],
+      edges: baseEdges,
+      gaps: [],
+    };
+    const companies = [
+      alertCompany({ company_id: 1, ticker: 'C1', impact_level: 'direct', parent_company_id: null }),
+      alertCompany({ company_id: 2, ticker: 'UNR', impact_level: 'indirect_l1', parent_company_id: 99 }),
+    ];
+    const result = chainTree(graph, companies);
+    expect(result.downstream).toEqual([]);
+  });
 });
 
 describe('mechanismBackbone', () => {

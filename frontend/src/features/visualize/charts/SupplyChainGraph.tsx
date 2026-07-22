@@ -74,7 +74,7 @@ export default function SupplyChainGraph({
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
-  const { direct, upstream, downstream } = chainTree(graph);
+  const { direct, upstream, downstream } = chainTree(graph, companies);
 
   if (direct === null) return null;
 

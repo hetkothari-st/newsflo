@@ -2,7 +2,7 @@ import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { rankByMagnitude } from '../transforms';
 import ChartCardShell from './ChartCardShell';
-import CompanyRow from './cards/CompanyRow';
+import CompanyNode from './primitives/CompanyNode';
 import NewsHeaderBlock from './primitives/NewsHeaderBlock';
 import { useCompanySelection } from './useCompanySelection';
 
@@ -30,12 +30,22 @@ function SplitColumn({
         <p className="font-data text-xs uppercase tracking-widest" style={{ color: `rgb(var(${colorVar}))` }}>{title}</p>
         <span className="font-data text-xs text-muted">{companies.length}</span>
       </div>
-      <div className="flex flex-col gap-1 px-3.5 pb-3.5">
+      <div className="flex flex-wrap gap-2 px-3.5 pb-3.5">
         {companies.length === 0 ? (
           <p className="px-2 py-1 font-data text-xs text-muted">—</p>
         ) : (
           companies.map((c) => (
-            <CompanyRow key={c.company_id} company={c} selected={selectedId === c.company_id} onClick={() => onSelect(c.company_id)} />
+            <CompanyNode
+              key={c.company_id}
+              name={c.name}
+              ticker={c.ticker}
+              direction={c.direction}
+              magnitudeLow={c.magnitude_low}
+              magnitudeHigh={c.magnitude_high}
+              inMyHoldings={c.in_my_holdings}
+              selected={selectedId === c.company_id}
+              onClick={() => onSelect(c.company_id)}
+            />
           ))
         )}
       </div>

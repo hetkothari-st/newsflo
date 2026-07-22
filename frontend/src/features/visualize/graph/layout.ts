@@ -2,11 +2,13 @@ import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } 
 import type { ImpactGraph } from '../../../lib/api';
 import { ringsByImpactLevel } from './model';
 
-// Each GraphNodeChip is a fixed w-40 (160px) wide tile -- ring spacing
-// must clear that width with real margin, or chips on adjacent rings can
-// visually overlap (a real risk flagged by review, since this layout
-// can't be checked in a browser in this environment).
-const RING_SPACING = 240;
+// CompanyNode (the current shared tile) is 120px wide -- ring spacing only
+// needs to clear that with real margin, not the old 160px GraphNodeChip
+// this was originally sized for. 240 left rings so far apart that most of
+// the graph needed panning/zooming just to see it (real user feedback,
+// live) -- 150 keeps rings clearly separated without spreading the graph
+// far past what the pane shows by default.
+const RING_SPACING = 150;
 
 // Bug (found comparing a live render to the reference mockup): angle was
 // (2*PI*i)/count with no per-ring term, so a single-node ring (the common
