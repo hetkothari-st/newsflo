@@ -18,6 +18,9 @@ export default {
         intensityHigh: 'rgb(var(--color-intensity-high) / <alpha-value>)',
         intensityModerate: 'rgb(var(--color-intensity-moderate) / <alpha-value>)',
         intensityLow: 'rgb(var(--color-intensity-low) / <alpha-value>)',
+        capLarge: 'rgb(var(--color-cap-large) / <alpha-value>)',
+        capMid: 'rgb(var(--color-cap-mid) / <alpha-value>)',
+        capSmall: 'rgb(var(--color-cap-small) / <alpha-value>)',
         // Keyed by the fixed category taxonomy (backend/app/analysis/schemas.py
         // CATEGORIES) -- category identity, unchanged across themes.
         swatch: {

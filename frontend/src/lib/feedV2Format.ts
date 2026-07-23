@@ -1,4 +1,4 @@
-import type { RippleRelationship, Verdict } from './feedV2Api';
+import type { CapTier, RippleRelationship, Verdict } from './feedV2Api';
 
 export function formatExcess(pct: number): { arrow: string; text: string } {
   const arrow = pct >= 0 ? '▲' : '▼';
@@ -33,4 +33,10 @@ export function intensityBandColorClass(band: 'High' | 'Moderate' | 'Low'): stri
   if (band === 'High') return 'bg-intensityHigh';
   if (band === 'Moderate') return 'bg-intensityModerate';
   return 'bg-intensityLow';
+}
+
+export function capTierColorClass(tier: CapTier): string {
+  if (tier === 'LARGE') return 'bg-capLarge/15 text-capLarge';
+  if (tier === 'MID') return 'bg-capMid/15 text-capMid';
+  return 'bg-capSmall/15 text-capSmall';
 }
