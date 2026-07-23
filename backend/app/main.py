@@ -28,8 +28,8 @@ from app.models import Company
 from app.prices.kite_ws_client import run_hub_client
 from app.prices.live_price import LIVE_PRICE_CACHE
 from app.routers import (
-    alerts, articles, auth, calendar, categories, companies, feed_v2, holdings, stock_deep_dive, translation,
-    watchlist, ws,
+    alerts, articles, auth, calendar, car_review, categories, companies, feed_v2, holdings, stock_deep_dive,
+    translation, watchlist, ws,
 )
 from app.scheduler import start_scheduler
 from app.ws.manager import manager
@@ -43,6 +43,7 @@ app.include_router(alerts.router)
 # otherwise intercept stock_deep_dive's single-segment "/directory" route
 # (Starlette matches routes in registration order, not by specificity).
 app.include_router(stock_deep_dive.router)
+app.include_router(car_review.router)
 app.include_router(feed_v2.router)
 app.include_router(calendar.router)
 app.include_router(auth.router)
