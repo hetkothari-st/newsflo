@@ -16,5 +16,9 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    // Playwright's e2e specs (frontend/e2e/**) declare their own `test()`
+    // via @playwright/test, not vitest -- collecting them here throws
+    // ("Playwright Test did not expect test() to be called here").
+    exclude: ['**/node_modules/**', '**/e2e/**'],
   },
 });

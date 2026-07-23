@@ -2,3 +2,6 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+.superpowers-screenshots/
+test-results/
+playwright-report/
