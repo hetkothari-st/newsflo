@@ -29,4 +29,19 @@ for (const theme of THEMES) {
       fullPage: true,
     });
   });
+
+  test(`feed-v2 intensity breakdown (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    const intensityTarget = page.getByTestId('intensity-tap-target').first();
+    await intensityTarget.waitFor({ timeout: 10_000 });
+    await intensityTarget.click();
+    await page.waitForTimeout(300);
+    await page.screenshot({
+      path: `.superpowers-screenshots/feed-v2-intensity-breakdown-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
 }
