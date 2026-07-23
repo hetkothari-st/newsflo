@@ -23,6 +23,9 @@
   --color-bearish: 255 69 58;
   --color-accent: 242 242 242;      /* = ink: any accent-colored element looks identical to today */
   --color-accent-secondary: 142 142 147; /* = muted */
+  --color-intensity-high: 248 113 113;
+  --color-intensity-moderate: 251 191 36;
+  --color-intensity-low: 74 222 128;
 }
 
 .light {
@@ -36,6 +39,9 @@
   --color-bearish: 255 69 58;
   --color-accent: 99 91 255;
   --color-accent-secondary: 45 212 191;
+  --color-intensity-high: 220 38 38;
+  --color-intensity-moderate: 217 119 6;
+  --color-intensity-low: 22 163 74;
 }
 
 body {

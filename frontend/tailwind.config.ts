@@ -15,6 +15,9 @@ export default {
         bearish: 'rgb(var(--color-bearish) / <alpha-value>)',
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         'accent-secondary': 'rgb(var(--color-accent-secondary) / <alpha-value>)',
+        intensityHigh: 'rgb(var(--color-intensity-high) / <alpha-value>)',
+        intensityModerate: 'rgb(var(--color-intensity-moderate) / <alpha-value>)',
+        intensityLow: 'rgb(var(--color-intensity-low) / <alpha-value>)',
         // Keyed by the fixed category taxonomy (backend/app/analysis/schemas.py
         // CATEGORIES) -- category identity, unchanged across themes.
         swatch: {
