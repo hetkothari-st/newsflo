@@ -13,6 +13,7 @@ import FeedV2Page from './pages/FeedV2Page';
 import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import StockDeepDivePage from './pages/StockDeepDivePage';
 import { useAuth } from './lib/auth';
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -30,6 +31,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<FeedPage />} />
         <Route path="/feed-v2" element={<FeedV2Page />} />
+        <Route path="/feed-v2/stock/:ticker" element={<StockDeepDivePage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
         <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
         <Route path="/alerts/:id/company/:companyId" element={<AlertCompanyAnalysisPage />} />
