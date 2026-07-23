@@ -88,6 +88,20 @@ for (const theme of THEMES) {
     // for the "What they do" section, which always renders once real data
     // arrives (with or without alert context), before screenshotting.
     await page.waitForSelector('text=What they do', { timeout: 10_000 });
+    // BottomNav (`fixed inset-x-0 bottom-0`, mobile only) is app-wide chrome,
+    // not specific to this page -- but this is the first PLAIN routed page
+    // (not a modal) tall enough on mobile to exceed one viewport, so a
+    // fullPage screenshot composites the fixed nav bar on top of whatever
+    // content sits at that scroll offset (here: the market-cap/P-E row),
+    // the same class of position:fixed-vs-fullPage issue already fixed for
+    // the Level 1 modal above. Hide it for this capture only -- it's real
+    // app chrome a live user always sees pinned to their own viewport
+    // bottom, never permanently over one fixed slice of page content the
+    // way a flattened screenshot renders it.
+    await page.evaluate(() => {
+      const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
+      if (bottomNav) bottomNav.style.display = 'none';
+    });
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-with-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
