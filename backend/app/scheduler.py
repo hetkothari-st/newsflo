@@ -22,6 +22,7 @@ from app.ingestion.finnhub import fetch_new_finnhub_articles
 # to revert.
 # from app.ingestion.poller import fetch_new_articles
 # from app.ingestion.sources import RSS_FEEDS
+from app.outcomes.car import check_pending_car_outcomes
 from app.outcomes.tracker import check_pending_outcomes
 from app.pipeline import process_new_articles
 from app.translation.groq_translator import (
@@ -55,6 +56,21 @@ def _run_horizon(horizon_days: int) -> None:
         check_pending_outcomes(session, horizon_days)
     except Exception:
         logger.exception("Outcome tracker run failed for horizon_days=%s", horizon_days)
+    finally:
+        session.close()
+
+
+def _run_car_review() -> None:
+    """Open a fresh session, run the CAR outcome check, and always close
+    the session. Any error is logged, never raised, so one failing run
+    does not crash the scheduler thread -- same contract as
+    _run_horizon."""
+    session = SessionLocal()
+    try:
+        created = check_pending_car_outcomes(session)
+        logger.info("CAR review cycle: %s outcomes recorded", created)
+    except Exception:
+        logger.exception("CAR review run failed")
     finally:
         session.close()
 
@@ -166,6 +182,12 @@ def start_scheduler() -> None:
             args=[horizon],
             id=f"outcome_tracker_{horizon}d",
         )
+    scheduler.add_job(
+        _run_car_review,
+        trigger="interval",
+        minutes=60,
+        id="car_review",
+    )
     # IndianAPI job disabled -- see the import comment above. Restore this
     # block (and re-enable _run_indianapi_ingestion) to revert.
     # scheduler.add_job(
