@@ -1,4 +1,4 @@
-import type { Verdict } from './feedV2Api';
+import type { RippleRelationship, Verdict } from './feedV2Api';
 
 export function formatExcess(pct: number): { arrow: string; text: string } {
   const arrow = pct >= 0 ? '▲' : '▼';
@@ -14,6 +14,19 @@ const VERDICT_LABELS: Record<Verdict, string> = {
 
 export function verdictLabel(verdict: Verdict): string {
   return VERDICT_LABELS[verdict];
+}
+
+const RELATIONSHIP_LABELS: Record<RippleRelationship, string> = {
+  BENEFICIARY: 'Beneficiary',
+  CUSTOMER_INPUT_COST: 'Customer / input cost',
+  SUPPLIER: 'Supplier',
+  SUBSTITUTE: 'Substitute',
+  COMPETITOR: 'Competitor',
+  SECTOR_WIDE: 'Sector wide',
+};
+
+export function relationshipLabel(relationship: RippleRelationship): string {
+  return RELATIONSHIP_LABELS[relationship];
 }
 
 export function intensityBandColorClass(band: 'High' | 'Moderate' | 'Low'): string {

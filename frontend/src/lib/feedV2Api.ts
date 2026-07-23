@@ -21,6 +21,32 @@ export interface Intensity {
 
 export type Verdict = 'COMPANY_SPECIFIC' | 'SECTOR_WIDE' | 'UNCONFIRMED';
 
+export type RippleRelationship =
+  | 'BENEFICIARY'
+  | 'CUSTOMER_INPUT_COST'
+  | 'SUPPLIER'
+  | 'SUBSTITUTE'
+  | 'COMPETITOR'
+  | 'SECTOR_WIDE';
+
+export interface RippleCompany {
+  ticker: string;
+  name: string;
+  relationship: RippleRelationship;
+  direction: 'bullish' | 'bearish';
+  excess_move_pct: number | null;
+  intensity: Intensity | null;
+  is_exposure_only: boolean;
+  in_my_holdings: boolean;
+}
+
+export type TimelineHorizon = 'TODAY' | 'DAYS' | 'WEEKS' | 'MONTHS' | 'QUARTERS';
+
+export interface TimelineEntry {
+  horizon: TimelineHorizon;
+  description: string;
+}
+
 export interface FeedV2Alert {
   id: number;
   category: string;
@@ -41,6 +67,8 @@ export interface FeedV2Alert {
   intensity: Intensity;
   breadth_score: number;
   in_my_holdings: boolean;
+  ripple?: RippleCompany[];
+  timeline?: TimelineEntry[];
 }
 
 function authHeaders(token: string | null): Record<string, string> {
