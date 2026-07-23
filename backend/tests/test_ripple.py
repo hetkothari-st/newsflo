@@ -2,6 +2,38 @@ from app.market.ripple import compute_ripple_companies, get_sector_peers_for_ale
 from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, MarketMove, utcnow
 
 
+def test_ripple_rows_include_cap_tier_and_business_desc(db_session):
+    peak = _company("PEAK.NS")
+    beneficiary = Company(
+        ticker="BEN.NS", name="Beneficiary Co", sector="oil_gas", index_tier="NIFTY50",
+        market_cap=5000.0, business_desc="Makes beneficiary things.",
+    )
+    db_session.add_all([peak, beneficiary])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=beneficiary.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=2.0, sector_move_pct=0.3, excess_move_pct=1.7,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    assert result[0]["business_desc"] == "Makes beneficiary things."
+    assert result[0]["cap_tier"] in ("LARGE", "MID", "SMALL", None)
+
+
 def _company(ticker, sector="oil_gas"):
     return Company(ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier="NIFTY50")
 
@@ -290,7 +322,7 @@ def test_sector_peers_row_shape_matches_ripple_row_shape(db_session):
 
     assert set(result[0].keys()) == {
         "ticker", "name", "direction", "excess_move_pct", "intensity",
-        "is_exposure_only", "in_my_holdings",
+        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc",
     }
 
 
@@ -367,6 +399,6 @@ def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "relationship", "direction", "excess_move_pct",
-        "intensity", "is_exposure_only", "in_my_holdings",
+        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc",
     }
     assert result[0]["relationship"] == "BENEFICIARY"
