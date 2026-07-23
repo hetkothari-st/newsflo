@@ -6,8 +6,8 @@ def _company(ticker, sector="oil_gas"):
     return Company(ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier="NIFTY50")
 
 
-def _article(db_session):
-    article = Article(source="test", url="https://example.com/a", title="t", content="c")
+def _article(db_session, url_suffix="a"):
+    article = Article(source="test", url=f"https://example.com/{url_suffix}", title="t", content="c")
     db_session.add(article)
     db_session.commit()
     return article
@@ -147,3 +147,48 @@ def test_fallback_benchmark_sector_is_flagged(db_session):
     result = compute_alert_measurement(db_session, alert)
 
     assert result["is_fallback_benchmark"] is True
+
+
+def test_intensity_peer_group_spans_same_sector_alerts_today(db_session):
+    """Two DIFFERENT alerts, same sector, one measured company each. Before
+    the fix, each alert's peer group was only its own moves -- a lone
+    company is trivially the max of a group containing only itself, so
+    both would degenerate to the same maxed-out excess_score regardless of
+    real magnitude. After the fix, the peer group spans every measured
+    company in the sector across today's alerts, so the small move and the
+    large move are compared against each other and score differently."""
+    small_co = _company("SMALLMOVE.NS", sector="metals")
+    big_co = _company("BIGMOVE.NS", sector="metals")
+    db_session.add_all([small_co, big_co])
+    db_session.commit()
+
+    small_article = _article(db_session, url_suffix="small-move")
+    small_alert = Alert(article_id=small_article.id, category="metals")
+    db_session.add(small_alert)
+    db_session.flush()
+    db_session.add(_alert_company(small_alert.id, small_co.id))
+    db_session.add(MarketMove(
+        alert_id=small_alert.id, company_id=small_co.id, benchmark_ticker="^CNXMETAL",
+        raw_move_pct=0.4, sector_move_pct=0.2, excess_move_pct=0.2,
+        volume=110.0, avg_volume_20d=100.0, volume_multiple=1.1,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    big_article = _article(db_session, url_suffix="big-move")
+    big_alert = Alert(article_id=big_article.id, category="metals")
+    db_session.add(big_alert)
+    db_session.flush()
+    db_session.add(_alert_company(big_alert.id, big_co.id))
+    db_session.add(MarketMove(
+        alert_id=big_alert.id, company_id=big_co.id, benchmark_ticker="^CNXMETAL",
+        raw_move_pct=-8.0, sector_move_pct=-0.5, excess_move_pct=-7.5,
+        volume=400.0, avg_volume_20d=100.0, volume_multiple=4.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    small_result = compute_alert_measurement(db_session, small_alert)
+    big_result = compute_alert_measurement(db_session, big_alert)
+
+    assert small_result["intensity"]["score"] < big_result["intensity"]["score"]

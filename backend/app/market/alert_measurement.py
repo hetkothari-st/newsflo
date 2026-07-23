@@ -6,11 +6,36 @@ app.routers.feed_v2 only.
 """
 from sqlalchemy.orm import Session
 
+from app.ist_time import day_utc_window, today_ist
 from app.market.breadth import compute_breadth_score
 from app.market.intensity import compute_intensity
 from app.market.sector_indices import is_fallback_benchmark
 from app.market.verdict import compute_verdict
-from app.models import Alert, MarketMove
+from app.models import Alert, Company, MarketMove
+
+
+def _sector_peer_moves(session: Session, sector: str) -> list[MarketMove]:
+    """Every measured (status='ok') MarketMove today for companies in the
+    given sector, across ALL of today's alerts -- not just one event. This
+    is the real comparison population for intensity's within-sector
+    normalization (spec §4.2): a single-company event's own excess move is
+    trivially the max of a group containing only itself, so a peer group
+    must reach beyond one event to be a meaningful comparison, or every
+    single-company alert scores 100/High regardless of real magnitude.
+    """
+    start_utc, end_utc = day_utc_window(today_ist())
+    return (
+        session.query(MarketMove)
+        .join(Company, MarketMove.company_id == Company.id)
+        .join(Alert, MarketMove.alert_id == Alert.id)
+        .filter(
+            Company.sector == sector,
+            MarketMove.measurement_status == "ok",
+            Alert.created_at >= start_utc,
+            Alert.created_at < end_utc,
+        )
+        .all()
+    )
 
 
 def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
@@ -27,7 +52,12 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     ({"score","band","components"}), breadth_score (int).
 
     "Peak" is whichever measured company has the largest |excess_move_pct|
-    -- the event's own headline reaction. is_unconfirmed is hardcoded False
+    -- the event's own headline reaction. breadth_score is event-scoped
+    (spec §4.4: how widely THIS event rippled). Intensity's excess/volume
+    peer groups are SECTOR-scoped across today's alerts (see
+    _sector_peer_moves) -- deliberately wider than the event, so a
+    single-company event's peak doesn't trivially normalize to 100 against
+    a peer group containing only itself. is_unconfirmed is hardcoded False
     (the rumor/denial LLM classifier is a later phase) -- verdict can only
     resolve to COMPANY_SPECIFIC/SECTOR_WIDE until then.
     """
@@ -41,20 +71,24 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
 
     peak = max(moves, key=lambda m: abs(m.excess_move_pct))
     excess_values = [m.excess_move_pct for m in moves]
-    volume_values = [m.volume_multiple for m in moves if m.volume_multiple is not None]
     breadth_score = compute_breadth_score(excess_values)
-
-    intensity = compute_intensity(
-        excess_move_pct=peak.excess_move_pct,
-        excess_peer_group=excess_values,
-        volume_multiple=peak.volume_multiple or 0.0,
-        volume_peer_group=volume_values or [peak.volume_multiple or 0.0],
-        breadth_score=breadth_score,
-    )
-    verdict = compute_verdict(is_unconfirmed=False, excess_move_pct=peak.excess_move_pct)
 
     peak_alert_company = next(ac for ac in alert.companies if ac.company_id == peak.company_id)
     peak_company = peak_alert_company.company
+
+    sector_moves = _sector_peer_moves(session, peak_company.sector)
+    excess_peer_group = [m.excess_move_pct for m in sector_moves] or [peak.excess_move_pct]
+    sector_volume_values = [m.volume_multiple for m in sector_moves if m.volume_multiple is not None]
+    volume_peer_group = sector_volume_values or [peak.volume_multiple or 0.0]
+
+    intensity = compute_intensity(
+        excess_move_pct=peak.excess_move_pct,
+        excess_peer_group=excess_peer_group,
+        volume_multiple=peak.volume_multiple or 0.0,
+        volume_peer_group=volume_peer_group,
+        breadth_score=breadth_score,
+    )
+    verdict = compute_verdict(is_unconfirmed=False, excess_move_pct=peak.excess_move_pct)
 
     return {
         "excess_move_pct": peak.excess_move_pct,

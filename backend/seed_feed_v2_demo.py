@@ -38,6 +38,17 @@ DEMO_ROWS = [
         "Cotton export duty cut announced", "Export duty cut helps textile makers",
         "Lower export duty directly raises this company's overseas margins.", "bullish",
     ),
+    (
+        # Same sector as RELIANCE.NS but a much smaller excess move -- proves
+        # the intensity peer group is genuinely cross-alert/sector-scoped
+        # (see app.market.alert_measurement._sector_peer_moves): before the
+        # fix both oil_gas rows would trivially score intensity.band "High"
+        # since each was "the max of a group containing only itself".
+        "ONGC.NS", "Oil and Natural Gas Corporation", "oil_gas", "^CNXENERGY",
+        -0.5, -0.2, -0.3, 1.0,
+        "Minor pullback in upstream oil stocks", "Small dip alongside broader energy sector",
+        "This move is modest and largely tracks the sector, not a company-specific shock.", "bearish",
+    ),
 ]
 
 
