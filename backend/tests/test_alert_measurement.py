@@ -156,7 +156,22 @@ def test_intensity_peer_group_spans_same_sector_alerts_today(db_session):
     both would degenerate to the same maxed-out excess_score regardless of
     real magnitude. After the fix, the peer group spans every measured
     company in the sector across today's alerts, so the small move and the
-    large move are compared against each other and score differently."""
+    large move are compared against each other and score differently.
+
+    Reviewer-caught confound fix: both alerts' excess_move_pct (2.0 and
+    -7.5) are kept on the SAME side of config.BREADTH_MEANINGFUL_MOVE_PCT
+    (1.0), i.e. both |excess_move_pct| >= 1.0. breadth_score is
+    event-scoped and untouched by this fix, but with the original values
+    (0.2 vs -7.5) it straddled the threshold and produced 0 vs 100 on its
+    own -- enough by itself to make small_score < big_score true even
+    under the OLD, buggy same-event-only peer group (where both alerts'
+    excess/volume sub-scores degenerately maxed to 100, so the assertion
+    was actually being carried entirely by breadth, not by the peer-group
+    fix). Pinning both magnitudes above the threshold makes breadth_score
+    100 for both alerts under old and new code alike, so the only thing
+    that can make small_score < big_score is the excess/volume
+    normalization against the sector-wide peer group -- i.e. the fix
+    itself."""
     small_co = _company("SMALLMOVE.NS", sector="metals")
     big_co = _company("BIGMOVE.NS", sector="metals")
     db_session.add_all([small_co, big_co])
@@ -169,7 +184,7 @@ def test_intensity_peer_group_spans_same_sector_alerts_today(db_session):
     db_session.add(_alert_company(small_alert.id, small_co.id))
     db_session.add(MarketMove(
         alert_id=small_alert.id, company_id=small_co.id, benchmark_ticker="^CNXMETAL",
-        raw_move_pct=0.4, sector_move_pct=0.2, excess_move_pct=0.2,
+        raw_move_pct=2.3, sector_move_pct=0.3, excess_move_pct=2.0,
         volume=110.0, avg_volume_20d=100.0, volume_multiple=1.1,
         measurement_status="ok", measured_at=utcnow(),
     ))
