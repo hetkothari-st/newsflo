@@ -1,4 +1,4 @@
-from app.market.ripple import compute_ripple_companies
+from app.market.ripple import compute_ripple_companies, get_sector_peers_for_alert
 from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, MarketMove, utcnow
 
 
@@ -235,3 +235,138 @@ def test_in_my_holdings_reflects_held_company_ids(db_session):
     )
 
     assert result[0]["in_my_holdings"] is True
+
+
+def test_sector_peers_excludes_self_and_other_sectors(db_session):
+    target = _company("TARGET.NS", sector="oil_gas")
+    same_sector = _company("PEER.NS", sector="oil_gas")
+    other_sector = _company("OTHER.NS", sector="it")
+    db_session.add_all([target, same_sector, other_sector])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    for c in (target, same_sector, other_sector):
+        db_session.add(_alert_company(alert.id, c.id))
+    for c, excess in ((target, -3.0), (same_sector, 1.5), (other_sector, 2.0)):
+        db_session.add(MarketMove(
+            alert_id=alert.id, company_id=c.id, benchmark_ticker="^CNXENERGY",
+            raw_move_pct=excess, sector_move_pct=0.0, excess_move_pct=excess,
+            measurement_status="ok", measured_at=utcnow(),
+        ))
+    db_session.commit()
+
+    result = get_sector_peers_for_alert(db_session, alert, target, held_company_ids=set())
+
+    tickers = {r["ticker"] for r in result}
+    assert tickers == {"PEER.NS"}
+
+
+def test_sector_peers_row_shape_matches_ripple_row_shape(db_session):
+    target = _company("TARGET.NS", sector="oil_gas")
+    peer = _company("PEER.NS", sector="oil_gas")
+    db_session.add_all([target, peer])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, target.id))
+    db_session.add(_alert_company(alert.id, peer.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=target.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-3.0, sector_move_pct=0.0, excess_move_pct=-3.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peer.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.5, sector_move_pct=0.0, excess_move_pct=1.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = get_sector_peers_for_alert(db_session, alert, target, held_company_ids=set())
+
+    assert set(result[0].keys()) == {
+        "ticker", "name", "direction", "excess_move_pct", "intensity",
+        "is_exposure_only", "in_my_holdings",
+    }
+
+
+def test_sector_peers_sorted_by_intensity_exposure_only_last(db_session):
+    target = _company("TARGET.NS", sector="oil_gas")
+    small = _company("SMALL.NS", sector="oil_gas")
+    big = _company("BIG.NS", sector="oil_gas")
+    unmeasured = _company("UNMEASURED.NS", sector="oil_gas")
+    db_session.add_all([target, small, big, unmeasured])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    for c in (target, small, big, unmeasured):
+        db_session.add(_alert_company(alert.id, c.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=target.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-3.0, sector_move_pct=0.0, excess_move_pct=-3.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=small.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=0.2, sector_move_pct=0.0, excess_move_pct=0.2,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=big.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=2.7, sector_move_pct=0.0, excess_move_pct=2.7,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=unmeasured.id, benchmark_ticker="^CNXENERGY",
+        measurement_status="no_data", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = get_sector_peers_for_alert(db_session, alert, target, held_company_ids=set())
+
+    tickers_in_order = [r["ticker"] for r in result]
+    assert tickers_in_order[-1] == "UNMEASURED.NS"
+    assert tickers_in_order.index("BIG.NS") < tickers_in_order.index("SMALL.NS")
+
+
+def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_session):
+    """Regression guard for the Task 2 refactor: compute_ripple_companies'
+    PUBLIC return shape (with 'relationship') must be byte-for-byte
+    unchanged even though its internals now delegate to the shared
+    _alert_company_rows helper."""
+    peak = _company("PEAK.NS")
+    beneficiary = _company("BEN.NS")
+    db_session.add_all([peak, beneficiary])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=beneficiary.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=2.0, sector_move_pct=0.3, excess_move_pct=1.7,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(_edge(alert.id, peak.id, beneficiary.id, relation="commodity", direction="bullish"))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    assert set(result[0].keys()) == {
+        "ticker", "name", "sector", "relationship", "direction", "excess_move_pct",
+        "intensity", "is_exposure_only", "in_my_holdings",
+    }
+    assert result[0]["relationship"] == "BENEFICIARY"
