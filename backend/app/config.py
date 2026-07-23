@@ -111,6 +111,10 @@ BREADTH_MEANINGFUL_MOVE_PCT = 1.0
 # retune against CAR outcomes (spec §4.6) once that data exists.
 VERDICT_EXCESS_THRESHOLD_PCT = 2.0
 
+# CAR (Cumulative Abnormal Return, spec §4.6) review thresholds.
+CAR_FLAT_THRESHOLD_PCT = 0.5  # |car_pct| below this counts as FLAT (neither held nor reversed)
+CAR_SUMMARY_SAMPLE_THRESHOLD = 5  # matches calibration/track_record.py's WIN_RATE_SAMPLE_THRESHOLD convention
+
 # AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
 # LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live
 # Company.market_cap every call -- never a hardcoded company list.

@@ -231,6 +231,31 @@ class CalibrationSample(Base):
     sampled_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class CarOutcome(Base):
+    """Cumulative Abnormal Return outcome (docs/NEWS_IMPACT_APP_SPEC.md
+    §4.6) -- one row per (alert, company), written exactly once by
+    app.outcomes.car.check_pending_car_outcomes once trading days -1..+3
+    around the alert have fully traded. Never updated afterward, same
+    immutable-snapshot discipline as MarketMove. day0_excess_move_pct is
+    copied from that alert/company's own MarketMove.excess_move_pct at
+    sample time (the original flagged reaction); car_pct is the actual
+    Sum(ticker return - benchmark return) over the window (app.outcomes.
+    price_fetcher.fetch_cumulative_excess_return). category is copied
+    from Alert.category at sample time, same reclassification-safety
+    reason CalibrationSample already documents for its own category
+    column."""
+    __tablename__ = "car_outcomes"
+    __table_args__ = (UniqueConstraint("alert_company_id", name="uq_car_outcome_alert_company"),)
+
+    id = Column(Integer, primary_key=True)
+    alert_company_id = Column(Integer, ForeignKey("alert_companies.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    category = Column(String, nullable=False)
+    day0_excess_move_pct = Column(Float, nullable=False)
+    car_pct = Column(Float, nullable=False)
+    computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class MarketMove(Base):
     """One row per (event, ticker) -- the measured facts backing every
     user-facing number (docs/NEWS_IMPACT_APP_SPEC.md §3.1, §3.2). ``event``
