@@ -46,6 +46,7 @@ export default function StockDeepDivePage() {
   }
 
   const hasAlertContext = deepDive.excess_move_pct !== null && deepDive.intensity !== null;
+  const isExposureWithinAlert = deepDive.is_exposure_only === true;
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-8">
@@ -69,6 +70,9 @@ export default function StockDeepDivePage() {
               <span className="font-data text-3xl font-medium text-ink">{deepDive.intensity.score}</span>
               <span className="font-sans text-sm text-muted">{deepDive.intensity.band}</span>
             </div>
+          )}
+          {isExposureWithinAlert && (
+            <span className="font-sans text-sm text-muted">Exposure</span>
           )}
         </div>
         <p className="mt-1 font-sans text-xs uppercase tracking-widest text-muted">

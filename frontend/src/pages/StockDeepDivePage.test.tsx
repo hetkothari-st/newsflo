@@ -79,6 +79,17 @@ describe('StockDeepDivePage', () => {
     expect(screen.queryByText('High')).not.toBeInTheDocument();
   });
 
+  it('shows an Exposure indicator, not a stale no-context look, when the deep-dived company itself is exposure-only within a real alert', async () => {
+    vi.spyOn(feedV2Api, 'getStockDeepDive').mockResolvedValue(
+      makeDeepDive({ excess_move_pct: null, intensity: null, is_exposure_only: true }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
+    expect(screen.getByText('Exposure')).toBeInTheDocument();
+    expect(screen.queryByText('High')).not.toBeInTheDocument();
+  });
+
   it('renders sector peers sorted as returned, via PeerRow', async () => {
     vi.spyOn(feedV2Api, 'getStockDeepDive').mockResolvedValue(
       makeDeepDive({
