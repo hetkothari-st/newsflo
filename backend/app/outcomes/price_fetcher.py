@@ -59,6 +59,14 @@ def fetch_cumulative_excess_return(
         ticker_closes = yf.Ticker(ticker).history(start=start.date(), end=end.date())["Close"]
         if len(ticker_closes) == 0:
             return None
+        # yfinance returns a tz-aware DatetimeIndex for NSE tickers (localized
+        # to Asia/Kolkata) -- comparing that directly against a tz-naive
+        # Timestamp raises TypeError, which the bare except below would
+        # silently swallow into "None", making this function unconditionally
+        # return None against real data while every mocked (tz-naive) test
+        # fixture kept passing. Normalize to tz-naive before any comparison.
+        if ticker_closes.index.tz is not None:
+            ticker_closes.index = ticker_closes.index.tz_localize(None)
 
         event_ts = pd.Timestamp(event_date.date())
         on_or_after = ticker_closes.index[ticker_closes.index >= event_ts]
@@ -75,6 +83,8 @@ def fetch_cumulative_excess_return(
         window_ticker_closes = ticker_closes.iloc[first_pos:last_pos + 1]
 
         benchmark_closes = yf.Ticker(benchmark_ticker).history(start=start.date(), end=end.date())["Close"]
+        if benchmark_closes.index.tz is not None:
+            benchmark_closes.index = benchmark_closes.index.tz_localize(None)
         benchmark_by_date = {
             ts.date(): float(v) for ts, v in benchmark_closes.items() if math.isfinite(float(v))
         }

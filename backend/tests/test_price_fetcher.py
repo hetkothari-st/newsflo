@@ -146,6 +146,40 @@ def test_fetch_cumulative_excess_return_returns_none_when_no_data(monkeypatch):
     assert result is None
 
 
+def test_fetch_cumulative_excess_return_handles_tz_aware_index(monkeypatch):
+    # Real yfinance returns a tz-aware DatetimeIndex for NSE tickers
+    # (localized to Asia/Kolkata) -- comparing that directly against a
+    # tz-naive event Timestamp raises TypeError, which the function's own
+    # bare except previously swallowed into "None" unconditionally,
+    # invisible to every other test here since _history_df's plain
+    # pd.DatetimeIndex(dates) is tz-naive and never exercised this path.
+    dates = ["2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13"]
+    ticker_closes = [100.0, 101.0, 103.0, 104.03, 106.11, 107.17]
+    benchmark_closes = [200.0, 202.0, 204.02, 204.02, 204.02, 206.06]
+
+    def _tz_aware_history_df(dates, closes):
+        index = pd.DatetimeIndex(dates).tz_localize("Asia/Kolkata")
+        return pd.DataFrame({"Close": closes}, index=index)
+
+    class FakeTicker:
+        def __init__(self, symbol):
+            self.symbol = symbol
+
+        def history(self, start=None, end=None):
+            if self.symbol == "STOCK.NS":
+                return _tz_aware_history_df(dates, ticker_closes)
+            return _tz_aware_history_df(dates, benchmark_closes)
+
+    monkeypatch.setattr(price_fetcher.yf, "Ticker", FakeTicker)
+
+    result = price_fetcher.fetch_cumulative_excess_return(
+        "STOCK.NS", "^BENCH", datetime(2026, 1, 8, tzinfo=timezone.utc),
+    )
+
+    assert result is not None
+    assert round(result, 1) == round(0.0 + 0.9803 + 1.0 + 1.9993 + 0.0, 1)
+
+
 def test_fetch_cumulative_excess_return_returns_none_on_exception(monkeypatch):
     class FakeTicker:
         def __init__(self, symbol):
