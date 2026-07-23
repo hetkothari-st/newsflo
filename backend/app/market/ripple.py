@@ -106,12 +106,10 @@ def get_sector_peers_for_alert(
     docs/NEWS_IMPACT_APP_SPEC.md §2, §9) -- never a peer's intensity
     borrowed from some other, unrelated event (spec §9: "same news swings
     them hardest" -- the ordering only means something within one event).
-    Same row shape as _alert_company_rows minus `sector` (the caller
-    already knows it -- it's the filter key).
+    Same row shape as _alert_company_rows, including `sector` -- the
+    frontend's per-peer (i) business popup needs each peer's own sector,
+    not just the filter key the caller already knows (see
+    StockDeepDivePage.tsx's businessPopupTicker-keyed popup).
     """
     rows = _alert_company_rows(session, alert, exclude_company_id=company.id, held_company_ids=held_company_ids)
-    return [
-        {k: v for k, v in row.items() if k != "sector"}
-        for row in rows
-        if row["sector"] == company.sector
-    ]
+    return [row for row in rows if row["sector"] == company.sector]

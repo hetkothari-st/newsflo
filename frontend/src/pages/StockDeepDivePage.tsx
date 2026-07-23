@@ -16,7 +16,7 @@ export default function StockDeepDivePage() {
   const { token } = useAuth();
 
   const [deepDive, setDeepDive] = useState<StockDeepDive | null | undefined>(undefined);
-  const [businessPopupOpen, setBusinessPopupOpen] = useState(false);
+  const [businessPopupTicker, setBusinessPopupTicker] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ticker) return;
@@ -47,6 +47,7 @@ export default function StockDeepDivePage() {
 
   const hasAlertContext = deepDive.excess_move_pct !== null && deepDive.intensity !== null;
   const isExposureWithinAlert = deepDive.is_exposure_only === true;
+  const popupPeer = deepDive.peers.find((p) => p.ticker === businessPopupTicker) ?? null;
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-8">
@@ -141,20 +142,22 @@ export default function StockDeepDivePage() {
                 isExposureOnly={peer.is_exposure_only}
                 inMyHoldings={peer.in_my_holdings}
                 alertId={alertId}
-                onOpenBusinessPopup={() => setBusinessPopupOpen(true)}
+                onOpenBusinessPopup={() => setBusinessPopupTicker(peer.ticker)}
               />
             ))}
           </div>
         </div>
       )}
 
-      <AlertDetail open={businessPopupOpen} onClose={() => setBusinessPopupOpen(false)}>
-        <BusinessPopup
-          ticker={deepDive.ticker}
-          sector={deepDive.sector}
-          capTier={deepDive.cap_tier}
-          businessDesc={deepDive.business_desc}
-        />
+      <AlertDetail open={popupPeer !== null} onClose={() => setBusinessPopupTicker(null)}>
+        {popupPeer && (
+          <BusinessPopup
+            ticker={popupPeer.ticker}
+            sector={popupPeer.sector}
+            capTier={popupPeer.cap_tier}
+            businessDesc={popupPeer.business_desc}
+          />
+        )}
       </AlertDetail>
     </main>
   );

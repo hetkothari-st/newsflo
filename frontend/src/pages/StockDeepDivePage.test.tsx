@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import StockDeepDivePage from './StockDeepDivePage';
 import * as feedV2Api from '../lib/feedV2Api';
@@ -106,6 +106,34 @@ describe('StockDeepDivePage', () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText('ONGC.NS')).toBeInTheDocument());
+  });
+
+  it("opens the tapped peer's OWN business popup, not the parent company's", async () => {
+    vi.spyOn(feedV2Api, 'getStockDeepDive').mockResolvedValue(
+      makeDeepDive({
+        peers: [
+          {
+            ticker: 'ONGC.NS', name: 'ONGC', sector: 'oil_gas', cap_tier: 'MID',
+            business_desc: 'Explores and produces crude oil and natural gas.',
+            direction: 'bearish', excess_move_pct: -0.3,
+            intensity: { score: 20, band: 'Low', components: [] }, is_exposure_only: false,
+            in_my_holdings: false,
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('ONGC.NS')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('View business details'));
+
+    // RELIANCE's own business_desc ("Refines crude oil...") always renders
+    // inline in the page's own "What they do" section regardless of popup
+    // state -- the real assertion is that the POPUP shows ONGC's distinct
+    // text, proving it's peer-specific, not the parent company's.
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Explores and produces crude oil and natural gas.')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Refines crude oil and runs retail fuel outlets.')).not.toBeInTheDocument();
   });
 
   it('renders a not-found message when the ticker does not exist', async () => {

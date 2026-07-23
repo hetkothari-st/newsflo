@@ -321,7 +321,7 @@ def test_sector_peers_row_shape_matches_ripple_row_shape(db_session):
     result = get_sector_peers_for_alert(db_session, alert, target, held_company_ids=set())
 
     assert set(result[0].keys()) == {
-        "ticker", "name", "direction", "excess_move_pct", "intensity",
+        "ticker", "name", "sector", "direction", "excess_move_pct", "intensity",
         "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc",
     }
 
