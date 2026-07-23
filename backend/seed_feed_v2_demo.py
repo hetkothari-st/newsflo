@@ -71,6 +71,24 @@ TIMELINE_ENTRIES = [
     ("QUARTERS", "Refiners may pass costs to consumers if the disruption persists."),
 ]
 
+# Plain-language "what they do" text for the Level 4 deep-dive's business
+# section (docs/NEWS_IMPACT_APP_SPEC.md §3.1 Stock.business_desc) -- the real
+# pipeline populates this via an LLM enrichment job (backend/
+# backfill_business_profiles.py) that this demo-only seed script deliberately
+# never calls (no LLM calls here, per the module docstring), so without this
+# static map every demo company's deep-dive page would show the "not
+# available" fallback instead of real content to screenshot-verify against.
+BUSINESS_DESCRIPTIONS = {
+    "RELIANCE.NS": "Refines crude oil and runs retail fuel, petrochemical, and telecom businesses.",
+    "TCS.NS": "Provides IT consulting and outsourced software services to global clients.",
+    "SOMETEXTILE.NS": "Manufactures and exports cotton textiles and apparel.",
+    "ONGC.NS": "Explores and produces crude oil and natural gas.",
+    "BPCL.NS": "Refines crude oil and distributes petroleum products through retail fuel outlets.",
+    "IOC.NS": "India's largest oil refiner, also distributing fuel and petrochemicals.",
+    "HPCL.NS": "Refines crude oil and markets petroleum products across India.",
+    "GAIL.NS": "Transports and markets natural gas via pipeline infrastructure.",
+}
+
 
 def main() -> None:
     # SAFETY: Refuse to run against a production database. This script inserts
@@ -109,8 +127,17 @@ def main() -> None:
 
             company = session.query(Company).filter_by(ticker=ticker).one_or_none()
             if company is None:
-                company = Company(ticker=ticker, name=name, sector=sector, index_tier="NIFTY50", market_cap=50000.0)
+                company = Company(
+                    ticker=ticker, name=name, sector=sector, index_tier="NIFTY50", market_cap=50000.0,
+                    business_desc=BUSINESS_DESCRIPTIONS.get(ticker),
+                )
                 session.add(company)
+                session.commit()
+            elif company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
+                # Backfill for a company row created by an earlier run of this
+                # script, before BUSINESS_DESCRIPTIONS existed -- re-running
+                # this script must be able to fix that, not leave it stale.
+                company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
                 session.commit()
 
             article = Article(
@@ -150,8 +177,14 @@ def main() -> None:
         for ticker, name, sector, relation, direction, excess, has_market_move in RIPPLE_COMPANIONS:
             company = session.query(Company).filter_by(ticker=ticker).one_or_none()
             if company is None:
-                company = Company(ticker=ticker, name=name, sector=sector, index_tier="OTHER", market_cap=20000.0)
+                company = Company(
+                    ticker=ticker, name=name, sector=sector, index_tier="OTHER", market_cap=20000.0,
+                    business_desc=BUSINESS_DESCRIPTIONS.get(ticker),
+                )
                 session.add(company)
+                session.commit()
+            elif company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
+                company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
                 session.commit()
 
             session.add(AlertCompany(
