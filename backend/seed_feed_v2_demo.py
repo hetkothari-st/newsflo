@@ -11,8 +11,10 @@ fixed marker prefix on Article.url) before re-inserting.
 Usage (from the backend/ directory, so `app` is importable):
     .venv/Scripts/python seed_feed_v2_demo.py
 """
+import sys
 from datetime import timedelta
 
+from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import Alert, AlertCompany, Article, Company, MarketMove, utcnow
 
@@ -53,6 +55,21 @@ DEMO_ROWS = [
 
 
 def main() -> None:
+    # SAFETY: Refuse to run against a production database. This script inserts
+    # genuine Alert/Article rows that would leak into the production /api/alerts
+    # feed if accidentally run against Postgres. Only allow this to run against
+    # local SQLite dev databases (DATABASE_URL starts with "sqlite://").
+    if not settings.database_url.startswith("sqlite://"):
+        print(
+            f"ERROR: seed_feed_v2_demo.py refuses to run against a non-SQLite database.\n"
+            f"DATABASE_URL is: {settings.database_url}\n"
+            f"This safety guard exists because running this script against production\n"
+            f"would inject demo alerts into the real /api/alerts feed.\n"
+            f"Only run this script against local SQLite dev databases.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     init_db()
     session = SessionLocal()
     try:
