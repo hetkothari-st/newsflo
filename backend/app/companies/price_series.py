@@ -70,3 +70,23 @@ def fetch_daily_bars(ticker: str, period: str) -> list[dict] | None:
         return points or None
     except Exception:
         return None
+
+
+def fetch_pe_ratio(ticker: str) -> float | None:
+    """Return ``ticker``'s trailing P/E ratio, or ``None`` if yfinance has
+    no value (loss-making company, ETF, data gap) or the fetch fails. Same
+    "never raise, degrade to None" contract as fetch_price_series/
+    fetch_daily_bars -- live, not cached or persisted (docs/
+    NEWS_IMPACT_APP_SPEC.md §3.1 Stock.pe is a directory-facing fact, not a
+    measured/derived spine number, so it carries no "never fabricate"
+    weight beyond the ordinary honest-degrade discipline every live fetch
+    in this module already follows).
+    """
+    try:
+        info = yf.Ticker(ticker).info
+        pe = info.get("trailingPE")
+        if pe is None or not math.isfinite(float(pe)):
+            return None
+        return float(pe)
+    except Exception:
+        return None

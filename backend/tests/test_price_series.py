@@ -138,3 +138,43 @@ def test_fetch_daily_bars_returns_none_on_exception(monkeypatch):
     monkeypatch.setattr(price_series.yf, "Ticker", boom)
 
     assert price_series.fetch_daily_bars("RELIANCE.NS", period="2mo") is None
+
+
+def test_fetch_pe_ratio_returns_trailing_pe(monkeypatch):
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.info = {"trailingPE": 24.7}
+
+    monkeypatch.setattr("yfinance.Ticker", FakeTicker)
+
+    assert price_series.fetch_pe_ratio("RELIANCE.NS") == 24.7
+
+
+def test_fetch_pe_ratio_returns_none_when_missing(monkeypatch):
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.info = {}
+
+    monkeypatch.setattr("yfinance.Ticker", FakeTicker)
+
+    assert price_series.fetch_pe_ratio("SOMETICKER.NS") is None
+
+
+def test_fetch_pe_ratio_returns_none_on_non_finite_value(monkeypatch):
+    class FakeTicker:
+        def __init__(self, ticker):
+            self.info = {"trailingPE": float("nan")}
+
+    monkeypatch.setattr("yfinance.Ticker", FakeTicker)
+
+    assert price_series.fetch_pe_ratio("SOMETICKER.NS") is None
+
+
+def test_fetch_pe_ratio_returns_none_on_exception(monkeypatch):
+    class FakeTicker:
+        def __init__(self, ticker):
+            raise RuntimeError("network error")
+
+    monkeypatch.setattr("yfinance.Ticker", FakeTicker)
+
+    assert price_series.fetch_pe_ratio("SOMETICKER.NS") is None
