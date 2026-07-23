@@ -7,6 +7,7 @@ import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
 import AlertChartsPage from './pages/AlertChartsPage';
 import AlertCompanyAnalysisPage from './pages/AlertCompanyAnalysisPage';
+import CarReviewPage from './pages/CarReviewPage';
 import CompanyPage from './pages/CompanyPage';
 import DirectoryPage from './pages/DirectoryPage';
 import FeedPage from './pages/FeedPage';
@@ -50,6 +51,14 @@ export default function App() {
           element={
             <RequireAuth>
               <AccountPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/car-review"
+          element={
+            <RequireAuth>
+              <CarReviewPage />
             </RequireAuth>
           }
         />
