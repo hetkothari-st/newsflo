@@ -43,7 +43,7 @@ export default function RippleSection({ companies }: RippleSectionProps) {
               {group.rows.map((row) => (
                 <div key={row.ticker} className="flex items-center gap-3">
                   <span className="font-data text-[11px] text-muted">{row.ticker}</span>
-                  {row.is_exposure_only ? (
+                  {row.is_exposure_only || row.excess_move_pct == null ? (
                     <span className="font-sans text-xs text-muted">Exposure</span>
                   ) : (
                     <>
@@ -52,7 +52,7 @@ export default function RippleSection({ companies }: RippleSectionProps) {
                           row.direction === 'bullish' ? 'text-bullish' : 'text-bearish'
                         }`}
                       >
-                        {formatExcess(row.excess_move_pct as number).text}
+                        {formatExcess(row.excess_move_pct).text}
                       </span>
                       {row.intensity && (
                         <span className="h-1 w-full max-w-[80px] rounded-sm bg-elevated">
