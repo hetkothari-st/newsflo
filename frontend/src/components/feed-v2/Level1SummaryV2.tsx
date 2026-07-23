@@ -10,6 +10,17 @@ function signedPct(value: number): string {
   return `${sign}${value.toFixed(1)}%`;
 }
 
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function Level1SummaryV2({ alert }: Level1SummaryV2Props) {
   return (
     <div className="flex flex-col gap-3">
@@ -50,6 +61,9 @@ export default function Level1SummaryV2({ alert }: Level1SummaryV2Props) {
         <div className="font-sans text-xs text-muted">
           {alert.article.source} &middot; {alert.is_fallback_benchmark ? 'vs Nifty 50' : 'vs sector index'}
         </div>
+        <time className="mt-1 block font-sans text-xs text-muted" dateTime={alert.created_at}>
+          {formatTime(alert.created_at)}
+        </time>
       </div>
     </div>
   );

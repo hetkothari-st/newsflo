@@ -63,4 +63,18 @@ describe('Level1SummaryV2', () => {
     render(<Level1SummaryV2 alert={makeAlert()} />);
     expect(screen.getByText(/Economic Times/)).toBeInTheDocument();
   });
+
+  it('renders a formatted created_at timestamp', () => {
+    render(<Level1SummaryV2 alert={makeAlert({ created_at: '2026-07-22T10:00:00Z' })} />);
+    const timeEl = document.querySelector('time');
+    expect(timeEl).toBeInTheDocument();
+    expect(timeEl).toHaveAttribute('dateTime', '2026-07-22T10:00:00Z');
+    expect(timeEl?.textContent).toMatch(/Jul/);
+  });
+
+  it('renders a + prefix for positive raw and sector move values', () => {
+    render(<Level1SummaryV2 alert={makeAlert({ raw_move_pct: 2.3, sector_move_pct: 0.9 })} />);
+    expect(screen.getByText(/\+2\.3%/)).toBeInTheDocument();
+    expect(screen.getByText(/\+0\.9%/)).toBeInTheDocument();
+  });
 });
