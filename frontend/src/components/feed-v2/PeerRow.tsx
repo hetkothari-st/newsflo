@@ -54,12 +54,12 @@ export default function PeerRow({
       {inMyHoldings && (
         <span data-testid="peer-row-owned-dot" className="h-[7px] w-[7px] shrink-0 rounded-full bg-accent" />
       )}
-      {isExposureOnly ? (
+      {isExposureOnly || excessMovePct == null ? (
         <span className="font-sans text-xs text-muted">Exposure</span>
       ) : (
         <>
           <span className={`font-data text-xs ${direction === 'bullish' ? 'text-bullish' : 'text-bearish'}`}>
-            {formatExcess(excessMovePct as number).text}
+            {formatExcess(excessMovePct).text}
           </span>
           {intensity && (
             <>

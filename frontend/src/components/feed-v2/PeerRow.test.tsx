@@ -87,4 +87,17 @@ describe('PeerRow', () => {
     expect(onOpenBusinessPopup).toHaveBeenCalledTimes(1);
     expect(mockNavigate).not.toHaveBeenCalled();
   });
+
+  it('does not navigate when Enter/Space is pressed on the (i) button (keydown isolation)', () => {
+    renderRow();
+    fireEvent.keyDown(screen.getByLabelText('View business details'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByLabelText('View business details'), { key: ' ' });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('renders Exposure when excessMovePct is null even if isExposureOnly is false', () => {
+    renderRow({ isExposureOnly: false, excessMovePct: null, intensity: null });
+    expect(screen.getByText('Exposure')).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+  });
 });
