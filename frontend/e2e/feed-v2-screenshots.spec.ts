@@ -67,4 +67,50 @@ for (const theme of THEMES) {
       fullPage: true,
     });
   });
+
+  test(`feed-v2 stock deep-dive with alert context (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    const firstRow = page.locator('[role="button"]').first();
+    await firstRow.waitFor({ timeout: 10_000 });
+    await firstRow.click();
+    await page.waitForTimeout(300);
+    const peerRow = page.locator('[role="dialog"] [role="button"][aria-label]').first();
+    await peerRow.waitFor({ timeout: 10_000 });
+    await peerRow.click();
+    await page.waitForTimeout(300);
+    await page.screenshot({
+      path: `.superpowers-screenshots/feed-v2-stock-deep-dive-with-alert-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
+
+  test(`feed-v2 directory (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2/directory');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    await page.waitForSelector('text=/./', { timeout: 10_000 }).catch(() => {});
+    await page.screenshot({
+      path: `.superpowers-screenshots/feed-v2-directory-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
+
+  test(`feed-v2 stock deep-dive without alert context (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2/directory');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    const firstLink = page.getByRole('link').first();
+    await firstLink.waitFor({ timeout: 10_000 });
+    await firstLink.click();
+    await page.waitForTimeout(300);
+    await page.screenshot({
+      path: `.superpowers-screenshots/feed-v2-stock-deep-dive-no-alert-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
 }
