@@ -1,5 +1,5 @@
 /// <reference types="vitest" />
-import { defineConfig } from 'vitest/config';
+import { defineConfig, defaultExclude } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -19,6 +19,6 @@ export default defineConfig({
     // Playwright's e2e specs (frontend/e2e/**) declare their own `test()`
     // via @playwright/test, not vitest -- collecting them here throws
     // ("Playwright Test did not expect test() to be called here").
-    exclude: ['**/node_modules/**', '**/e2e/**'],
+    exclude: [...defaultExclude, '**/e2e/**'],
   },
 });
