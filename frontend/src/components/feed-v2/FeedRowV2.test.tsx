@@ -87,4 +87,13 @@ describe('FeedRowV2 intensity breakdown', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  it('does not open the row when Enter/Space is pressed on the intensity tap target', () => {
+    const onOpen = vi.fn();
+    render(<FeedRowV2 alert={makeAlert()} onOpen={onOpen} />);
+
+    fireEvent.keyDown(screen.getByTestId('intensity-tap-target'), { key: 'Enter', code: 'Enter' });
+
+    expect(onOpen).not.toHaveBeenCalled();
+  });
 });

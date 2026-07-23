@@ -52,6 +52,9 @@ export default function FeedRowV2({ alert, onOpen }: FeedRowV2Props) {
               e.stopPropagation();
               setBreakdownOpen(true);
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+            }}
             className="flex items-center gap-2"
             aria-label="View intensity breakdown"
           >
