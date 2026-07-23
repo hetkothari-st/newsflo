@@ -32,10 +32,15 @@
   --color-intensity-high: 96 165 250;
   --color-intensity-moderate: 251 191 36;
   --color-intensity-low: 167 139 250;
-  /* Cap-tier tag colors -- a third distinct hue family from bullish/bearish
-     (green/red) and intensity (blue/amber/violet), so a cap-tier pill next
-     to a ticker never reads as a direction or intensity signal. */
-  --color-cap-large: 129 140 248;
+  /* Cap-tier tag colors -- distinct from bullish/bearish (green/red) and
+     intensity (blue/amber/violet) so a cap-tier pill never reads as a
+     direction or intensity signal. cap-mid/cap-small are separate hues
+     (teal/orange); cap-large is desaturated slate-blue rather than a 4th
+     saturated hue -- a saturated indigo/blue here sits in the same hue
+     band as intensity-high/intensity-low (blue/violet) and reads as a
+     confusable 3rd intensity color rather than a clearly separate tag
+     family. Low saturation, not hue distance, is what keeps it distinct. */
+  --color-cap-large: 148 163 184;
   --color-cap-mid: 45 212 191;
   --color-cap-small: 251 146 60;
 }
@@ -56,7 +61,7 @@
   --color-intensity-high: 37 99 235;
   --color-intensity-moderate: 217 119 6;
   --color-intensity-low: 124 58 237;
-  --color-cap-large: 79 70 229;
+  --color-cap-large: 71 85 105;
   --color-cap-mid: 13 148 136;
   --color-cap-small: 194 65 12;
 }
