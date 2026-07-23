@@ -63,3 +63,28 @@ describe('FeedRowV2', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('FeedRowV2 intensity breakdown', () => {
+  it('opens the intensity breakdown popup when the intensity bar/score is clicked, without opening the row', () => {
+    const onOpen = vi.fn();
+    render(<FeedRowV2 alert={makeAlert()} onOpen={onOpen} />);
+
+    fireEvent.click(screen.getByTestId('intensity-tap-target'));
+
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(screen.getByText("Intensity measures how hard the news hit this stock — not whether it's a good investment.")).toBeInTheDocument();
+  });
+
+  it('closes the breakdown popup via its own close button without opening the row', () => {
+    const onOpen = vi.fn();
+    render(<FeedRowV2 alert={makeAlert()} onOpen={onOpen} />);
+
+    fireEvent.click(screen.getByTestId('intensity-tap-target'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Close'));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});
