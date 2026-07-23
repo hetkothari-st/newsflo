@@ -16,7 +16,7 @@ from datetime import timedelta
 
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import Alert, AlertCompany, Article, Company, MarketMove, utcnow
+from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, MarketMove, TimelineEffect, utcnow
 
 URL_MARKER = "https://demo.feed-v2.local/"
 
@@ -53,6 +53,24 @@ DEMO_ROWS = [
     ),
 ]
 
+# Ripple companions + timeline, attached to DEMO_ROWS[0] (RELIANCE.NS) only --
+# one company per relationship-mapping family (see app.reasoning.
+# ripple_relationship._RELATION_TO_RIPPLE_RELATIONSHIP), plus one with NO
+# MarketMove row at all to demonstrate the exposure-only path.
+RIPPLE_COMPANIONS = [
+    # (ticker, name, sector, relation, direction, excess, has_market_move)
+    ("BPCL.NS", "Bharat Petroleum Corporation", "oil_gas", "commodity", "bullish", 3.0, True),
+    ("IOC.NS", "Indian Oil Corporation", "oil_gas", "input_cost", "bearish", -1.5, True),
+    ("HPCL.NS", "Hindustan Petroleum Corporation", "oil_gas", "competitor", "bearish", -0.8, True),
+    ("GAIL.NS", "GAIL India", "oil_gas", "supplier", "bearish", None, False),
+]
+
+TIMELINE_ENTRIES = [
+    ("TODAY", "Markets react immediately to the supply disruption."),
+    ("WEEKS", "Refining margins stay pressured while crude prices remain elevated."),
+    ("QUARTERS", "Refiners may pass costs to consumers if the disruption persists."),
+]
+
 
 def main() -> None:
     # SAFETY: Refuse to run against a production database. This script inserts
@@ -78,11 +96,14 @@ def main() -> None:
             for alert in session.query(Alert).filter_by(article_id=article.id).all():
                 session.query(MarketMove).filter_by(alert_id=alert.id).delete()
                 session.query(AlertCompany).filter_by(alert_id=alert.id).delete()
+                session.query(ImpactEdge).filter_by(alert_id=alert.id).delete()
+                session.query(TimelineEffect).filter_by(alert_id=alert.id).delete()
                 session.delete(alert)
             session.delete(article)
         session.commit()
 
         now = utcnow()
+        first_alert_id = None
         for i, row in enumerate(DEMO_ROWS):
             ticker, name, sector, benchmark, raw, sector_move, excess, vol_mult, headline, summary_short, why, direction = row
 
@@ -106,6 +127,8 @@ def main() -> None:
             )
             session.add(alert)
             session.flush()
+            if i == 0:
+                first_alert_id = alert.id
 
             alert_company = AlertCompany(
                 alert_id=alert.id, company_id=company.id, direction=direction,
@@ -122,7 +145,47 @@ def main() -> None:
             ))
             session.commit()
 
-        print(f"Seeded {len(DEMO_ROWS)} demo feed-v2 alerts.")
+        # Ripple companions + timeline, attached to DEMO_ROWS[0] (RELIANCE.NS) only.
+        peak_company = session.query(Company).filter_by(ticker=DEMO_ROWS[0][0]).one()
+        for ticker, name, sector, relation, direction, excess, has_market_move in RIPPLE_COMPANIONS:
+            company = session.query(Company).filter_by(ticker=ticker).one_or_none()
+            if company is None:
+                company = Company(ticker=ticker, name=name, sector=sector, index_tier="OTHER", market_cap=20000.0)
+                session.add(company)
+                session.commit()
+
+            session.add(AlertCompany(
+                alert_id=first_alert_id, company_id=company.id, direction=direction,
+                magnitude_low=0.5, magnitude_high=1.5, rationale=f"Ripple effect via {relation}.",
+                basis="direct_mention",
+            ))
+
+            if has_market_move:
+                session.add(MarketMove(
+                    alert_id=first_alert_id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+                    raw_move_pct=excess, sector_move_pct=0.0, excess_move_pct=excess,
+                    volume=100.0, avg_volume_20d=100.0, volume_multiple=1.0,
+                    measurement_status="ok", measured_at=now,
+                ))
+            else:
+                session.add(MarketMove(
+                    alert_id=first_alert_id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+                    measurement_status="no_data", measured_at=now,
+                ))
+
+            session.add(ImpactEdge(
+                alert_id=first_alert_id, from_company_id=peak_company.id, from_node_kind="company",
+                from_label=peak_company.ticker, to_company_id=company.id, to_node_kind="company",
+                to_label=company.ticker, relation=relation, direction=direction,
+                note=f"Demo ripple edge ({relation}).", source="llm_only",
+            ))
+            session.commit()
+
+        for horizon, description in TIMELINE_ENTRIES:
+            session.add(TimelineEffect(alert_id=first_alert_id, horizon=horizon, description=description))
+        session.commit()
+
+        print(f"Seeded {len(DEMO_ROWS)} demo feed-v2 alerts, {len(RIPPLE_COMPANIONS)} ripple companions, {len(TIMELINE_ENTRIES)} timeline entries.")
     finally:
         session.close()
 
