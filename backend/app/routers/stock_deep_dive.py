@@ -15,7 +15,7 @@ from app.auth.dependencies import get_current_user_optional
 from app.companies.price_series import fetch_pe_ratio
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
-from app.market.cap_tier import compute_cap_tier_for_ticker
+from app.market.cap_tier import compute_cap_tier_for_ticker, compute_cap_tiers
 from app.market.ripple import get_sector_peers_for_alert
 from app.models import Alert, AlertCompany, Company, MarketMove, User
 from app.routers.articles import get_db
@@ -99,3 +99,31 @@ def get_stock_deep_dive(
     result["volume_multiple"] = move.volume_multiple
     result["intensity"] = _intensity_for_company_move(db, company, move, breadth_score)
     return result
+
+
+@router.get("/directory")
+def get_directory(
+    cap_tier: str | None = None,
+    sector: str | None = None,
+    db: Session = Depends(get_db),
+):
+    rows = db.query(Company.ticker, Company.market_cap).filter(Company.market_cap.isnot(None)).all()
+    tiers = compute_cap_tiers([(t, c) for t, c in rows])
+
+    query = db.query(Company).filter(Company.market_cap.isnot(None))
+    if sector is not None:
+        query = query.filter(Company.sector == sector)
+    companies = query.order_by(Company.ticker.asc()).all()
+
+    results = []
+    for company in companies:
+        tier = tiers.get(company.ticker)
+        if cap_tier is not None and tier != cap_tier:
+            continue
+        results.append({
+            "ticker": company.ticker,
+            "name": company.name,
+            "sector": company.sector,
+            "cap_tier": tier,
+        })
+    return results

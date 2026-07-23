@@ -134,3 +134,84 @@ def test_stock_deep_dive_with_alert_id_but_company_not_in_that_alert_ignores_ale
     assert body["excess_move_pct"] is None
     assert body["peers"] == []
     app.dependency_overrides.clear()
+
+
+from app.market.cap_tier import compute_cap_tiers
+
+
+def test_directory_returns_all_companies_with_cap_tier_and_sector(db_session, monkeypatch):
+    _override_db(db_session)
+    db_session.add_all([
+        _company("BIG.NS", sector="oil_gas", market_cap=900000.0),
+        _company("SMALL.NS", sector="it", market_cap=500.0),
+    ])
+    db_session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/feed-v2/directory")
+
+    assert response.status_code == 200
+    body = response.json()
+    tickers = {row["ticker"] for row in body}
+    assert tickers == {"BIG.NS", "SMALL.NS"}
+    by_ticker = {row["ticker"]: row for row in body}
+    assert by_ticker["BIG.NS"]["sector"] == "oil_gas"
+    assert by_ticker["BIG.NS"]["cap_tier"] in ("LARGE", "MID", "SMALL")
+    app.dependency_overrides.clear()
+
+
+def test_directory_filters_by_cap_tier(db_session):
+    # Cap tier is rank-based (AMFI_LARGE_CAP_RANK_CUTOFF=100,
+    # AMFI_MID_CAP_RANK_CUTOFF=250 -- app/config.py), so ranking TINY.NS into
+    # SMALL requires 250+ companies ranked above it, same convention as
+    # tests/test_cap_tier.py.
+    _override_db(db_session)
+    db_session.add_all([
+        _company("BIG.NS", sector="oil_gas", market_cap=900000.0),
+        *[_company(f"FILLER{i}.NS", sector="other", market_cap=100000.0 - i) for i in range(260)],
+        _company("TINY.NS", sector="it", market_cap=10.0),
+    ])
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2/directory?cap_tier=SMALL")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert all(row["cap_tier"] == "SMALL" for row in body)
+    assert "TINY.NS" in {row["ticker"] for row in body}
+    assert "BIG.NS" not in {row["ticker"] for row in body}
+    app.dependency_overrides.clear()
+
+
+def test_directory_filters_by_sector(db_session):
+    _override_db(db_session)
+    db_session.add_all([
+        _company("OILCO.NS", sector="oil_gas", market_cap=1000.0),
+        _company("ITCO.NS", sector="it", market_cap=1000.0),
+    ])
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2/directory?sector=it")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {row["ticker"] for row in body} == {"ITCO.NS"}
+    app.dependency_overrides.clear()
+
+
+def test_directory_omits_companies_with_no_market_cap(db_session):
+    """cap_tier can't be ranked for a company with no market_cap -- the
+    directory omits it rather than showing a fabricated/None cap tier
+    (Ground Rules: never fabricate, omit rather than invent)."""
+    _override_db(db_session)
+    db_session.add(_company("NOCAP.NS", sector="oil_gas", market_cap=None))
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2/directory")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    app.dependency_overrides.clear()

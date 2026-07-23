@@ -38,8 +38,12 @@ app = FastAPI(title="NewsFlo")
 
 app.include_router(articles.router)
 app.include_router(alerts.router)
-app.include_router(feed_v2.router)
+# stock_deep_dive.router must be included before feed_v2.router: feed_v2 has a
+# catch-all GET /{alert_id} under the same "/api/feed-v2" prefix, which would
+# otherwise intercept stock_deep_dive's single-segment "/directory" route
+# (Starlette matches routes in registration order, not by specificity).
 app.include_router(stock_deep_dive.router)
+app.include_router(feed_v2.router)
 app.include_router(calendar.router)
 app.include_router(auth.router)
 app.include_router(holdings.router)
