@@ -35,7 +35,18 @@ for (const theme of THEMES) {
     if (theme === 'light') {
       await page.evaluate(() => document.documentElement.classList.add('light'));
     }
-    await page.waitForSelector('text=/./', { timeout: 10_000 }).catch(() => {});
+    // `waitForSelector('text=/./')` matches the nav bar's own text ("FEED",
+    // "HOLDINGS", etc.) immediately on page load -- CarReviewPage renders
+    // `null` (return null;) until its own async fetch resolves, so that
+    // wait condition is satisfied long before real content exists,
+    // producing a blank screenshot below the nav (the exact same race
+    // class already found and fixed for the Level 1/deep-dive screenshots
+    // in Phase 6/7 -- verified by reproducing this blank result first,
+    // then confirming the fix below actually shows real content). Wait
+    // for a specific demo row's company name instead (RELIANCE.NS sorts
+    // first per the backend's `ORDER BY Alert.created_at DESC` and the
+    // seed script's per-row offsets).
+    await page.waitForSelector('text=Reliance Industries', { timeout: 10_000 });
     await page.screenshot({
       path: `.superpowers-screenshots/car-review-${theme}-${test.info().project.name}.png`,
       fullPage: true,
