@@ -29,9 +29,14 @@ export type RippleRelationship =
   | 'COMPETITOR'
   | 'SECTOR_WIDE';
 
+export type CapTier = 'LARGE' | 'MID' | 'SMALL';
+
 export interface RippleCompany {
   ticker: string;
   name: string;
+  sector: string;
+  cap_tier: CapTier | null;
+  business_desc: string | null;
   relationship?: RippleRelationship;
   direction: 'bullish' | 'bearish';
   excess_move_pct: number | null;
@@ -39,8 +44,6 @@ export interface RippleCompany {
   is_exposure_only: boolean;
   in_my_holdings: boolean;
 }
-
-export type CapTier = 'LARGE' | 'MID' | 'SMALL';
 
 export interface StockDeepDive {
   ticker: string;

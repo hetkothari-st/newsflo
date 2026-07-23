@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import Level1SummaryV2 from './Level1SummaryV2';
 import type { FeedV2Alert } from '../../lib/feedV2Api';
 
@@ -80,18 +81,22 @@ describe('Level1SummaryV2', () => {
 
   it('renders the ripple section when ripple data is present', () => {
     render(
-      <Level1SummaryV2
-        alert={makeAlert({
-          ripple: [
-            {
-              ticker: 'BPCL.NS', name: 'Bharat Petroleum', relationship: 'BENEFICIARY',
-              direction: 'bullish', excess_move_pct: 3.0,
-              intensity: { score: 70, band: 'Moderate', components: [] },
-              is_exposure_only: false, in_my_holdings: false,
-            },
-          ],
-        })}
-      />,
+      <MemoryRouter>
+        <Level1SummaryV2
+          alert={makeAlert({
+            ripple: [
+              {
+                ticker: 'BPCL.NS', name: 'Bharat Petroleum', sector: 'oil_gas',
+                cap_tier: 'LARGE', business_desc: 'Refines and markets petroleum products.',
+                relationship: 'BENEFICIARY',
+                direction: 'bullish', excess_move_pct: 3.0,
+                intensity: { score: 70, band: 'Moderate', components: [] },
+                is_exposure_only: false, in_my_holdings: false,
+              },
+            ],
+          })}
+        />
+      </MemoryRouter>,
     );
     expect(screen.getByText('BPCL.NS')).toBeInTheDocument();
   });

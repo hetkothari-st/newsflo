@@ -68,7 +68,7 @@ export default function Level1SummaryV2({ alert }: Level1SummaryV2Props) {
         </time>
       </div>
 
-      {alert.ripple && <RippleSection companies={alert.ripple} />}
+      {alert.ripple && <RippleSection companies={alert.ripple} alertId={alert.id} />}
       {alert.timeline && <TimelineSection entries={alert.timeline} />}
     </div>
   );
