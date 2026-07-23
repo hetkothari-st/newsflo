@@ -80,7 +80,14 @@ for (const theme of THEMES) {
     const peerRow = page.locator('[role="dialog"] [role="button"][aria-label]').first();
     await peerRow.waitFor({ timeout: 10_000 });
     await peerRow.click();
-    await page.waitForTimeout(300);
+    // The deep-dive page issues its OWN async fetch after navigation (unlike
+    // the popups above, which reuse already-loaded data) -- StockDeepDivePage
+    // renders nothing (`return null`) until that fetch resolves. A fixed
+    // waitForTimeout raced the fetch and captured a blank page (verified: a
+    // manual reproduction rendered full content once given real time). Wait
+    // for the "What they do" section, which always renders once real data
+    // arrives (with or without alert context), before screenshotting.
+    await page.waitForSelector('text=What they do', { timeout: 10_000 });
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-with-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
@@ -104,10 +111,15 @@ for (const theme of THEMES) {
     if (theme === 'light') {
       await page.evaluate(() => document.documentElement.classList.add('light'));
     }
-    const firstLink = page.getByRole('link').first();
-    await firstLink.waitFor({ timeout: 10_000 });
-    await firstLink.click();
-    await page.waitForTimeout(300);
+    // `getByRole('link').first()` matched the nav bar's own logo link (first
+    // in DOM order, outside the directory list), navigating to the legacy
+    // "/" feed instead of a company row -- verified by inspecting the
+    // resulting screenshot, which showed image-card feed content, not a
+    // deep-dive. Scope to a link that actually points at a stock deep-dive.
+    const firstCompanyLink = page.locator('a[href^="/feed-v2/stock/"]').first();
+    await firstCompanyLink.waitFor({ timeout: 10_000 });
+    await firstCompanyLink.click();
+    await page.waitForSelector('text=What they do', { timeout: 10_000 });
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-no-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
