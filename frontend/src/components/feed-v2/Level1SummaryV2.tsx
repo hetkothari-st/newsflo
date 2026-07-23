@@ -1,5 +1,7 @@
 import { verdictLabel } from '../../lib/feedV2Format';
 import type { FeedV2Alert } from '../../lib/feedV2Api';
+import RippleSection from './RippleSection';
+import TimelineSection from './TimelineSection';
 
 interface Level1SummaryV2Props {
   alert: FeedV2Alert;
@@ -65,6 +67,9 @@ export default function Level1SummaryV2({ alert }: Level1SummaryV2Props) {
           {formatTime(alert.created_at)}
         </time>
       </div>
+
+      {alert.ripple && <RippleSection companies={alert.ripple} />}
+      {alert.timeline && <TimelineSection entries={alert.timeline} />}
     </div>
   );
 }

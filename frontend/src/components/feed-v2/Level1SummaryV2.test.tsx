@@ -77,4 +77,38 @@ describe('Level1SummaryV2', () => {
     expect(screen.getByText(/\+2\.3%/)).toBeInTheDocument();
     expect(screen.getByText(/\+0\.9%/)).toBeInTheDocument();
   });
+
+  it('renders the ripple section when ripple data is present', () => {
+    render(
+      <Level1SummaryV2
+        alert={makeAlert({
+          ripple: [
+            {
+              ticker: 'BPCL.NS', name: 'Bharat Petroleum', relationship: 'BENEFICIARY',
+              direction: 'bullish', excess_move_pct: 3.0,
+              intensity: { score: 70, band: 'Moderate', components: [] },
+              is_exposure_only: false, in_my_holdings: false,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText('BPCL.NS')).toBeInTheDocument();
+  });
+
+  it('renders the timeline section when timeline data is present', () => {
+    render(
+      <Level1SummaryV2
+        alert={makeAlert({
+          timeline: [{ horizon: 'TODAY', description: 'Markets react immediately.' }],
+        })}
+      />,
+    );
+    expect(screen.getByText('Markets react immediately.')).toBeInTheDocument();
+  });
+
+  it('renders neither section when ripple/timeline are absent (list-fetch shape)', () => {
+    render(<Level1SummaryV2 alert={makeAlert({ ripple: undefined, timeline: undefined })} />);
+    expect(screen.queryByText('Exposure')).not.toBeInTheDocument();
+  });
 });
