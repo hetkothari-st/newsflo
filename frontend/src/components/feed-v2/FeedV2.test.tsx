@@ -66,4 +66,14 @@ describe('FeedV2', () => {
     await waitFor(() => expect(feedV2Api.getFeedV2Alerts).toHaveBeenCalled());
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+
+  it('renders a link to the stock directory', async () => {
+    vi.spyOn(feedV2Api, 'getFeedV2Alerts').mockResolvedValue([]);
+    renderFeedV2();
+    await waitFor(() => expect(feedV2Api.getFeedV2Alerts).toHaveBeenCalled());
+    expect(screen.getByRole('link', { name: 'Browse all stocks' })).toHaveAttribute(
+      'href',
+      '/feed-v2/directory',
+    );
+  });
 });

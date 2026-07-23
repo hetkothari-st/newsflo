@@ -8,6 +8,7 @@ import AccountPage from './pages/AccountPage';
 import AlertChartsPage from './pages/AlertChartsPage';
 import AlertCompanyAnalysisPage from './pages/AlertCompanyAnalysisPage';
 import CompanyPage from './pages/CompanyPage';
+import DirectoryPage from './pages/DirectoryPage';
 import FeedPage from './pages/FeedPage';
 import FeedV2Page from './pages/FeedV2Page';
 import HoldingsPage from './pages/HoldingsPage';
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/" element={<FeedPage />} />
         <Route path="/feed-v2" element={<FeedV2Page />} />
         <Route path="/feed-v2/stock/:ticker" element={<StockDeepDivePage />} />
+        <Route path="/feed-v2/directory" element={<DirectoryPage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
         <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
         <Route path="/alerts/:id/company/:companyId" element={<AlertCompanyAnalysisPage />} />

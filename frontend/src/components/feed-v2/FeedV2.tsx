@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { getFeedV2Alert, getFeedV2Alerts, type FeedV2Alert } from '../../lib/feedV2Api';
 import AlertDetail from '../AlertDetail';
@@ -22,6 +23,11 @@ export default function FeedV2() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4">
+      <div className="mb-2 flex justify-end">
+        <Link to="/feed-v2/directory" className="font-sans text-xs text-muted underline">
+          Browse all stocks
+        </Link>
+      </div>
       <div className="rounded-lg bg-surface p-5">
         {alerts.map((alert) => (
           <FeedRowV2 key={alert.id} alert={alert} onOpen={() => handleOpen(alert.id)} />
