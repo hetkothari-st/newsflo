@@ -207,3 +207,24 @@ def test_intensity_peer_group_spans_same_sector_alerts_today(db_session):
     big_result = compute_alert_measurement(db_session, big_alert)
 
     assert small_result["intensity"]["score"] < big_result["intensity"]["score"]
+
+
+def test_result_includes_peak_company_id(db_session):
+    company = _company("A.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, company.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=2.0, sector_move_pct=0.5, excess_move_pct=1.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_alert_measurement(db_session, alert)
+
+    assert result["peak_company_id"] == company.id

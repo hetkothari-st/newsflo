@@ -38,6 +38,28 @@ def _sector_peer_moves(session: Session, sector: str) -> list[MarketMove]:
     )
 
 
+def _intensity_for_company_move(session: Session, company: Company, move: MarketMove, breadth_score: int) -> dict:
+    """Compute intensity for one (company, move) pair, normalized against
+    every measured company in the same sector across today's alerts (see
+    _sector_peer_moves). Shared by compute_alert_measurement (for the
+    event's peak company) and app.market.ripple.compute_ripple_companies
+    (for every other measured company in the event's ripple) -- the exact
+    same normalization discipline applies to both, so this is the one
+    place that logic lives.
+    """
+    sector_moves = _sector_peer_moves(session, company.sector)
+    excess_peer_group = [m.excess_move_pct for m in sector_moves] or [move.excess_move_pct]
+    sector_volume_values = [m.volume_multiple for m in sector_moves if m.volume_multiple is not None]
+    volume_peer_group = sector_volume_values or [move.volume_multiple or 0.0]
+    return compute_intensity(
+        excess_move_pct=move.excess_move_pct,
+        excess_peer_group=excess_peer_group,
+        volume_multiple=move.volume_multiple or 0.0,
+        volume_peer_group=volume_peer_group,
+        breadth_score=breadth_score,
+    )
+
+
 def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     """Returns None if this alert has no company with a real measured
     excess move (measurement_status == "ok") -- an alert with nothing
@@ -48,18 +70,14 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     Otherwise returns a dict with: excess_move_pct, direction
     ("bullish"|"bearish"), raw_move_pct, sector_move_pct, volume_multiple
     (float | None), benchmark_ticker, is_fallback_benchmark (bool),
-    peak_ticker, peak_company_name, verdict (str), intensity
-    ({"score","band","components"}), breadth_score (int).
+    peak_ticker, peak_company_id, peak_company_name, verdict (str),
+    intensity ({"score","band","components"}), breadth_score (int).
 
     "Peak" is whichever measured company has the largest |excess_move_pct|
     -- the event's own headline reaction. breadth_score is event-scoped
-    (spec §4.4: how widely THIS event rippled). Intensity's excess/volume
-    peer groups are SECTOR-scoped across today's alerts (see
-    _sector_peer_moves) -- deliberately wider than the event, so a
-    single-company event's peak doesn't trivially normalize to 100 against
-    a peer group containing only itself. is_unconfirmed is hardcoded False
-    (the rumor/denial LLM classifier is a later phase) -- verdict can only
-    resolve to COMPANY_SPECIFIC/SECTOR_WIDE until then.
+    (spec §4.4: how widely THIS event rippled). is_unconfirmed is
+    hardcoded False (the rumor/denial LLM classifier is a later phase) --
+    verdict can only resolve to COMPANY_SPECIFIC/SECTOR_WIDE until then.
     """
     moves = (
         session.query(MarketMove)
@@ -76,18 +94,7 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     peak_alert_company = next(ac for ac in alert.companies if ac.company_id == peak.company_id)
     peak_company = peak_alert_company.company
 
-    sector_moves = _sector_peer_moves(session, peak_company.sector)
-    excess_peer_group = [m.excess_move_pct for m in sector_moves] or [peak.excess_move_pct]
-    sector_volume_values = [m.volume_multiple for m in sector_moves if m.volume_multiple is not None]
-    volume_peer_group = sector_volume_values or [peak.volume_multiple or 0.0]
-
-    intensity = compute_intensity(
-        excess_move_pct=peak.excess_move_pct,
-        excess_peer_group=excess_peer_group,
-        volume_multiple=peak.volume_multiple or 0.0,
-        volume_peer_group=volume_peer_group,
-        breadth_score=breadth_score,
-    )
+    intensity = _intensity_for_company_move(session, peak_company, peak, breadth_score)
     verdict = compute_verdict(is_unconfirmed=False, excess_move_pct=peak.excess_move_pct)
 
     return {
@@ -99,6 +106,7 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
         "benchmark_ticker": peak.benchmark_ticker,
         "is_fallback_benchmark": is_fallback_benchmark(peak_company.sector),
         "peak_ticker": peak_company.ticker,
+        "peak_company_id": peak_company.id,
         "peak_company_name": peak_company.name,
         "verdict": verdict,
         "intensity": intensity,
