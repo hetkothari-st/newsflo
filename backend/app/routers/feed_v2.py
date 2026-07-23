@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth.dependencies import get_current_user_optional
 from app.ist_time import day_utc_window, today_ist
 from app.market.alert_measurement import compute_alert_measurement
+from app.market.ripple import compute_ripple_companies
+from app.market.timeline_entries import get_timeline_entries
 from app.models import Alert, AlertCompany, Holding, User
 from app.routers.articles import get_db
 
@@ -91,4 +93,9 @@ def get_feed_v2_alert(
         raise HTTPException(status_code=404, detail="Alert has no measured companies")
 
     held_company_ids = _held_company_ids(db, current_user)
-    return _serialize(alert, measurement, held_company_ids)
+    result = _serialize(alert, measurement, held_company_ids)
+    result["ripple"] = compute_ripple_companies(
+        db, alert, exclude_company_id=measurement["peak_company_id"], held_company_ids=held_company_ids,
+    )
+    result["timeline"] = get_timeline_entries(db, alert)
+    return result

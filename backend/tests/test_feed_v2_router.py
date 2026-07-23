@@ -107,3 +107,31 @@ def test_get_feed_v2_alert_404_when_unmeasured(db_session):
 
     assert response.status_code == 404
     app.dependency_overrides.clear()
+
+
+def test_get_feed_v2_alert_includes_ripple_and_timeline(db_session):
+    _override_db(db_session)
+    alert = _measured_alert(db_session)  # single-company alert -- peak only, no ripple companions
+    client = TestClient(app)
+
+    response = client.get(f"/api/feed-v2/{alert.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ripple"] == []
+    assert body["timeline"] == []
+    app.dependency_overrides.clear()
+
+
+def test_list_feed_v2_does_not_include_ripple_or_timeline(db_session):
+    _override_db(db_session)
+    _measured_alert(db_session)
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "ripple" not in body[0]
+    assert "timeline" not in body[0]
+    app.dependency_overrides.clear()
