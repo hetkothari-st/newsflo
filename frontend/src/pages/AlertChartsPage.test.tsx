@@ -134,4 +134,18 @@ describe('AlertChartsPage', () => {
     expect(screen.getByText('Economic Chain')).toBeInTheDocument();
     expect(screen.getByText('Knowledge Graph')).toBeInTheDocument();
   });
+
+  it('renders the Main Feed button and carousel navigation controls', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alert());
+    renderPage('1');
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Return to Main Feed' })).toBeInTheDocument(),
+    );
+
+    expect(screen.getByRole('button', { name: 'Previous Chart' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next Chart' })).toBeInTheDocument();
+    expect(screen.getByText('Chart 1 of 10')).toBeInTheDocument();
+  });
 });
+
