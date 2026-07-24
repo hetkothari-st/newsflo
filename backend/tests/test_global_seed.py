@@ -29,3 +29,9 @@ def test_every_global_ticker_is_non_indian():
     # them all as GLOBAL.
     for entry in GLOBAL_COMPANIES:
         assert not entry["ticker"].endswith((".NS", ".BO")), entry
+
+
+def test_no_duplicate_tickers():
+    # The upsert loader keys on ticker, so any duplicate would silently
+    # collapse two entries into one row. Guard against that here.
+    assert len(GLOBAL_COMPANIES) == len(set(e["ticker"] for e in GLOBAL_COMPANIES))
