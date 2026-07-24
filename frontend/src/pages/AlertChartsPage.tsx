@@ -16,6 +16,7 @@ import SupplyChainGraph from '../features/visualize/charts/SupplyChainGraph';
 import EconomicChain from '../features/visualize/charts/EconomicChain';
 import KnowledgeGraph from '../features/visualize/charts/KnowledgeGraph';
 import { buildGraph } from '../features/visualize/graph/model';
+import { useHorizontalSwipe } from '../lib/useHorizontalSwipe';
 
 // Normal = the article's own direct impact only (both actually-direct
 // mentions and sector-inference fan-out -- see impact_level in
@@ -75,6 +76,7 @@ export default function AlertChartsPage() {
   const [alert, setAlert] = useState<Alert | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [breadth, setBreadth] = useState<Breadth>('normal');
+  const [activeChartIndex, setActiveChartIndex] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -99,11 +101,27 @@ export default function AlertChartsPage() {
   }
 
   const graph = buildGraph(alert);
+  const charts = [
+    { key: 'impact-tree', render: () => <ImpactTree companies={alert.companies} graph={graph} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'ripple-graph', render: () => <RippleGraph graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'supply-chain', render: () => <SupplyChainGraph graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'level-tree', render: () => <LevelTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'confidence-tree', render: () => <ConfidenceTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'split-tree', render: () => <SplitTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'timeline-tree', render: () => <TimelineTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'sector-tree', render: () => <SectorTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} /> },
+    { key: 'economic-chain', render: () => <EconomicChain graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} /> },
+    { key: 'knowledge-graph', render: () => <KnowledgeGraph graph={graph} companies={alert.companies} eventType={alert.event_type} /> },
+  ];
+  const goToPreviousChart = () => setActiveChartIndex((index) => Math.max(0, index - 1));
+  const goToNextChart = () => setActiveChartIndex((index) => Math.min(charts.length - 1, index + 1));
+  const swipeHandlers = useHorizontalSwipe({ onSwipeLeft: goToNextChart, onSwipeRight: goToPreviousChart });
+  const activeChart = charts[activeChartIndex];
 
   return (
     <div className="flex min-h-screen flex-col bg-page">
       <div className="flex items-center gap-3 border-b border-hairline p-4">
-        <button type="button" onClick={() => navigate(-1)} aria-label="Back" className="text-muted hover:text-ink">
+        <button type="button" onClick={() => navigate(`/alerts/${id}`)} aria-label="Affected companies" className="text-muted hover:text-ink">
           ←
         </button>
         <h1 className="truncate text-sm text-ink">{alert.article.title}</h1>
@@ -124,17 +142,37 @@ export default function AlertChartsPage() {
       </div>
       <StatBar companies={alert.companies} breadth={breadth} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4">
-          <ImpactTree companies={alert.companies} graph={graph} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <RippleGraph graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <SupplyChainGraph graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <LevelTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <ConfidenceTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <SplitTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <TimelineTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <SectorTree companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} eventType={alert.event_type} />
-          <EconomicChain graph={graph} companies={alert.companies} article={alert.article} alertCreatedAt={alert.created_at} />
-          <KnowledgeGraph graph={graph} companies={alert.companies} eventType={alert.event_type} />
+        <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-4 py-4">
+          <div
+            data-testid="chart-carousel"
+            className="flex min-h-0 flex-1 flex-col touch-pan-y"
+            {...swipeHandlers}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={goToPreviousChart}
+                disabled={activeChartIndex === 0}
+                aria-label="Previous chart"
+                className="rounded-lg border border-hairline px-3 py-2 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <p className="text-xs font-medium uppercase tracking-widest text-muted">Chart {activeChartIndex + 1} of {charts.length}</p>
+              <button
+                type="button"
+                onClick={goToNextChart}
+                disabled={activeChartIndex === charts.length - 1}
+                aria-label="Next chart"
+                className="rounded-lg border border-hairline px-3 py-2 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-0.5" key={activeChart.key}>
+              {activeChart.render()}
+            </div>
+          </div>
         </div>
       </div>
     </div>
