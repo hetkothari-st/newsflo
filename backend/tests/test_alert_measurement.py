@@ -13,10 +13,11 @@ def _article(db_session, url_suffix="a"):
     return article
 
 
-def _alert_company(alert_id, company_id, direction="bullish"):
+def _alert_company(alert_id, company_id, direction="bullish", impact_level="direct"):
     return AlertCompany(
         alert_id=alert_id, company_id=company_id, direction=direction,
         magnitude_low=1.0, magnitude_high=2.0, rationale="r", basis="direct_mention",
+        impact_level=impact_level,
     )
 
 
@@ -228,3 +229,148 @@ def test_result_includes_peak_company_id(db_session):
     result = compute_alert_measurement(db_session, alert)
 
     assert result["peak_company_id"] == company.id
+
+
+from app.market.alert_measurement import compute_impact_companies
+
+
+def test_impact_companies_includes_every_direct_measured_company(db_session):
+    a = _company("A.NS")
+    b = _company("B.NS")
+    db_session.add_all([a, b])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, a.id, direction="bearish"))
+    db_session.add(_alert_company(alert.id, b.id, direction="bullish"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=a.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=-4.2, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=b.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=1.5, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_impact_companies(db_session, alert)
+
+    tickers = [r["ticker"] for r in result]
+    assert tickers == ["A.NS", "B.NS"]  # sorted by |excess_move_pct| descending
+    assert result[0]["direction"] == "bearish"
+    assert result[0]["excess_move_pct"] == -4.2
+    assert result[1]["name"] == "Company B.NS"
+
+
+def test_impact_companies_excludes_indirect_companies(db_session):
+    direct = _company("A.NS")
+    indirect = _company("B.NS")
+    db_session.add_all([direct, indirect])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, direct.id))
+    db_session.add(_alert_company(alert.id, indirect.id, impact_level="indirect_l1"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=direct.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=indirect.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=9.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_impact_companies(db_session, alert)
+
+    assert [r["ticker"] for r in result] == ["A.NS"]
+
+
+def test_impact_companies_excludes_unmeasured_companies(db_session):
+    measured = _company("A.NS")
+    unmeasured = _company("B.NS")
+    db_session.add_all([measured, unmeasured])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, measured.id))
+    db_session.add(_alert_company(alert.id, unmeasured.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=measured.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=unmeasured.id, benchmark_ticker="^NSEI",
+        measurement_status="no_data", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_impact_companies(db_session, alert)
+
+    assert [r["ticker"] for r in result] == ["A.NS"]
+
+
+def test_impact_companies_includes_why_when_present(db_session):
+    company = _company("A.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    ac = _alert_company(alert.id, company.id)
+    ac.why = "Higher crude prices lift upstream margins."
+    db_session.add(ac)
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_impact_companies(db_session, alert)
+
+    assert result[0]["why"] == "Higher crude prices lift upstream margins."
+
+
+def test_impact_companies_why_is_none_when_not_populated(db_session):
+    company = _company("A.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, company.id))  # why left unset -- defaults to None
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_impact_companies(db_session, alert)
+
+    assert result[0]["why"] is None
+
+
+def test_impact_companies_returns_empty_list_when_none_qualify(db_session):
+    company = _company("A.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, company.id, impact_level="indirect_l1"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    assert compute_impact_companies(db_session, alert) == []

@@ -112,3 +112,42 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
         "intensity": intensity,
         "breadth_score": breadth_score,
     }
+
+
+def compute_impact_companies(session: Session, alert: Alert) -> list[dict]:
+    """Every directly-affected company for this alert (spec §1 layer 2,
+    "Impact core") -- AlertCompany.impact_level == "direct" AND a real
+    measured excess move (measurement_status == "ok"). Distinct from
+    compute_alert_measurement's single "peak" company: this returns the
+    FULL set (peak included), each with its own excess_move_pct, direction,
+    and why (refine_alert-populated causal text, None if that LLM call
+    never succeeded -- never fabricated). indirect_l1/indirect_l2 companies
+    are excluded -- those are cascade/ripple companies, already surfaced by
+    app.market.ripple.compute_ripple_companies. Sorted by |excess_move_pct|
+    descending, same ordering discipline as the rest of this module. Never
+    raises; returns [] when nothing qualifies (omit rather than fabricate).
+    """
+    moves_by_company_id = {
+        m.company_id: m
+        for m in session.query(MarketMove)
+        .filter(MarketMove.alert_id == alert.id, MarketMove.measurement_status == "ok")
+        .all()
+    }
+
+    results = []
+    for alert_company in alert.companies:
+        if alert_company.impact_level != "direct":
+            continue
+        move = moves_by_company_id.get(alert_company.company_id)
+        if move is None or move.excess_move_pct is None:
+            continue
+        results.append({
+            "ticker": alert_company.company.ticker,
+            "name": alert_company.company.name,
+            "direction": alert_company.direction,
+            "excess_move_pct": move.excess_move_pct,
+            "why": alert_company.why,
+        })
+
+    results.sort(key=lambda r: abs(r["excess_move_pct"]), reverse=True)
+    return results
