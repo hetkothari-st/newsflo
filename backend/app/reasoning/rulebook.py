@@ -584,6 +584,65 @@ RULES: dict[str, dict] = {
                  "adequacy) must each be evaluated independently -- a strong low-cost deposit base does "
                  "not imply clean loans, and vice versa"),
     ),
+    "RULE_ORDER_WIN": _rule(
+        "A company announces a large contract or order win",
+        "order_win_contract",
+        [],
+        caveats=("Judge size against the company's ANNUAL revenue -- a 'large' order at 2% of revenue is "
+                 "noise, at 30% it transforms visibility. Check margin profile and execution timeline; "
+                 "revenue books over years. Losing bidders and rivals move only with specific evidence"),
+    ),
+    "RULE_CAPACITY_EXPANSION": _rule(
+        "A company announces a new plant, capacity expansion, or major capex program",
+        "corporate_action",
+        [],
+        caveats=("Ask how it's funded: debt-funded expansion into weak demand destroys value; "
+                 "internally-funded expansion into visible demand compounds it. Expect near-term margin "
+                 "drag (depreciation, ramp-up costs) before long-term growth"),
+    ),
+    "RULE_CREDIT_RATING_CHANGE": _rule(
+        "A rating agency upgrades or downgrades a company's credit rating",
+        "corporate_action",
+        [],
+        caveats=("A downgrade raises borrowing costs and can trigger covenant/collateral demands -- the "
+                 "hit scales with leverage; heavily-indebted NBFCs and infrastructure developers are most "
+                 "sensitive. Upgrades work in reverse but move prices less"),
+    ),
+    "RULE_MANAGEMENT_GOVERNANCE_ISSUE": _rule(
+        "CEO/CFO exit, auditor resignation, fraud allegation, or promoter-pledge stress surfaces",
+        "corporate_action",
+        [],
+        caveats=("Governance shocks compress the valuation multiple regardless of current earnings. An "
+                 "auditor resignation is among the most severe red flags -- it implies the numbers "
+                 "themselves may be unreliable. High promoter share-pledging adds forced-selling risk "
+                 "if the stock falls"),
+    ),
+    "RULE_BUYBACK_DIVIDEND": _rule(
+        "A company announces a buyback, special dividend, or big payout change",
+        "corporate_action",
+        [],
+        caveats=("A buyback signals management sees the stock as undervalued and shrinks share count "
+                 "(raising earnings per share) -- but check it isn't funded by debt the business needs. "
+                 "A dividend cut usually signals cash stress and is a stronger negative than a hike is "
+                 "a positive"),
+    ),
+    "RULE_STAKE_SALE_IPO": _rule(
+        "Promoter/major holder sells a stake, or an IPO / lockup expiry adds share supply",
+        "corporate_action",
+        [],
+        caveats=("Large stake sales add supply AND raise the question of why an insider is selling -- "
+                 "check the stated reason against the seller's history. Lockup expiries add mechanical "
+                 "supply without a fundamentals signal. A parent listing a subsidiary can unlock value "
+                 "for the parent"),
+    ),
+    "RULE_IT_DEMAND_SIGNAL": _rule(
+        "A global IT bellwether (e.g. Accenture) reports results/guidance, or US tech-spending data shifts",
+        "earnings",
+        [],
+        caveats=("Global peers' guidance is a LEADING indicator for Indian IT demand -- strong bookings "
+                 "commentary is bullish for TCS/Infosys/Wipro/HCL before their own results, weak guidance "
+                 "bearish. Large caps track enterprise deal commentary; mid-caps swing harder both ways"),
+    ),
 }
 
 
