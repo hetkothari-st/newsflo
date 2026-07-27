@@ -1,12 +1,34 @@
+import json
 from types import SimpleNamespace
 
 from app.filtering.relevance import classify_relevance, filter_new_articles
 from app.models import Article
 
 
-def _fake_client(response_text: str):
+class _FakeToolCall:
+    def __init__(self, name: str, arguments: dict):
+        self.function = SimpleNamespace(name=name, arguments=json.dumps(arguments))
+
+
+def _fake_client(relevant: bool):
     def create(**kwargs):
-        message = SimpleNamespace(content=response_text)
+        message = SimpleNamespace(tool_calls=[_FakeToolCall("record_relevance", {"relevant": relevant})])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+def _no_tool_call_client():
+    def create(**kwargs):
+        message = SimpleNamespace(tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+def _malformed_client():
+    def create(**kwargs):
+        message = SimpleNamespace(tool_calls=[_FakeToolCall("record_relevance", {})])
+        # Force malformed JSON regardless of the dict above.
+        message.tool_calls[0].function.arguments = '{"relevant": tru'
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
@@ -17,17 +39,12 @@ def _raising_client():
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
 
-def test_classify_relevance_true_on_yes():
-    assert classify_relevance(_fake_client("YES"), "RBI hikes repo rate", "") is True
+def test_classify_relevance_true_on_relevant():
+    assert classify_relevance(_fake_client(True), "RBI hikes repo rate", "") is True
 
 
-def test_classify_relevance_false_on_no():
-    assert classify_relevance(_fake_client("NO"), "Cat stuck in tree", "") is False
-
-
-def test_classify_relevance_tolerates_case_and_whitespace():
-    assert classify_relevance(_fake_client("  yes  "), "t", "c") is True
-    assert classify_relevance(_fake_client("No."), "t", "c") is False
+def test_classify_relevance_false_on_irrelevant():
+    assert classify_relevance(_fake_client(False), "Cat stuck in tree", "") is False
 
 
 def test_classify_relevance_fails_open_on_client_exception():
@@ -36,9 +53,12 @@ def test_classify_relevance_fails_open_on_client_exception():
     assert classify_relevance(_raising_client(), "t", "c") is True
 
 
-def test_classify_relevance_fails_open_on_garbled_response():
-    assert classify_relevance(_fake_client(""), "t", "c") is False
-    assert classify_relevance(_fake_client("maybe"), "t", "c") is False
+def test_classify_relevance_fails_open_when_no_tool_call_returned():
+    assert classify_relevance(_no_tool_call_client(), "t", "c") is True
+
+
+def test_classify_relevance_fails_open_on_malformed_arguments():
+    assert classify_relevance(_malformed_client(), "t", "c") is True
 
 
 def test_filter_new_articles_categorizes_relevant_and_filters_irrelevant(db_session, monkeypatch):
@@ -95,13 +115,6 @@ def test_filter_new_articles_only_touches_new_articles(db_session, monkeypatch):
     filter_new_articles(db_session, client=object())
 
     assert call_count["n"] == 0
-
-
-def test_classify_relevance_fails_open_on_non_string_content():
-    # Load-bearing: a non-string content (e.g. a list of content-part
-    # blocks) must not escape the try block as an uncaught AttributeError --
-    # the function must still fail open.
-    assert classify_relevance(_fake_client(["yes"]), "t", "c") is True
 
 
 def test_filter_new_articles_throttles_between_articles(db_session, monkeypatch):

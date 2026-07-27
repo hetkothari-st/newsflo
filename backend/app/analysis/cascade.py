@@ -157,7 +157,15 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "actually about, not knock-on effects. For each, give its direction "
             "(bullish/bearish) and a one-line mechanism explaining WHY that "
             "sector is affected. Zero sectors is a correct answer when nothing "
-            "in the facts genuinely supports one."
+            "in the facts genuinely supports one -- this is common and "
+            "expected, not a failure: an accident, disaster, crime, or "
+            "human-interest story has zero real sectors unless the facts "
+            "themselves state a concrete economic consequence (e.g. a "
+            "disaster that destroys a named facility, or triggers a stated "
+            "insurance/supply-chain effect). Do not manufacture a mechanism "
+            "just to have something to report -- 'this could affect "
+            "sentiment' or 'this relates to the broader economy' is not a "
+            "real mechanism."
         )
         parent_context = ""
         valid_parents = None
