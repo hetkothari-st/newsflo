@@ -79,3 +79,16 @@ def test_company_mention_defaults_impact_level_to_direct_when_absent():
     )
     assert mention.impact_level == "direct"
     assert mention.parent_ticker is None
+
+
+def test_event_types_expanded_vocabulary():
+    from app.analysis.schemas import EVENT_TYPES
+    expected = [
+        "repo_rate_change", "inflation", "macro_data", "fiscal_policy",
+        "monsoon_weather", "crude_oil", "commodity_price", "currency_move",
+        "global_rates", "geopolitics", "government_spending", "government_policy",
+        "trade_policy", "regulation", "pricing_action", "fii_dii_flows",
+        "earnings", "merger_acquisition", "order_win_contract",
+        "corporate_action", "banking_metrics", "other",
+    ]
+    assert EVENT_TYPES == expected
