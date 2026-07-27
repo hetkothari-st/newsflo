@@ -82,6 +82,14 @@ export interface TimelineEntry {
   description: string;
 }
 
+export interface ImpactCompany {
+  ticker: string;
+  name: string;
+  direction: 'bullish' | 'bearish';
+  excess_move_pct: number;
+  why: string | null;
+}
+
 export interface FeedV2Alert {
   id: number;
   category: string;
@@ -104,6 +112,7 @@ export interface FeedV2Alert {
   in_my_holdings: boolean;
   ripple?: RippleCompany[];
   timeline?: TimelineEntry[];
+  impact_companies?: ImpactCompany[];
 }
 
 function authHeaders(token: string | null): Record<string, string> {
