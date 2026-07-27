@@ -75,3 +75,22 @@ def test_every_chain_event_type_is_chain_bearing():
     from app.reasoning.rulebook import CHAIN_EXCLUDED_EVENT_TYPES
     for event_type in CHAINS:
         assert event_type not in CHAIN_EXCLUDED_EVENT_TYPES
+
+
+def test_canonical_chain_labels_are_stable():
+    # _build_chains picks the first-declared rule per event_type; these
+    # mechanism-node labels pin the canonical directional variant so a
+    # later insertion cannot silently flip a chart chain's direction.
+    expected = {
+        "repo_rate_change": "Repo Rate ↓",
+        "inflation": "Inflation ↑",
+        "crude_oil": "Crude Oil ↑",
+        "currency_move": "INR ↓",
+        "fiscal_policy": "GST Cut",
+        "commodity_price": "Metal Prices ↑",
+        "global_rates": "Global Risk-Off",
+    }
+    for event_type, label in expected.items():
+        mech_labels = [e["from"]["label"] for e in CHAINS[event_type]
+                       if e["from"]["kind"] == "mechanism"]
+        assert label in mech_labels, f"{event_type}: canonical chain is not {label!r}"
