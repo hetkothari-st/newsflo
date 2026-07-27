@@ -28,6 +28,7 @@ class ScriptedClient:
         self._responses = responses
         self.calls = []
         self.last_tool = None
+        self.last_messages = None
 
     class _Completions:
         def __init__(self, outer):
@@ -37,6 +38,7 @@ class ScriptedClient:
             name = kwargs["tool_choice"]["function"]["name"]
             self._outer.calls.append({"name": name, "model": kwargs.get("model")})
             self._outer.last_tool = kwargs["tools"][0]
+            self._outer.last_messages = kwargs.get("messages")
             if name not in self._outer._responses:
                 raise AssertionError(f"unscripted stage called: {name}")
             response = self._outer._responses[name]
@@ -158,6 +160,34 @@ def test_identify_sectors_calls_fallback_model_only():
     _identify_sectors(client, facts="f", parent_sectors=None)
 
     assert client.calls == [{"name": "record_sectors", "model": FALLBACK_MODEL}]
+
+
+def test_primary_sector_prompt_contains_rulebook_digest():
+    # RULE_MONSOON_GOOD appears only in the digest (stage 2), never in
+    # SECTOR_DEFINITIONS -- proves the digest block is actually injected
+    # into the primary sector-identification call and NOT the cascade call.
+    from app.analysis.cascade import _identify_sectors
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+    _identify_sectors(client, "some facts", None)
+    prompt = client.last_messages[-1]["content"]
+    assert "RULE_MONSOON_GOOD" in prompt
+    assert "KNOWN TRANSMISSION CHAINS" in prompt
+
+
+def test_cascade_sector_prompt_has_no_rulebook_digest():
+    from app.analysis.cascade import _identify_sectors
+    from app.analysis.schemas import SectorFinding
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+    parents = [SectorFinding(sector="banking", direction="bullish", mechanism="m")]
+    _identify_sectors(client, "some facts", parents)
+    prompt = client.last_messages[-1]["content"]
+    assert "KNOWN TRANSMISSION CHAINS" not in prompt
+
+
+def test_company_rationale_instructions_forbid_verbatim_echo():
+    from app.analysis.cascade import COMPANY_RATIONALE_INSTRUCTIONS
+    assert "verbatim" in COMPANY_RATIONALE_INSTRUCTIONS.lower()
+    assert "first principles" in COMPANY_RATIONALE_INSTRUCTIONS.lower()
 
 
 def test_build_sector_tool_cascade_constrains_parent_sector_enum():
@@ -738,14 +768,34 @@ def test_generate_edges_verify_call_failure_falls_back_to_unverified_proposed_ch
     assert all("[UNVERIFIED" in e["note"] for e in rulebook_edges)
 
 
+def test_generate_edges_verify_call_failure_drops_proposed_chain_for_heterogeneous_event_type():
+    # commodity_price's canonical chain (Metal Prices) is not in
+    # CHAIN_FALLBACK_KEEP_EVENT_TYPES -- it also covers gold/coal/agri news,
+    # so an unverified chain risks charting the wrong subject entirely, not
+    # just the wrong direction. On verify failure the proposed edges must
+    # be dropped rather than kept as unverified.
+    class FailingClient:
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self)
+
+        def create(self, **kwargs):
+            raise RuntimeError("provider down")
+
+    edges = _generate_edges(FailingClient(), facts="f", event_type="commodity_price", companies=[])
+
+    rulebook_edges = [e for e in edges if e["source"] in ("rulebook_verified", "rulebook_pruned")]
+    assert rulebook_edges == []
+
+
 def test_generate_edges_missing_verification_for_one_index_kept_unverified_not_dropped():
-    proposed = CHAINS["inflation"]  # 3 edges
-    # Only verify index 0 and 2 -- index 1 is missing from the response entirely.
+    proposed = CHAINS["inflation"]
+    # Verify every index except 1 -- index 1 is missing from the response entirely.
     client = ScriptedClient({
         "record_edge_verification": {
             "verifications": [
-                {"index": 0, "applicable": True},
-                {"index": 2, "applicable": True},
+                {"index": i, "applicable": True}
+                for i in range(len(proposed)) if i != 1
             ],
             "llm_only_edges": [],
         },

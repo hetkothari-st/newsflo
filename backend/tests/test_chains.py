@@ -42,7 +42,10 @@ def test_get_chain_none_event_type_returns_none():
 
 
 @pytest.mark.parametrize("event_type", [
-    "repo_rate_change", "crude_oil", "government_spending", "currency_move", "inflation",
+    "repo_rate_change", "crude_oil", "government_spending", "currency_move",
+    "inflation", "macro_data", "fiscal_policy", "monsoon_weather",
+    "commodity_price", "global_rates", "geopolitics", "fii_dii_flows",
+    "government_policy", "trade_policy", "regulation", "pricing_action",
 ])
 def test_broad_mechanism_event_types_have_a_nonempty_chain(event_type):
     chain = get_chain(event_type)
@@ -51,7 +54,8 @@ def test_broad_mechanism_event_types_have_a_nonempty_chain(event_type):
 
 
 @pytest.mark.parametrize("event_type", [
-    "earnings", "merger_acquisition", "banking_metrics", "other",
+    "earnings", "merger_acquisition", "banking_metrics",
+    "order_win_contract", "corporate_action", "other",
 ])
 def test_company_specific_event_types_have_no_chain(event_type):
     assert get_chain(event_type) is None
@@ -68,7 +72,35 @@ def test_chains_text_is_nonempty_and_mentions_every_event_type():
         assert event_type in CHAINS_TEXT
 
 
-def test_chains_has_exactly_the_five_broad_mechanism_event_types():
-    assert set(CHAINS) == {
-        "repo_rate_change", "crude_oil", "government_spending", "currency_move", "inflation",
+def test_every_chain_event_type_is_chain_bearing():
+    from app.reasoning.rulebook import CHAIN_EXCLUDED_EVENT_TYPES
+    for event_type in CHAINS:
+        assert event_type not in CHAIN_EXCLUDED_EVENT_TYPES
+
+
+def test_canonical_chain_labels_are_stable():
+    # _build_chains picks the first-declared rule per event_type; these
+    # mechanism-node labels pin the canonical directional variant so a
+    # later insertion cannot silently flip a chart chain's direction.
+    expected = {
+        "repo_rate_change": "Repo Rate ↓",
+        "inflation": "Inflation ↑",
+        "crude_oil": "Crude Oil ↑",
+        "currency_move": "INR ↓",
+        "fiscal_policy": "GST Cut",
+        "commodity_price": "Metal Prices ↑",
+        "global_rates": "Global Risk-Off",
+        "government_policy": "PLI Scheme",
+        "trade_policy": "Import Duty ↑",
+        "regulation": "RBI Tightening",
+        "pricing_action": "Telecom Tariff ↑",
+        "macro_data": "GDP Growth ↑",
+        "monsoon_weather": "Good Monsoon",
+        "geopolitics": "Geopolitical Conflict",
+        "government_spending": "Govt Capex ↑",
+        "fii_dii_flows": "FII Outflows",
     }
+    for event_type, label in expected.items():
+        mech_labels = [e["from"]["label"] for e in CHAINS[event_type]
+                       if e["from"]["kind"] == "mechanism"]
+        assert label in mech_labels, f"{event_type}: canonical chain is not {label!r}"

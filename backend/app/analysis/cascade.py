@@ -28,7 +28,10 @@ import logging
 from openai import RateLimitError
 
 from app.reasoning.playbooks import PLAYBOOKS_TEXT
-from app.reasoning.rulebook import CHAINS, EDGE_RELATIONS, NODE_SECTOR, RULEBOOK_TEXT, get_chain
+from app.reasoning.rulebook import (
+    CHAIN_FALLBACK_KEEP_EVENT_TYPES, CHAINS, EDGE_RELATIONS, NODE_SECTOR, RULEBOOK_DIGEST,
+    RULEBOOK_TEXT, get_chain,
+)
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
 from app.analysis.schemas import (
@@ -167,6 +170,15 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "sentiment' or 'this relates to the broader economy' is not a "
             "real mechanism."
         )
+        framing += (
+            "\n\nConsult the KNOWN TRANSMISSION CHAINS reference below. When a "
+            "chain's trigger genuinely matches these facts, follow its sector "
+            "branches -- adapted to this article's specifics, and dropping any "
+            "branch whose stated condition doesn't hold here. When none "
+            "matches, reason from first principles. Never include a sector "
+            "just because it appears in a chain -- the mechanism must hold "
+            "for THIS article."
+        )
         parent_context = ""
         valid_parents = None
     else:
@@ -218,6 +230,13 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
         parent_context = f"\n\nAlready-identified sectors this may ripple from:\n{parent_lines}"
         valid_parents = [s.sector for s in parent_sectors]
 
+    # Digest is only injected on the primary branch -- the cascade branches
+    # (stage 4/6) already carry a longer prompt (parent sectors + cascade
+    # framing) and RULEBOOK_DIGEST's chains describe the DIRECT/primary
+    # transmission, not a further ripple hop, so it isn't the right
+    # reference for those calls anyway.
+    digest_block = f"KNOWN TRANSMISSION CHAINS:\n{RULEBOOK_DIGEST}\n\n" if parent_sectors is None else ""
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -225,6 +244,7 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "content": (
                 f"{framing}\n\n"
                 f"SECTOR DEFINITIONS:\n{SECTOR_DEFINITIONS}\n\n"
+                f"{digest_block}"
                 f"Facts: {facts}"
                 f"{parent_context}"
             ),
@@ -333,10 +353,18 @@ COMPANY_RATIONALE_INSTRUCTIONS = (
     "or closely paraphrased fact from the article (prefix \"article: \"), "
     "or a specific historical precedent you actually know (prefix "
     "\"historical: \").\n\n"
-    "Consult the ECONOMIC REASONING RULES and SECTOR PLAYBOOKS below. If a "
-    "rule genuinely applies, use it to strengthen your rationale and "
-    "include its rule id verbatim as one entry in that company's "
-    "evidence_refs. Do not force-fit a rule that doesn't actually apply.\n"
+    "Consult the ECONOMIC REASONING RULES and SECTOR PLAYBOOKS below. When a "
+    "rule genuinely applies: include its rule id verbatim as one entry in that "
+    "company's evidence_refs, then ADAPT its mechanism to this article's "
+    "specifics -- name the actual numbers, companies, and conditions from the "
+    "news. Copying rule text verbatim into rationale or key_points is "
+    "forbidden: the rules are generic priors, your output must be this "
+    "article's specific story. The article's own facts always override a "
+    "rule's generic direction -- when they conflict, follow the article and "
+    "do not cite the rule. Respect each rule's 'only if' conditions -- a "
+    "conditional branch whose condition doesn't hold here does not apply. If "
+    "no rule matches, reason from first principles and cite no rule id -- do "
+    "not force-fit one.\n"
     f"ECONOMIC REASONING RULES:\n{RULEBOOK_TEXT}\n\n"
     f"SECTOR PLAYBOOKS:\n{PLAYBOOKS_TEXT}"
 )
@@ -809,11 +837,25 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
                     "note": llm_edge["note"], "source": "llm_only",
                 })
         except Exception as exc:
-            logger.warning("edge verification call failed, falling back to unverified proposed chain: %s", exc)
-            edges = [
-                {**e, "source": "rulebook_verified", "note": f"{e['note']} [UNVERIFIED: verification call failed]"}
-                for e in proposed
-            ]
+            if event_type in CHAIN_FALLBACK_KEEP_EVENT_TYPES:
+                logger.warning("edge verification call failed, falling back to unverified proposed chain: %s", exc)
+                edges = [
+                    {**e, "source": "rulebook_verified", "note": f"{e['note']} [UNVERIFIED: verification call failed]"}
+                    for e in proposed
+                ]
+            else:
+                # This event_type's chain covers several distinct news
+                # families (see CHAIN_FALLBACK_KEEP_EVENT_TYPES docstring in
+                # rulebook.py) -- without verification an unverified
+                # canonical chain risks charting the wrong SUBJECT entirely,
+                # not just the wrong direction. Drop the proposed edges
+                # rather than keep a possibly-mismatched chain; company-
+                # attachment edges below still proceed as usual.
+                logger.warning(
+                    "edge verification call failed for non-fallback-safe event_type %r, dropping proposed chain: %s",
+                    event_type, exc,
+                )
+                edges = []
 
     edges.extend(_sector_attachment_edges(companies))
     return edges

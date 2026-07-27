@@ -50,6 +50,30 @@ SUB_SECTOR_TAXONOMY: dict[str, list[str]] = {
     "infra": [
         "construction_engineering", "power_utilities", "capital_goods", "cement", "infra_other",
     ],
+    "railways_transport": [
+        "aviation", "ports_shipping", "logistics_roadways", "rail_equipment", "railways_transport_other",
+    ],
+    "construction_realestate": [
+        "residential_developer", "commercial_reit", "construction_realestate_other",
+    ],
+    "defense": [
+        "defense_platforms", "defense_electronics", "shipyard", "defense_other",
+    ],
+    "agriculture": [
+        "fertilizers", "agrochemicals", "seeds_agri_inputs", "agriculture_other",
+    ],
+    "consumer_durables": [
+        "appliances_electronics", "wires_cables", "consumer_durables_other",
+    ],
+    "media_entertainment": [
+        "broadcast_tv", "multiplex_film", "digital_gaming", "media_entertainment_other",
+    ],
+    "chemicals": [
+        "specialty_chemicals", "commodity_chemicals", "paints", "chemicals_other",
+    ],
+    "textiles": [
+        "apparel_garments", "yarn_fabric", "textiles_other",
+    ],
 }
 
 # Short definitions for the classification prompt, same terse style as
@@ -114,6 +138,52 @@ SUB_SECTOR_DEFINITIONS: dict[str, str] = {
         "- capital_goods: industrial and capital goods manufacturers.\n"
         "- cement: cement manufacturers.\n"
         "- infra_other: none of the above cleanly."
+    ),
+    "railways_transport": (
+        "- aviation: airlines and airport operators.\n"
+        "- ports_shipping: port operators and shipping lines.\n"
+        "- logistics_roadways: road logistics, warehousing, and express delivery.\n"
+        "- rail_equipment: rail wagon/locomotive/component manufacturers.\n"
+        "- railways_transport_other: none of the above cleanly."
+    ),
+    "construction_realestate": (
+        "- residential_developer: housing-focused property developers.\n"
+        "- commercial_reit: office/mall developers and REITs.\n"
+        "- construction_realestate_other: none of the above cleanly."
+    ),
+    "defense": (
+        "- defense_platforms: aircraft/missile/vehicle platform manufacturers.\n"
+        "- defense_electronics: radar, avionics, and defense electronics makers.\n"
+        "- shipyard: naval and commercial shipbuilders.\n"
+        "- defense_other: none of the above cleanly."
+    ),
+    "agriculture": (
+        "- fertilizers: urea/NPK/phosphate fertilizer producers.\n"
+        "- agrochemicals: pesticide/herbicide/crop-protection makers.\n"
+        "- seeds_agri_inputs: seed companies and other farm-input suppliers.\n"
+        "- agriculture_other: none of the above cleanly."
+    ),
+    "consumer_durables": (
+        "- appliances_electronics: appliance and consumer-electronics manufacturers.\n"
+        "- wires_cables: wires, cables, and electrical-accessories makers.\n"
+        "- consumer_durables_other: none of the above cleanly."
+    ),
+    "media_entertainment": (
+        "- broadcast_tv: TV broadcasters and content networks.\n"
+        "- multiplex_film: cinema chains and film production companies.\n"
+        "- digital_gaming: digital media, OTT, and gaming companies.\n"
+        "- media_entertainment_other: none of the above cleanly."
+    ),
+    "chemicals": (
+        "- specialty_chemicals: high-value niche chemical manufacturers.\n"
+        "- commodity_chemicals: bulk/basic chemical producers.\n"
+        "- paints: paint and coatings manufacturers.\n"
+        "- chemicals_other: none of the above cleanly."
+    ),
+    "textiles": (
+        "- apparel_garments: garment and apparel makers/brands.\n"
+        "- yarn_fabric: spinning, yarn, and fabric manufacturers.\n"
+        "- textiles_other: none of the above cleanly."
     ),
 }
 

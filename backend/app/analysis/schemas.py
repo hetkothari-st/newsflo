@@ -8,9 +8,31 @@ SECTORS = [
     "consumer_durables", "media_entertainment", "chemicals", "textiles", "other",
 ]
 TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
+# The specific triggering event (stage-1 classification; also keys the
+# rulebook's transmission chains). Existing 9 values keep their exact names
+# -- persisted Alert.event_type rows cite them.
 EVENT_TYPES = [
-    "repo_rate_change", "inflation", "crude_oil", "currency_move",
-    "government_spending", "earnings", "merger_acquisition", "banking_metrics",
+    "repo_rate_change",      # RBI repo/policy rate decisions
+    "inflation",             # CPI/WPI prints and inflation commentary
+    "macro_data",            # GDP, IIP, PMI, employment, trade-balance data
+    "fiscal_policy",         # budget, fiscal deficit, government borrowing, GST changes
+    "monsoon_weather",       # monsoon progress, drought, extreme weather
+    "crude_oil",             # crude price moves and oil supply events
+    "commodity_price",       # non-crude commodities: gold, metals, coal, agri
+    "currency_move",         # INR/USD and other FX moves
+    "global_rates",          # Fed/ECB decisions, global risk-on/risk-off
+    "geopolitics",           # war, sanctions, cross-border conflict
+    "government_spending",   # infra capex, defense procurement, public projects
+    "government_policy",     # PLI schemes, subsidies, sector programs
+    "trade_policy",          # import/export duties, FTAs, export bans
+    "regulation",            # RBI/SEBI/TRAI/USFDA and sector regulators
+    "pricing_action",        # industry-wide price hikes/cuts (telecom tariffs, cement)
+    "fii_dii_flows",         # foreign/domestic institutional flow stories
+    "earnings",              # results, guidance, and peer demand signals
+    "merger_acquisition",
+    "order_win_contract",    # large contract/order wins
+    "corporate_action",      # buyback, dividend, stake sale, IPO, rating, mgmt change, capacity expansion
+    "banking_metrics",
     "other",
 ]
 # The article-level topical bucket shown as a badge on every feed card

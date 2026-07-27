@@ -5,5 +5,5 @@ whenever ANALYSIS_INSTRUCTIONS or the rulebook/playbook content changes
 meaningfully; never edit history, only add a new version string.
 """
 
-PROMPT_VERSION = "2026.07.15-reasoning-v2"
-KNOWLEDGE_VERSION = "2026.07.15-rulebook-v1"
+PROMPT_VERSION = "2026.07.27-reasoning-v3"
+KNOWLEDGE_VERSION = "2026.07.27-rulebook-v2"
