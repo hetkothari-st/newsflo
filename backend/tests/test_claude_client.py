@@ -106,15 +106,31 @@ def test_rotating_client_does_not_rotate_on_non_rate_limit_errors():
         pass
 
 
-def test_build_client_wraps_in_fallback_when_anthropic_key_given():
-    client = build_client("groq-key", "anthropic-key")
+def _gemini_api_error() -> "GeminiAPIError":
+    from app.analysis.claude_client import GeminiAPIError
+    return GeminiAPIError("Gemini API returned 429: quota exceeded")
+
+
+def test_build_client_wraps_in_fallback_when_gemini_key_given():
+    from app.analysis.claude_client import GeminiAdapter
+    client = build_client("groq-key", "gemini-key")
     assert isinstance(client, FallbackClient)
-    assert isinstance(client._primary, AnthropicAdapter)
+    assert isinstance(client._primary, GeminiAdapter)
 
 
-def test_build_client_skips_fallback_wrapper_without_anthropic_key():
+def test_build_client_skips_fallback_wrapper_without_gemini_key():
     client = build_client("groq-key", None)
     assert not isinstance(client, FallbackClient)
+
+
+def test_fallback_client_falls_through_to_secondary_on_gemini_api_error():
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(_gemini_api_error())
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
 
 
 def test_fallback_client_uses_primary_when_it_succeeds():

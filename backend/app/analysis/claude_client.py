@@ -325,18 +325,18 @@ class FallbackClient:
     def _call(self, **kwargs):
         try:
             return self._primary.chat.completions.create(**kwargs)
-        except (RateLimitError, AnthropicAPIError):
+        except (RateLimitError, AnthropicAPIError, GeminiAPIError):
             return self._secondary.chat.completions.create(**kwargs)
 
 
 def build_client(
-    groq_api_key: str | list[str], anthropic_api_key: str | None = None,
+    groq_api_key: str | list[str], gemini_api_key: str | None = None,
 ) -> OpenAI | RotatingClient | FallbackClient:
     if isinstance(groq_api_key, list):
         groq_client = RotatingClient(groq_api_key, base_url=GROQ_BASE_URL)
     else:
         groq_client = OpenAI(api_key=groq_api_key, base_url=GROQ_BASE_URL)
 
-    if anthropic_api_key:
-        return FallbackClient(AnthropicAdapter(anthropic_api_key), groq_client)
+    if gemini_api_key:
+        return FallbackClient(GeminiAdapter(gemini_api_key), groq_client)
     return groq_client
