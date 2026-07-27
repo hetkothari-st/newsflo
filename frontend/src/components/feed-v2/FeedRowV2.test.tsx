@@ -10,7 +10,7 @@ function makeAlert(overrides: Partial<FeedV2Alert> = {}): FeedV2Alert {
     created_at: '2026-07-22T10:00:00Z',
     summary_short: 'Oil supply shock lifts refiners',
     summary_long: null,
-    article: { id: 1, title: 'Oil surges', url: 'https://example.com/a', source: 'test', published_at: null },
+    article: { id: 1, image_url: null, title: 'Oil surges', url: 'https://example.com/a', source: 'test', published_at: null },
     excess_move_pct: -4.2,
     direction: 'bearish',
     raw_move_pct: -4.8,
@@ -61,6 +61,27 @@ describe('FeedRowV2', () => {
     render(<FeedRowV2 alert={makeAlert()} onOpen={onOpen} />);
     fireEvent.click(screen.getByText('Oil supply shock lifts refiners'));
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the article headline and category', () => {
+    render(<FeedRowV2 alert={makeAlert()} onOpen={() => {}} />);
+    expect(screen.getByText('Oil surges')).toBeInTheDocument();
+    expect(screen.getByText('Oil & Gas')).toBeInTheDocument();
+  });
+
+  it('renders the article photo when image_url is present', () => {
+    const { container } = render(
+      <FeedRowV2
+        alert={makeAlert({
+          article: {
+            id: 1, image_url: 'https://example.com/photo.jpg', title: 'Oil surges',
+            url: 'https://example.com/a', source: 'test', published_at: null,
+          },
+        })}
+        onOpen={() => {}}
+      />,
+    );
+    expect(container.querySelector('img[src="https://example.com/photo.jpg"]')).toBeInTheDocument();
   });
 });
 
