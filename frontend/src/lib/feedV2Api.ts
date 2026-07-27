@@ -1,5 +1,6 @@
 export interface FeedV2Article {
   id: number;
+  image_url: string | null;
   title: string;
   url: string;
   source: string;
