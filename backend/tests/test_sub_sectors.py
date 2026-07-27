@@ -85,3 +85,10 @@ def test_classify_batch_falls_back_to_other_bucket_for_a_ticker_the_model_omitte
     # treats a missing key as "still unclassified, try again next run" rather
     # than guessing a bucket for it.
     assert result == {}
+
+
+def test_taxonomy_covers_every_sector_except_other():
+    from app.analysis.schemas import SECTORS
+    from app.companies.sub_sectors import SUB_SECTOR_TAXONOMY
+    expected = set(SECTORS) - {"other"}
+    assert set(SUB_SECTOR_TAXONOMY) == expected
