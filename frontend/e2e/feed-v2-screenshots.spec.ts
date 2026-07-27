@@ -2,6 +2,13 @@ import { test } from '@playwright/test';
 
 const THEMES = ['dark', 'light'] as const;
 
+function hideBottomNav(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
+    if (bottomNav) bottomNav.style.display = 'none';
+  });
+}
+
 for (const theme of THEMES) {
   test(`feed-v2 Level 0 (${theme})`, async ({ page }) => {
     await page.goto('/feed-v2');
@@ -23,33 +30,59 @@ for (const theme of THEMES) {
     const firstRow = page.locator('[role="button"]').first();
     await firstRow.waitFor({ timeout: 10_000 });
     await firstRow.click();
-    await page.waitForTimeout(300); // allow the modal's open transition to settle
-    // The modal panel is `position: fixed` (see AlertDetail.tsx) with its own
-    // `max-h-[85vh] overflow-hidden` box and an inner `overflow-y-auto` body
-    // -- Chromium excludes fixed-position content from document.scrollHeight
-    // entirely regardless of overflow/max-height, so a page-level `fullPage`
-    // screenshot can never include content past the modal's own scroll fold,
-    // and an element screenshot of the still-clipped dialog caps at 85vh too
-    // (verified against a live page: dialog.scrollHeight was 927px on a
-    // 390x844 viewport, but a plain element screenshot only captured 718px,
-    // exactly 85vh). Lift both the panel's own clipping and its child's
-    // scroll clipping first so the element screenshot captures the true,
-    // full height -- ripple + timeline content included regardless of
-    // viewport height.
-    await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"]') as HTMLElement | null;
-      const body = dialog?.querySelector('.overflow-y-auto') as HTMLElement | null;
-      if (dialog) {
-        dialog.style.overflow = 'visible';
-        dialog.style.maxHeight = 'none';
-      }
-      if (body) {
-        body.style.overflow = 'visible';
-        body.style.maxHeight = 'none';
-      }
-    });
-    await page.locator('[role="dialog"]').screenshot({
+    // AlertLevel1Page is now a real routed page (not a modal) that issues
+    // its own async fetch after navigation -- wait for content that only
+    // renders once that fetch resolves, same discipline as the deep-dive
+    // page's "What they do" wait below.
+    await page.waitForSelector('text=Raw move', { timeout: 10_000 });
+    await hideBottomNav(page);
+    await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-level1-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
+
+  test(`feed-v2 Level 2 ripple (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    const firstRow = page.locator('[role="button"]').first();
+    await firstRow.waitFor({ timeout: 10_000 });
+    await firstRow.click();
+    await page.waitForSelector('text=Raw move', { timeout: 10_000 });
+    const rippleDoor = page.getByRole('link', { name: /See ripple/ });
+    await rippleDoor.click();
+    // "See timeline" always renders once AlertRipplePage's own fetch
+    // resolves, regardless of whether this alert has any ripple companies
+    // -- a stable anchor independent of ripple content.
+    await page.waitForSelector('text=See timeline', { timeout: 10_000 });
+    await hideBottomNav(page);
+    await page.screenshot({
+      path: `.superpowers-screenshots/feed-v2-level2-ripple-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
+    });
+  });
+
+  test(`feed-v2 Level 3 timeline (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    const firstRow = page.locator('[role="button"]').first();
+    await firstRow.waitFor({ timeout: 10_000 });
+    await firstRow.click();
+    await page.waitForSelector('text=Raw move', { timeout: 10_000 });
+    await page.getByRole('link', { name: /See ripple/ }).click();
+    await page.waitForSelector('text=See timeline', { timeout: 10_000 });
+    await page.getByRole('link', { name: /See timeline/ }).click();
+    // "← Ripple" always renders once AlertTimelinePage's own fetch
+    // resolves, regardless of whether this alert has any timeline entries.
+    await page.waitForSelector('text=Ripple', { timeout: 10_000 });
+    await hideBottomNav(page);
+    await page.screenshot({
+      path: `.superpowers-screenshots/feed-v2-level3-timeline-${theme}-${test.info().project.name}.png`,
+      fullPage: true,
     });
   });
 
@@ -76,32 +109,16 @@ for (const theme of THEMES) {
     const firstRow = page.locator('[role="button"]').first();
     await firstRow.waitFor({ timeout: 10_000 });
     await firstRow.click();
-    await page.waitForTimeout(300);
-    const peerRow = page.locator('[role="dialog"] [role="button"][aria-label]').first();
+    await page.waitForSelector('text=Raw move', { timeout: 10_000 });
+    await page.getByRole('link', { name: /See ripple/ }).click();
+    await page.waitForSelector('text=See timeline', { timeout: 10_000 });
+    // Ripple's peer rows are now on a plain page (no longer scoped inside
+    // a `[role="dialog"]`) -- same selector shape PeerRow has always used.
+    const peerRow = page.locator('[role="button"][aria-label]').first();
     await peerRow.waitFor({ timeout: 10_000 });
     await peerRow.click();
-    // The deep-dive page issues its OWN async fetch after navigation (unlike
-    // the popups above, which reuse already-loaded data) -- StockDeepDivePage
-    // renders nothing (`return null`) until that fetch resolves. A fixed
-    // waitForTimeout raced the fetch and captured a blank page (verified: a
-    // manual reproduction rendered full content once given real time). Wait
-    // for the "What they do" section, which always renders once real data
-    // arrives (with or without alert context), before screenshotting.
     await page.waitForSelector('text=What they do', { timeout: 10_000 });
-    // BottomNav (`fixed inset-x-0 bottom-0`, mobile only) is app-wide chrome,
-    // not specific to this page -- but this is the first PLAIN routed page
-    // (not a modal) tall enough on mobile to exceed one viewport, so a
-    // fullPage screenshot composites the fixed nav bar on top of whatever
-    // content sits at that scroll offset (here: the market-cap/P-E row),
-    // the same class of position:fixed-vs-fullPage issue already fixed for
-    // the Level 1 modal above. Hide it for this capture only -- it's real
-    // app chrome a live user always sees pinned to their own viewport
-    // bottom, never permanently over one fixed slice of page content the
-    // way a flattened screenshot renders it.
-    await page.evaluate(() => {
-      const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
-      if (bottomNav) bottomNav.style.display = 'none';
-    });
+    await hideBottomNav(page);
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-with-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
@@ -125,15 +142,11 @@ for (const theme of THEMES) {
     if (theme === 'light') {
       await page.evaluate(() => document.documentElement.classList.add('light'));
     }
-    // `getByRole('link').first()` matched the nav bar's own logo link (first
-    // in DOM order, outside the directory list), navigating to the legacy
-    // "/" feed instead of a company row -- verified by inspecting the
-    // resulting screenshot, which showed image-card feed content, not a
-    // deep-dive. Scope to a link that actually points at a stock deep-dive.
     const firstCompanyLink = page.locator('a[href^="/feed-v2/stock/"]').first();
     await firstCompanyLink.waitFor({ timeout: 10_000 });
     await firstCompanyLink.click();
     await page.waitForSelector('text=What they do', { timeout: 10_000 });
+    await hideBottomNav(page);
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-no-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
