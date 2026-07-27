@@ -48,7 +48,7 @@ from app.pipeline import (
 def main(limit: int, force: bool) -> None:
     init_db()
     session = SessionLocal()
-    client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
+    client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
 
     alerts = session.query(Alert).order_by(Alert.created_at.desc()).limit(limit).all()
 
