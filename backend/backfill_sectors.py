@@ -28,7 +28,7 @@ BATCH_SIZE = 25  # companies per LLM call -- keeps prompt/response small and eac
 def main() -> None:
     init_db()
     session = SessionLocal()
-    client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
+    client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
     total = 0
     try:
         companies = session.query(Company).all()

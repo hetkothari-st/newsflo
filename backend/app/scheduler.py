@@ -134,7 +134,7 @@ def _run_ingestion_and_analysis() -> None:
     session = SessionLocal()
     try:
         # inserted = fetch_new_articles(session, RSS_FEEDS)  # RSS -- see import comment above
-        client = build_client(settings.groq_api_keys, settings.anthropic_api_key or None)
+        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
         created = process_new_articles(session, client, throttle_seconds=2.5)
         logger.info("Analysis cycle: %s alerts created", created)
     except Exception:

@@ -106,15 +106,31 @@ def test_rotating_client_does_not_rotate_on_non_rate_limit_errors():
         pass
 
 
-def test_build_client_wraps_in_fallback_when_anthropic_key_given():
-    client = build_client("groq-key", "anthropic-key")
+def _gemini_api_error() -> "GeminiAPIError":
+    from app.analysis.claude_client import GeminiAPIError
+    return GeminiAPIError("Gemini API returned 429: quota exceeded")
+
+
+def test_build_client_wraps_in_fallback_when_gemini_key_given():
+    from app.analysis.claude_client import GeminiAdapter
+    client = build_client("groq-key", "gemini-key")
     assert isinstance(client, FallbackClient)
-    assert isinstance(client._primary, AnthropicAdapter)
+    assert isinstance(client._primary, GeminiAdapter)
 
 
-def test_build_client_skips_fallback_wrapper_without_anthropic_key():
+def test_build_client_skips_fallback_wrapper_without_gemini_key():
     client = build_client("groq-key", None)
     assert not isinstance(client, FallbackClient)
+
+
+def test_fallback_client_falls_through_to_secondary_on_gemini_api_error():
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(_gemini_api_error())
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
 
 
 def test_fallback_client_uses_primary_when_it_succeeds():
@@ -250,3 +266,232 @@ def _translate_via_fake(fake_messages, **kwargs):
     completions._client = SimpleNamespace(messages=fake_messages)
     completions._model = ANTHROPIC_MODEL
     return completions.create(**kwargs)
+
+
+def _gemini_response(function_name: str, args: dict) -> httpx.Response:
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent")
+    body = {
+        "candidates": [{
+            "content": {
+                "parts": [{"functionCall": {"name": function_name, "args": args}}],
+                "role": "model",
+            },
+            "finishReason": "STOP",
+        }],
+    }
+    return httpx.Response(status_code=200, request=request, json=body)
+
+
+def _gemini_response_no_function_call() -> httpx.Response:
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent")
+    body = {"candidates": [{"content": {"parts": [{"text": "no tool call here"}], "role": "model"}, "finishReason": "STOP"}]}
+    return httpx.Response(status_code=200, request=request, json=body)
+
+
+def test_gemini_adapter_translates_request_and_response_to_openai_shape(monkeypatch):
+    from app.analysis.claude_client import GEMINI_MODEL, GeminiAdapter
+
+    tool_input = {
+        "category": "oil_energy",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "Refiner margins expand.",
+        }],
+    }
+    captured = {}
+
+    def fake_post(url, *, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _gemini_response("record_analysis", tool_input)
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+
+    adapter = GeminiAdapter("test-gemini-key")
+
+    from app.analysis.claude_client import SYSTEM_PROMPT
+
+    FAKE_TOOL = {
+        "type": "function",
+        "function": {
+            "name": "record_analysis",
+            "description": "test tool",
+            "parameters": {
+                "type": "object",
+                "properties": {"category": {"type": "string"}},
+                "required": ["category"],
+            },
+        },
+    }
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[FAKE_TOOL],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Title: test\n\nContent: test"},
+        ],
+    )
+
+    # Request was translated to Gemini's shape correctly.
+    assert f"models/{GEMINI_MODEL}:generateContent" in captured["url"]
+    assert "key=test-gemini-key" in captured["url"]
+    sent = captured["json"]
+    assert sent["systemInstruction"]["parts"][0]["text"] == SYSTEM_PROMPT
+    assert sent["contents"] == [{"role": "user", "parts": [{"text": "Title: test\n\nContent: test"}]}]
+    sent_schema = sent["tools"][0]["function_declarations"][0]["parameters"]
+    assert sent_schema["type"] == "OBJECT"  # uppercased from "object"
+    assert sent_schema["properties"]["category"]["type"] == "STRING"  # uppercased from "string"
+    assert sent["tool_config"]["function_calling_config"]["mode"] == "ANY"
+    assert sent["generationConfig"]["maxOutputTokens"] == 1024
+
+    # Response was translated back to the OpenAI shape analyze_article expects.
+    tool_call = result.choices[0].message.tool_calls[0]
+    assert tool_call.function.name == "record_analysis"
+    assert json.loads(tool_call.function.arguments) == tool_input  # args re-serialized to a JSON string
+
+
+def test_gemini_adapter_returns_empty_tool_calls_when_no_function_call(monkeypatch):
+    from app.analysis.claude_client import GeminiAdapter
+
+    monkeypatch.setattr(
+        "app.analysis.claude_client.httpx.post",
+        lambda url, *, json, timeout: _gemini_response_no_function_call(),
+    )
+    adapter = GeminiAdapter("test-gemini-key")
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[{"role": "user", "content": "test"}],
+    )
+
+    assert result.choices[0].message.tool_calls == []
+
+
+def test_uppercase_schema_types_handles_real_nullable_list_typed_field():
+    # Regression test for the Critical finding: build_company_tool's real,
+    # in-production schema has a JSON-Schema list-valued nullable field
+    # ("ticker": {"type": ["string", "null"]}), nested two levels deep
+    # inside array `items`/object `properties`. A naive dict.get(result
+    # ["type"], ...) on a list-valued type raises "TypeError: unhashable
+    # type: 'list'" the instant it's reached -- this must not crash, and
+    # must translate to Gemini's single-type-string + `nullable` shape.
+    from app.analysis.cascade import build_company_tool
+    from app.analysis.claude_client import _uppercase_schema_types
+
+    schema = build_company_tool(None)["function"]["parameters"]
+
+    result = _uppercase_schema_types(schema)  # must not raise
+
+    company_item_properties = (
+        result["properties"]["sector_companies"]["items"]
+        ["properties"]["companies"]["items"]["properties"]
+    )
+    assert company_item_properties["ticker"] == {"type": "STRING", "nullable": True}
+    # A sibling, non-nullable string field went through the ordinary path unaffected.
+    assert company_item_properties["name"] == {"type": "STRING"}
+
+
+def test_uppercase_schema_types_rejects_unsupported_list_shapes():
+    from app.analysis.claude_client import _uppercase_schema_types
+
+    try:
+        _uppercase_schema_types({"type": ["string", "number"]})
+        assert False, "Expected ValueError for a list-valued type with no 'null' member"
+    except ValueError:
+        pass
+
+
+def test_gemini_adapter_raises_gemini_api_error_on_non_2xx_response(monkeypatch):
+    from app.analysis.claude_client import GeminiAdapter, GeminiAPIError
+
+    def fake_post(url, *, json, timeout):
+        request = httpx.Request("POST", url)
+        return httpx.Response(status_code=429, request=request, json={"error": {"message": "quota exceeded"}})
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+    adapter = GeminiAdapter("test-gemini-key")
+
+    try:
+        adapter.chat.completions.create(
+            max_tokens=1024,
+            tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+            tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+            messages=[{"role": "user", "content": "test"}],
+        )
+        assert False, "Expected GeminiAPIError to be raised"
+    except GeminiAPIError:
+        pass
+
+
+def test_gemini_adapter_raises_gemini_api_error_on_network_failure(monkeypatch):
+    # httpx.post can raise before any response exists at all (DNS failure,
+    # refused connection, connect/read timeout -- all httpx.HTTPError
+    # subclasses). This must not propagate as the raw httpx exception --
+    # it has to become a GeminiAPIError so FallbackClient's except tuple
+    # still catches it and degrades to Groq.
+    from app.analysis.claude_client import GeminiAdapter, GeminiAPIError
+
+    def fake_post(url, *, json, timeout):
+        raise httpx.ConnectTimeout("connection timed out", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+    adapter = GeminiAdapter("test-gemini-key")
+
+    try:
+        adapter.chat.completions.create(
+            max_tokens=1024,
+            tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+            tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+            messages=[{"role": "user", "content": "test"}],
+        )
+        assert False, "Expected GeminiAPIError to be raised"
+    except GeminiAPIError:
+        pass
+
+
+def test_gemini_adapter_returns_empty_tool_calls_on_safety_block(monkeypatch):
+    # A Gemini safety block (or a MAX_TOKENS truncation) yields a candidate
+    # with finishReason set but NO "content" key at all -- this must degrade
+    # to the same empty-tool_calls path as an ordinary response with no
+    # function call, not raise a raw KeyError.
+    from app.analysis.claude_client import GeminiAdapter
+
+    def fake_post(url, *, json, timeout):
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            status_code=200, request=request,
+            json={"candidates": [{"finishReason": "SAFETY", "index": 0}]},
+        )
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+    adapter = GeminiAdapter("test-gemini-key")
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[{"role": "user", "content": "test"}],
+    )
+
+    assert result.choices[0].message.tool_calls == []
+
+
+def test_fallback_client_falls_through_to_secondary_on_gemini_network_failure():
+    # GeminiAPIError raised for a network-failure reason (not just an
+    # HTTP-status reason, already covered by
+    # test_fallback_client_falls_through_to_secondary_on_gemini_api_error)
+    # must still trigger the same fallthrough to the secondary client.
+    from app.analysis.claude_client import GeminiAPIError
+
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(GeminiAPIError("Gemini API request failed: ConnectTimeout"))
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel

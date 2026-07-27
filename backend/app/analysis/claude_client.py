@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import httpx
 from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
@@ -10,6 +11,28 @@ from openai import OpenAI, RateLimitError
 # funded key is never wasted on calls that a free provider could have
 # served, and so the app keeps working if Anthropic's own rate limit is hit.
 ANTHROPIC_MODEL = "claude-sonnet-4-5"
+
+# Gemini is the analysis pipeline's primary provider (replaces the dead
+# Anthropic slot -- see docs/superpowers/specs/2026-07-27-gemini-primary-
+# reasoning-provider-design.md). "gemini-flash-latest" is an alias Google
+# keeps pointed at their current recommended flash model, not a dated
+# version string -- same reasoning as FALLBACK_MODEL's own history below
+# (a hardcoded model name needs a manual swap when a provider deprecates
+# it; an alias doesn't).
+GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+class GeminiAPIError(Exception):
+    """Raised on any non-2xx response from the Gemini API, and on any
+    httpx.HTTPError raised before a response even exists (connection
+    refused, DNS failure, connect/read timeout) -- covers rate limits/quota
+    exhaustion (429), auth failures, server errors, and network/connection
+    failures alike, same "any provider-level failure should degrade to the
+    fallback provider" discipline AnthropicAPIError already provides for
+    Anthropic.
+    """
+
 
 MODEL = "llama-3.3-70b-versatile"
 # Groq enforces daily token quotas PER MODEL, not per key -- multiple keys on
@@ -95,6 +118,137 @@ class RotatingClient:
         raise last_error
 
 
+_JSON_SCHEMA_TO_GEMINI_TYPE = {
+    "object": "OBJECT", "string": "STRING", "boolean": "BOOLEAN",
+    "number": "NUMBER", "integer": "INTEGER", "array": "ARRAY",
+}
+
+
+def _uppercase_schema_types(schema: dict) -> dict:
+    """Gemini's function-declaration parameter schema requires uppercase
+    type strings ("OBJECT", "STRING", ...) -- every tool builder in this
+    codebase emits lowercase JSON Schema ("object", "string", ...), the
+    format every OTHER provider here (OpenAI-shape Groq, Anthropic)
+    accepts as-is. Confirmed live: Gemini rejects/misbehaves on lowercase.
+    Recursively walks `properties` (object schemas) and `items` (array
+    schemas) -- two places a nested schema can appear in this codebase's
+    tool definitions -- uppercasing every `type` key found, leaving
+    `description`/`enum`/`required` untouched.
+
+    A third shape also occurs (e.g. cascade.py's nullable `ticker` field):
+    JSON Schema's list-valued `"type": ["string", "null"]`, meaning
+    "string or null". Gemini's schema format has no equivalent list -- it
+    takes a single uppercase `"type"` string plus a separate boolean
+    `"nullable"` flag. Every list-valued `type` actually present in this
+    codebase's tool schemas is exactly this 2-element `[<real type>, "null"]`
+    shape, so that's the only list shape handled here: the non-"null" entry
+    is uppercased and used as `type`, and `nullable` is set whenever "null"
+    was present in the list.
+    """
+    result = dict(schema)
+    if isinstance(result.get("type"), list):
+        type_list = result["type"]
+        real_types = [t for t in type_list if t != "null"]
+        if len(real_types) != 1:
+            raise ValueError(f"Unsupported list-valued JSON Schema type: {type_list!r}")
+        result["type"] = _JSON_SCHEMA_TO_GEMINI_TYPE.get(real_types[0], real_types[0])
+        if "null" in type_list:
+            result["nullable"] = True
+    elif "type" in result:
+        result["type"] = _JSON_SCHEMA_TO_GEMINI_TYPE.get(result["type"], result["type"])
+    if "properties" in result:
+        result["properties"] = {k: _uppercase_schema_types(v) for k, v in result["properties"].items()}
+    if "items" in result:
+        result["items"] = _uppercase_schema_types(result["items"])
+    return result
+
+
+class _GeminiCompletions:
+    """Translates an OpenAI-shape chat.completions.create(...) call into a
+    Gemini generateContent REST call and translates the response back --
+    same duck-typing contract as _AnthropicCompletions, one provider over.
+    """
+
+    def __init__(self, api_key: str, model: str):
+        self._api_key = api_key
+        self._model = model
+
+    def create(self, *, max_tokens, tools, messages, **_ignored):
+        system_content = None
+        contents = []
+        for m in messages:
+            if m["role"] == "system":
+                system_content = m["content"]
+            else:
+                contents.append({"role": "user", "parts": [{"text": m["content"]}]})
+
+        function_spec = tools[0]["function"]
+        function_declaration = {
+            "name": function_spec["name"],
+            "description": function_spec["description"],
+            "parameters": _uppercase_schema_types(function_spec["parameters"]),
+        }
+
+        body = {
+            "contents": contents,
+            "tools": [{"function_declarations": [function_declaration]}],
+            "tool_config": {"function_calling_config": {"mode": "ANY"}},
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+        if system_content is not None:
+            body["systemInstruction"] = {"parts": [{"text": system_content}]}
+
+        url = f"{GEMINI_BASE_URL}/models/{self._model}:generateContent?key={self._api_key}"
+        try:
+            response = httpx.post(url, json=body, timeout=60.0)
+        except httpx.HTTPError as exc:
+            # Raised by httpx BEFORE any response exists (DNS failure, refused
+            # connection, read/connect timeout, ...) -- no status code to
+            # inspect, so this can't go through the status-code branch below.
+            # Re-raised as GeminiAPIError so FallbackClient's except tuple
+            # still catches it and degrades to Groq instead of the raw httpx
+            # exception propagating out of the whole pipeline. Deliberately
+            # built from type(exc).__name__, not `exc`/`str(exc)`'s own
+            # request -- `url` above embeds the API key as a query param
+            # (Gemini's documented auth method), and we never want a key to
+            # end up in a log line via an exception's string form.
+            raise GeminiAPIError(f"Gemini API request failed: {type(exc).__name__}") from exc
+        if response.status_code != 200:
+            raise GeminiAPIError(f"Gemini API returned {response.status_code}: {response.text}")
+
+        data = response.json()
+        candidates = data.get("candidates") or []
+        # A safety block or MAX_TOKENS truncation omits "content" entirely
+        # (finishReason: "SAFETY"/"MAX_TOKENS" with no content key) -- .get(...)
+        # falls through to the same empty-tool_calls path as an ordinary
+        # response with no function call, instead of a raw KeyError crash.
+        content = candidates[0].get("content", {}) if candidates else {}
+        parts = content.get("parts", [])
+        function_call = next((p["functionCall"] for p in parts if "functionCall" in p), None)
+
+        if function_call is None:
+            fake_tool_calls = []
+        else:
+            fake_tool_calls = [SimpleNamespace(
+                function=SimpleNamespace(name=function_call["name"], arguments=json.dumps(function_call["args"])),
+            )]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=fake_tool_calls))])
+
+
+class _GeminiChat:
+    def __init__(self, api_key: str, model: str):
+        self.completions = _GeminiCompletions(api_key, model)
+
+
+class GeminiAdapter:
+    """Duck-types the OpenAI client surface analyze_article uses, backed by
+    a raw Gemini generateContent REST call, so the rest of the pipeline
+    never needs to know which provider actually served a given call."""
+
+    def __init__(self, api_key: str, model: str = GEMINI_MODEL):
+        self.chat = _GeminiChat(api_key, model)
+
+
 class _AnthropicCompletions:
     """Translates an OpenAI-shape chat.completions.create(...) call into a
     native Anthropic messages.create(...) call and translates the response
@@ -173,14 +327,19 @@ class _FallbackChat:
 
 
 class FallbackClient:
-    """Tries the primary client (Anthropic) first; on ANY Anthropic API-level
-    failure (rate limit, insufficient credit balance, auth, server error,
-    connection failure -- anthropic.APIError covers all of these) or an
-    OpenAI-style RateLimitError, falls through to the secondary client (Groq,
-    itself possibly a RotatingClient/model-fallback already). A credit/billing
-    failure is a real, expected production scenario for a paid API -- not
-    catching it here would crash the whole pipeline instead of degrading to
-    the fallback provider. Errors from the secondary client itself still
+    """Tries the primary client first; on ANY primary-provider API-level
+    failure (rate limit/quota, auth, server error, connection failure --
+    GeminiAPIError and AnthropicAPIError each cover all of these for their
+    own provider) or an OpenAI-style RateLimitError, falls through to the
+    secondary client (Groq, itself possibly a RotatingClient/model-fallback
+    already). The analysis pipeline's build_client() wires GeminiAdapter as
+    primary (Anthropic's key is dead); AnthropicAdapter is still used as a
+    primary elsewhere (translation's own provider selection) -- this class
+    stays provider-agnostic on purpose so either caller gets the same
+    degrade-to-Groq safety net. A quota/billing failure is a real, expected
+    production scenario for any paid or rate-limited API -- not catching it
+    here would crash the whole pipeline instead of degrading to the
+    fallback provider. Errors from the secondary client itself still
     propagate normally.
     """
 
@@ -192,18 +351,18 @@ class FallbackClient:
     def _call(self, **kwargs):
         try:
             return self._primary.chat.completions.create(**kwargs)
-        except (RateLimitError, AnthropicAPIError):
+        except (RateLimitError, AnthropicAPIError, GeminiAPIError):
             return self._secondary.chat.completions.create(**kwargs)
 
 
 def build_client(
-    groq_api_key: str | list[str], anthropic_api_key: str | None = None,
+    groq_api_key: str | list[str], gemini_api_key: str | None = None,
 ) -> OpenAI | RotatingClient | FallbackClient:
     if isinstance(groq_api_key, list):
         groq_client = RotatingClient(groq_api_key, base_url=GROQ_BASE_URL)
     else:
         groq_client = OpenAI(api_key=groq_api_key, base_url=GROQ_BASE_URL)
 
-    if anthropic_api_key:
-        return FallbackClient(AnthropicAdapter(anthropic_api_key), groq_client)
+    if gemini_api_key:
+        return FallbackClient(GeminiAdapter(gemini_api_key), groq_client)
     return groq_client
