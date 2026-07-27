@@ -2,27 +2,29 @@ import { test } from '@playwright/test';
 
 const THEMES = ['dark', 'light'] as const;
 
-function hideBottomNav(page: import('@playwright/test').Page) {
-  return page.evaluate(() => {
-    const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
-    if (bottomNav) bottomNav.style.display = 'none';
-  });
-}
-
 for (const theme of THEMES) {
-  test(`feed-v2 Level 0 (${theme})`, async ({ page }) => {
+  test(`feed-v2 list (${theme})`, async ({ page }) => {
     await page.goto('/feed-v2');
     if (theme === 'light') {
       await page.evaluate(() => document.documentElement.classList.add('light'));
     }
     await page.waitForSelector('text=/./', { timeout: 10_000 }).catch(() => {});
+    // On mobile the seeded feed has more cards than fit in one viewport, so
+    // this fullPage capture is taller than the viewport just like the
+    // deep-dive pages -- the fixed BottomNav must be hidden here too, or it
+    // freezes at its viewport-relative position and overlaps a card partway
+    // down the composited screenshot.
+    await page.evaluate(() => {
+      const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
+      if (bottomNav) bottomNav.style.display = 'none';
+    });
     await page.screenshot({
-      path: `.superpowers-screenshots/feed-v2-level0-${theme}-${test.info().project.name}.png`,
+      path: `.superpowers-screenshots/feed-v2-list-${theme}-${test.info().project.name}.png`,
       fullPage: true,
     });
   });
 
-  test(`feed-v2 Level 1 (${theme})`, async ({ page }) => {
+  test(`feed-v2 detail panel - affected tab (${theme})`, async ({ page }) => {
     await page.goto('/feed-v2');
     if (theme === 'light') {
       await page.evaluate(() => document.documentElement.classList.add('light'));
@@ -30,41 +32,29 @@ for (const theme of THEMES) {
     const firstRow = page.locator('[role="button"]').first();
     await firstRow.waitFor({ timeout: 10_000 });
     await firstRow.click();
-    // AlertLevel1Page is now a real routed page (not a modal) that issues
-    // its own async fetch after navigation -- wait for content that only
-    // renders once that fetch resolves, same discipline as the deep-dive
-    // page's "What they do" wait below.
+    // The popup issues its own async fetch after opening -- wait for
+    // content that only renders once that fetch resolves.
     await page.waitForSelector('text=Raw move', { timeout: 10_000 });
-    await hideBottomNav(page);
-    await page.screenshot({
-      path: `.superpowers-screenshots/feed-v2-level1-${theme}-${test.info().project.name}.png`,
-      fullPage: true,
+    await page.getByRole('button', { name: /Affected/ }).click();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]') as HTMLElement | null;
+      const body = dialog?.querySelector('.overflow-y-auto') as HTMLElement | null;
+      if (dialog) {
+        dialog.style.overflow = 'visible';
+        dialog.style.maxHeight = 'none';
+      }
+      if (body) {
+        body.style.overflow = 'visible';
+        body.style.maxHeight = 'none';
+      }
+    });
+    await page.locator('[role="dialog"]').screenshot({
+      path: `.superpowers-screenshots/feed-v2-panel-affected-${theme}-${test.info().project.name}.png`,
     });
   });
 
-  test(`feed-v2 Level 2 ripple (${theme})`, async ({ page }) => {
-    await page.goto('/feed-v2');
-    if (theme === 'light') {
-      await page.evaluate(() => document.documentElement.classList.add('light'));
-    }
-    const firstRow = page.locator('[role="button"]').first();
-    await firstRow.waitFor({ timeout: 10_000 });
-    await firstRow.click();
-    await page.waitForSelector('text=Raw move', { timeout: 10_000 });
-    const rippleDoor = page.getByRole('link', { name: /See ripple/ });
-    await rippleDoor.click();
-    // "See timeline" always renders once AlertRipplePage's own fetch
-    // resolves, regardless of whether this alert has any ripple companies
-    // -- a stable anchor independent of ripple content.
-    await page.waitForSelector('text=See timeline', { timeout: 10_000 });
-    await hideBottomNav(page);
-    await page.screenshot({
-      path: `.superpowers-screenshots/feed-v2-level2-ripple-${theme}-${test.info().project.name}.png`,
-      fullPage: true,
-    });
-  });
-
-  test(`feed-v2 Level 3 timeline (${theme})`, async ({ page }) => {
+  test(`feed-v2 detail panel - ripple tab (${theme})`, async ({ page }) => {
     await page.goto('/feed-v2');
     if (theme === 'light') {
       await page.evaluate(() => document.documentElement.classList.add('light'));
@@ -73,16 +63,50 @@ for (const theme of THEMES) {
     await firstRow.waitFor({ timeout: 10_000 });
     await firstRow.click();
     await page.waitForSelector('text=Raw move', { timeout: 10_000 });
-    await page.getByRole('link', { name: /See ripple/ }).click();
-    await page.waitForSelector('text=See timeline', { timeout: 10_000 });
-    await page.getByRole('link', { name: /See timeline/ }).click();
-    // "← Ripple" always renders once AlertTimelinePage's own fetch
-    // resolves, regardless of whether this alert has any timeline entries.
-    await page.waitForSelector('text=Ripple', { timeout: 10_000 });
-    await hideBottomNav(page);
-    await page.screenshot({
-      path: `.superpowers-screenshots/feed-v2-level3-timeline-${theme}-${test.info().project.name}.png`,
-      fullPage: true,
+    await page.getByRole('button', { name: /Ripple/ }).click();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]') as HTMLElement | null;
+      const body = dialog?.querySelector('.overflow-y-auto') as HTMLElement | null;
+      if (dialog) {
+        dialog.style.overflow = 'visible';
+        dialog.style.maxHeight = 'none';
+      }
+      if (body) {
+        body.style.overflow = 'visible';
+        body.style.maxHeight = 'none';
+      }
+    });
+    await page.locator('[role="dialog"]').screenshot({
+      path: `.superpowers-screenshots/feed-v2-panel-ripple-${theme}-${test.info().project.name}.png`,
+    });
+  });
+
+  test(`feed-v2 detail panel - timeline tab (${theme})`, async ({ page }) => {
+    await page.goto('/feed-v2');
+    if (theme === 'light') {
+      await page.evaluate(() => document.documentElement.classList.add('light'));
+    }
+    const firstRow = page.locator('[role="button"]').first();
+    await firstRow.waitFor({ timeout: 10_000 });
+    await firstRow.click();
+    await page.waitForSelector('text=Raw move', { timeout: 10_000 });
+    await page.getByRole('button', { name: /Timeline/ }).click();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]') as HTMLElement | null;
+      const body = dialog?.querySelector('.overflow-y-auto') as HTMLElement | null;
+      if (dialog) {
+        dialog.style.overflow = 'visible';
+        dialog.style.maxHeight = 'none';
+      }
+      if (body) {
+        body.style.overflow = 'visible';
+        body.style.maxHeight = 'none';
+      }
+    });
+    await page.locator('[role="dialog"]').screenshot({
+      path: `.superpowers-screenshots/feed-v2-panel-timeline-${theme}-${test.info().project.name}.png`,
     });
   });
 
@@ -110,15 +134,15 @@ for (const theme of THEMES) {
     await firstRow.waitFor({ timeout: 10_000 });
     await firstRow.click();
     await page.waitForSelector('text=Raw move', { timeout: 10_000 });
-    await page.getByRole('link', { name: /See ripple/ }).click();
-    await page.waitForSelector('text=See timeline', { timeout: 10_000 });
-    // Ripple's peer rows are now on a plain page (no longer scoped inside
-    // a `[role="dialog"]`) -- same selector shape PeerRow has always used.
-    const peerRow = page.locator('[role="button"][aria-label]').first();
+    await page.getByRole('button', { name: /Ripple/ }).click();
+    const peerRow = page.locator('[role="dialog"] [role="button"][aria-label]').first();
     await peerRow.waitFor({ timeout: 10_000 });
     await peerRow.click();
     await page.waitForSelector('text=What they do', { timeout: 10_000 });
-    await hideBottomNav(page);
+    await page.evaluate(() => {
+      const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
+      if (bottomNav) bottomNav.style.display = 'none';
+    });
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-with-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
@@ -146,7 +170,10 @@ for (const theme of THEMES) {
     await firstCompanyLink.waitFor({ timeout: 10_000 });
     await firstCompanyLink.click();
     await page.waitForSelector('text=What they do', { timeout: 10_000 });
-    await hideBottomNav(page);
+    await page.evaluate(() => {
+      const bottomNav = document.querySelector('nav.fixed') as HTMLElement | null;
+      if (bottomNav) bottomNav.style.display = 'none';
+    });
     await page.screenshot({
       path: `.superpowers-screenshots/feed-v2-stock-deep-dive-no-alert-${theme}-${test.info().project.name}.png`,
       fullPage: true,
