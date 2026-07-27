@@ -196,3 +196,47 @@ def test_list_feed_v2_does_not_include_impact_companies(db_session):
     assert response.status_code == 200
     assert "impact_companies" not in response.json()[0]
     app.dependency_overrides.clear()
+
+
+def test_get_feed_v2_alert_includes_article_image_url(db_session):
+    _override_db(db_session)
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+    article = Article(
+        source="test", url="https://example.com/img", title="Oil surges", content="c",
+        image_url="https://example.com/photo.jpg",
+    )
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", basis="direct_mention",
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=-4.2, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get(f"/api/feed-v2/{alert.id}")
+
+    assert response.status_code == 200
+    assert response.json()["article"]["image_url"] == "https://example.com/photo.jpg"
+    app.dependency_overrides.clear()
+
+
+def test_list_feed_v2_includes_article_image_url_null_when_absent(db_session):
+    _override_db(db_session)
+    _measured_alert(db_session)  # no image_url set -- Article defaults to None
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2")
+
+    assert response.status_code == 200
+    assert response.json()[0]["article"]["image_url"] is None
+    app.dependency_overrides.clear()

@@ -38,6 +38,7 @@ def _serialize(alert: Alert, measurement: dict, held_company_ids: set[int]) -> d
         "summary_long": alert.summary_long,
         "article": {
             "id": alert.article.id,
+            "image_url": alert.article.image_url,
             "title": alert.article.title,
             "url": alert.article.url,
             "source": alert.article.source,
