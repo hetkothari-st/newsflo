@@ -190,7 +190,7 @@ def main() -> None:
             session.add(AlertCompany(
                 alert_id=first_alert_id, company_id=company.id, direction=direction,
                 magnitude_low=0.5, magnitude_high=1.5, rationale=f"Ripple effect via {relation}.",
-                basis="direct_mention",
+                basis="direct_mention", impact_level="indirect_l1",
             ))
 
             if has_market_move:

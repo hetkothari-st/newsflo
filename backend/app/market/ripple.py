@@ -1,6 +1,9 @@
-"""Level 2 ripple data: every OTHER measured/exposed company tied to an
-alert (excluding the event's own peak, already shown at Level 0/1), grouped
-by relationship type (docs/NEWS_IMPACT_APP_SPEC.md §2 Level 2, §3.1
+"""Level 2 ripple data: every OTHER indirect (cascade/spillover) company
+tied to an alert -- excluding both the event's own peak (already shown at
+Level 0/1) AND any directly-named company (impact_level == "direct",
+already shown by Level 1's Affected tab, see
+app.market.alert_measurement.compute_impact_companies) -- grouped by
+relationship type (docs/NEWS_IMPACT_APP_SPEC.md §2 Level 2, §3.1
 RippleLink). A company with no real measured move renders as a flagged
 EXPOSURE, never a fabricated impact number (spec: "ripple companies that
 have not moved... show it as a flagged relationship with no number and no
@@ -79,8 +82,21 @@ def compute_ripple_companies(
     (float|None), intensity (dict|None), is_exposure_only (bool),
     in_my_holdings (bool)}. Sorted by intensity score descending;
     exposure-only entries (no score) sort last.
+
+    Only AlertCompany.impact_level != "direct" (indirect_l1/indirect_l2 --
+    genuine cascade/spillover) qualifies. Directly-named companies are
+    shown by app.market.alert_measurement.compute_impact_companies
+    (Level 1's Affected tab) instead -- without this filter, a non-peak
+    direct company appeared in BOTH views under two different names
+    ("directly affected" and "ripple"), which is exactly what "ripple
+    effect" should NOT mean: confirmed live in production, a user
+    reported the two tabs "literally show the same companies."
     """
+    ticker_to_company_id = {ac.company.ticker: ac.company_id for ac in alert.companies}
+    indirect_company_ids = {ac.company_id for ac in alert.companies if ac.impact_level != "direct"}
+
     rows = _alert_company_rows(session, alert, exclude_company_id, held_company_ids)
+    rows = [row for row in rows if ticker_to_company_id[row["ticker"]] in indirect_company_ids]
 
     edges = session.query(ImpactEdge).filter_by(alert_id=alert.id).all()
     relation_by_company_id: dict[int, str] = {}
@@ -89,7 +105,6 @@ def compute_ripple_companies(
             if company_id is not None and company_id not in relation_by_company_id:
                 relation_by_company_id[company_id] = edge.relation
 
-    ticker_to_company_id = {ac.company.ticker: ac.company_id for ac in alert.companies}
     results = []
     for row in rows:
         company_id = ticker_to_company_id[row["ticker"]]

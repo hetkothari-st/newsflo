@@ -15,7 +15,7 @@ def test_ripple_rows_include_cap_tier_and_business_desc(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, beneficiary.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -45,10 +45,11 @@ def _article(db_session):
     return article
 
 
-def _alert_company(alert_id, company_id, direction="bullish"):
+def _alert_company(alert_id, company_id, direction="bullish", impact_level="direct"):
     return AlertCompany(
         alert_id=alert_id, company_id=company_id, direction=direction,
         magnitude_low=1.0, magnitude_high=2.0, rationale="r", basis="direct_mention",
+        impact_level=impact_level,
     )
 
 
@@ -70,7 +71,7 @@ def test_excludes_the_peak_company(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, other.id))
+    db_session.add(_alert_company(alert.id, other.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -99,7 +100,7 @@ def test_groups_by_relationship_via_impact_edge(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, beneficiary.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -128,7 +129,7 @@ def test_company_with_no_edge_defaults_to_sector_wide(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, unlinked.id))
+    db_session.add(_alert_company(alert.id, unlinked.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -156,7 +157,7 @@ def test_unmeasured_company_is_exposure_only_with_no_number(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, unmeasured.id))
+    db_session.add(_alert_company(alert.id, unmeasured.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -185,7 +186,7 @@ def test_company_with_no_market_move_row_at_all_is_exposure_only(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, never_measured.id))
+    db_session.add(_alert_company(alert.id, never_measured.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -209,8 +210,9 @@ def test_sorted_by_intensity_descending_exposure_only_sorts_last(db_session):
     alert = Alert(article_id=article.id, category="oil_gas")
     db_session.add(alert)
     db_session.flush()
-    for c in (peak, small, big, unmeasured):
-        db_session.add(_alert_company(alert.id, c.id))
+    db_session.add(_alert_company(alert.id, peak.id))
+    for c in (small, big, unmeasured):
+        db_session.add(_alert_company(alert.id, c.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -249,7 +251,7 @@ def test_in_my_holdings_reflects_held_company_ids(db_session):
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, held.id))
+    db_session.add(_alert_company(alert.id, held.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -381,7 +383,7 @@ def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_
     db_session.add(alert)
     db_session.flush()
     db_session.add(_alert_company(alert.id, peak.id))
-    db_session.add(_alert_company(alert.id, beneficiary.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id, impact_level="indirect_l1"))
     db_session.add(MarketMove(
         alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
         raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
@@ -402,3 +404,85 @@ def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_
         "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc",
     }
     assert result[0]["relationship"] == "BENEFICIARY"
+
+
+def test_excludes_direct_non_peak_companies_from_ripple(db_session):
+    """Ripple (Level 2) must only show genuine spillover (indirect_l1/l2)
+    -- a company the article directly names is shown by
+    compute_impact_companies (Level 1's Affected tab) instead. Before this
+    fix, every non-peak AlertCompany appeared in ripple regardless of
+    impact_level, duplicating Affected's content verbatim (confirmed live
+    in production: a user reported the two tabs "literally show the same
+    companies")."""
+    peak = _company("PEAK.NS")
+    other_direct = _company("DIRECT.NS")
+    spillover = _company("SPILLOVER.NS")
+    db_session.add_all([peak, other_direct, spillover])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, other_direct.id, impact_level="direct"))
+    db_session.add(_alert_company(alert.id, spillover.id, impact_level="indirect_l1"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=other_direct.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.0, sector_move_pct=0.2, excess_move_pct=0.8,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=spillover.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.2, sector_move_pct=0.2, excess_move_pct=1.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    tickers = {r["ticker"] for r in result}
+    assert tickers == {"SPILLOVER.NS"}
+
+
+def test_includes_both_indirect_levels(db_session):
+    """indirect_l2 (a second cascade hop) must qualify for ripple too --
+    only impact_level == "direct" is excluded, not every level besides
+    indirect_l1 specifically."""
+    peak = _company("PEAK.NS")
+    l1 = _company("L1.NS")
+    l2 = _company("L2.NS")
+    db_session.add_all([peak, l1, l2])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, l1.id, impact_level="indirect_l1"))
+    db_session.add(_alert_company(alert.id, l2.id, impact_level="indirect_l2"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=l1.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.0, sector_move_pct=0.2, excess_move_pct=0.8,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=l2.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=0.6, sector_move_pct=0.1, excess_move_pct=0.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    tickers = {r["ticker"] for r in result}
+    assert tickers == {"L1.NS", "L2.NS"}
