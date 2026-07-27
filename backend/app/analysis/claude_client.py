@@ -24,10 +24,13 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
 class GeminiAPIError(Exception):
-    """Raised on any non-2xx response from the Gemini API -- covers rate
-    limits/quota exhaustion (429), auth failures, and server errors alike,
-    same "any provider-level failure should degrade to the fallback
-    provider" discipline AnthropicAPIError already provides for Anthropic.
+    """Raised on any non-2xx response from the Gemini API, and on any
+    httpx.HTTPError raised before a response even exists (connection
+    refused, DNS failure, connect/read timeout) -- covers rate limits/quota
+    exhaustion (429), auth failures, server errors, and network/connection
+    failures alike, same "any provider-level failure should degrade to the
+    fallback provider" discipline AnthropicAPIError already provides for
+    Anthropic.
     """
 
 
@@ -196,13 +199,31 @@ class _GeminiCompletions:
             body["systemInstruction"] = {"parts": [{"text": system_content}]}
 
         url = f"{GEMINI_BASE_URL}/models/{self._model}:generateContent?key={self._api_key}"
-        response = httpx.post(url, json=body, timeout=60.0)
+        try:
+            response = httpx.post(url, json=body, timeout=60.0)
+        except httpx.HTTPError as exc:
+            # Raised by httpx BEFORE any response exists (DNS failure, refused
+            # connection, read/connect timeout, ...) -- no status code to
+            # inspect, so this can't go through the status-code branch below.
+            # Re-raised as GeminiAPIError so FallbackClient's except tuple
+            # still catches it and degrades to Groq instead of the raw httpx
+            # exception propagating out of the whole pipeline. Deliberately
+            # built from type(exc).__name__, not `exc`/`str(exc)`'s own
+            # request -- `url` above embeds the API key as a query param
+            # (Gemini's documented auth method), and we never want a key to
+            # end up in a log line via an exception's string form.
+            raise GeminiAPIError(f"Gemini API request failed: {type(exc).__name__}") from exc
         if response.status_code != 200:
             raise GeminiAPIError(f"Gemini API returned {response.status_code}: {response.text}")
 
         data = response.json()
         candidates = data.get("candidates") or []
-        parts = candidates[0]["content"]["parts"] if candidates else []
+        # A safety block or MAX_TOKENS truncation omits "content" entirely
+        # (finishReason: "SAFETY"/"MAX_TOKENS" with no content key) -- .get(...)
+        # falls through to the same empty-tool_calls path as an ordinary
+        # response with no function call, instead of a raw KeyError crash.
+        content = candidates[0].get("content", {}) if candidates else {}
+        parts = content.get("parts", [])
         function_call = next((p["functionCall"] for p in parts if "functionCall" in p), None)
 
         if function_call is None:

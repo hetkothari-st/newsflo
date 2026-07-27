@@ -426,3 +426,72 @@ def test_gemini_adapter_raises_gemini_api_error_on_non_2xx_response(monkeypatch)
         assert False, "Expected GeminiAPIError to be raised"
     except GeminiAPIError:
         pass
+
+
+def test_gemini_adapter_raises_gemini_api_error_on_network_failure(monkeypatch):
+    # httpx.post can raise before any response exists at all (DNS failure,
+    # refused connection, connect/read timeout -- all httpx.HTTPError
+    # subclasses). This must not propagate as the raw httpx exception --
+    # it has to become a GeminiAPIError so FallbackClient's except tuple
+    # still catches it and degrades to Groq.
+    from app.analysis.claude_client import GeminiAdapter, GeminiAPIError
+
+    def fake_post(url, *, json, timeout):
+        raise httpx.ConnectTimeout("connection timed out", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+    adapter = GeminiAdapter("test-gemini-key")
+
+    try:
+        adapter.chat.completions.create(
+            max_tokens=1024,
+            tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+            tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+            messages=[{"role": "user", "content": "test"}],
+        )
+        assert False, "Expected GeminiAPIError to be raised"
+    except GeminiAPIError:
+        pass
+
+
+def test_gemini_adapter_returns_empty_tool_calls_on_safety_block(monkeypatch):
+    # A Gemini safety block (or a MAX_TOKENS truncation) yields a candidate
+    # with finishReason set but NO "content" key at all -- this must degrade
+    # to the same empty-tool_calls path as an ordinary response with no
+    # function call, not raise a raw KeyError.
+    from app.analysis.claude_client import GeminiAdapter
+
+    def fake_post(url, *, json, timeout):
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            status_code=200, request=request,
+            json={"candidates": [{"finishReason": "SAFETY", "index": 0}]},
+        )
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+    adapter = GeminiAdapter("test-gemini-key")
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[{"role": "user", "content": "test"}],
+    )
+
+    assert result.choices[0].message.tool_calls == []
+
+
+def test_fallback_client_falls_through_to_secondary_on_gemini_network_failure():
+    # GeminiAPIError raised for a network-failure reason (not just an
+    # HTTP-status reason, already covered by
+    # test_fallback_client_falls_through_to_secondary_on_gemini_api_error)
+    # must still trigger the same fallthrough to the secondary client.
+    from app.analysis.claude_client import GeminiAPIError
+
+    sentinel = SimpleNamespace(choices=[])
+    primary = _FailingUnderlyingClient(GeminiAPIError("Gemini API request failed: ConnectTimeout"))
+    secondary = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sentinel)))
+
+    result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
+
+    assert result is sentinel
