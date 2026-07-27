@@ -739,13 +739,13 @@ def test_generate_edges_verify_call_failure_falls_back_to_unverified_proposed_ch
 
 
 def test_generate_edges_missing_verification_for_one_index_kept_unverified_not_dropped():
-    proposed = CHAINS["inflation"]  # 3 edges
-    # Only verify index 0 and 2 -- index 1 is missing from the response entirely.
+    proposed = CHAINS["inflation"]
+    # Verify every index except 1 -- index 1 is missing from the response entirely.
     client = ScriptedClient({
         "record_edge_verification": {
             "verifications": [
-                {"index": 0, "applicable": True},
-                {"index": 2, "applicable": True},
+                {"index": i, "applicable": True}
+                for i in range(len(proposed)) if i != 1
             ],
             "llm_only_edges": [],
         },

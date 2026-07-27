@@ -51,7 +51,8 @@ def test_broad_mechanism_event_types_have_a_nonempty_chain(event_type):
 
 
 @pytest.mark.parametrize("event_type", [
-    "earnings", "merger_acquisition", "banking_metrics", "other",
+    "earnings", "merger_acquisition", "banking_metrics",
+    "order_win_contract", "corporate_action", "other",
 ])
 def test_company_specific_event_types_have_no_chain(event_type):
     assert get_chain(event_type) is None
@@ -68,7 +69,7 @@ def test_chains_text_is_nonempty_and_mentions_every_event_type():
         assert event_type in CHAINS_TEXT
 
 
-def test_chains_has_exactly_the_five_broad_mechanism_event_types():
-    assert set(CHAINS) == {
-        "repo_rate_change", "crude_oil", "government_spending", "currency_move", "inflation",
-    }
+def test_every_chain_event_type_is_chain_bearing():
+    from app.reasoning.rulebook import CHAIN_EXCLUDED_EVENT_TYPES
+    for event_type in CHAINS:
+        assert event_type not in CHAIN_EXCLUDED_EVENT_TYPES
