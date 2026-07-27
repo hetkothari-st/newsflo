@@ -44,6 +44,7 @@ def test_get_chain_none_event_type_returns_none():
 @pytest.mark.parametrize("event_type", [
     "repo_rate_change", "crude_oil", "government_spending", "currency_move",
     "inflation", "macro_data", "fiscal_policy", "monsoon_weather",
+    "commodity_price", "global_rates", "geopolitics", "fii_dii_flows",
 ])
 def test_broad_mechanism_event_types_have_a_nonempty_chain(event_type):
     chain = get_chain(event_type)
