@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./newsflo.db")
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
     openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     groq_api_key: str = os.environ.get("GROQ_API_KEY", "")
