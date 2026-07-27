@@ -250,3 +250,129 @@ def _translate_via_fake(fake_messages, **kwargs):
     completions._client = SimpleNamespace(messages=fake_messages)
     completions._model = ANTHROPIC_MODEL
     return completions.create(**kwargs)
+
+
+def _gemini_response(function_name: str, args: dict) -> httpx.Response:
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent")
+    body = {
+        "candidates": [{
+            "content": {
+                "parts": [{"functionCall": {"name": function_name, "args": args}}],
+                "role": "model",
+            },
+            "finishReason": "STOP",
+        }],
+    }
+    return httpx.Response(status_code=200, request=request, json=body)
+
+
+def _gemini_response_no_function_call() -> httpx.Response:
+    request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent")
+    body = {"candidates": [{"content": {"parts": [{"text": "no tool call here"}], "role": "model"}, "finishReason": "STOP"}]}
+    return httpx.Response(status_code=200, request=request, json=body)
+
+
+def test_gemini_adapter_translates_request_and_response_to_openai_shape(monkeypatch):
+    from app.analysis.claude_client import GEMINI_MODEL, GeminiAdapter
+
+    tool_input = {
+        "category": "oil_energy",
+        "companies": [{
+            "name": "Reliance Industries", "ticker": "RELIANCE.NS", "is_direct": True, "sector": None,
+            "direction": "bullish", "magnitude_low": 2.0, "magnitude_high": 4.0,
+            "rationale": "Refiner margins expand.",
+        }],
+    }
+    captured = {}
+
+    def fake_post(url, *, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _gemini_response("record_analysis", tool_input)
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+
+    adapter = GeminiAdapter("test-gemini-key")
+
+    from app.analysis.claude_client import SYSTEM_PROMPT
+
+    FAKE_TOOL = {
+        "type": "function",
+        "function": {
+            "name": "record_analysis",
+            "description": "test tool",
+            "parameters": {
+                "type": "object",
+                "properties": {"category": {"type": "string"}},
+                "required": ["category"],
+            },
+        },
+    }
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[FAKE_TOOL],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Title: test\n\nContent: test"},
+        ],
+    )
+
+    # Request was translated to Gemini's shape correctly.
+    assert f"models/{GEMINI_MODEL}:generateContent" in captured["url"]
+    assert "key=test-gemini-key" in captured["url"]
+    sent = captured["json"]
+    assert sent["systemInstruction"]["parts"][0]["text"] == SYSTEM_PROMPT
+    assert sent["contents"] == [{"role": "user", "parts": [{"text": "Title: test\n\nContent: test"}]}]
+    sent_schema = sent["tools"][0]["function_declarations"][0]["parameters"]
+    assert sent_schema["type"] == "OBJECT"  # uppercased from "object"
+    assert sent_schema["properties"]["category"]["type"] == "STRING"  # uppercased from "string"
+    assert sent["tool_config"]["function_calling_config"]["mode"] == "ANY"
+    assert sent["generationConfig"]["maxOutputTokens"] == 1024
+
+    # Response was translated back to the OpenAI shape analyze_article expects.
+    tool_call = result.choices[0].message.tool_calls[0]
+    assert tool_call.function.name == "record_analysis"
+    assert json.loads(tool_call.function.arguments) == tool_input  # args re-serialized to a JSON string
+
+
+def test_gemini_adapter_returns_empty_tool_calls_when_no_function_call(monkeypatch):
+    from app.analysis.claude_client import GeminiAdapter
+
+    monkeypatch.setattr(
+        "app.analysis.claude_client.httpx.post",
+        lambda url, *, json, timeout: _gemini_response_no_function_call(),
+    )
+    adapter = GeminiAdapter("test-gemini-key")
+
+    result = adapter.chat.completions.create(
+        max_tokens=1024,
+        tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+        tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+        messages=[{"role": "user", "content": "test"}],
+    )
+
+    assert result.choices[0].message.tool_calls == []
+
+
+def test_gemini_adapter_raises_gemini_api_error_on_non_2xx_response(monkeypatch):
+    from app.analysis.claude_client import GeminiAdapter, GeminiAPIError
+
+    def fake_post(url, *, json, timeout):
+        request = httpx.Request("POST", url)
+        return httpx.Response(status_code=429, request=request, json={"error": {"message": "quota exceeded"}})
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", fake_post)
+    adapter = GeminiAdapter("test-gemini-key")
+
+    try:
+        adapter.chat.completions.create(
+            max_tokens=1024,
+            tools=[{"type": "function", "function": {"name": "record_analysis", "description": "d", "parameters": {"type": "object", "properties": {}, "required": []}}}],
+            tool_choice={"type": "function", "function": {"name": "record_analysis"}},
+            messages=[{"role": "user", "content": "test"}],
+        )
+        assert False, "Expected GeminiAPIError to be raised"
+    except GeminiAPIError:
+        pass

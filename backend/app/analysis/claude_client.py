@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import httpx
 from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
@@ -10,6 +11,25 @@ from openai import OpenAI, RateLimitError
 # funded key is never wasted on calls that a free provider could have
 # served, and so the app keeps working if Anthropic's own rate limit is hit.
 ANTHROPIC_MODEL = "claude-sonnet-4-5"
+
+# Gemini is the analysis pipeline's primary provider (replaces the dead
+# Anthropic slot -- see docs/superpowers/specs/2026-07-27-gemini-primary-
+# reasoning-provider-design.md). "gemini-flash-latest" is an alias Google
+# keeps pointed at their current recommended flash model, not a dated
+# version string -- same reasoning as FALLBACK_MODEL's own history below
+# (a hardcoded model name needs a manual swap when a provider deprecates
+# it; an alias doesn't).
+GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+class GeminiAPIError(Exception):
+    """Raised on any non-2xx response from the Gemini API -- covers rate
+    limits/quota exhaustion (429), auth failures, and server errors alike,
+    same "any provider-level failure should degrade to the fallback
+    provider" discipline AnthropicAPIError already provides for Anthropic.
+    """
+
 
 MODEL = "llama-3.3-70b-versatile"
 # Groq enforces daily token quotas PER MODEL, not per key -- multiple keys on
@@ -93,6 +113,101 @@ class RotatingClient:
                 last_error = exc
                 continue
         raise last_error
+
+
+_JSON_SCHEMA_TO_GEMINI_TYPE = {
+    "object": "OBJECT", "string": "STRING", "boolean": "BOOLEAN",
+    "number": "NUMBER", "integer": "INTEGER", "array": "ARRAY",
+}
+
+
+def _uppercase_schema_types(schema: dict) -> dict:
+    """Gemini's function-declaration parameter schema requires uppercase
+    type strings ("OBJECT", "STRING", ...) -- every tool builder in this
+    codebase emits lowercase JSON Schema ("object", "string", ...), the
+    format every OTHER provider here (OpenAI-shape Groq, Anthropic)
+    accepts as-is. Confirmed live: Gemini rejects/misbehaves on lowercase.
+    Recursively walks `properties` (object schemas) and `items` (array
+    schemas) -- the only two places a nested schema can appear in this
+    codebase's tool definitions -- uppercasing every `type` key found,
+    leaving `description`/`enum`/`required` untouched.
+    """
+    result = dict(schema)
+    if "type" in result:
+        result["type"] = _JSON_SCHEMA_TO_GEMINI_TYPE.get(result["type"], result["type"])
+    if "properties" in result:
+        result["properties"] = {k: _uppercase_schema_types(v) for k, v in result["properties"].items()}
+    if "items" in result:
+        result["items"] = _uppercase_schema_types(result["items"])
+    return result
+
+
+class _GeminiCompletions:
+    """Translates an OpenAI-shape chat.completions.create(...) call into a
+    Gemini generateContent REST call and translates the response back --
+    same duck-typing contract as _AnthropicCompletions, one provider over.
+    """
+
+    def __init__(self, api_key: str, model: str):
+        self._api_key = api_key
+        self._model = model
+
+    def create(self, *, max_tokens, tools, messages, **_ignored):
+        system_content = None
+        contents = []
+        for m in messages:
+            if m["role"] == "system":
+                system_content = m["content"]
+            else:
+                contents.append({"role": "user", "parts": [{"text": m["content"]}]})
+
+        function_spec = tools[0]["function"]
+        function_declaration = {
+            "name": function_spec["name"],
+            "description": function_spec["description"],
+            "parameters": _uppercase_schema_types(function_spec["parameters"]),
+        }
+
+        body = {
+            "contents": contents,
+            "tools": [{"function_declarations": [function_declaration]}],
+            "tool_config": {"function_calling_config": {"mode": "ANY"}},
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+        if system_content is not None:
+            body["systemInstruction"] = {"parts": [{"text": system_content}]}
+
+        url = f"{GEMINI_BASE_URL}/models/{self._model}:generateContent?key={self._api_key}"
+        response = httpx.post(url, json=body, timeout=60.0)
+        if response.status_code != 200:
+            raise GeminiAPIError(f"Gemini API returned {response.status_code}: {response.text}")
+
+        data = response.json()
+        candidates = data.get("candidates") or []
+        parts = candidates[0]["content"]["parts"] if candidates else []
+        function_call = next((p["functionCall"] for p in parts if "functionCall" in p), None)
+
+        if function_call is None:
+            fake_tool_calls = []
+        else:
+            fake_tool_calls = [SimpleNamespace(
+                function=SimpleNamespace(name=function_call["name"], arguments=json.dumps(function_call["args"])),
+            )]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=fake_tool_calls))])
+
+
+class _GeminiChat:
+    def __init__(self, api_key: str, model: str):
+        self.completions = _GeminiCompletions(api_key, model)
+
+
+class GeminiAdapter:
+    """Duck-types the OpenAI client surface analyze_article uses, backed by
+    a raw Gemini generateContent REST call, so the rest of the pipeline
+    never needs to know which provider actually served a given call."""
+
+    def __init__(self, api_key: str, model: str = GEMINI_MODEL):
+        self.chat = _GeminiChat(api_key, model)
 
 
 class _AnthropicCompletions:
