@@ -32,6 +32,17 @@ CHAIN_EXCLUDED_EVENT_TYPES = frozenset({
     "order_win_contract", "corporate_action", "other",
 })
 
+# Event types whose CHAINS entry describes their one canonical topic -- safe
+# to keep as [UNVERIFIED] chart edges when the verify call fails. The other
+# chain-bearing event types share one chain across several distinct news
+# families (commodity_price covers metals/gold/coal/agri; regulation covers
+# RBI/USFDA/SEBI...), so an unverified canonical chain can be about the
+# wrong SUBJECT entirely, not just the wrong direction -- drop those instead.
+CHAIN_FALLBACK_KEEP_EVENT_TYPES = frozenset({
+    "repo_rate_change", "inflation", "crude_oil", "currency_move",
+    "government_spending", "monsoon_weather",
+})
+
 
 def _b(sector, sub_sector, direction, relation, mechanism, *,
        order=1, condition=None, via=None, parent_sector=None):
@@ -118,7 +129,8 @@ RULES: dict[str, dict] = {
             _b("consumer_durables", None, "bearish", "demand",
                "Big-ticket discretionary purchases are the first thing households postpone when budgets tighten"),
             _b("metals", None, "bullish", "commodity",
-               "Commodity producers sell their output at the higher prices driving the inflation"),
+               condition="the inflation is driven by commodity/goods prices, not food/services",
+               mechanism="Commodity producers sell their output at the higher prices driving the inflation"),
             _b("banking", None, "bearish", "credit_cost", order=2, via="RBI rate-hike response",
                mechanism="Persistent inflation raises the odds of RBI hikes, which slow loan growth"),
         ],
@@ -687,9 +699,16 @@ def get_rule(rule_id: str) -> str | None:
     return _RENDERED.get(rule_id)
 
 
+def _digest_target_label(b):
+    label = _target_label(b)
+    if b["condition"]:
+        label += f" (only if {b['condition']})"
+    return label
+
+
 def _render_digest_line(rule_id, rule):
-    bulls = [_target_label(b) for b in rule["branches"] if b["direction"] == "bullish"]
-    bears = [_target_label(b) for b in rule["branches"] if b["direction"] == "bearish"]
+    bulls = [_digest_target_label(b) for b in rule["branches"] if b["direction"] == "bullish"]
+    bears = [_digest_target_label(b) for b in rule["branches"] if b["direction"] == "bearish"]
     sides = []
     if bulls:
         sides.append("bullish: " + ", ".join(bulls))

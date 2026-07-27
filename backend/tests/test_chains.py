@@ -94,6 +94,11 @@ def test_canonical_chain_labels_are_stable():
         "trade_policy": "Import Duty ↑",
         "regulation": "RBI Tightening",
         "pricing_action": "Telecom Tariff ↑",
+        "macro_data": "GDP Growth ↑",
+        "monsoon_weather": "Good Monsoon",
+        "geopolitics": "Geopolitical Conflict",
+        "government_spending": "Govt Capex ↑",
+        "fii_dii_flows": "FII Outflows",
     }
     for event_type, label in expected.items():
         mech_labels = [e["from"]["label"] for e in CHAINS[event_type]

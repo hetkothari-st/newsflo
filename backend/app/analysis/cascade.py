@@ -29,7 +29,8 @@ from openai import RateLimitError
 
 from app.reasoning.playbooks import PLAYBOOKS_TEXT
 from app.reasoning.rulebook import (
-    CHAINS, EDGE_RELATIONS, NODE_SECTOR, RULEBOOK_DIGEST, RULEBOOK_TEXT, get_chain,
+    CHAIN_FALLBACK_KEEP_EVENT_TYPES, CHAINS, EDGE_RELATIONS, NODE_SECTOR, RULEBOOK_DIGEST,
+    RULEBOOK_TEXT, get_chain,
 )
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
@@ -836,11 +837,25 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
                     "note": llm_edge["note"], "source": "llm_only",
                 })
         except Exception as exc:
-            logger.warning("edge verification call failed, falling back to unverified proposed chain: %s", exc)
-            edges = [
-                {**e, "source": "rulebook_verified", "note": f"{e['note']} [UNVERIFIED: verification call failed]"}
-                for e in proposed
-            ]
+            if event_type in CHAIN_FALLBACK_KEEP_EVENT_TYPES:
+                logger.warning("edge verification call failed, falling back to unverified proposed chain: %s", exc)
+                edges = [
+                    {**e, "source": "rulebook_verified", "note": f"{e['note']} [UNVERIFIED: verification call failed]"}
+                    for e in proposed
+                ]
+            else:
+                # This event_type's chain covers several distinct news
+                # families (see CHAIN_FALLBACK_KEEP_EVENT_TYPES docstring in
+                # rulebook.py) -- without verification an unverified
+                # canonical chain risks charting the wrong SUBJECT entirely,
+                # not just the wrong direction. Drop the proposed edges
+                # rather than keep a possibly-mismatched chain; company-
+                # attachment edges below still proceed as usual.
+                logger.warning(
+                    "edge verification call failed for non-fallback-safe event_type %r, dropping proposed chain: %s",
+                    event_type, exc,
+                )
+                edges = []
 
     edges.extend(_sector_attachment_edges(companies))
     return edges

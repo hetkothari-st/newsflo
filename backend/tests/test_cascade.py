@@ -768,6 +768,26 @@ def test_generate_edges_verify_call_failure_falls_back_to_unverified_proposed_ch
     assert all("[UNVERIFIED" in e["note"] for e in rulebook_edges)
 
 
+def test_generate_edges_verify_call_failure_drops_proposed_chain_for_heterogeneous_event_type():
+    # commodity_price's canonical chain (Metal Prices) is not in
+    # CHAIN_FALLBACK_KEEP_EVENT_TYPES -- it also covers gold/coal/agri news,
+    # so an unverified chain risks charting the wrong subject entirely, not
+    # just the wrong direction. On verify failure the proposed edges must
+    # be dropped rather than kept as unverified.
+    class FailingClient:
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self)
+
+        def create(self, **kwargs):
+            raise RuntimeError("provider down")
+
+    edges = _generate_edges(FailingClient(), facts="f", event_type="commodity_price", companies=[])
+
+    rulebook_edges = [e for e in edges if e["source"] in ("rulebook_verified", "rulebook_pruned")]
+    assert rulebook_edges == []
+
+
 def test_generate_edges_missing_verification_for_one_index_kept_unverified_not_dropped():
     proposed = CHAINS["inflation"]
     # Verify every index except 1 -- index 1 is missing from the response entirely.

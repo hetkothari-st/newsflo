@@ -79,8 +79,18 @@ def test_chain_excluded_event_types_are_the_company_scoped_ones():
     })
 
 
+def test_digest_marks_conditional_branches_with_only_if():
+    # RULE_IMPORT_DUTY_HIKE's branches are all condition-gated (e.g. "the
+    # duty protects steel") -- the stage-2 digest must surface that, or the
+    # model reads them as unconditional sector calls.
+    lines = [line for line in RULEBOOK_DIGEST.splitlines() if line.startswith("- RULE_IMPORT_DUTY_HIKE:")]
+    assert len(lines) == 1
+    assert "only if" in lines[0]
+
+
 def test_rendered_rule_mentions_condition_and_via():
     # RULE_CRUDE_OIL_UP has a conditional branch and (after Task 5) an
     # order-2 branch -- the rendering must surface both markers.
     text = get_rule("RULE_CRUDE_OIL_UP")
     assert "only if" in text
+    assert "via packaging and freight" in text
