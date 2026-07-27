@@ -128,12 +128,30 @@ def _uppercase_schema_types(schema: dict) -> dict:
     format every OTHER provider here (OpenAI-shape Groq, Anthropic)
     accepts as-is. Confirmed live: Gemini rejects/misbehaves on lowercase.
     Recursively walks `properties` (object schemas) and `items` (array
-    schemas) -- the only two places a nested schema can appear in this
-    codebase's tool definitions -- uppercasing every `type` key found,
-    leaving `description`/`enum`/`required` untouched.
+    schemas) -- two places a nested schema can appear in this codebase's
+    tool definitions -- uppercasing every `type` key found, leaving
+    `description`/`enum`/`required` untouched.
+
+    A third shape also occurs (e.g. cascade.py's nullable `ticker` field):
+    JSON Schema's list-valued `"type": ["string", "null"]`, meaning
+    "string or null". Gemini's schema format has no equivalent list -- it
+    takes a single uppercase `"type"` string plus a separate boolean
+    `"nullable"` flag. Every list-valued `type` actually present in this
+    codebase's tool schemas is exactly this 2-element `[<real type>, "null"]`
+    shape, so that's the only list shape handled here: the non-"null" entry
+    is uppercased and used as `type`, and `nullable` is set whenever "null"
+    was present in the list.
     """
     result = dict(schema)
-    if "type" in result:
+    if isinstance(result.get("type"), list):
+        type_list = result["type"]
+        real_types = [t for t in type_list if t != "null"]
+        if len(real_types) != 1:
+            raise ValueError(f"Unsupported list-valued JSON Schema type: {type_list!r}")
+        result["type"] = _JSON_SCHEMA_TO_GEMINI_TYPE.get(real_types[0], real_types[0])
+        if "null" in type_list:
+            result["nullable"] = True
+    elif "type" in result:
         result["type"] = _JSON_SCHEMA_TO_GEMINI_TYPE.get(result["type"], result["type"])
     if "properties" in result:
         result["properties"] = {k: _uppercase_schema_types(v) for k, v in result["properties"].items()}

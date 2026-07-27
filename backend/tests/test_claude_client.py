@@ -356,6 +356,40 @@ def test_gemini_adapter_returns_empty_tool_calls_when_no_function_call(monkeypat
     assert result.choices[0].message.tool_calls == []
 
 
+def test_uppercase_schema_types_handles_real_nullable_list_typed_field():
+    # Regression test for the Critical finding: build_company_tool's real,
+    # in-production schema has a JSON-Schema list-valued nullable field
+    # ("ticker": {"type": ["string", "null"]}), nested two levels deep
+    # inside array `items`/object `properties`. A naive dict.get(result
+    # ["type"], ...) on a list-valued type raises "TypeError: unhashable
+    # type: 'list'" the instant it's reached -- this must not crash, and
+    # must translate to Gemini's single-type-string + `nullable` shape.
+    from app.analysis.cascade import build_company_tool
+    from app.analysis.claude_client import _uppercase_schema_types
+
+    schema = build_company_tool(None)["function"]["parameters"]
+
+    result = _uppercase_schema_types(schema)  # must not raise
+
+    company_item_properties = (
+        result["properties"]["sector_companies"]["items"]
+        ["properties"]["companies"]["items"]["properties"]
+    )
+    assert company_item_properties["ticker"] == {"type": "STRING", "nullable": True}
+    # A sibling, non-nullable string field went through the ordinary path unaffected.
+    assert company_item_properties["name"] == {"type": "STRING"}
+
+
+def test_uppercase_schema_types_rejects_unsupported_list_shapes():
+    from app.analysis.claude_client import _uppercase_schema_types
+
+    try:
+        _uppercase_schema_types({"type": ["string", "number"]})
+        assert False, "Expected ValueError for a list-valued type with no 'null' member"
+    except ValueError:
+        pass
+
+
 def test_gemini_adapter_raises_gemini_api_error_on_non_2xx_response(monkeypatch):
     from app.analysis.claude_client import GeminiAdapter, GeminiAPIError
 
