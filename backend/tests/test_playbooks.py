@@ -25,3 +25,9 @@ def test_every_playbook_key_is_a_real_sector():
 def test_playbooks_text_contains_every_playbook_sector_name():
     for sector in PLAYBOOKS:
         assert sector in PLAYBOOKS_TEXT
+
+
+def test_playbooks_cover_every_sector_except_other():
+    from app.analysis.schemas import SECTORS
+    from app.reasoning.playbooks import PLAYBOOKS
+    assert set(PLAYBOOKS) == set(SECTORS) - {"other"}

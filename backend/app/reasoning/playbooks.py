@@ -54,6 +54,59 @@ PLAYBOOKS: dict[str, str] = {
         "capex cycle, input costs (cement, steel), and execution/order-book "
         "visibility."
     ),
+    "railways_transport": (
+        "Transport: aviation drivers are passenger demand, jet fuel (ATF, ~40% "
+        "of cost), and USD/INR (fuel/leases are dollar costs); KPIs are load "
+        "factor and yields. Ports/shipping track trade volumes and freight "
+        "rates. Road logistics tracks fuel costs, e-commerce, and "
+        "manufacturing activity. Rail equipment tracks government railway "
+        "capex."
+    ),
+    "construction_realestate": (
+        "Real estate: drivers are mortgage rates, affordability, and job/income "
+        "confidence. KPIs: pre-sales/bookings, collections, net debt, "
+        "inventory months. Commercial/REIT depends on office absorption and "
+        "retail footfalls. Highly rate-sensitive in both directions."
+    ),
+    "defense": (
+        "Defense: driven by government procurement orders, indigenization "
+        "policy, and export wins. KPIs: order book vs annual revenue, "
+        "execution pace. Order-to-revenue lag runs years -- wins change "
+        "visibility, not next quarter."
+    ),
+    "agriculture": (
+        "Agri inputs: driven by monsoon/sowing, minimum support prices, and "
+        "subsidy policy (urea subsidies drive fertilizer economics; gas is "
+        "the key input cost). Agrochemical demand tracks planted acreage and "
+        "pest cycles. Watch subsidy-receivable delays on fertilizer balance "
+        "sheets."
+    ),
+    "consumer_durables": (
+        "Consumer durables: driven by festive/summer season demand, consumer "
+        "financing availability, and input costs (copper, aluminium, steel, "
+        "imported electronics). Rate-sensitive (EMI purchases). KPIs: volume "
+        "growth, channel inventory. PLI schemes shift manufacturing "
+        "economics."
+    ),
+    "media_entertainment": (
+        "Media: ad revenue tracks GDP and consumer-sector health (FMCG/auto "
+        "are the biggest advertisers). Subscription/OTT growth structural; "
+        "multiplexes track box-office slate and occupancy. KPIs: ad growth, "
+        "subscriber counts, occupancy rates."
+    ),
+    "chemicals": (
+        "Chemicals: crude derivatives are the feedstock -- margins move "
+        "inversely with crude. China supply/pricing swings global spreads "
+        "(Chinese oversupply crushes realizations). Specialty chemicals have "
+        "stickier pricing than commodity chemicals. KPIs: spreads, capacity "
+        "utilization, export mix."
+    ),
+    "textiles": (
+        "Textiles: cotton/yarn prices drive spinning margins (spread between "
+        "cotton and yarn). Export demand from US/EU retail, USD/INR, and "
+        "trade agreements (UK/EU FTAs, China+1 shifts) drive orders. KPIs: "
+        "yarn spreads, export order books, utilization."
+    ),
 }
 
 PLAYBOOKS_TEXT = "\n".join(f"- {sector}: {text}" for sector, text in PLAYBOOKS.items())
