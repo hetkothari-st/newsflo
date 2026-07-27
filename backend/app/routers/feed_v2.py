@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user_optional
 from app.ist_time import day_utc_window, today_ist
-from app.market.alert_measurement import compute_alert_measurement
+from app.market.alert_measurement import compute_alert_measurement, compute_impact_companies
 from app.market.ripple import compute_ripple_companies
 from app.market.timeline_entries import get_timeline_entries
 from app.models import Alert, AlertCompany, Holding, User
@@ -98,4 +98,5 @@ def get_feed_v2_alert(
         db, alert, exclude_company_id=measurement["peak_company_id"], held_company_ids=held_company_ids,
     )
     result["timeline"] = get_timeline_entries(db, alert)
+    result["impact_companies"] = compute_impact_companies(db, alert)
     return result
