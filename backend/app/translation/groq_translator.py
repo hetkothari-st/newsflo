@@ -6,12 +6,22 @@ from app.analysis.claude_client import MODEL, GROQ_BASE_URL, AnthropicAdapter, R
 from app.translation import nllb_translator
 from app.translation.languages import LANG_NAMES, TARGET_LANGS
 
-# Self-hosted (NLLB via CTranslate2, see nllb_translator.py) replaces the
-# paid/rate-limited API providers as the default: no per-minute token cap,
-# no cost, no cross-account key juggling. "anthropic"/"groq" stay wired up
-# as fallbacks -- flip back if the local model becomes unavailable in some
-# environment (e.g. a deploy target too small to hold the model in memory).
-TRANSLATION_PROVIDER = "nllb"  # "nllb" | "anthropic" | "groq"
+# Self-hosted (NLLB via CTranslate2, see nllb_translator.py) is the
+# ideal default: no per-minute token cap, no cost, no cross-account key
+# juggling. But it loads a 1.3B-parameter model (int8-quantized) into
+# process memory on first use and keeps it resident for the process's
+# whole life -- confirmed in production (2026-07-24 crash investigation):
+# the Railway deploy target for this service is too small to hold that
+# model alongside FastAPI + scheduler + DB pool, and the process was
+# silently OOM-killed a few translation cycles after boot (no exception,
+# no traceback -- just the container killing the process). Switched to
+# "groq" (GROQ_API_KEY already provisioned and confirmed working in
+# prod) until either the model is moved out of this process or the
+# deploy target's memory is increased -- see this comment's own prior
+# self, which already anticipated exactly this: "flip back if the local
+# model becomes unavailable in some environment (e.g. a deploy target
+# too small to hold the model in memory)."
+TRANSLATION_PROVIDER = "groq"  # "nllb" | "anthropic" | "groq"
 TRANSLATION_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 # Deliberately MODEL (llama-3.3-70b-versatile), not FALLBACK_MODEL, despite
