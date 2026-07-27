@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import FeedV2 from './FeedV2';
 import * as feedV2Api from '../../lib/feedV2Api';
 import { AuthProvider } from '../../lib/auth';
@@ -13,7 +13,10 @@ function makeAlert(overrides: Partial<FeedV2Alert> = {}): FeedV2Alert {
     created_at: '2026-07-22T10:00:00Z',
     summary_short: 'Oil supply shock lifts refiners',
     summary_long: 'Crude prices jumped on a supply disruption. Refiners face wider margin pressure.',
-    article: { id: 1, title: 'Oil surges', url: 'https://example.com/a', source: 'Economic Times', published_at: null },
+    article: {
+      id: 1, image_url: null, title: 'Oil surges', url: 'https://example.com/a',
+      source: 'Economic Times', published_at: null,
+    },
     excess_move_pct: -4.2,
     direction: 'bearish',
     raw_move_pct: -4.8,
@@ -33,12 +36,9 @@ function makeAlert(overrides: Partial<FeedV2Alert> = {}): FeedV2Alert {
 
 function renderFeedV2() {
   return render(
-    <MemoryRouter initialEntries={['/feed-v2']}>
+    <MemoryRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/feed-v2" element={<FeedV2 />} />
-          <Route path="/feed-v2/alert/:id" element={<div>Alert Level 1 Page</div>} />
-        </Routes>
+        <FeedV2 />
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -48,16 +48,19 @@ describe('FeedV2', () => {
   it('fetches and renders feed rows', async () => {
     vi.spyOn(feedV2Api, 'getFeedV2Alerts').mockResolvedValue([makeAlert()]);
     renderFeedV2();
-    await waitFor(() => expect(screen.getByText('Oil supply shock lifts refiners')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Oil surges')).toBeInTheDocument());
   });
 
-  it('navigates to the Level 1 page when a row is clicked', async () => {
+  it('opens the detail panel when a row is clicked', async () => {
     vi.spyOn(feedV2Api, 'getFeedV2Alerts').mockResolvedValue([makeAlert()]);
+    vi.spyOn(feedV2Api, 'getFeedV2Alert').mockResolvedValue(makeAlert());
     const { user } = await import('@testing-library/user-event').then((m) => ({ user: m.default.setup() }));
     renderFeedV2();
-    await waitFor(() => screen.getByText('Oil supply shock lifts refiners'));
-    await user.click(screen.getByText('Oil supply shock lifts refiners'));
-    await waitFor(() => expect(screen.getByText('Alert Level 1 Page')).toBeInTheDocument());
+    await waitFor(() => screen.getByText('Oil surges'));
+    await user.click(screen.getByText('Oil surges'));
+    await waitFor(() =>
+      expect(screen.getByText(/Crude prices jumped on a supply disruption/)).toBeInTheDocument(),
+    );
   });
 
   it('renders nothing extra when the feed is empty', async () => {

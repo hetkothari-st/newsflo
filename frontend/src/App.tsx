@@ -7,9 +7,6 @@ import TranslationProgressBanner from './components/TranslationProgressBanner';
 import AccountPage from './pages/AccountPage';
 import AlertChartsPage from './pages/AlertChartsPage';
 import AlertCompanyAnalysisPage from './pages/AlertCompanyAnalysisPage';
-import AlertLevel1Page from './pages/AlertLevel1Page';
-import AlertRipplePage from './pages/AlertRipplePage';
-import AlertTimelinePage from './pages/AlertTimelinePage';
 import CarReviewPage from './pages/CarReviewPage';
 import CompanyPage from './pages/CompanyPage';
 import DirectoryPage from './pages/DirectoryPage';
@@ -36,9 +33,6 @@ export default function App() {
       <Routes>
         <Route path="/" element={<FeedPage />} />
         <Route path="/feed-v2" element={<FeedV2Page />} />
-        <Route path="/feed-v2/alert/:id" element={<AlertLevel1Page />} />
-        <Route path="/feed-v2/alert/:id/ripple" element={<AlertRipplePage />} />
-        <Route path="/feed-v2/alert/:id/timeline" element={<AlertTimelinePage />} />
         <Route path="/feed-v2/stock/:ticker" element={<StockDeepDivePage />} />
         <Route path="/feed-v2/directory" element={<DirectoryPage />} />
         <Route path="/company/:id" element={<CompanyPage />} />
