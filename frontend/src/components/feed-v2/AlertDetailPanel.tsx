@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatExcess, verdictLabel } from '../../lib/feedV2Format';
 import type { FeedV2Alert } from '../../lib/feedV2Api';
+import CompanyLogo from '../CompanyLogo';
 import RippleSection from './RippleSection';
 import TimelineSection from './TimelineSection';
 
@@ -126,6 +127,7 @@ export default function AlertDetailPanel({ alert }: AlertDetailPanelProps) {
                     className="cursor-pointer"
                   >
                     <div className="flex items-center gap-3">
+                      <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} size="sm" />
                       <span className="font-data text-[11px] text-muted">{company.ticker}</span>
                       <span
                         className={`font-data text-xs ${

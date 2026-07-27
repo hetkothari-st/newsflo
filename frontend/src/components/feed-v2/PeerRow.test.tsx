@@ -125,4 +125,29 @@ describe('PeerRow', () => {
     );
     expect(container.querySelector('p')).not.toBeInTheDocument();
   });
+
+  it('renders the real logo image when logoUrl is present', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <PeerRow
+          ticker="BPCL.NS"
+          capTier="LARGE"
+          direction="bullish"
+          excessMovePct={3.0}
+          intensity={{ score: 70, band: 'Moderate', components: [] }}
+          isExposureOnly={false}
+          inMyHoldings={false}
+          logoUrl="https://cdn.brandfetch.io/ticker/BPCL.NS?c=test"
+          alertId={42}
+          onOpenBusinessPopup={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('img[src="https://cdn.brandfetch.io/ticker/BPCL.NS?c=test"]')).toBeInTheDocument();
+  });
+
+  it('renders ticker initials as a fallback when logoUrl is absent', () => {
+    renderRow({ logoUrl: null });
+    expect(screen.getByText('BP')).toBeInTheDocument();
+  });
 });

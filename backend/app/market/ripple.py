@@ -17,6 +17,7 @@ this alert's companies.
 """
 from sqlalchemy.orm import Session
 
+from app.companies.branding import logo_url
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import compute_cap_tier_for_ticker
@@ -68,6 +69,7 @@ def _alert_company_rows(
             "is_exposure_only": exposure_only,
             "in_my_holdings": alert_company.company_id in held_company_ids,
             "why": alert_company.why,
+            "logo_url": logo_url(company),
         }
         if not exposure_only and move is not None and move.excess_move_pct is not None:
             entry["excess_move_pct"] = move.excess_move_pct

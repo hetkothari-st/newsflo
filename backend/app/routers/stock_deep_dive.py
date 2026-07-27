@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
+from app.companies.branding import logo_url
 from app.companies.price_series import fetch_pe_ratio
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
@@ -31,6 +32,7 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "sector": company.sector,
         "cap_tier": compute_cap_tier_for_ticker(session, company.ticker),
         "business_desc": company.business_desc,
+        "logo_url": logo_url(company),
         "market_cap": company.market_cap,
         "pe": fetch_pe_ratio(company.ticker),
         "in_my_holdings": company.id in held_company_ids,

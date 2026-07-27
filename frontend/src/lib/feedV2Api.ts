@@ -45,6 +45,7 @@ export interface RippleCompany {
   is_exposure_only: boolean;
   in_my_holdings: boolean;
   why: string | null;
+  logo_url: string | null;
 }
 
 export interface StockDeepDive {
@@ -53,6 +54,7 @@ export interface StockDeepDive {
   sector: string;
   cap_tier: CapTier | null;
   business_desc: string | null;
+  logo_url: string | null;
   market_cap: number | null;
   pe: number | null;
   in_my_holdings: boolean;
@@ -90,6 +92,7 @@ export interface ImpactCompany {
   direction: 'bullish' | 'bearish';
   excess_move_pct: number;
   why: string | null;
+  logo_url: string | null;
 }
 
 export interface FeedV2Alert {

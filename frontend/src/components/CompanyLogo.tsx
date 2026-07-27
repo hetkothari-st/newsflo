@@ -6,6 +6,7 @@ function initials(ticker: string): string {
 }
 
 const SIZE_CLASS = {
+  sm: 'h-6 w-6 text-[9px]',
   md: 'h-11 w-11 text-sm',
   lg: 'h-16 w-16 text-lg',
 } as const;
@@ -17,7 +18,7 @@ export default function CompanyLogo({
 }: {
   logoUrl?: string | null;
   ticker: string;
-  size?: 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg';
 }) {
   const [failed, setFailed] = useState(false);
   const showFallback = !logoUrl || failed;

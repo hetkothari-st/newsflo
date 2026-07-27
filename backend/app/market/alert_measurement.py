@@ -6,6 +6,7 @@ app.routers.feed_v2 only.
 """
 from sqlalchemy.orm import Session
 
+from app.companies.branding import logo_url
 from app.ist_time import day_utc_window, today_ist
 from app.market.breadth import compute_breadth_score
 from app.market.intensity import compute_intensity
@@ -153,6 +154,7 @@ def compute_impact_companies(session: Session, alert: Alert) -> list[dict]:
             "direction": alert_company.direction,
             "excess_move_pct": move.excess_move_pct,
             "why": alert_company.why,
+            "logo_url": logo_url(alert_company.company),
         })
 
     results.sort(key=lambda r: abs(r["excess_move_pct"]), reverse=True)

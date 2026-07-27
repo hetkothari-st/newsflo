@@ -374,3 +374,29 @@ def test_impact_companies_returns_empty_list_when_none_qualify(db_session):
     db_session.commit()
 
     assert compute_impact_companies(db_session, alert) == []
+
+
+def test_impact_companies_include_logo_url(db_session, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "brandfetch_client_id", "test-client-id")
+
+    company = Company(
+        ticker="A.NS", name="Company A.NS", sector="oil_gas", index_tier="NIFTY50",
+        isin="INE111A11111",
+    )
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, company.id))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_impact_companies(db_session, alert)
+
+    assert result[0]["logo_url"] == "https://cdn.brandfetch.io/isin/INE111A11111?c=test-client-id"

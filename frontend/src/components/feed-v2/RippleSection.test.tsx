@@ -24,6 +24,7 @@ function makeCompany(overrides: Partial<RippleCompany> = {}): RippleCompany {
     is_exposure_only: false,
     in_my_holdings: false,
     why: null,
+    logo_url: null,
     ...overrides,
   };
 }

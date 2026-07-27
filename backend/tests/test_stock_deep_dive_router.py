@@ -215,3 +215,23 @@ def test_directory_omits_companies_with_no_market_cap(db_session):
     assert response.status_code == 200
     assert response.json() == []
     app.dependency_overrides.clear()
+
+
+def test_stock_deep_dive_includes_logo_url(db_session, monkeypatch):
+    monkeypatch.setattr("app.routers.stock_deep_dive.fetch_pe_ratio", lambda ticker: None)
+    from app.config import settings
+    monkeypatch.setattr(settings, "brandfetch_client_id", "test-client-id")
+    _override_db(db_session)
+    company = Company(
+        ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50",
+        isin="INE002A01018",
+    )
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2/stock/RELIANCE.NS")
+
+    assert response.status_code == 200
+    assert response.json()["logo_url"] == "https://cdn.brandfetch.io/isin/INE002A01018?c=test-client-id"
+    app.dependency_overrides.clear()

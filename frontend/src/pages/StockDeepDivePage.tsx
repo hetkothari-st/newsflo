@@ -4,6 +4,7 @@ import IntensityBreakdownPopup from '../components/feed-v2/IntensityBreakdownPop
 import PeerRow from '../components/feed-v2/PeerRow';
 import BusinessPopup from '../components/feed-v2/BusinessPopup';
 import AlertDetail from '../components/AlertDetail';
+import CompanyLogo from '../components/CompanyLogo';
 import { capTierColorClass, formatExcess } from '../lib/feedV2Format';
 import { getStockDeepDive, type StockDeepDive } from '../lib/feedV2Api';
 import { useAuth } from '../lib/auth';
@@ -54,6 +55,7 @@ export default function StockDeepDivePage() {
       <div className="rounded-lg bg-surface p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <CompanyLogo logoUrl={deepDive.logo_url} ticker={deepDive.ticker} size="md" />
             <span className="font-sans text-lg text-ink">{deepDive.name}</span>
             {deepDive.cap_tier && (
               <span
@@ -142,6 +144,7 @@ export default function StockDeepDivePage() {
                 isExposureOnly={peer.is_exposure_only}
                 inMyHoldings={peer.in_my_holdings}
                 why={peer.why}
+                logoUrl={peer.logo_url}
                 alertId={alertId}
                 onOpenBusinessPopup={() => setBusinessPopupTicker(peer.ticker)}
               />

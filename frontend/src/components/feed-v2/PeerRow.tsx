@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { capTierColorClass, formatExcess, intensityBandColorClass } from '../../lib/feedV2Format';
 import type { CapTier, Intensity } from '../../lib/feedV2Api';
+import CompanyLogo from '../CompanyLogo';
 
 interface PeerRowProps {
   ticker: string;
@@ -11,6 +12,7 @@ interface PeerRowProps {
   isExposureOnly: boolean;
   inMyHoldings: boolean;
   why?: string | null;
+  logoUrl?: string | null;
   alertId?: number;
   onOpenBusinessPopup: () => void;
 }
@@ -24,6 +26,7 @@ export default function PeerRow({
   isExposureOnly,
   inMyHoldings,
   why,
+  logoUrl,
   alertId,
   onOpenBusinessPopup,
 }: PeerRowProps) {
@@ -46,6 +49,7 @@ export default function PeerRow({
       className="flex cursor-pointer flex-col gap-1 py-1.5"
     >
       <div className="flex items-center gap-3">
+        <CompanyLogo logoUrl={logoUrl} ticker={ticker} size="sm" />
         <span className="font-data text-[11px] text-muted">{ticker}</span>
         {capTier && (
           <span
