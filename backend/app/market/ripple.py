@@ -29,13 +29,17 @@ def _alert_company_rows(
 ) -> list[dict]:
     """Every AlertCompany on ``alert`` other than ``exclude_company_id``,
     each: {ticker, name, sector, direction, excess_move_pct (float|None),
-    intensity (dict|None), is_exposure_only (bool), in_my_holdings (bool)}.
-    excess_move_pct/intensity are None whenever is_exposure_only is True --
-    never a fabricated number for an unmeasured company. Sorted by
-    intensity score descending; exposure-only entries (no score) sort
-    last. Shared by compute_ripple_companies (adds `relationship`, groups
-    by it) and get_sector_peers_for_alert (filters by `sector`) -- the one
-    place this per-company computation lives.
+    intensity (dict|None), is_exposure_only (bool), in_my_holdings (bool),
+    why (str|None)}. excess_move_pct/intensity are None whenever
+    is_exposure_only is True -- never a fabricated number for an
+    unmeasured company. `why` is refine_alert-populated causal text for
+    THIS company's own measured move (None if that LLM call never
+    succeeded, or the company was never measured -- never fabricated,
+    same discipline as every other LLM-text field in this codebase).
+    Sorted by intensity score descending; exposure-only entries (no
+    score) sort last. Shared by compute_ripple_companies (adds
+    `relationship`, groups by it) and get_sector_peers_for_alert (filters
+    by `sector`) -- the one place this per-company computation lives.
     """
     moves_by_company_id = {
         m.company_id: m for m in session.query(MarketMove).filter_by(alert_id=alert.id).all()
@@ -63,6 +67,7 @@ def _alert_company_rows(
             "intensity": None,
             "is_exposure_only": exposure_only,
             "in_my_holdings": alert_company.company_id in held_company_ids,
+            "why": alert_company.why,
         }
         if not exposure_only and move is not None and move.excess_move_pct is not None:
             entry["excess_move_pct"] = move.excess_move_pct

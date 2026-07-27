@@ -100,4 +100,29 @@ describe('PeerRow', () => {
     expect(screen.getByText('Exposure')).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
+
+  it('renders why text when present', () => {
+    renderRow({ why: 'Higher input costs squeeze this supplier\'s own margins.' });
+    expect(screen.getByText('Higher input costs squeeze this supplier\'s own margins.')).toBeInTheDocument();
+  });
+
+  it('renders no why text when it is null', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <PeerRow
+          ticker="BPCL.NS"
+          capTier="LARGE"
+          direction="bullish"
+          excessMovePct={3.0}
+          intensity={{ score: 70, band: 'Moderate', components: [] }}
+          isExposureOnly={false}
+          inMyHoldings={false}
+          why={null}
+          alertId={42}
+          onOpenBusinessPopup={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('p')).not.toBeInTheDocument();
+  });
 });

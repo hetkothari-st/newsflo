@@ -60,6 +60,7 @@ export default function RippleSection({ companies, alertId }: RippleSectionProps
                     intensity={row.intensity}
                     isExposureOnly={row.is_exposure_only}
                     inMyHoldings={row.in_my_holdings}
+                    why={row.why}
                     alertId={alertId}
                     onOpenBusinessPopup={() => setBusinessPopupTicker(row.ticker)}
                   />

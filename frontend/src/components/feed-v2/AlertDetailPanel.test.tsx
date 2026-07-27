@@ -45,7 +45,7 @@ function makeAlert(overrides: Partial<FeedV2Alert> = {}): FeedV2Alert {
         ticker: 'BPCL.NS', name: 'Bharat Petroleum', sector: 'oil_gas', cap_tier: 'LARGE',
         business_desc: 'Refines petroleum.', relationship: 'BENEFICIARY', direction: 'bullish',
         excess_move_pct: 3.0, intensity: { score: 70, band: 'Moderate', components: [] },
-        is_exposure_only: false, in_my_holdings: false,
+        is_exposure_only: false, in_my_holdings: false, why: null,
       },
     ],
     timeline: [{ horizon: 'TODAY', description: 'Markets react immediately.' }],

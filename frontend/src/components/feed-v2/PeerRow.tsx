@@ -10,6 +10,7 @@ interface PeerRowProps {
   intensity: Intensity | null;
   isExposureOnly: boolean;
   inMyHoldings: boolean;
+  why?: string | null;
   alertId?: number;
   onOpenBusinessPopup: () => void;
 }
@@ -22,6 +23,7 @@ export default function PeerRow({
   intensity,
   isExposureOnly,
   inMyHoldings,
+  why,
   alertId,
   onOpenBusinessPopup,
 }: PeerRowProps) {
@@ -41,56 +43,59 @@ export default function PeerRow({
         if (e.key === 'Enter' || e.key === ' ') goToDeepDive();
       }}
       aria-label={ticker}
-      className="flex cursor-pointer items-center gap-3 py-1.5"
+      className="flex cursor-pointer flex-col gap-1 py-1.5"
     >
-      <span className="font-data text-[11px] text-muted">{ticker}</span>
-      {capTier && (
-        <span
-          className={`rounded-full px-2 py-0.5 font-sans text-[10px] uppercase tracking-widest ${capTierColorClass(capTier)}`}
-        >
-          {capTier}
-        </span>
-      )}
-      {inMyHoldings && (
-        <span data-testid="peer-row-owned-dot" className="h-[7px] w-[7px] shrink-0 rounded-full bg-accent" />
-      )}
-      {isExposureOnly || excessMovePct == null ? (
-        <span className="font-sans text-xs text-muted">Exposure</span>
-      ) : (
-        <>
-          <span className={`font-data text-xs ${direction === 'bullish' ? 'text-bullish' : 'text-bearish'}`}>
-            {formatExcess(excessMovePct).text}
+      <div className="flex items-center gap-3">
+        <span className="font-data text-[11px] text-muted">{ticker}</span>
+        {capTier && (
+          <span
+            className={`rounded-full px-2 py-0.5 font-sans text-[10px] uppercase tracking-widest ${capTierColorClass(capTier)}`}
+          >
+            {capTier}
           </span>
-          {intensity && (
-            <>
-              <span className="h-1 w-full max-w-[80px] rounded-sm bg-elevated">
-                <span
-                  className={`block h-full rounded-sm ${intensityBandColorClass(intensity.band)}`}
-                  style={{ width: `${intensity.score}%` }}
-                />
-              </span>
-              <span className="font-data text-[11px] text-muted">{intensity.score}</span>
-            </>
-          )}
-        </>
-      )}
-      <button
-        type="button"
-        aria-label="View business details"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenBusinessPopup();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-        }}
-        className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] text-muted"
-      >
-        i
-      </button>
-      <span className="shrink-0 text-muted" aria-hidden="true">
-        ›
-      </span>
+        )}
+        {inMyHoldings && (
+          <span data-testid="peer-row-owned-dot" className="h-[7px] w-[7px] shrink-0 rounded-full bg-accent" />
+        )}
+        {isExposureOnly || excessMovePct == null ? (
+          <span className="font-sans text-xs text-muted">Exposure</span>
+        ) : (
+          <>
+            <span className={`font-data text-xs ${direction === 'bullish' ? 'text-bullish' : 'text-bearish'}`}>
+              {formatExcess(excessMovePct).text}
+            </span>
+            {intensity && (
+              <>
+                <span className="h-1 w-full max-w-[80px] rounded-sm bg-elevated">
+                  <span
+                    className={`block h-full rounded-sm ${intensityBandColorClass(intensity.band)}`}
+                    style={{ width: `${intensity.score}%` }}
+                  />
+                </span>
+                <span className="font-data text-[11px] text-muted">{intensity.score}</span>
+              </>
+            )}
+          </>
+        )}
+        <button
+          type="button"
+          aria-label="View business details"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenBusinessPopup();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+          }}
+          className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] text-muted"
+        >
+          i
+        </button>
+        <span className="shrink-0 text-muted" aria-hidden="true">
+          ›
+        </span>
+      </div>
+      {why && <p className="font-sans text-[12px] leading-snug text-muted">{why}</p>}
     </div>
   );
 }

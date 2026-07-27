@@ -44,6 +44,7 @@ export interface RippleCompany {
   intensity: Intensity | null;
   is_exposure_only: boolean;
   in_my_holdings: boolean;
+  why: string | null;
 }
 
 export interface StockDeepDive {

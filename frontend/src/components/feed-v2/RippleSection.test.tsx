@@ -23,6 +23,7 @@ function makeCompany(overrides: Partial<RippleCompany> = {}): RippleCompany {
     intensity: { score: 70, band: 'Moderate', components: [] },
     is_exposure_only: false,
     in_my_holdings: false,
+    why: null,
     ...overrides,
   };
 }

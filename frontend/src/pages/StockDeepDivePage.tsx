@@ -141,6 +141,7 @@ export default function StockDeepDivePage() {
                 intensity={peer.intensity}
                 isExposureOnly={peer.is_exposure_only}
                 inMyHoldings={peer.in_my_holdings}
+                why={peer.why}
                 alertId={alertId}
                 onOpenBusinessPopup={() => setBusinessPopupTicker(peer.ticker)}
               />

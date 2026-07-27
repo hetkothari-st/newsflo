@@ -324,7 +324,7 @@ def test_sector_peers_row_shape_matches_ripple_row_shape(db_session):
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "direction", "excess_move_pct", "intensity",
-        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc",
+        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "why",
     }
 
 
@@ -401,7 +401,7 @@ def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "relationship", "direction", "excess_move_pct",
-        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc",
+        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "why",
     }
     assert result[0]["relationship"] == "BENEFICIARY"
 
@@ -486,3 +486,61 @@ def test_includes_both_indirect_levels(db_session):
 
     tickers = {r["ticker"] for r in result}
     assert tickers == {"L1.NS", "L2.NS"}
+
+
+def test_ripple_rows_include_why_when_present(db_session):
+    peak = _company("PEAK.NS")
+    spillover = _company("SPILLOVER.NS")
+    db_session.add_all([peak, spillover])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    ripple_ac = _alert_company(alert.id, spillover.id, impact_level="indirect_l1")
+    ripple_ac.why = "Higher input costs squeeze this supplier's own margins."
+    db_session.add(ripple_ac)
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=spillover.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.0, sector_move_pct=0.2, excess_move_pct=0.8,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    assert result[0]["why"] == "Higher input costs squeeze this supplier's own margins."
+
+
+def test_ripple_rows_why_is_none_when_not_populated(db_session):
+    peak = _company("PEAK.NS")
+    spillover = _company("SPILLOVER.NS")
+    db_session.add_all([peak, spillover])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, spillover.id, impact_level="indirect_l1"))  # why left unset
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=spillover.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.0, sector_move_pct=0.2, excess_move_pct=0.8,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    assert result[0]["why"] is None
