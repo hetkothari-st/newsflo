@@ -22,12 +22,27 @@ next level." The current feed-v2 build violates this in two ways:
    `|excess_move_pct|`) for an alert. When an alert names multiple
    directly-affected companies (confirmed in production: a bee-farming
    story named both `HINDUNILVR.NS` and `CONCOR.NS`), every company
-   except the peak is silently discarded — never shown in the feed,
-   never shown in ripple (ripple is sector peers of the peak company
-   only, a different relationship entirely), never shown anywhere. Each
-   `AlertCompany.why` (the LLM-generated, per-company causal explanation,
-   already populated by `refine_alert`) is also never surfaced in
-   feed-v2's API or UI at all.
+   except the peak has no dedicated "here's who was named and why" view
+   anywhere — `AlertCompany.why` (the LLM-generated, per-company causal
+   explanation, already populated by `refine_alert`) is never surfaced in
+   feed-v2's API or UI at all, for any company.
+   >
+   > **Correction (post-implementation whole-branch review):** this
+   > section originally claimed non-peak companies were "never shown in
+   > ripple... never shown anywhere." That's inaccurate —
+   > `compute_ripple_companies` (`backend/app/market/ripple.py`) already
+   > includes every non-peak `AlertCompany`, direct or indirect, grouped
+   > by relationship type; only `get_sector_peers_for_alert` (a different
+   > function, feeding Level 4's sector-peers doorway) is scoped to one
+   > company's sector. So a non-peak *directly-named* company was already
+   > visible via ripple before this design — just without its own `why`
+   > text or a "these are the ones directly named" framing. The Impact
+   > core section this design adds is still additive value (the `why`
+   > narrative + a data-layer-2-shaped view), but it now intentionally
+   > overlaps with ripple for that subset of companies — accepted as two
+   > legitimate lenses on the same company (Level 1 = named + why, Level
+   > 2 = grouped by relationship), not deduplicated. See `compute_impact_
+   > companies`'s docstring in `alert_measurement.py` for the same note.
 
 ## Goals
 

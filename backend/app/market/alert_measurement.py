@@ -122,10 +122,16 @@ def compute_impact_companies(session: Session, alert: Alert) -> list[dict]:
     FULL set (peak included), each with its own excess_move_pct, direction,
     and why (refine_alert-populated causal text, None if that LLM call
     never succeeded -- never fabricated). indirect_l1/indirect_l2 companies
-    are excluded -- those are cascade/ripple companies, already surfaced by
-    app.market.ripple.compute_ripple_companies. Sorted by |excess_move_pct|
-    descending, same ordering discipline as the rest of this module. Never
-    raises; returns [] when nothing qualifies (omit rather than fabricate).
+    are excluded -- those are cascade companies, surfaced only by
+    app.market.ripple.compute_ripple_companies, not here. Note:
+    compute_ripple_companies is NOT scoped to indirect companies only --
+    it includes every non-peak AlertCompany (direct and indirect), so a
+    non-peak direct company appears in both this function's result AND in
+    ripple. That overlap is intentional, not a bug: two lenses on the same
+    company (this = named + why, ripple = grouped by relationship type),
+    not deduplicated. Sorted by |excess_move_pct| descending, same
+    ordering discipline as the rest of this module. Never raises; returns
+    [] when nothing qualifies (omit rather than fabricate).
     """
     moves_by_company_id = {
         m.company_id: m
