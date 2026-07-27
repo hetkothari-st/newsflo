@@ -306,14 +306,19 @@ class _FallbackChat:
 
 
 class FallbackClient:
-    """Tries the primary client (Anthropic) first; on ANY Anthropic API-level
-    failure (rate limit, insufficient credit balance, auth, server error,
-    connection failure -- anthropic.APIError covers all of these) or an
-    OpenAI-style RateLimitError, falls through to the secondary client (Groq,
-    itself possibly a RotatingClient/model-fallback already). A credit/billing
-    failure is a real, expected production scenario for a paid API -- not
-    catching it here would crash the whole pipeline instead of degrading to
-    the fallback provider. Errors from the secondary client itself still
+    """Tries the primary client first; on ANY primary-provider API-level
+    failure (rate limit/quota, auth, server error, connection failure --
+    GeminiAPIError and AnthropicAPIError each cover all of these for their
+    own provider) or an OpenAI-style RateLimitError, falls through to the
+    secondary client (Groq, itself possibly a RotatingClient/model-fallback
+    already). The analysis pipeline's build_client() wires GeminiAdapter as
+    primary (Anthropic's key is dead); AnthropicAdapter is still used as a
+    primary elsewhere (translation's own provider selection) -- this class
+    stays provider-agnostic on purpose so either caller gets the same
+    degrade-to-Groq safety net. A quota/billing failure is a real, expected
+    production scenario for any paid or rate-limited API -- not catching it
+    here would crash the whole pipeline instead of degrading to the
+    fallback provider. Errors from the secondary client itself still
     propagate normally.
     """
 
