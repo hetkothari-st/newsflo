@@ -562,9 +562,35 @@ def _identify_companies(
         )
 
     try:
-        response = _call(MODEL)
-    except RateLimitError:
-        response = _call(FALLBACK_MODEL)
+        try:
+            response = _call(MODEL)
+        except RateLimitError:
+            response = _call(FALLBACK_MODEL)
+    except Exception as exc:
+        if parent_pool is not None:
+            raise
+        # The direct-stage prompt carries the full rulebook/playbook block
+        # (~6k tokens). When the primary provider is unavailable and the
+        # call degrades to Groq, that block alone can push the request past
+        # Groq's per-request token cap (observed live: 413 "Request too
+        # large", losing the entire direct-company stage). Retry once with
+        # the slim cascade-style instructions (no rulebook/playbooks): a
+        # less-informed answer beats losing every direct company -- the
+        # alert simply gets no rule citations that run.
+        logger.warning(
+            "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
+        )
+        messages[1]["content"] = (
+            f"{framing}\n\n"
+            f"Facts: {facts}\n\n"
+            f"Sectors:\n{sector_lines}"
+            f"{parent_context}\n\n"
+            f"{CASCADE_COMPANY_RATIONALE_INSTRUCTIONS}"
+        )
+        try:
+            response = _call(MODEL)
+        except RateLimitError:
+            response = _call(FALLBACK_MODEL)
 
     message = response.choices[0].message
     tool_calls = message.tool_calls or []

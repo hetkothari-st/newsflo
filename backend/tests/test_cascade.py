@@ -303,6 +303,69 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     ]
 
 
+def test_identify_companies_direct_stage_retries_slim_on_oversize_rejection():
+    # Simulates Groq's per-request token cap (observed live as 413 "Request
+    # too large"): any prompt carrying the full rulebook block is rejected,
+    # the slim retry (no rulebook) succeeds. The direct stage must recover
+    # instead of losing every direct company.
+    class OversizeRejectingClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                content = kwargs["messages"][1]["content"]
+                if "ECONOMIC REASONING RULES" in content:
+                    self._outer.calls.append({
+                        "name": kwargs["tool_choice"]["function"]["name"],
+                        "model": kwargs["model"],
+                    })
+                    raise RuntimeError("Request too large (simulated 413)")
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    company_fields = dict(_FULL_COMPANY_FIELDS, name="HDFC Bank", ticker="HDFCBANK.NS")
+    client = OversizeRejectingClient({
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [company_fields]},
+        ]},
+    })
+
+    result = _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+
+    assert len(result) == 1
+    assert result[0].ticker == "HDFCBANK.NS"
+    # First call carried the rulebook and was rejected; the retry was slim.
+    assert len(client.calls) == 2
+    assert "ECONOMIC REASONING RULES" not in client.last_messages[1]["content"]
+
+
+def test_identify_companies_cascade_stage_does_not_retry_slim():
+    # The slim retry exists only for the direct stage's oversized prompt --
+    # a cascade-stage failure must propagate to analyze_article's own
+    # truncation handling, not silently re-call the model.
+    class AlwaysFailingClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                raise RuntimeError("provider down")
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = AlwaysFailingClient({})
+
+    with pytest.raises(RuntimeError, match="provider down"):
+        _identify_companies(
+            client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+        )
+
+
 def test_build_company_tool_cascade_constrains_parent_ticker_enum():
     tool = build_company_tool(parent_tickers=["HDFCBANK.NS"])
     props = tool["function"]["parameters"]["properties"]["sector_companies"]["items"]["properties"]["companies"]["items"]["properties"]
