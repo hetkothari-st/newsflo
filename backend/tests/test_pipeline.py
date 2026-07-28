@@ -69,6 +69,80 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert refreshed_article.status == "ANALYZED"
 
 
+def test_process_new_articles_reconciles_direction_to_measured_move(db_session, monkeypatch):
+    from app.models import MarketMove, utcnow
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/a",
+        title="US strikes Iran oil export sites", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_gas",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"],
+            confidence_score=85, time_horizon="Short-Term",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+
+    # The LLM guessed "bullish" before the market had reacted. The real,
+    # measured move went the other way -- persisted direction must defer
+    # to the measured fact, not the pre-measurement LLM guess.
+    def fake_measure(session, company_obj):
+        return MarketMove(
+            company_id=company_obj.id, benchmark_ticker="^NSEI",
+            measurement_status="ok", excess_move_pct=-3.1, measured_at=utcnow(),
+        )
+
+    monkeypatch.setattr(pipeline_module, "measure_company_move", fake_measure)
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    assert created == 1
+    alert_company = db_session.query(AlertCompany).one()
+    assert alert_company.direction == "bearish"
+
+
+def test_process_new_articles_keeps_llm_direction_when_unmeasured(db_session, monkeypatch):
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/a",
+        title="US strikes Iran oil export sites", content="crude oil markets react",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_gas",
+        companies=[CompanyMention(
+            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
+            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"],
+            confidence_score=85, time_horizon="Short-Term",
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    # measure_company_move stays on conftest's autouse "no_data" stub.
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    assert created == 1
+    alert_company = db_session.query(AlertCompany).one()
+    assert alert_company.direction == "bullish"
+
+
 def test_process_new_articles_uses_full_content_over_summary_when_available(db_session, monkeypatch):
     company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
     db_session.add(company)

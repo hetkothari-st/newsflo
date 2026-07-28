@@ -330,6 +330,25 @@ def _persist_alert(
             session.add(move)
             market_moves.append(move)
 
+    # Reconcile each AlertCompany.direction with its own REAL measured move,
+    # before why-text generation ever reads `direction` -- the LLM's
+    # direction call above happened BEFORE the market had actually reacted,
+    # so it is a prediction, not a fact. Measurement is the spine (spec
+    # Ground Rules): once a real reaction exists, it must always win over a
+    # stale pre-measurement guess, or the UI ends up showing a green
+    # "bullish"/"positively impacting" narrative next to a red, negative
+    # excess-move number for the same company -- confirmed happening in
+    # production (a merger-news alert called "bullish" while the stock's
+    # actual measured reaction was -3.1%). Only overwrites when a real
+    # measurement exists (measurement_status == "ok"); an unmeasured/
+    # exposure-only company keeps the LLM's own call, since there is no
+    # measured reality yet to defer to.
+    moves_by_company_id = {m.company_id: m for m in market_moves}
+    for alert_company in alert_companies:
+        move = moves_by_company_id.get(alert_company.company_id)
+        if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
+            alert_company.direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+
     if client is not None:
         try:
             refine_alert(client, session, alert, article, alert_companies, market_moves)
