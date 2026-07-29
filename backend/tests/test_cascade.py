@@ -592,11 +592,18 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
 
     assert result.category == "macro_policy"
     assert result.event_type == "currency_move"
-    assert len(result.companies) == 2
-    direct, cascade = result.companies
+    assert len(result.companies) == 3
+    direct, sector_wide, cascade = result.companies
     assert direct.ticker == "HDFCBANK.NS"
     assert direct.impact_level == "direct"
     assert direct.parent_ticker is None
+    # One deterministic sector-wide fan-out mention per primary sector (here
+    # just "banking") -- lets resolve_companies's top-N-by-tier lookup add
+    # this sector's other real companies regardless of what the LLM named.
+    assert sector_wide.is_direct is False
+    assert sector_wide.sector == "banking"
+    assert sector_wide.direction == "bearish"
+    assert sector_wide.impact_level == "direct"
     assert cascade.ticker == "IRCTC.NS"
     assert cascade.impact_level == "indirect_l1"
     assert cascade.parent_ticker == "HDFCBANK.NS"
@@ -645,7 +652,46 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
 
     result = analyze_article(client, title="t", content="c")
 
-    assert result.companies == []
+    # The LLM's own per-company call failed, but the deterministic
+    # sector-wide fan-out mention (built from the already-succeeded primary
+    # sector, not from this failed call) still comes through -- a resilience
+    # side effect: this alert still resolves to real companies via
+    # resolve_companies's top-N-by-tier lookup instead of zero.
+    assert len(result.companies) == 1
+    assert result.companies[0].is_direct is False
+    assert result.companies[0].sector == "banking"
+
+
+def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
+    # Two primary sectors, one LLM-named direct company (in "banking" only)
+    # -- the "oil_gas" sector never got a specific company named by the LLM
+    # at all, the exact production symptom this fan-out fixes. No ticker on
+    # the named company so the L1/L2 cascade stages never trigger (keeps
+    # this test scoped to stage 3's own output, not the whole 7-stage chain
+    # -- see test_analyze_article_composes_all_seven_stages_end_to_end for
+    # that).
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [
+            {"sector": "banking", "direction": "bearish", "mechanism": "rate exposure"},
+            {"sector": "oil_gas", "direction": "bullish", "mechanism": "crude price pass-through"},
+        ]},
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [_full_company("HDFC Bank", None)]},
+        ]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    named = [c for c in result.companies if c.name == "HDFC Bank"]
+    sector_wide = [c for c in result.companies if c.is_direct is False]
+    assert len(named) == 1
+    assert len(sector_wide) == 2
+    by_sector = {c.sector: c for c in sector_wide}
+    assert by_sector["banking"].direction == "bearish"
+    assert by_sector["oil_gas"].direction == "bullish"
+    assert all(c.impact_level == "direct" for c in sector_wide)
+    assert all(c.ticker is None for c in sector_wide)
 
 
 def test_analyze_article_logs_swallowed_stage_failures(caplog):

@@ -926,6 +926,30 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         primary_companies = []
     all_companies.extend(primary_companies)
 
+    # Deterministic sector-wide fan-out: primary_companies is only whichever
+    # specific companies the LLM happened to name -- confirmed in production
+    # to vary wildly in coverage for the same sector (one oil-price alert
+    # named 8 companies, another named only Reliance). One sector-wide
+    # mention per identified primary sector lets
+    # app.companies.resolution.resolve_companies's existing top-N-by-
+    # index-tier fan-out (TOP_N_SECTOR_COMPANIES) fill in that sector's
+    # other real, prominent constituents regardless of what the LLM
+    # enumerated -- that fan-out already existed but was unreachable dead
+    # code, since _identify_companies always sets is_direct=True on every
+    # mention it returns. Already deduplicated against primary_companies by
+    # resolve_companies's seen_company_ids, so a company the LLM already
+    # named is never added twice. magnitude_low/high are placeholders (this
+    # is a sector, not a company the LLM ever estimated a range for) --
+    # unused by feed-v2 (which only ever displays the real measured
+    # excess_move_pct), only read by the legacy /api/alerts router.
+    for sector in primary_sectors:
+        all_companies.append(CompanyMention(
+            name=f"{sector.sector} sector", is_direct=False, sector=sector.sector,
+            direction=sector.direction, magnitude_low=1.0, magnitude_high=3.0,
+            rationale=f"Sector-wide exposure via {sector.sector}: {sector.mechanism}",
+            time_horizon="Short-Term", impact_level="direct",
+        ))
+
     l1_parent_tickers_present = [c for c in primary_companies if c.ticker]
     if l1_parent_tickers_present:
         try:
