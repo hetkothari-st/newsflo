@@ -5,7 +5,8 @@ import pytest
 
 from app.analysis.cascade import (
     analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
-    _identify_companies, _identify_sectors, _sector_mechanism_edges, build_company_tool, build_sector_tool,
+    _identify_companies, _identify_sectors, _sector_fanout_mentions, _sector_mechanism_edges,
+    build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
 from app.reasoning.rulebook import CHAINS
@@ -592,8 +593,8 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
 
     assert result.category == "macro_policy"
     assert result.event_type == "currency_move"
-    assert len(result.companies) == 3
-    direct, sector_wide, cascade = result.companies
+    assert len(result.companies) == 4
+    direct, sector_wide, cascade, cascade_sector_wide = result.companies
     assert direct.ticker == "HDFCBANK.NS"
     assert direct.impact_level == "direct"
     assert direct.parent_ticker is None
@@ -607,6 +608,13 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
     assert cascade.ticker == "IRCTC.NS"
     assert cascade.impact_level == "indirect_l1"
     assert cascade.parent_ticker == "HDFCBANK.NS"
+    # Same deterministic fan-out, now for the L1 cascade sector
+    # (railways_transport) -- chained from the L1 stage's own parent pool
+    # (here just HDFC Bank, the only primary company with a ticker).
+    assert cascade_sector_wide.is_direct is False
+    assert cascade_sector_wide.sector == "railways_transport"
+    assert cascade_sector_wide.impact_level == "indirect_l1"
+    assert cascade_sector_wide.parent_ticker == "HDFCBANK.NS"
     # 7 calls: facts, primary sectors, primary companies, L1 sectors, L1
     # companies, L2 sectors -- the L2-sector call DOES run (L1 sectors and
     # L1 companies-with-tickers are both non-empty, so the orchestrator's
@@ -660,6 +668,31 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
     assert len(result.companies) == 1
     assert result.companies[0].is_direct is False
     assert result.companies[0].sector == "banking"
+
+
+def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level_and_parent():
+    sectors = [
+        SectorFinding(sector="auto", direction="bearish", mechanism="input cost pass-through"),
+        SectorFinding(sector="metals", direction="bullish", mechanism="commodity price rise"),
+    ]
+
+    mentions = _sector_fanout_mentions(sectors, impact_level="indirect_l2", parent_ticker="MARUTI.NS")
+
+    assert len(mentions) == 2
+    assert all(m.is_direct is False for m in mentions)
+    assert all(m.impact_level == "indirect_l2" for m in mentions)
+    assert all(m.parent_ticker == "MARUTI.NS" for m in mentions)
+    assert {m.sector for m in mentions} == {"auto", "metals"}
+    assert {m.direction for m in mentions} == {"bearish", "bullish"}
+
+
+def test_sector_fanout_mentions_direct_stage_has_no_parent_ticker():
+    sectors = [SectorFinding(sector="banking", direction="bearish", mechanism="rate exposure")]
+
+    mentions = _sector_fanout_mentions(sectors, impact_level="direct")
+
+    assert mentions[0].parent_ticker is None
+    assert mentions[0].impact_level == "direct"
 
 
 def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():

@@ -101,47 +101,53 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
     then indirect_l2) regardless of the order the LLM returned them in, so
     an indirect entry's parent_ticker always resolves against an
     already-populated ticker->company_id map -- see _LEVEL_ORDER.
+
+    Dispatches on is_direct (a specific named company vs. a sector-wide
+    fan-out mention), not on impact_level -- a sector-wide fan-out mention
+    can itself be at any impact_level (see app.analysis.cascade's
+    _sector_fanout_mentions, which builds one for the direct stage AND for
+    each cascade level), so an indirect one still needs its own
+    parent_ticker chain resolved the same way a direct_mention indirect
+    entry does.
     """
     resolved = []
     seen_company_ids: set[int] = set()
     ticker_to_company_id: dict[str, int] = {}
 
+    def _resolve_parent(mention: CompanyMention) -> tuple[int | None, bool]:
+        """Returns (parent_company_id, ok). ok is False only when this
+        mention IS at an indirect level but its parent_ticker didn't
+        resolve (missing, unknown ticker, or a typo) -- the chain is
+        broken, so the caller should drop the entry rather than persist an
+        orphaned indirect row, consistent with "omit rather than
+        mismatch". A direct-level mention always returns (None, True)."""
+        if mention.impact_level not in ("indirect_l1", "indirect_l2"):
+            return None, True
+        parent_company_id = ticker_to_company_id.get(mention.parent_ticker) if mention.parent_ticker else None
+        return parent_company_id, parent_company_id is not None
+
     for mention in sorted(mentions, key=lambda m: _LEVEL_ORDER.get(m.impact_level, 0)):
-        if mention.impact_level in ("indirect_l1", "indirect_l2"):
+        if mention.is_direct:
             company = _find_direct_company(session, mention)
             if company is None:
                 continue
             if company.id in seen_company_ids:
                 continue
-            seen_company_ids.add(company.id)
-            parent_company_id = (
-                ticker_to_company_id.get(mention.parent_ticker) if mention.parent_ticker else None
-            )
-            # A parent_ticker that didn't resolve to any already-persisted
-            # company (e.g. the model referenced a ticker outside this
-            # response, or a typo) means the chain is broken -- drop this
-            # entry rather than persist an orphaned indirect row with no
-            # parent, consistent with "omit rather than mismatch".
-            if parent_company_id is None:
+            parent_company_id, ok = _resolve_parent(mention)
+            if not ok:
                 continue
+            seen_company_ids.add(company.id)
             resolved.append(_to_resolved(
                 company, mention, basis="direct_mention",
                 impact_level=mention.impact_level, parent_company_id=parent_company_id,
             ))
             if mention.ticker:
                 ticker_to_company_id[mention.ticker] = company.id
-        elif mention.is_direct:
-            company = _find_direct_company(session, mention)
-            if company is None:
-                continue
-            if company.id in seen_company_ids:
-                continue
-            seen_company_ids.add(company.id)
-            resolved.append(_to_resolved(company, mention, basis="direct_mention"))
-            if mention.ticker:
-                ticker_to_company_id[mention.ticker] = company.id
         else:
             if not mention.sector:
+                continue
+            parent_company_id, ok = _resolve_parent(mention)
+            if not ok:
                 continue
             companies = (
                 session.query(Company)
@@ -154,5 +160,9 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
                 if company.id in seen_company_ids:
                     continue
                 seen_company_ids.add(company.id)
-                resolved.append(_to_resolved(company, mention, basis="sector_inference"))
+                resolved.append(_to_resolved(
+                    company, mention, basis="sector_inference",
+                    impact_level=mention.impact_level, parent_company_id=parent_company_id,
+                ))
+                ticker_to_company_id[company.ticker] = company.id
     return resolved

@@ -56,6 +56,86 @@ def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
     assert len(resolved_tickers & set(other_tickers)) == 2
 
 
+def test_resolve_sector_inference_at_indirect_l1_chains_to_the_stated_parent(db_session):
+    # app.analysis.cascade's _sector_fanout_mentions builds a sector-wide
+    # fan-out mention for cascade levels too, not just the direct stage --
+    # it must chain to a resolvable parent exactly like a direct_mention
+    # indirect entry does.
+    parent = _make_company(db_session, "HDFCBANK.NS", "HDFC Bank", "banking", 1_000_000.0)
+    for i in range(3):
+        _make_company(db_session, f"AUTO_{i}.NS", f"Auto Co {i}", "auto", None)
+    direct_mention = CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, sector="banking",
+        direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="rate exposure",
+        confidence_score=70, time_horizon="Short-Term", impact_level="direct",
+    )
+    sector_wide_l1 = CompanyMention(
+        name="auto sector", ticker=None, is_direct=False, sector="auto",
+        direction="bearish", magnitude_low=1.0, magnitude_high=3.0, rationale="input cost pass-through",
+        confidence_score=50, time_horizon="Short-Term",
+        impact_level="indirect_l1", parent_ticker="HDFCBANK.NS",
+    )
+
+    resolved = resolve_companies(db_session, [direct_mention, sector_wide_l1])
+
+    sector_rows = [r for r in resolved if r["basis"] == "sector_inference"]
+    assert len(sector_rows) == 3
+    assert all(r["impact_level"] == "indirect_l1" for r in sector_rows)
+    assert all(r["parent_company_id"] == parent.id for r in sector_rows)
+
+
+def test_resolve_sector_inference_at_indirect_l2_chains_through_l1(db_session):
+    parent = _make_company(db_session, "HDFCBANK.NS", "HDFC Bank", "banking", 1_000_000.0)
+    l1_company = _make_company(db_session, "MARUTI.NS", "Maruti Suzuki", "auto", 500_000.0)
+    _make_company(db_session, "COMP_A.NS", "Component Co A", "metals", None)
+
+    mentions = [
+        CompanyMention(
+            name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, sector="banking",
+            direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="rate exposure",
+            confidence_score=70, time_horizon="Short-Term", impact_level="direct",
+        ),
+        CompanyMention(
+            name="Maruti Suzuki", ticker="MARUTI.NS", is_direct=True, sector="auto",
+            direction="bearish", magnitude_low=-1.0, magnitude_high=-1.0, rationale="demand hit",
+            confidence_score=60, time_horizon="Short-Term",
+            impact_level="indirect_l1", parent_ticker="HDFCBANK.NS",
+        ),
+        CompanyMention(
+            name="metals sector", ticker=None, is_direct=False, sector="metals",
+            direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="input cost",
+            confidence_score=45, time_horizon="Short-Term",
+            impact_level="indirect_l2", parent_ticker="MARUTI.NS",
+        ),
+    ]
+
+    resolved = resolve_companies(db_session, mentions)
+
+    sector_row = next(r for r in resolved if r["basis"] == "sector_inference")
+    assert sector_row["impact_level"] == "indirect_l2"
+    assert sector_row["parent_company_id"] == l1_company.id
+    # Sanity: the chain's own companies still resolved correctly too.
+    assert {r["company_id"] for r in resolved} == {parent.id, l1_company.id, sector_row["company_id"]}
+
+
+def test_resolve_sector_inference_at_indirect_level_dropped_when_parent_unresolved(db_session):
+    # The stated parent_ticker was never itself resolved in this same
+    # mentions list (e.g. its own LLM call failed) -- the chain is broken,
+    # so this entry must be dropped entirely, not persisted with no parent.
+    for i in range(3):
+        _make_company(db_session, f"AUTO_{i}.NS", f"Auto Co {i}", "auto", None)
+    sector_wide_l1 = CompanyMention(
+        name="auto sector", ticker=None, is_direct=False, sector="auto",
+        direction="bearish", magnitude_low=1.0, magnitude_high=3.0, rationale="input cost pass-through",
+        confidence_score=50, time_horizon="Short-Term",
+        impact_level="indirect_l1", parent_ticker="NEVER_RESOLVED.NS",
+    )
+
+    resolved = resolve_companies(db_session, [sector_wide_l1])
+
+    assert resolved == []
+
+
 def test_resolve_direct_mention_with_unknown_ticker_is_skipped(db_session):
     mention = CompanyMention(
         name="Unknown Corp", ticker="UNKNOWN.NS", is_direct=True, sector=None,
