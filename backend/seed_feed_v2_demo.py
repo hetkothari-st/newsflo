@@ -51,18 +51,47 @@ DEMO_ROWS = [
         "Minor pullback in upstream oil stocks", "Small dip alongside broader energy sector",
         "This move is modest and largely tracks the sector, not a company-specific shock.", "bearish",
     ),
+    (
+        # UNCONFIRMED verdict path (spec v2 §4.3): rumor/denial alert --
+        # Alert.is_unconfirmed is set to 1 for this row below.
+        "IDEA.NS", "Vodafone Idea", "telecom", "^NSEI",
+        2.3, 0.4, 1.9, 2.1,
+        "Report claims promoter stake sale; company denies", "Unverified stake-sale report; treat with caution",
+        "The move rests on an unconfirmed report the company has denied.", "bullish",
+    ),
 ]
+
+# Per-ticker signal extras for DEMO_ROWS' MarketMove (spec v2 §4.2 inputs):
+# (delivery_pct, vol_normalized, materiality, avg_traded_value)
+DEMO_ROW_SIGNALS = {
+    "RELIANCE.NS": (61.0, 2.4, 0.004, 1_200_000_000.0),
+    "TCS.NS": (72.0, 0.4, 0.001, 900_000_000.0),
+    "SOMETEXTILE.NS": (44.0, 1.9, 0.03, 30_000_000.0),
+    "ONGC.NS": (68.0, 0.3, 0.001, 700_000_000.0),
+    "IDEA.NS": (44.0, 1.2, 0.008, 90_000_000.0),
+}
 
 # Ripple companions + timeline, attached to DEMO_ROWS[0] (RELIANCE.NS) only --
 # one company per relationship-mapping family (see app.reasoning.
 # ripple_relationship._RELATION_TO_RIPPLE_RELATIONSHIP), plus one with NO
 # MarketMove row at all to demonstrate the exposure-only path.
 RIPPLE_COMPANIONS = [
-    # (ticker, name, sector, relation, direction, excess, has_market_move)
-    ("BPCL.NS", "Bharat Petroleum Corporation", "oil_gas", "commodity", "bullish", 3.0, True),
-    ("IOC.NS", "Indian Oil Corporation", "oil_gas", "input_cost", "bearish", -1.5, True),
-    ("HPCL.NS", "Hindustan Petroleum Corporation", "oil_gas", "competitor", "bearish", -0.8, True),
-    ("GAIL.NS", "GAIL India", "oil_gas", "supplier", "bearish", None, False),
+    # (ticker, name, sector, relation, direction, excess, has_market_move,
+    #  market_cap, delivery_pct, avg_traded_value)
+    ("BPCL.NS", "Bharat Petroleum Corporation", "oil_gas", "commodity", "bullish", 3.0, True,
+     120000.0, 63.0, 900_000_000.0),
+    ("IOC.NS", "Indian Oil Corporation", "oil_gas", "input_cost", "bearish", -1.5, True,
+     180000.0, 55.0, 800_000_000.0),
+    ("HPCL.NS", "Hindustan Petroleum Corporation", "oil_gas", "competitor", "bearish", -0.8, True,
+     80000.0, 58.0, 600_000_000.0),
+    ("GAIL.NS", "GAIL India", "oil_gas", "supplier", "bearish", None, False,
+     90000.0, None, None),
+    # MICRO cap (below config.MICRO_CAP_FLOOR) with low delivery + thin
+    # trading -- exercises every small/micro risk cue at once (spec v2 §6):
+    # liquidity LOW tag, <50% delivery warning, thin-trading note, and the
+    # materiality-ranked discovery tab.
+    ("CHENNPETRO.NS", "Chennai Petroleum Corporation", "oil_gas", "commodity", "bullish", 4.7, True,
+     400.0, 38.0, 20_000_000.0),
 ]
 
 TIMELINE_ENTRIES = [
@@ -87,6 +116,8 @@ BUSINESS_DESCRIPTIONS = {
     "IOC.NS": "India's largest oil refiner, also distributing fuel and petrochemicals.",
     "HPCL.NS": "Refines crude oil and markets petroleum products across India.",
     "GAIL.NS": "Transports and markets natural gas via pipeline infrastructure.",
+    "IDEA.NS": "Operates a pan-India mobile telecom network for voice and data.",
+    "CHENNPETRO.NS": "A standalone refiner turning crude into fuels; crude is its single biggest input cost.",
 }
 
 
@@ -133,11 +164,16 @@ def main() -> None:
                 )
                 session.add(company)
                 session.commit()
-            elif company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
-                # Backfill for a company row created by an earlier run of this
-                # script, before BUSINESS_DESCRIPTIONS existed -- re-running
-                # this script must be able to fix that, not leave it stale.
-                company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
+            else:
+                # Backfill for a company row that pre-exists this script (or
+                # was created by an earlier run before these fields existed)
+                # -- re-running this script must be able to fix that, not
+                # leave it stale. market_cap drives the cap-tier tag on
+                # every stock row (spec v2 §4.5).
+                if company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
+                    company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
+                if company.market_cap is None:
+                    company.market_cap = 50000.0
                 session.commit()
 
             article = Article(
@@ -151,6 +187,8 @@ def main() -> None:
                 article_id=article.id, category=sector if sector != "textiles" else "other",
                 created_at=now - timedelta(minutes=5 * i), summary_short=summary_short,
                 summary_long=f"{summary_short}. {why}",
+                # Rumor/denial demo row -> UNCONFIRMED verdict (spec v2 §4.3).
+                is_unconfirmed=1 if ticker == "IDEA.NS" else 0,
             )
             session.add(alert)
             session.flush()
@@ -164,40 +202,57 @@ def main() -> None:
             )
             session.add(alert_company)
 
+            delivery_pct, vol_normalized, materiality, avg_traded_value = DEMO_ROW_SIGNALS.get(
+                ticker, (None, None, None, None),
+            )
             session.add(MarketMove(
                 alert_id=alert.id, company_id=company.id, benchmark_ticker=benchmark,
                 raw_move_pct=raw, sector_move_pct=sector_move, excess_move_pct=excess,
                 volume=vol_mult * 100.0, avg_volume_20d=100.0, volume_multiple=vol_mult,
+                delivery_pct=delivery_pct, vol_normalized=vol_normalized,
+                materiality=materiality, avg_traded_value=avg_traded_value,
                 measurement_status="ok", measured_at=now,
             ))
             session.commit()
 
         # Ripple companions + timeline, attached to DEMO_ROWS[0] (RELIANCE.NS) only.
         peak_company = session.query(Company).filter_by(ticker=DEMO_ROWS[0][0]).one()
-        for ticker, name, sector, relation, direction, excess, has_market_move in RIPPLE_COMPANIONS:
+        for ticker, name, sector, relation, direction, excess, has_market_move, market_cap, delivery_pct, avg_traded_value in RIPPLE_COMPANIONS:
             company = session.query(Company).filter_by(ticker=ticker).one_or_none()
             if company is None:
                 company = Company(
-                    ticker=ticker, name=name, sector=sector, index_tier="OTHER", market_cap=20000.0,
+                    ticker=ticker, name=name, sector=sector, index_tier="OTHER", market_cap=market_cap,
                     business_desc=BUSINESS_DESCRIPTIONS.get(ticker),
                 )
                 session.add(company)
                 session.commit()
-            elif company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
-                company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
+            else:
+                # Keep companion rows current on re-run (market_cap drives the
+                # MICRO demo path; business_desc drives the (i) popup).
+                company.market_cap = market_cap
+                if company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
+                    company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
                 session.commit()
 
             session.add(AlertCompany(
                 alert_id=first_alert_id, company_id=company.id, direction=direction,
                 magnitude_low=0.5, magnitude_high=1.5, rationale=f"Ripple effect via {relation}.",
                 basis="direct_mention", impact_level="indirect_l1",
+                parent_company_id=peak_company.id,
+                why=f"Linked to the crude move as a {relation.replace('_', ' ')} of the refining chain."
+                if has_market_move else None,
             ))
 
             if has_market_move:
                 session.add(MarketMove(
                     alert_id=first_alert_id, company_id=company.id, benchmark_ticker="^CNXENERGY",
                     raw_move_pct=excess, sector_move_pct=0.0, excess_move_pct=excess,
-                    volume=100.0, avg_volume_20d=100.0, volume_multiple=1.0,
+                    volume=(410.0 if ticker == "CHENNPETRO.NS" else 100.0), avg_volume_20d=100.0,
+                    volume_multiple=(4.1 if ticker == "CHENNPETRO.NS" else 1.0),
+                    delivery_pct=delivery_pct,
+                    vol_normalized=(3.1 if ticker == "CHENNPETRO.NS" else 0.8),
+                    materiality=(0.09 if ticker == "CHENNPETRO.NS" else 0.002),
+                    avg_traded_value=avg_traded_value,
                     measurement_status="ok", measured_at=now,
                 ))
             else:

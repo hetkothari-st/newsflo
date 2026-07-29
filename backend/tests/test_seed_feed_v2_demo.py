@@ -42,4 +42,6 @@ def test_seed_feed_v2_demo_allows_sqlite_database(monkeypatch, db_session):
     demo_articles = db_session.query(Article).filter(
         Article.url.like("https://demo.feed-v2.local/%")
     ).all()
-    assert len(demo_articles) == 4  # DEMO_ROWS has 4 entries
+    from seed_feed_v2_demo import DEMO_ROWS
+
+    assert len(demo_articles) == len(DEMO_ROWS)

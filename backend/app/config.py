@@ -93,10 +93,25 @@ settings = Settings()
 # cap-tier function in app/market/ reads its weights and thresholds from
 # here, never hardcodes them (spec §4.2, §10).
 
-# Live-feed intensity weights (spec §4.2) -- must sum to 1.0. The advisory-
-# tier weight profile (adds a fundamental_score term) is out of scope until
-# the FundamentalEstimate/RIA-advisory phase.
-INTENSITY_WEIGHTS_LIVE = {"excess": 0.55, "volume": 0.25, "breadth": 0.20}
+# Six-signal composite intensity weights (spec v2 §4.2) -- the full
+# advisory-tier profile. The live-feed tier has no fundamental signal, and
+# older MarketMove rows may lack delivery/materiality/vol_norm values --
+# compute_intensity renormalizes the weights of whichever signals are
+# actually present so they sum to 1 (spec §4.2: "Live-feed tier (no
+# fundamental): renormalize the other five to sum to 1").
+INTENSITY_WEIGHTS = {
+    "excess": 0.28,
+    "volume": 0.12,
+    "delivery": 0.15,
+    "materiality": 0.25,
+    "vol_norm": 0.10,
+    "fundamental": 0.10,
+}
+
+# -- COMMENTED OUT (superseded by INTENSITY_WEIGHTS above, spec v2 §4.2's
+# six-signal blend; breadth is an event-level metric, no longer an
+# intensity component):
+# INTENSITY_WEIGHTS_LIVE = {"excess": 0.55, "volume": 0.25, "breadth": 0.20}
 
 # Intensity band thresholds (spec §4.2): >=75 High, 50-74 Moderate, <50 Low.
 INTENSITY_BAND_HIGH = 75
@@ -121,3 +136,23 @@ CAR_SUMMARY_SAMPLE_THRESHOLD = 5  # matches calibration/track_record.py's WIN_RA
 # Company.market_cap every call -- never a hardcoded company list.
 AMFI_LARGE_CAP_RANK_CUTOFF = 100
 AMFI_MID_CAP_RANK_CUTOFF = 250
+
+# MICRO cutoff (spec v2 §4.5: "apply a micro cutoff below a chosen
+# market-cap floor"): a company below this market-cap floor is MICRO
+# regardless of rank. Same unit as Company.market_cap.
+MICRO_CAP_FLOOR = 500.0
+
+# Liquidity tier thresholds (spec v2 §4.6): derived from 20-day average
+# traded value (close x volume, same unit as prices x shares). LOW liquidity
+# on a small/micro cap is a risk cue, not decoration.
+LIQUIDITY_HIGH_AVG_TRADED_VALUE = 500_000_000.0  # >= -> HIGH
+LIQUIDITY_MODERATE_AVG_TRADED_VALUE = 50_000_000.0  # >= -> MODERATE, else LOW
+
+# Delivery-percentage warning threshold (spec v2 §4.2, §6): delivery_pct
+# below this fires the "much of this move was intraday speculation" warning.
+LOW_DELIVERY_WARNING_PCT = 50.0
+
+# Unusual-activity discovery threshold (spec v2 §6 path 3): a small/micro
+# cap whose day volume is at least this multiple of its own 20-day average
+# qualifies for the "unusual activity" tab.
+UNUSUAL_VOLUME_MULTIPLE = 2.0

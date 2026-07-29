@@ -36,21 +36,19 @@ def fetch_price_change_pct(ticker: str, start_date: datetime, horizon_days: int)
         return None
 
 
-def fetch_cumulative_excess_return(
+def fetch_daily_excess_returns(
     ticker: str, benchmark_ticker: str, event_date: datetime,
     days_before: int = 1, days_after: int = 3,
-) -> float | None:
-    """Cumulative Abnormal Return (docs/NEWS_IMPACT_APP_SPEC.md §4.6): the
-    sum of (ticker daily return - benchmark daily return) over trading
-    days [event_date - days_before .. event_date + days_after] (default
-    -1..+3, 5 trading days -- 6 closes needed since each daily return
-    requires the prior day's close too). Returns a percentage (matching
-    MarketMove.excess_move_pct's own convention: 1.5 means 1.5%, not
-    0.015). Returns None -- "not ready yet, retry on the next scheduled
-    run" -- if the market hasn't yet traded far enough past event_date
-    to fill the whole window, or if data is unavailable/the fetch fails.
-    Same "never raise, degrade to None" contract as
-    fetch_price_change_pct in this same module.
+) -> list[float] | None:
+    """Per-trading-day excess returns (ticker daily return - benchmark
+    daily return, each as a %) over trading days [event_date - days_before
+    .. event_date + days_after] (default -1..+3 -> 5 values) -- the
+    day-by-day series behind CAR, so the review screen can draw the bar
+    track (spec v2 §4.7), not just the sum. Returns None -- "not ready
+    yet, retry on the next scheduled run" -- if the market hasn't yet
+    traded far enough past event_date to fill the whole window, or if
+    data is unavailable/the fetch fails. Same "never raise, degrade to
+    None" contract as fetch_price_change_pct in this same module.
     """
     try:
         start = event_date - timedelta(days=14)
@@ -89,7 +87,7 @@ def fetch_cumulative_excess_return(
             ts.date(): float(v) for ts, v in benchmark_closes.items() if math.isfinite(float(v))
         }
 
-        cumulative_excess = 0.0
+        daily_excess: list[float] = []
         for i in range(1, len(window_dates)):
             prev_close = float(window_ticker_closes.iloc[i - 1])
             curr_close = float(window_ticker_closes.iloc[i])
@@ -107,8 +105,23 @@ def fetch_cumulative_excess_return(
                 return None
             benchmark_return = benchmark_curr / benchmark_prev - 1
 
-            cumulative_excess += (ticker_return - benchmark_return) * 100
+            daily_excess.append((ticker_return - benchmark_return) * 100)
 
-        return cumulative_excess
+        return daily_excess
     except Exception:
         return None
+
+
+def fetch_cumulative_excess_return(
+    ticker: str, benchmark_ticker: str, event_date: datetime,
+    days_before: int = 1, days_after: int = 3,
+) -> float | None:
+    """Cumulative Abnormal Return (spec §4.7): the sum of
+    fetch_daily_excess_returns' per-day series. Returns a percentage
+    (matching MarketMove.excess_move_pct's own convention: 1.5 means
+    1.5%, not 0.015), or None under the same not-ready/no-data contract.
+    """
+    series = fetch_daily_excess_returns(ticker, benchmark_ticker, event_date, days_before, days_after)
+    if series is None:
+        return None
+    return sum(series)

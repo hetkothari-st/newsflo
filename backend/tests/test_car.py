@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 from app.models import Alert, AlertCompany, Article, Company, MarketMove, CarOutcome, utcnow
@@ -55,7 +56,9 @@ def test_check_pending_car_outcomes_creates_a_row_when_fetch_succeeds(db_session
     ))
     db_session.commit()
 
-    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: -3.5)
+    # fetch_fn now returns the per-day excess-return series (spec v2 §4.7);
+    # car_pct is its sum and the raw series is stored for the review screen.
+    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: [-1.0, -1.5, -0.5, -0.3, -0.2])
 
     assert created == 1
     row = db_session.query(CarOutcome).one()
@@ -63,6 +66,7 @@ def test_check_pending_car_outcomes_creates_a_row_when_fetch_succeeds(db_session
     assert row.category == "oil_gas"
     assert row.day0_excess_move_pct == -4.2
     assert row.car_pct == -3.5
+    assert json.loads(row.car_series_json) == [-1.0, -1.5, -0.5, -0.3, -0.2]
 
 
 def test_check_pending_car_outcomes_skips_when_fetch_returns_none(db_session):
@@ -102,7 +106,7 @@ def test_check_pending_car_outcomes_skips_unmeasured_alert_companies(db_session)
     ))
     db_session.commit()
 
-    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: -3.5)
+    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: [-3.5])
 
     assert created == 0
 
@@ -123,7 +127,7 @@ def test_check_pending_car_outcomes_skips_alerts_too_recent(db_session):
     ))
     db_session.commit()
 
-    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: -3.5)
+    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: [-3.5])
 
     assert created == 0
 
@@ -150,7 +154,7 @@ def test_check_pending_car_outcomes_does_not_recreate_existing_row(db_session):
     ))
     db_session.commit()
 
-    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: -9.9)
+    created = check_pending_car_outcomes(db_session, fetch_fn=lambda *a, **k: [-9.9])
 
     assert created == 0
     assert db_session.query(CarOutcome).count() == 1

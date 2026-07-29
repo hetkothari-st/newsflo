@@ -57,6 +57,12 @@ _ADDED_COLUMNS = [
     ("companies", "business_desc", "TEXT"),
     ("companies", "supply_chain_suppliers_json", "TEXT"),
     ("companies", "supply_chain_customers_json", "TEXT"),
+    ("market_moves", "delivery_pct", "FLOAT"),
+    ("market_moves", "vol_normalized", "FLOAT"),
+    ("market_moves", "materiality", "FLOAT"),
+    ("market_moves", "avg_traded_value", "FLOAT"),
+    ("car_outcomes", "car_series_json", "TEXT"),
+    ("alerts", "is_unconfirmed", "INTEGER"),
 ]
 
 

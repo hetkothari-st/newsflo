@@ -5,10 +5,11 @@ from app.models import Company
 
 
 class _FakeCompany:
-    def __init__(self, ticker, sector, company_id=1):
+    def __init__(self, ticker, sector, company_id=1, market_cap=None):
         self.id = company_id
         self.ticker = ticker
         self.sector = sector
+        self.market_cap = market_cap
 
 
 def test_compute_excess_move_pct_positive():

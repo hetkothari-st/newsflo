@@ -1,0 +1,233 @@
+/* API client for the card-feed UI (docs/NEWS_IMPACT_APP_SPEC_V2.md).
+   Fresh module for the v3 surface -- the old lib/feedV2Api.ts stays for
+   the retired feed-v2 components until they are deleted. */
+
+export type CapTier = 'LARGE' | 'MID' | 'SMALL' | 'MICRO';
+export type LiquidityTier = 'LOW' | 'MODERATE' | 'HIGH';
+export type Verdict = 'COMPANY_SPECIFIC' | 'SECTOR_WIDE' | 'UNCONFIRMED';
+export type Direction = 'bullish' | 'bearish';
+
+export interface IntensityComponent {
+  label: string;
+  raw: number;
+  score: number;
+  weight: number;
+  contribution: number;
+}
+
+export interface Intensity {
+  score: number;
+  band: 'High' | 'Moderate' | 'Low';
+  components: IntensityComponent[];
+}
+
+export interface FeedArticle {
+  id: number;
+  image_url: string | null;
+  title: string;
+  url: string;
+  source: string;
+  published_at: string | null;
+}
+
+export interface FeedAlert {
+  id: number;
+  category: string;
+  created_at: string;
+  summary_short: string | null;
+  summary_long: string | null;
+  article: FeedArticle;
+  excess_move_pct: number;
+  direction: Direction;
+  raw_move_pct: number;
+  sector_move_pct: number;
+  volume_multiple: number | null;
+  benchmark_ticker: string;
+  is_fallback_benchmark: boolean;
+  peak_ticker: string;
+  peak_company_name: string;
+  peak_cap_tier: CapTier | null;
+  verdict: Verdict;
+  intensity: Intensity;
+  breadth_score: number;
+  in_my_holdings: boolean;
+}
+
+export interface LayerRow {
+  ticker: string;
+  name: string;
+  sector: string;
+  cap_tier: CapTier | null;
+  liquidity_tier: LiquidityTier | null;
+  delivery_pct: number | null;
+  business_desc: string | null;
+  direction: Direction;
+  excess_move_pct: number | null;
+  intensity: Intensity | null;
+  is_exposure_only: boolean;
+  in_my_holdings: boolean;
+  why: string | null;
+  logo_url: string | null;
+}
+
+export interface RippleLayer {
+  title: string;
+  relationship: string;
+  icon: 'win' | 'lose' | 'side';
+  note: string | null;
+  rows: LayerRow[];
+}
+
+export type TimelineHorizon = 'TODAY' | 'DAYS' | 'WEEKS' | 'MONTHS' | 'QUARTERS';
+
+export interface TimelineEntry {
+  horizon: TimelineHorizon;
+  description: string;
+}
+
+export interface AlertDetail extends FeedAlert {
+  layers: RippleLayer[];
+  timeline: TimelineEntry[];
+}
+
+export interface StockDeepDive {
+  ticker: string;
+  name: string;
+  sector: string;
+  cap_tier: CapTier | null;
+  business_desc: string | null;
+  logo_url: string | null;
+  market_cap: number | null;
+  pe: number | null;
+  in_my_holdings: boolean;
+  excess_move_pct: number | null;
+  raw_move_pct: number | null;
+  sector_move_pct: number | null;
+  volume_multiple: number | null;
+  liquidity_tier: LiquidityTier | null;
+  delivery_pct: number | null;
+  intensity: Intensity | null;
+  is_exposure_only: boolean | null;
+  peers: LayerRow[];
+}
+
+export interface DiscoveryEntry {
+  ticker: string;
+  name: string;
+  sector: string;
+  cap_tier: CapTier | null;
+  liquidity_tier: LiquidityTier | null;
+  excess_move_pct: number | null;
+  volume_multiple: number | null;
+  delivery_pct: number | null;
+  materiality: number | null;
+  why: string | null;
+  alert_id: number;
+  headline: string;
+  via_ticker: string | null;
+  logo_url: string | null;
+  low_delivery: boolean;
+  thin_trading: boolean;
+}
+
+export type DiscoveryTab = 'materiality' | 'holdings' | 'unusual';
+
+export interface DirectoryCompany {
+  ticker: string;
+  name: string;
+  sector: string;
+  cap_tier: CapTier | null;
+}
+
+export interface PortfolioHolding {
+  ticker: string;
+  name: string;
+  quantity: number;
+  affected_alert_id: number | null;
+  affected_headline: string | null;
+}
+
+export interface PortfolioOverlay {
+  holdings: PortfolioHolding[];
+  affected_count: number;
+}
+
+export type CarOutcomeLabel = 'HELD' | 'REVERSED' | 'FLAT';
+
+export interface CarReviewRow {
+  id: number;
+  ticker: string;
+  company_name: string;
+  category: string;
+  article_title: string;
+  article_url: string;
+  alert_created_at: string;
+  day0_excess_move_pct: number;
+  car_pct: number;
+  car_series: number[] | null;
+  outcome_label: CarOutcomeLabel;
+}
+
+function authHeaders(token: string | null): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+interface ApiError {
+  detail?: string;
+}
+
+async function parseError(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as ApiError;
+    if (typeof body.detail === 'string') return body.detail;
+    return `Request failed (${res.status})`;
+  } catch {
+    return `Request failed (${res.status})`;
+  }
+}
+
+async function getJson<T>(url: string, token: string | null): Promise<T> {
+  const res = await fetch(url, { headers: authHeaders(token) });
+  if (!res.ok) throw new Error(await parseError(res));
+  return (await res.json()) as T;
+}
+
+export function getFeedAlerts(token: string | null = null): Promise<FeedAlert[]> {
+  return getJson<FeedAlert[]>('/api/feed-v2', token);
+}
+
+export function getAlertDetail(id: number, token: string | null = null): Promise<AlertDetail> {
+  return getJson<AlertDetail>(`/api/feed-v2/${id}`, token);
+}
+
+export function getStockDeepDive(
+  ticker: string,
+  alertId?: number,
+  token: string | null = null,
+): Promise<StockDeepDive> {
+  const query = alertId !== undefined ? `?alert_id=${alertId}` : '';
+  return getJson<StockDeepDive>(`/api/feed-v2/stock/${encodeURIComponent(ticker)}${query}`, token);
+}
+
+export function getDiscovery(tab: DiscoveryTab, token: string | null = null): Promise<DiscoveryEntry[]> {
+  return getJson<DiscoveryEntry[]>(`/api/feed-v2/discovery/${tab}`, token);
+}
+
+export function getDirectory(
+  filters: { capTier?: CapTier; sector?: string } = {},
+  token: string | null = null,
+): Promise<DirectoryCompany[]> {
+  const params = new URLSearchParams();
+  if (filters.capTier) params.set('cap_tier', filters.capTier);
+  if (filters.sector) params.set('sector', filters.sector);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return getJson<DirectoryCompany[]>(`/api/feed-v2/directory${query}`, token);
+}
+
+export function getPortfolioOverlay(token: string | null): Promise<PortfolioOverlay> {
+  return getJson<PortfolioOverlay>('/api/feed-v2/portfolio', token);
+}
+
+export function getCarReview(token: string | null): Promise<CarReviewRow[]> {
+  return getJson<CarReviewRow[]>('/api/car-review', token);
+}

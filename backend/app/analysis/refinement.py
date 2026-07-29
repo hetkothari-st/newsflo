@@ -22,7 +22,10 @@ EVENT_SUMMARY_FRAMING = (
     "exactly two sentences, plain language, no jargon (unpack any finance "
     "term you use). Do not include any percentage, price, price target, "
     "or buy/sell/hold language -- describe what happened and why it "
-    "matters, not whether to trade on it."
+    "matters, not whether to trade on it. Set is_unconfirmed to true ONLY "
+    "when the event is an unverified report, rumor, or speculation, or "
+    "when a named party has denied it -- an officially announced or "
+    "confirmed event is false."
 )
 
 
@@ -43,8 +46,12 @@ def build_event_summary_tool() -> dict:
                         "type": "string",
                         "description": "Exactly two plain-language sentences, jargon-free, expanding on summary_short.",
                     },
+                    "is_unconfirmed": {
+                        "type": "boolean",
+                        "description": "true ONLY for an unverified report/rumor/speculation or a denied claim; false for an officially announced or confirmed event.",
+                    },
                 },
-                "required": ["summary_short", "summary_long"],
+                "required": ["summary_short", "summary_long", "is_unconfirmed"],
             },
         },
     }
@@ -106,7 +113,16 @@ def generate_event_summary(client, title: str, content: str) -> dict | None:
 
     if summary_short is None and summary_long is None:
         return None
-    return {"summary_short": summary_short, "summary_long": summary_long}
+    # Rumor/denial classification (spec v2 §4.3). Only a literal boolean
+    # counts; anything else degrades to None (leave Alert.is_unconfirmed
+    # unset -- reads as confirmed) rather than guessing.
+    raw_unconfirmed = first.get("is_unconfirmed")
+    is_unconfirmed = raw_unconfirmed if isinstance(raw_unconfirmed, bool) else None
+    return {
+        "summary_short": summary_short,
+        "summary_long": summary_long,
+        "is_unconfirmed": is_unconfirmed,
+    }
 
 
 IMPACT_WHY_FRAMING = (
@@ -370,6 +386,8 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     if summary:
         alert.summary_short = summary.get("summary_short")
         alert.summary_long = summary.get("summary_long")
+        if summary.get("is_unconfirmed") is not None:
+            alert.is_unconfirmed = 1 if summary["is_unconfirmed"] else 0
 
     moves_by_company_id = {m.company_id: m for m in market_moves}
     measured = []

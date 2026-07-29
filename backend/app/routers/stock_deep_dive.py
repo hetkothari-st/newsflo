@@ -17,6 +17,7 @@ from app.companies.price_series import fetch_pe_ratio
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import compute_cap_tier_for_ticker, compute_cap_tiers
+from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple import get_sector_peers_for_alert
 from app.models import Alert, AlertCompany, Company, MarketMove, User
 from app.routers.articles import get_db
@@ -40,6 +41,10 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "raw_move_pct": None,
         "sector_move_pct": None,
         "volume_multiple": None,
+        # Spec v2 §4.6 / §6 risk cues -- populated only in alert context
+        # (they derive from that alert's MarketMove row).
+        "liquidity_tier": None,
+        "delivery_pct": None,
         "intensity": None,
         "is_exposure_only": None,
         "peers": [],
@@ -99,6 +104,8 @@ def get_stock_deep_dive(
     result["raw_move_pct"] = move.raw_move_pct
     result["sector_move_pct"] = move.sector_move_pct
     result["volume_multiple"] = move.volume_multiple
+    result["liquidity_tier"] = compute_liquidity_tier(move.avg_traded_value)
+    result["delivery_pct"] = move.delivery_pct
     result["intensity"] = _intensity_for_company_move(db, company, move, breadth_score)
     return result
 

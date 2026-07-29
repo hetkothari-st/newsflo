@@ -47,17 +47,31 @@ def _intensity_for_company_move(session: Session, company: Company, move: Market
     (for every other measured company in the event's ripple) -- the exact
     same normalization discipline applies to both, so this is the one
     place that logic lives.
+
+    Six-signal blend (spec v2 §4.2): excess, volume, delivery,
+    materiality, vol_norm (fundamental is advisory-tier, not wired).
+    Signals a row genuinely lacks (delivery has no data source yet; old
+    rows predate materiality/vol_norm) get their weight renormalized away
+    inside compute_intensity -- never counted as zero. ``breadth_score``
+    is no longer an intensity component (it's an event-level metric,
+    spec §4.4) -- parameter kept so callers stay unchanged.
     """
+    del breadth_score  # event-level metric now, not an intensity signal (spec v2 §4.2)
     sector_moves = _sector_peer_moves(session, company.sector)
     excess_peer_group = [m.excess_move_pct for m in sector_moves] or [move.excess_move_pct]
     sector_volume_values = [m.volume_multiple for m in sector_moves if m.volume_multiple is not None]
-    volume_peer_group = sector_volume_values or [move.volume_multiple or 0.0]
+    materiality_values = [m.materiality for m in sector_moves if m.materiality is not None]
+    vol_norm_values = [m.vol_normalized for m in sector_moves if m.vol_normalized is not None]
     return compute_intensity(
         excess_move_pct=move.excess_move_pct,
         excess_peer_group=excess_peer_group,
-        volume_multiple=move.volume_multiple or 0.0,
-        volume_peer_group=volume_peer_group,
-        breadth_score=breadth_score,
+        volume_multiple=move.volume_multiple,
+        volume_peer_group=sector_volume_values or None,
+        delivery_pct=move.delivery_pct,
+        materiality=move.materiality,
+        materiality_peer_group=materiality_values or None,
+        vol_normalized=move.vol_normalized,
+        vol_norm_peer_group=vol_norm_values or None,
     )
 
 
@@ -76,9 +90,9 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
 
     "Peak" is whichever measured company has the largest |excess_move_pct|
     -- the event's own headline reaction. breadth_score is event-scoped
-    (spec §4.4: how widely THIS event rippled). is_unconfirmed is
-    hardcoded False (the rumor/denial LLM classifier is a later phase) --
-    verdict can only resolve to COMPANY_SPECIFIC/SECTOR_WIDE until then.
+    (spec §4.4: how widely THIS event rippled). is_unconfirmed comes from
+    Alert.is_unconfirmed (refinement LLM rumor/denial classification,
+    spec v2 §4.3); NULL reads as confirmed.
     """
     moves = (
         session.query(MarketMove)
@@ -96,7 +110,12 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     peak_company = peak_alert_company.company
 
     intensity = _intensity_for_company_move(session, peak_company, peak, breadth_score)
-    verdict = compute_verdict(is_unconfirmed=False, excess_move_pct=peak.excess_move_pct)
+    # is_unconfirmed comes from the refinement LLM's rumor/denial
+    # classification (spec v2 §4.3); NULL (pre-feature alerts) reads as
+    # confirmed.
+    verdict = compute_verdict(
+        is_unconfirmed=bool(alert.is_unconfirmed), excess_move_pct=peak.excess_move_pct,
+    )
 
     return {
         "excess_move_pct": peak.excess_move_pct,

@@ -6,6 +6,8 @@ reactions held or reversed once the market has actually traded far
 enough past each alert -- the data this build's whole measurement spine
 gets back-validated against.
 """
+import json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -33,6 +35,10 @@ def _serialize(outcome: CarOutcome, alert_company: AlertCompany) -> dict:
         "alert_created_at": alert.created_at.isoformat(),
         "day0_excess_move_pct": outcome.day0_excess_move_pct,
         "car_pct": outcome.car_pct,
+        # Per-day excess-return series (-1..+3), the review screen's bar
+        # track (spec v2 §4.7); null for rows computed before the series
+        # column shipped -- the UI falls back to car_pct alone.
+        "car_series": json.loads(outcome.car_series_json) if outcome.car_series_json else None,
         "outcome_label": compute_car_outcome_label(outcome.day0_excess_move_pct, outcome.car_pct),
     }
 

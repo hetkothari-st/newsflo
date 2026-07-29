@@ -142,21 +142,26 @@ def test_get_feed_v2_alert_404_when_unmeasured(db_session):
     app.dependency_overrides.clear()
 
 
-def test_get_feed_v2_alert_includes_ripple_and_timeline(db_session):
+def test_get_feed_v2_alert_includes_layers_and_timeline(db_session):
     _override_db(db_session)
-    alert = _measured_alert(db_session)  # single-company alert -- peak only, no ripple companions
+    # Single-company alert: the card back still shows the complete
+    # who's-affected view (spec v2 §2) -- one "Directly affected" layer
+    # containing the peak itself.
+    alert = _measured_alert(db_session)
     client = TestClient(app)
 
     response = client.get(f"/api/feed-v2/{alert.id}")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["ripple"] == []
+    assert len(body["layers"]) == 1
+    assert body["layers"][0]["relationship"] == "DIRECT"
+    assert len(body["layers"][0]["rows"]) == 1
     assert body["timeline"] == []
     app.dependency_overrides.clear()
 
 
-def test_list_feed_v2_does_not_include_ripple_or_timeline(db_session):
+def test_list_feed_v2_does_not_include_layers_or_timeline(db_session):
     _override_db(db_session)
     _measured_alert(db_session)
     client = TestClient(app)
@@ -165,12 +170,12 @@ def test_list_feed_v2_does_not_include_ripple_or_timeline(db_session):
 
     assert response.status_code == 200
     body = response.json()
-    assert "ripple" not in body[0]
+    assert "layers" not in body[0]
     assert "timeline" not in body[0]
     app.dependency_overrides.clear()
 
 
-def test_get_feed_v2_alert_includes_impact_companies(db_session):
+def test_get_feed_v2_alert_layers_carry_both_direct_companies(db_session):
     _override_db(db_session)
     alert = _multi_company_alert(db_session)
     client = TestClient(app)
@@ -179,22 +184,11 @@ def test_get_feed_v2_alert_includes_impact_companies(db_session):
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["impact_companies"]) == 2
-    assert body["impact_companies"][0]["ticker"] == "A.NS"
-    assert body["impact_companies"][0]["why"] == "Crude spike raises input costs."
-    assert body["impact_companies"][1]["why"] is None
-    app.dependency_overrides.clear()
-
-
-def test_list_feed_v2_does_not_include_impact_companies(db_session):
-    _override_db(db_session)
-    _measured_alert(db_session)
-    client = TestClient(app)
-
-    response = client.get("/api/feed-v2")
-
-    assert response.status_code == 200
-    assert "impact_companies" not in response.json()[0]
+    direct = next(l for l in body["layers"] if l["relationship"] == "DIRECT")
+    assert len(direct["rows"]) == 2
+    rows_by_ticker = {r["ticker"]: r for r in direct["rows"]}
+    assert rows_by_ticker["A.NS"]["why"] == "Crude spike raises input costs."
+    assert rows_by_ticker["B.NS"]["why"] is None
     app.dependency_overrides.clear()
 
 

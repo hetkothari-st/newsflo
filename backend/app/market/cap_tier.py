@@ -14,11 +14,16 @@ from app.models import Company
 def compute_cap_tiers(companies: list[tuple[str, float]]) -> dict[str, str]:
     """``companies`` is [(ticker, market_cap_cr), ...] with non-null market
     caps. Ranks by market cap descending and buckets by AMFI-style rank
-    cutoffs from app.config. Returns {ticker: 'LARGE'|'MID'|'SMALL'}."""
+    cutoffs from app.config; a company below config.MICRO_CAP_FLOOR is
+    MICRO regardless of rank (spec v2 §4.5: "apply a micro cutoff below a
+    chosen market-cap floor"). Returns
+    {ticker: 'LARGE'|'MID'|'SMALL'|'MICRO'}."""
     ranked = sorted(companies, key=lambda tc: tc[1], reverse=True)
     tiers: dict[str, str] = {}
-    for rank, (ticker, _cap) in enumerate(ranked, start=1):
-        if rank <= config.AMFI_LARGE_CAP_RANK_CUTOFF:
+    for rank, (ticker, cap) in enumerate(ranked, start=1):
+        if cap < config.MICRO_CAP_FLOOR:
+            tiers[ticker] = "MICRO"
+        elif rank <= config.AMFI_LARGE_CAP_RANK_CUTOFF:
             tiers[ticker] = "LARGE"
         elif rank <= config.AMFI_MID_CAP_RANK_CUTOFF:
             tiers[ticker] = "MID"

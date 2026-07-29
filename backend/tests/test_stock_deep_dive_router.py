@@ -169,6 +169,7 @@ def test_directory_filters_by_cap_tier(db_session):
     db_session.add_all([
         _company("BIG.NS", sector="oil_gas", market_cap=900000.0),
         *[_company(f"FILLER{i}.NS", sector="other", market_cap=100000.0 - i) for i in range(260)],
+        # Below config.MICRO_CAP_FLOOR -> MICRO regardless of rank (spec v2 §4.5).
         _company("TINY.NS", sector="it", market_cap=10.0),
     ])
     db_session.commit()
@@ -179,8 +180,12 @@ def test_directory_filters_by_cap_tier(db_session):
     assert response.status_code == 200
     body = response.json()
     assert all(row["cap_tier"] == "SMALL" for row in body)
-    assert "TINY.NS" in {row["ticker"] for row in body}
+    # TINY.NS is MICRO now (below the market-cap floor), not SMALL.
+    assert "TINY.NS" not in {row["ticker"] for row in body}
     assert "BIG.NS" not in {row["ticker"] for row in body}
+
+    micro = client.get("/api/feed-v2/directory?cap_tier=MICRO").json()
+    assert {row["ticker"] for row in micro} == {"TINY.NS"}
     app.dependency_overrides.clear()
 
 

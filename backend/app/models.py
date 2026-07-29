@@ -96,6 +96,12 @@ class Alert(Base):
     # cascade stages that produce per-company rationale/magnitude.
     summary_short = Column(String, nullable=True)  # <= 12 words, the one-line "why"
     summary_long = Column(Text, nullable=True)  # 2 sentences, plain language
+    # Rumor/denial classification (spec v2 §4.3): 1 when the event is an
+    # unconfirmed report / rumor / has been denied -> verdict UNCONFIRMED.
+    # Integer 0/1 (same convention as User.email_alerts_enabled), populated
+    # by the same refinement LLM call as summary_short; NULL for alerts
+    # refined before this shipped (treated as confirmed).
+    is_unconfirmed = Column(Integer, nullable=True)
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -253,6 +259,12 @@ class CarOutcome(Base):
     category = Column(String, nullable=False)
     day0_excess_move_pct = Column(Float, nullable=False)
     car_pct = Column(Float, nullable=False)
+    # JSON-encoded list[float]: the per-trading-day excess returns across
+    # the -1..+3 window (5 values), so the review screen can draw the
+    # day-by-day bar track (spec v2 §4.7 review screen), not just the sum.
+    # NULL for rows computed before this column shipped -- the UI falls
+    # back to showing car_pct alone, never a fabricated series.
+    car_series_json = Column(Text, nullable=True)
     computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
@@ -278,6 +290,24 @@ class MarketMove(Base):
     volume = Column(Float, nullable=True)
     avg_volume_20d = Column(Float, nullable=True)
     volume_multiple = Column(Float, nullable=True)
+    # Spec v2 §3.1/§4.2 signal inputs, all measured facts (never LLM):
+    # delivery_pct -- % of day volume taken to delivery (India edge). NULL
+    # until a real NSE delivery-data source is wired in; intensity
+    # renormalizes its weight away rather than fabricating (spec Ground
+    # Rules: omit rather than invent).
+    delivery_pct = Column(Float, nullable=True)
+    # vol_normalized -- |raw move| / stdev of the stock's own trailing daily
+    # returns (move vs its own volatility, spec §4.2). NULL when history is
+    # too short.
+    vol_normalized = Column(Float, nullable=True)
+    # materiality -- news size vs company size (spec §4.2): excess traded
+    # value on the day (over the 20d average, in currency terms) as a
+    # fraction of market cap. Deterministic proxy computed from measured
+    # bars only. NULL when market cap or volume history is unavailable.
+    materiality = Column(Float, nullable=True)
+    # avg_traded_value -- 20-day average of close x volume; the liquidity-
+    # tier input (spec §4.6). Tier itself is derived on read, never stored.
+    avg_traded_value = Column(Float, nullable=True)
     measured_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     measurement_status = Column(String, nullable=False)  # ok | no_data | stale
 

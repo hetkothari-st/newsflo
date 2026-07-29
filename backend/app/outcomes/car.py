@@ -4,13 +4,14 @@ trading days -1..+3 once the market has actually traded that far. "Not
 live -- it completes days later" (spec) -- this module's job is entirely
 scheduled/batch, never called on a live request path.
 """
+import json
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
 from app import config
 from app.models import Alert, AlertCompany, CarOutcome, MarketMove, utcnow
-from app.outcomes.price_fetcher import fetch_cumulative_excess_return
+from app.outcomes.price_fetcher import fetch_daily_excess_returns
 
 # Generous buffer: a -1..+3 trading-day window is well within a week even
 # across a long weekend/holiday cluster. An alert younger than this cannot
@@ -30,15 +31,17 @@ def compute_car_outcome_label(day0_excess_move_pct: float, car_pct: float) -> st
 
 
 def check_pending_car_outcomes(
-    session: Session, fetch_fn=fetch_cumulative_excess_return,
+    session: Session, fetch_fn=fetch_daily_excess_returns,
 ) -> int:
     """For every AlertCompany with a real measured MarketMove
     (measurement_status='ok') whose Alert is at least _MIN_ALERT_AGE_DAYS
-    old and has no CarOutcome yet, compute CAR and record it. A None
-    fetch result (market hasn't traded that far yet, or data unavailable)
-    is skipped -- retried next run, never blocks the rest of the batch
-    (same contract as app.outcomes.tracker.check_pending_outcomes).
-    Returns the number of rows created.
+    old and has no CarOutcome yet, fetch the per-day excess-return series
+    (spec v2 §4.7 -- the review screen's day-by-day bar track), record it
+    plus its sum as CAR. A None fetch result (market hasn't traded that
+    far yet, or data unavailable) is skipped -- retried next run, never
+    blocks the rest of the batch (same contract as
+    app.outcomes.tracker.check_pending_outcomes). Returns the number of
+    rows created.
     """
     cutoff = utcnow() - timedelta(days=_MIN_ALERT_AGE_DAYS)
     already_sampled_ids = session.query(CarOutcome.alert_company_id)
@@ -58,15 +61,16 @@ def check_pending_car_outcomes(
 
     created = 0
     for alert_company, move in pending:
-        car_pct = fetch_fn(alert_company.company.ticker, move.benchmark_ticker, alert_company.alert.created_at)
-        if car_pct is None:
+        series = fetch_fn(alert_company.company.ticker, move.benchmark_ticker, alert_company.alert.created_at)
+        if series is None:
             continue
         session.add(CarOutcome(
             alert_company_id=alert_company.id,
             company_id=alert_company.company_id,
             category=alert_company.alert.category,
             day0_excess_move_pct=move.excess_move_pct,
-            car_pct=car_pct,
+            car_pct=sum(series),
+            car_series_json=json.dumps(series),
         ))
         session.commit()
         created += 1

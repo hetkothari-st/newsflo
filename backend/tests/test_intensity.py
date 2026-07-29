@@ -26,43 +26,62 @@ def test_normalize_score_degenerate_group_returns_100():
 
 
 def test_compute_intensity_matches_hand_computed_value():
-    # excess=-4.8 is the max-magnitude peer -> excess_score=100
-    # volume_multiple=3.0 is the max-magnitude peer -> volume_score=100
-    # breadth_score=40 (already 0-100, used directly)
+    # All five live-feed signals present (no fundamental): weights
+    # renormalize over 0.28+0.12+0.15+0.25+0.10 = 0.90 (spec v2 §4.2).
+    # Every signal is the max of its peer group -> each sub-score 100,
+    # except delivery (already 0-100 by definition) at 38.
     result = intensity.compute_intensity(
         excess_move_pct=-4.8, excess_peer_group=[-4.8, -1.0, 0.5],
         volume_multiple=3.0, volume_peer_group=[3.0, 1.0],
-        breadth_score=40,
+        delivery_pct=38.0,
+        materiality=0.05, materiality_peer_group=[0.05, 0.01],
+        vol_normalized=2.5, vol_norm_peer_group=[2.5, 1.0],
     )
-    expected_score = round(100 * 0.55 + 100 * 0.25 + 40 * 0.20)  # 55 + 25 + 8 = 88
-    assert result["score"] == expected_score
+    total_w = 0.28 + 0.12 + 0.15 + 0.25 + 0.10
+    expected = round(
+        100 * 0.28 / total_w + 100 * 0.12 / total_w + 38 * 0.15 / total_w
+        + 100 * 0.25 / total_w + 100 * 0.10 / total_w
+    )
+    assert result["score"] == expected
     assert result["band"] == "High"
-    assert len(result["components"]) == 3
     labels = {c["label"] for c in result["components"]}
-    assert labels == {"excess", "volume", "breadth"}
+    assert labels == {"excess", "volume", "delivery", "materiality", "vol_norm"}
+
+
+def test_compute_intensity_renormalizes_missing_signals():
+    # Only excess + volume present (an old MarketMove row): their weights
+    # renormalize to sum to 1, never counting a missing signal as zero.
+    result = intensity.compute_intensity(
+        excess_move_pct=-4.8, excess_peer_group=[-4.8, -1.0],
+        volume_multiple=3.0, volume_peer_group=[3.0, 1.0],
+    )
+    assert {c["label"] for c in result["components"]} == {"excess", "volume"}
+    assert sum(c["weight"] for c in result["components"]) == pytest.approx(1.0, abs=0.01)
+    # Both signals are the max of their group -> composite must be 100.
+    assert result["score"] == 100
 
 
 def test_compute_intensity_never_returns_a_bare_number():
     result = intensity.compute_intensity(
         excess_move_pct=1.0, excess_peer_group=[1.0],
         volume_multiple=1.0, volume_peer_group=[1.0],
-        breadth_score=10,
     )
     assert isinstance(result, dict)
     assert set(result.keys()) == {"score", "band", "components"}
     for component in result["components"]:
-        assert set(component.keys()) == {"label", "raw", "weight", "contribution"}
+        assert set(component.keys()) == {"label", "raw", "score", "weight", "contribution"}
 
 
 def test_changing_a_config_weight_changes_the_score():
     kwargs = dict(
         excess_move_pct=-4.8, excess_peer_group=[-4.8, -1.0],
         volume_multiple=3.0, volume_peer_group=[3.0, 1.0],
-        breadth_score=40,
+        delivery_pct=38.0,
     )
     default_result = intensity.compute_intensity(**kwargs)
     custom_result = intensity.compute_intensity(
-        **kwargs, weights={"excess": 0.10, "volume": 0.10, "breadth": 0.80},
+        **kwargs,
+        weights={**config.INTENSITY_WEIGHTS, "excess": 0.05, "delivery": 0.75},
     )
     assert default_result["score"] != custom_result["score"]
 
@@ -80,14 +99,14 @@ def test_within_sector_normalization_gives_consistent_meaning_across_events():
 def test_band_thresholds():
     high = intensity.compute_intensity(
         excess_move_pct=10, excess_peer_group=[10], volume_multiple=10,
-        volume_peer_group=[10], breadth_score=100,
+        volume_peer_group=[10],
     )
     assert high["score"] >= config.INTENSITY_BAND_HIGH
     assert high["band"] == "High"
 
     low = intensity.compute_intensity(
         excess_move_pct=0.01, excess_peer_group=[0.01, 100], volume_multiple=0.01,
-        volume_peer_group=[0.01, 100], breadth_score=0,
+        volume_peer_group=[0.01, 100],
     )
     assert low["score"] < config.INTENSITY_BAND_MODERATE
     assert low["band"] == "Low"

@@ -39,6 +39,54 @@ def _daily_return_pct(bars: list[dict]) -> float | None:
     return (last_close - prev_close) / prev_close * 100
 
 
+def compute_vol_normalized(raw_move_pct: float, bars: list[dict]) -> float | None:
+    """Spec v2 §4.2 vol_normalized: |today's raw move| divided by the
+    standard deviation of the stock's own trailing daily returns (the 20
+    days before today) -- "a 3% move is huge for a stable large cap,
+    normal for a jumpy small cap". Returns None (never a fabricated
+    number) when fewer than 3 trailing returns exist or the stock was
+    flat throughout (zero deviation)."""
+    closes = [b["close"] for b in bars[:-1]][-21:]  # up to 21 closes -> 20 returns, today excluded
+    returns = [
+        (closes[i] - closes[i - 1]) / closes[i - 1] * 100
+        for i in range(1, len(closes))
+        if closes[i - 1]
+    ]
+    if len(returns) < 3:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / len(returns)
+    stdev = variance ** 0.5
+    if stdev == 0:
+        return None
+    return abs(raw_move_pct) / stdev
+
+
+def compute_avg_traded_value(bars: list[dict]) -> float | None:
+    """20-day average of close x volume (the days before today) -- the
+    liquidity-tier input (spec v2 §4.6). None when no trailing days exist."""
+    trailing = bars[-21:-1]
+    if not trailing:
+        return None
+    return sum(b["close"] * b["volume"] for b in trailing) / len(trailing)
+
+
+def compute_materiality(
+    day_close: float, day_volume: float, avg_volume_20d: float | None, market_cap: float | None,
+) -> float | None:
+    """Spec v2 §4.2 materiality: news size vs company size. Deterministic
+    proxy from measured bars only (no LLM): the day's EXCESS traded value
+    (value traded beyond the stock's own 20-day average) as a fraction of
+    market cap -- "a Rs 500 Cr order is transformational for a Rs 1,000 Cr
+    micro-cap, trivial for a giant". Raw ratio; normalized within
+    sector/event on read like every other intensity sub-score. None when
+    market cap or the volume average is unavailable (omit, never invent)."""
+    if not market_cap or avg_volume_20d is None:
+        return None
+    excess_traded_value = max(0.0, (day_volume - avg_volume_20d)) * day_close
+    return excess_traded_value / market_cap
+
+
 def measure_company_move(session: Session, company: Company) -> MarketMove:
     """Fetch real price/volume bars for ``company`` and its sector
     benchmark, compute the measured facts, and return an unattached
@@ -79,6 +127,14 @@ def measure_company_move(session: Session, company: Company) -> MarketMove:
         volume=day_volume,
         avg_volume_20d=avg_volume_20d,
         volume_multiple=volume_multiple,
+        # delivery_pct deliberately left NULL -- no real NSE delivery-data
+        # source is wired yet; intensity renormalizes without it rather
+        # than fabricating (spec v2 §4.2 + Ground Rules).
+        vol_normalized=compute_vol_normalized(raw_move_pct, company_bars),
+        materiality=compute_materiality(
+            company_bars[-1]["close"], day_volume, avg_volume_20d, company.market_cap,
+        ),
+        avg_traded_value=compute_avg_traded_value(company_bars),
         measured_at=utcnow(),
         measurement_status="ok",
     )

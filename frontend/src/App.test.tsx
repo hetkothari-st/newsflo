@@ -43,9 +43,12 @@ function renderAt(path: string) {
 }
 
 describe('App routing', () => {
-  it('renders the feed nav at /', () => {
+  it('renders the card-feed shell at /', () => {
     renderAt('/');
-    expect(screen.getAllByRole('link', { name: /^feed$/i }).length).toBeGreaterThan(0);
+    // The shell's own bottom nav (spec v2 §7) -- buttons, not router links.
+    expect(screen.getByRole('button', { name: /^feed$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /discover/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /directory/i })).toBeInTheDocument();
   });
 
   it('redirects /holdings to /login when logged out', () => {

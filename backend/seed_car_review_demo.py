@@ -13,6 +13,7 @@ fixed marker prefix on Article.url) before re-inserting.
 Usage (from the backend/ directory, so `app` is importable):
     .venv/Scripts/python seed_car_review_demo.py
 """
+import json
 import sys
 from datetime import timedelta
 
@@ -22,14 +23,16 @@ from app.models import Alert, AlertCompany, Article, CarOutcome, Company, Market
 
 URL_MARKER = "https://demo.car-review.local/"
 
-# (ticker, name, category, benchmark, day0_excess, car_pct, headline)
+# (ticker, name, category, benchmark, day0_excess, car_series, headline)
+# car_pct is derived as sum(car_series) -- the per-day series drives the
+# review screen's -1..+3 bar track (spec v2 §4.7).
 DEMO_ROWS = [
-    ("RELIANCE.NS", "Reliance Industries", "oil_gas", "^CNXENERGY", -4.2, -3.6, "Crude oil supply shock hits refiners"),
-    ("TCS.NS", "Tata Consultancy Services", "it", "^CNXIT", 2.8, 3.4, "Large IT deal win announced"),
-    ("HDFCBANK.NS", "HDFC Bank", "banking", "^NSEBANK", -3.1, 2.9, "Regulatory concern flagged, later cleared"),
-    ("SUNPHARMA.NS", "Sun Pharmaceutical", "pharma", "^CNXPHARMA", 3.5, 0.2, "Drug approval news, muted follow-through"),
-    ("TATASTEEL.NS", "Tata Steel", "metals", "^CNXMETAL", -2.6, -2.2, "Tariff announcement hits metal stocks"),
-    ("MARUTI.NS", "Maruti Suzuki", "auto", "^CNXAUTO", 4.0, 3.1, "Strong monthly sales numbers"),
+    ("RELIANCE.NS", "Reliance Industries", "oil_gas", "^CNXENERGY", -4.2, [-1.1, -0.9, -0.8, -0.5, -0.3], "Crude oil supply shock hits refiners"),
+    ("TCS.NS", "Tata Consultancy Services", "it", "^CNXIT", 2.8, [0.5, 1.2, 0.9, 0.4, 0.4], "Large IT deal win announced"),
+    ("HDFCBANK.NS", "HDFC Bank", "banking", "^NSEBANK", -3.1, [-1.0, -0.6, 1.1, 1.6, 1.8], "Regulatory concern flagged, later cleared"),
+    ("SUNPHARMA.NS", "Sun Pharmaceutical", "pharma", "^CNXPHARMA", 3.5, [0.9, 0.4, -0.3, -0.5, -0.3], "Drug approval news, muted follow-through"),
+    ("TATASTEEL.NS", "Tata Steel", "metals", "^CNXMETAL", -2.6, [-0.8, -0.7, -0.4, -0.2, -0.1], "Tariff announcement hits metal stocks"),
+    ("MARUTI.NS", "Maruti Suzuki", "auto", "^CNXAUTO", 4.0, [1.1, 0.9, 0.6, 0.3, 0.2], "Strong monthly sales numbers"),
 ]
 
 
@@ -61,7 +64,8 @@ def main() -> None:
 
         now = utcnow()
         for i, row in enumerate(DEMO_ROWS):
-            ticker, name, category, benchmark, day0_excess, car_pct, headline = row
+            ticker, name, category, benchmark, day0_excess, car_series, headline = row
+            car_pct = round(sum(car_series), 2)
 
             company = session.query(Company).filter_by(ticker=ticker).one_or_none()
             if company is None:
@@ -100,6 +104,7 @@ def main() -> None:
             session.add(CarOutcome(
                 alert_company_id=alert_company.id, company_id=company.id, category=category,
                 day0_excess_move_pct=day0_excess, car_pct=car_pct,
+                car_series_json=json.dumps(car_series),
             ))
             session.commit()
 
