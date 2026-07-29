@@ -14,11 +14,14 @@ export default function CollapsibleInsightRow({
   eventType,
   alertCreatedAt,
   alertId,
+  parentCompany,
 }: {
   company: AlertCompany;
   eventType?: string | null;
   alertCreatedAt: string;
   alertId?: number;
+  // See InsightCard's own parentCompany doc -- forwarded through unchanged.
+  parentCompany?: AlertCompany | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -33,7 +36,13 @@ export default function CollapsibleInsightRow({
           <span aria-hidden="true">▾</span>
           {company.name}
         </button>
-        <InsightCard company={company} eventType={eventType} alertCreatedAt={alertCreatedAt} alertId={alertId} />
+        <InsightCard
+          company={company}
+          eventType={eventType}
+          alertCreatedAt={alertCreatedAt}
+          alertId={alertId}
+          parentCompany={parentCompany}
+        />
       </div>
     );
   }
@@ -48,7 +57,12 @@ export default function CollapsibleInsightRow({
       <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} size="sm" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold text-ink">{company.name}</span>
-        <span className="font-data text-xs text-muted">{company.ticker}</span>
+        <span className="font-data text-xs text-muted">
+          {company.ticker}
+          {/* Visible even before expanding -- the direct answer to "why is
+              this company in the Ripple bucket" shouldn't require a click. */}
+          {parentCompany && ` · via ${parentCompany.ticker}`}
+        </span>
       </span>
       <span
         aria-hidden="true"

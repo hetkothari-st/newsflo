@@ -149,6 +149,24 @@ describe('InsightCard', () => {
     expect(screen.getByText(/Reliance Industries operates in the .* sector\./)).toBeInTheDocument();
   });
 
+  it('shows "Linked via" the parent company when one is given (why this company is in the Ripple bucket)', () => {
+    const parent: AlertCompany = { ...company, company_id: 2, ticker: 'RELIANCE.NS', name: 'Reliance Industries' };
+    render(
+      <InsightCard
+        company={{ ...company, company_id: 3, impact_level: 'indirect_l1', parent_company_id: 2 }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+        parentCompany={parent}
+      />,
+    );
+    expect(screen.getByText('Linked via RELIANCE.NS · Reliance Industries')).toBeInTheDocument();
+  });
+
+  it('renders no "Linked via" line for a direct company (no parent)', () => {
+    render(<InsightCard company={company} eventType="crude_oil" alertCreatedAt="2026-07-17T10:00:00.000Z" />);
+    expect(screen.queryByText(/Linked via/)).not.toBeInTheDocument();
+  });
+
   it('renders no sector-membership line when the company has no sector', () => {
     render(
       <InsightCard

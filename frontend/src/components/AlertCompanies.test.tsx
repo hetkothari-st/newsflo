@@ -103,6 +103,19 @@ describe('AlertCompanies', () => {
     expect(screen.queryByText('Ripple Co')).not.toBeInTheDocument();
   });
 
+  it('resolves and shows the parent company a Ripple company is linked via', async () => {
+    const levelAlert: Alert = {
+      ...alert,
+      companies: [
+        { ...alert.companies[0], company_id: 1, name: 'Reliance Industries', ticker: 'RELIANCE.NS', impact_level: 'direct' },
+        { ...alert.companies[1], company_id: 2, name: 'ONGC', impact_level: 'indirect_l1', parent_company_id: 1 },
+      ],
+    };
+    render(<AlertCompanies alert={levelAlert} isAuthenticated />);
+    await userEvent.click(screen.getByText(/Indirect Impact — Level 1/));
+    expect(screen.getByText(/via RELIANCE\.NS/)).toBeInTheDocument();
+  });
+
   it('expands a Ripple group on click to reveal its companies', async () => {
     const levelAlert: Alert = {
       ...alert,

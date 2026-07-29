@@ -158,19 +158,32 @@ export default function AlertCompanies({
               </button>
               {isOpen && (
                 <div className="flex flex-col">
-                  {group.companies.map((company) => (
-                    <div
-                      key={company.company_id}
-                      className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
-                    >
-                      <CollapsibleInsightRow
-                        company={company}
-                        eventType={alert.event_type}
-                        alertCreatedAt={alert.created_at}
-                        alertId={alert.id}
-                      />
-                    </div>
-                  ))}
+                  {group.companies.map((company) => {
+                    // Resolved against the alert's FULL company list, not
+                    // just the currently-visible/filtered subset -- a
+                    // Ripple company's parent can be filtered out of the
+                    // My Portfolio tab while the ripple company itself
+                    // (held) stays visible, and it should still show what
+                    // it's linked via.
+                    const parentCompany =
+                      company.parent_company_id != null
+                        ? alert.companies.find((c) => c.company_id === company.parent_company_id)
+                        : undefined;
+                    return (
+                      <div
+                        key={company.company_id}
+                        className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
+                      >
+                        <CollapsibleInsightRow
+                          company={company}
+                          eventType={alert.event_type}
+                          alertCreatedAt={alert.created_at}
+                          alertId={alert.id}
+                          parentCompany={parentCompany}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

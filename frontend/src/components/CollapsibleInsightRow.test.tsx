@@ -65,6 +65,33 @@ describe('CollapsibleInsightRow', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows "via {ticker}" of the parent company while collapsed, before any click', () => {
+    const parent: AlertCompany = { ...company, company_id: 2, ticker: 'RELIANCE.NS', name: 'Reliance Industries' };
+    render(
+      <CollapsibleInsightRow
+        company={{ ...company, impact_level: 'indirect_l1', parent_company_id: 2 }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+        parentCompany={parent}
+      />,
+    );
+    expect(screen.getByText(/via RELIANCE\.NS/)).toBeInTheDocument();
+  });
+
+  it('shows the full "Linked via" line once expanded', async () => {
+    const parent: AlertCompany = { ...company, company_id: 2, ticker: 'RELIANCE.NS', name: 'Reliance Industries' };
+    render(
+      <CollapsibleInsightRow
+        company={{ ...company, impact_level: 'indirect_l1', parent_company_id: 2 }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+        parentCompany={parent}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Reliance Industries/ }));
+    expect(screen.getByText('Linked via RELIANCE.NS · Reliance Industries')).toBeInTheDocument();
+  });
+
   it('shows a bearish arrow for a bearish company while collapsed', () => {
     render(
       <CollapsibleInsightRow

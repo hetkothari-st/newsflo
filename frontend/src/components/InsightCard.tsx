@@ -35,11 +35,18 @@ export default function InsightCard({
   eventType,
   alertCreatedAt,
   alertId,
+  parentCompany,
 }: {
   company: AlertCompany;
   eventType?: string | null;
   alertCreatedAt: string;
   alertId?: number;
+  // The company this one's impact_level chain runs through (resolved by the
+  // caller from alert.companies via company.parent_company_id) -- null for
+  // impact_level === 'direct', which has no parent. This is the direct
+  // answer to "why is this company in the Ripple L1/L2 bucket": it chains
+  // from this specific company, not the sector/category in general.
+  parentCompany?: AlertCompany | null;
 }) {
   const { language, t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
@@ -106,6 +113,11 @@ export default function InsightCard({
       </div>
 
       {membershipNote && <p className="mt-2 text-xs italic text-muted">{membershipNote}</p>}
+      {parentCompany && (
+        <p className="mt-1 font-data text-[11px] uppercase tracking-widest text-muted">
+          Linked via {parentCompany.ticker} · {parentCompany.name}
+        </p>
+      )}
 
       {points.length >= 2 && (
         <div className="mt-3">
