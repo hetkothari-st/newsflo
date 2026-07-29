@@ -36,6 +36,7 @@ export default function InsightCard({
   alertCreatedAt,
   alertId,
   parentCompany,
+  hideHeader = false,
 }: {
   company: AlertCompany;
   eventType?: string | null;
@@ -47,6 +48,14 @@ export default function InsightCard({
   // answer to "why is this company in the Ripple L1/L2 bucket": it chains
   // from this specific company, not the sector/category in general.
   parentCompany?: AlertCompany | null;
+  // CollapsibleInsightRow already renders its own logo/name/ticker header
+  // as the persistent, always-visible click target -- rendering this
+  // card's own copy of the same logo/name/ticker/price block underneath it
+  // was a straight duplicate (confirmed from a real screenshot: the name
+  // appeared twice, once as an all-caps toggle label, once here). Skips
+  // just that block; the event/sector/time meta line above it is NOT
+  // duplicated anywhere else, so it still renders.
+  hideHeader?: boolean;
 }) {
   const { language, t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
@@ -103,14 +112,20 @@ export default function InsightCard({
         <span>{formatRelativeTime(alertCreatedAt, new Date(), language)}</span>
       </div>
 
-      <div className="mt-3 flex items-center gap-3.5">
-        <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[22px] font-semibold leading-tight text-ink">{company.name}</p>
-          <p className="font-data text-xs text-muted">{company.ticker}</p>
+      {!hideHeader && (
+        <div className="mt-3 flex items-center gap-3.5">
+          <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[22px] font-semibold leading-tight text-ink">{company.name}</p>
+            <p className="font-data text-xs text-muted">{company.ticker}</p>
+          </div>
+          {priceLine && <div className="shrink-0 text-right text-base">{priceLine}</div>}
         </div>
-        {priceLine && <div className="shrink-0 text-right text-base">{priceLine}</div>}
-      </div>
+      )}
+      {/* Name/ticker/logo already shown by the parent row's own persistent
+          header -- but the price is real info that block never carried, so
+          it still needs a home here. */}
+      {hideHeader && priceLine && <div className="mt-2 text-base">{priceLine}</div>}
 
       {membershipNote && <p className="mt-2 text-xs italic text-muted">{membershipNote}</p>}
       {parentCompany && (

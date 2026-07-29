@@ -149,6 +149,24 @@ describe('InsightCard', () => {
     expect(screen.getByText(/Reliance Industries operates in the .* sector\./)).toBeInTheDocument();
   });
 
+  it('hides the logo/name/ticker header block when hideHeader is set, but keeps the price line', () => {
+    render(
+      <InsightCard
+        company={{ ...company, price_at_analysis: 2500, return_1m: 3.2 }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+        hideHeader
+      />,
+    );
+    expect(screen.queryByText('RELIANCE.NS')).not.toBeInTheDocument();
+    expect(screen.getByText('2500.00', { exact: false })).toBeInTheDocument();
+  });
+
+  it('shows the logo/name/ticker header block by default (hideHeader unset)', () => {
+    render(<InsightCard company={company} eventType="crude_oil" alertCreatedAt="2026-07-17T10:00:00.000Z" />);
+    expect(screen.getByText('RELIANCE.NS')).toBeInTheDocument();
+  });
+
   it('shows "Linked via" the parent company when one is given (why this company is in the Ripple bucket)', () => {
     const parent: AlertCompany = { ...company, company_id: 2, ticker: 'RELIANCE.NS', name: 'Reliance Industries' };
     render(

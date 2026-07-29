@@ -38,4 +38,11 @@ describe('CompanyLogo', () => {
     render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" />);
     expect(screen.getByText('RE')).toBeInTheDocument();
   });
+
+  it('gives the monogram fallback visible contrast (bg-elevated), not the near-invisible bg-page', () => {
+    render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" />);
+    const wrapper = screen.getByText('RE').parentElement;
+    expect(wrapper?.className).toContain('bg-elevated');
+    expect(wrapper?.className).not.toContain('bg-page');
+  });
 });

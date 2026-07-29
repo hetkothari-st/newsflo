@@ -25,10 +25,16 @@ export default function CompanyLogo({
 
   return (
     <span
-      className={`flex shrink-0 items-center justify-center overflow-hidden border border-hairline bg-page ${SIZE_CLASS[size]}`}
+      className={`flex shrink-0 items-center justify-center overflow-hidden border border-hairline ${
+        showFallback ? 'bg-elevated' : 'bg-page'
+      } ${SIZE_CLASS[size]}`}
     >
       {showFallback ? (
-        <span className="font-data text-muted" aria-hidden="true">
+        // bg-elevated (one tier lighter than surface) + text-ink, not
+        // bg-page + text-muted -- a company with no real logo art was
+        // reading as "disabled" next to companies with real, colorful
+        // logos, purely from the near-zero contrast of the old fallback.
+        <span className="font-data font-semibold text-ink" aria-hidden="true">
           {initials(ticker)}
         </span>
       ) : (

@@ -65,6 +65,12 @@ describe('CollapsibleInsightRow', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows the company name exactly once when expanded, not duplicated as a separate header', async () => {
+    render(<CollapsibleInsightRow company={company} eventType="crude_oil" alertCreatedAt="2026-07-17T10:00:00.000Z" />);
+    await userEvent.click(screen.getByRole('button', { name: /Reliance Industries/ }));
+    expect(screen.getAllByText('Reliance Industries')).toHaveLength(1);
+  });
+
   it('shows "via {ticker}" of the parent company while collapsed, before any click', () => {
     const parent: AlertCompany = { ...company, company_id: 2, ticker: 'RELIANCE.NS', name: 'Reliance Industries' };
     render(

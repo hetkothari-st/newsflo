@@ -148,9 +148,15 @@ export default function AlertCompanies({
                 type="button"
                 onClick={() => toggleGroup(group.key)}
                 aria-expanded={isOpen}
-                className={`flex w-full items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}
+                className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-widest outline-none transition-colors hover:bg-elevated/60 focus-visible:ring-1 focus-visible:ring-hairline ${headerClass(groupMode, group)}`}
               >
-                <span aria-hidden="true" className="font-data text-[10px]">{isOpen ? '▾' : '▸'}</span>
+                <span
+                  aria-hidden="true"
+                  className="font-data text-[10px] transition-transform duration-150"
+                  style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }}
+                >
+                  ▸
+                </span>
                 {group.color && (
                   <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
                 )}
