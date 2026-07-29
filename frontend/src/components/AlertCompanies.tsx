@@ -4,12 +4,13 @@ import type { Alert, AlertCompany } from '../lib/api';
 // TranslationKey only typed the commented-out GROUP_LABEL_KEY below.
 // import type { TranslationKey } from '../lib/i18n';
 import { useLanguage } from '../lib/language';
-import InsightCard from './InsightCard';
+import CollapsibleInsightRow from './CollapsibleInsightRow';
 import SentimentBar from '../features/visualize/SentimentBar';
 import {
   groupByTier,
   groupByImpact,
   groupBySector,
+  groupByImpactLevel,
   type CompanyGroup,
   type GroupMode,
 } from '../features/visualize/transforms';
@@ -28,6 +29,7 @@ type Tab = 'predicted' | 'my_demat';
 function groupCompanies(mode: GroupMode, companies: AlertCompany[]): CompanyGroup[] {
   if (mode === 'impact') return groupByImpact(companies);
   if (mode === 'sector') return groupBySector(companies);
+  if (mode === 'impact_level') return groupByImpactLevel(companies);
   return groupByTier(companies);
 }
 
@@ -35,6 +37,11 @@ function headerClass(mode: GroupMode, group: CompanyGroup): string {
   if (mode === 'impact') return group.key === 'bullish' ? 'text-bullish' : 'text-bearish';
   return 'text-muted';
 }
+
+// Direct Impact starts open (the main reason someone opened this alert);
+// Ripple L1/L2 start collapsed -- one row of headers to scan before opting
+// into the deeper cascade levels, rather than 16 companies dumped at once.
+const DEFAULT_OPEN_IMPACT_LEVELS: Record<string, boolean> = { direct: true };
 
 export default function AlertCompanies({
   alert,
@@ -48,7 +55,10 @@ export default function AlertCompanies({
   const [tab, setTab] = useState<Tab>('predicted');
   // setGroupMode is unused while the group-by selector below is commented
   // out -- re-add it to this destructure when the selector comes back.
-  const [groupMode] = useState<GroupMode>('tier');
+  const [groupMode] = useState<GroupMode>('impact_level');
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(DEFAULT_OPEN_IMPACT_LEVELS);
+  const toggleGroup = (key: string) =>
+    setOpenGroups((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }));
 
   const visible = tab === 'predicted' ? alert.companies : alert.companies.filter((c) => c.in_my_holdings);
   const grouped = groupCompanies(groupMode, visible);
@@ -130,31 +140,42 @@ export default function AlertCompanies({
       {grouped.length === 0 ? (
         <p className="text-xs text-muted">{emptyCopy}</p>
       ) : (
-        grouped.map((group) => (
-          <div key={group.key} className="flex flex-col gap-2">
-            <p className={`flex items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}>
-              {group.color && (
-                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
-              )}
-              {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
-            </p>
-            <div className="flex flex-col">
-              {group.companies.map((company) => (
-                <div
-                  key={company.company_id}
-                  className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
-                >
-                  <InsightCard
-                    company={company}
-                    eventType={alert.event_type}
-                    alertCreatedAt={alert.created_at}
-                    alertId={alert.id}
-                  />
+        grouped.map((group) => {
+          const isOpen = openGroups[group.key] ?? false;
+          return (
+            <div key={group.key} className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.key)}
+                aria-expanded={isOpen}
+                className={`flex w-full items-center gap-1.5 text-xs uppercase tracking-widest ${headerClass(groupMode, group)}`}
+              >
+                <span aria-hidden="true" className="font-data text-[10px]">{isOpen ? '▾' : '▸'}</span>
+                {group.color && (
+                  <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
+                )}
+                {groupMode === 'tier' ? group.label : `${group.label} · ${group.companies.length}`}
+              </button>
+              {isOpen && (
+                <div className="flex flex-col">
+                  {group.companies.map((company) => (
+                    <div
+                      key={company.company_id}
+                      className={groupMode !== 'tier' && company.basis === 'sector_inference' ? 'opacity-70' : undefined}
+                    >
+                      <CollapsibleInsightRow
+                        company={company}
+                        eventType={alert.event_type}
+                        alertCreatedAt={alert.created_at}
+                        alertId={alert.id}
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );

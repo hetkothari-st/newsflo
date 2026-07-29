@@ -1,9 +1,9 @@
 import type { AlertCompany } from '../../lib/api';
 import { sectorColor } from './colors';
 import { subSectorKey, subSectorLabel, UNCLASSIFIED_KEY } from './subSectorLabels';
-import { impactLevelKey } from './impactLevels';
+import { IMPACT_LEVEL_ORDER, impactLevelColor, impactLevelKey, impactLevelLabel } from './impactLevels';
 
-export type GroupMode = 'tier' | 'impact' | 'sector';
+export type GroupMode = 'tier' | 'impact' | 'sector' | 'impact_level';
 
 export interface CompanyGroup {
   key: string;
@@ -79,6 +79,20 @@ export function groupByImpact(companies: AlertCompany[]): CompanyGroup[] {
   if (bullish.length > 0) groups.push({ key: 'bullish', label: 'Bullish', companies: bullish });
   if (bearish.length > 0) groups.push({ key: 'bearish', label: 'Bearish', companies: bearish });
   return groups;
+}
+
+// Direct / Ripple L1 / Ripple L2 -- app.companies.resolution.resolve_companies
+// already stamps every persisted AlertCompany with the correct impact_level
+// (LLM-named direct mentions, deterministic sector fan-out, and cascade
+// chains all set it at persist time), so this grouping is a straight
+// pass-through of that already-accurate field, not a new classification.
+export function groupByImpactLevel(companies: AlertCompany[]): CompanyGroup[] {
+  return IMPACT_LEVEL_ORDER.map((level) => ({
+    key: level,
+    label: impactLevelLabel(level),
+    color: impactLevelColor(level),
+    companies: companies.filter((c) => impactLevelKey(c) === level),
+  })).filter((g) => g.companies.length > 0);
 }
 
 export function groupBySector(companies: AlertCompany[]): CompanyGroup[] {

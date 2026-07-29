@@ -258,6 +258,83 @@ def test_list_alerts_includes_company_sector(db_session):
     app.dependency_overrides.clear()
 
 
+def test_list_alerts_includes_company_why_and_business_desc(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(
+        source="test", url="https://example.com/why", title="Why test headline",
+        status="ANALYZED", category="oil_energy",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    company = Company(
+        ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas",
+        index_tier="NIFTY50", market_cap=1.0,
+        business_desc="Refines crude oil and produces petrochemicals.",
+    )
+    db_session.add(company)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+        why="Widening refining margins directly lift Reliance's core earnings.",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_json = response.json()[0]["companies"][0]
+    assert company_json["why"] == "Widening refining margins directly lift Reliance's core earnings."
+    assert company_json["business_desc"] == "Refines crude oil and produces petrochemicals."
+
+    app.dependency_overrides.clear()
+
+
+def test_list_alerts_defaults_why_and_business_desc_to_none_when_absent(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    article = Article(
+        source="test", url="https://example.com/why-none", title="Why-none test headline",
+        status="ANALYZED", category="oil_energy",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin",
+        basis="direct_mention", confidence="llm_estimate",
+    ))
+    db_session.commit()
+
+    response = client.get("/api/alerts")
+
+    assert response.status_code == 200
+    company_json = response.json()[0]["companies"][0]
+    assert company_json["why"] is None
+    assert company_json["business_desc"] is None
+
+    app.dependency_overrides.clear()
+
+
 def test_list_alerts_includes_company_logo_url(db_session, monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings, "brandfetch_client_id", "test-client-id")

@@ -74,6 +74,17 @@ export interface AlertCompany {
   // company an indirect entry is economically linked through.
   impact_level?: string;
   parent_company_id?: number | null;
+  // Post-measurement, company-specific explanation (see backend
+  // app.analysis.refinement.refine_alert) -- more accurate than `rationale`
+  // (the pre-measurement cascade-stage estimate, generic/shared across an
+  // entire sector_inference group) once it exists. Null until refine_alert
+  // runs, or for a company with no real measured move to explain.
+  why?: string | null;
+  // One-sentence, jargon-free description of what the company actually does
+  // (see backend app.companies.business_profile) -- used to build the "how
+  // this company belongs to its sector" line. Null until the one-time
+  // enrichment backfill covers it.
+  business_desc?: string | null;
 }
 
 export interface GraphNode {

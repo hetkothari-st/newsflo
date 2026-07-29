@@ -16,6 +16,20 @@ function truncatedRationale(rationale: string): string {
   return `${firstSentence.slice(0, 157)}…`;
 }
 
+// Deterministic, LLM-free 1-liner explaining how this company belongs to
+// its sector -- built from business_desc (already a one-sentence, factual
+// description -- see backend app.companies.business_profile) rather than
+// asking the LLM to justify sector membership, since that's a factual claim
+// (what the company does), not a prediction.
+function sectorMembershipNote(company: AlertCompany, sectorText: string): string | null {
+  if (!sectorText) return null;
+  if (company.business_desc) {
+    const firstSentence = company.business_desc.split(/(?<=[.!?])\s+/)[0];
+    return `${firstSentence} — ${sectorText} sector.`;
+  }
+  return `${company.name} operates in the ${sectorText} sector.`;
+}
+
 export default function InsightCard({
   company,
   eventType,
@@ -68,13 +82,16 @@ export default function InsightCard({
       </span>
     ) : null;
 
+  const sectorText = company.sector ? sectorLabel(company.sector) : '';
+  const membershipNote = sectorMembershipNote(company, sectorText);
+
   return (
     <div className="border-b border-hairline py-4 font-editorial">
       <div className="flex items-baseline justify-between font-data text-[11px] uppercase tracking-widest text-muted">
         <span>
           {eventType ? eventTypeLabel(eventType) : ''}
           {eventType && company.sector ? ' · ' : ''}
-          {company.sector ? sectorLabel(company.sector) : ''}
+          {sectorText}
         </span>
         <span>{formatRelativeTime(alertCreatedAt, new Date(), language)}</span>
       </div>
@@ -88,6 +105,8 @@ export default function InsightCard({
         {priceLine && <div className="shrink-0 text-right text-base">{priceLine}</div>}
       </div>
 
+      {membershipNote && <p className="mt-2 text-xs italic text-muted">{membershipNote}</p>}
+
       {points.length >= 2 && (
         <div className="mt-3">
           <InsightSparkline points={points} direction={company.direction} />
@@ -99,6 +118,8 @@ export default function InsightCard({
         timeHorizon={company.time_horizon}
         impactLevel={company.impact_level}
       />
+
+      {company.why && <p className="mt-3 text-base leading-relaxed text-ink">{company.why}</p>}
 
       <ul className="mt-3 flex flex-col gap-1.5 text-base leading-relaxed text-ink">
         {visiblePoints.map((point, i) => (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  groupByTier, groupByImpact, groupBySector, sectorLabel, rankByMagnitude, rankByConfidence,
+  groupByTier, groupByImpact, groupBySector, groupByImpactLevel, sectorLabel, rankByMagnitude, rankByConfidence,
   groupByTimeHorizon, computeNetSignal, groupBySectorAndSubSector, groupIndirectBySubSector,
 } from './transforms';
 import type { AlertCompany } from '../../lib/api';
@@ -73,6 +73,30 @@ describe('groupByImpact', () => {
     expect(bullish?.companies).toHaveLength(1);
     expect(bearish?.companies).toHaveLength(1);
     expect(groups).toHaveLength(2);
+  });
+});
+
+describe('groupByImpactLevel', () => {
+  it('orders groups Direct -> Ripple L1 -> Ripple L2', () => {
+    const groups = groupByImpactLevel([
+      company({ company_id: 1, impact_level: 'indirect_l2' }),
+      company({ company_id: 2, impact_level: 'direct' }),
+      company({ company_id: 3, impact_level: 'indirect_l1' }),
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(['direct', 'indirect_l1', 'indirect_l2']);
+    expect(groups.map((g) => g.label)).toEqual([
+      'Direct Impact', 'Indirect Impact — Level 1', 'Indirect Impact — Level 2',
+    ]);
+  });
+
+  it('defaults a missing impact_level to direct', () => {
+    const groups = groupByImpactLevel([company({ impact_level: undefined })]);
+    expect(groups.map((g) => g.key)).toEqual(['direct']);
+  });
+
+  it('omits a level with zero companies', () => {
+    const groups = groupByImpactLevel([company({ impact_level: 'direct' })]);
+    expect(groups.map((g) => g.key)).toEqual(['direct']);
   });
 });
 

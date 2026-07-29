@@ -105,6 +105,61 @@ describe('InsightCard', () => {
     expect(link).toHaveAttribute('href', '/alerts/7/company/1');
   });
 
+  it('shows the why text when present', () => {
+    render(
+      <InsightCard
+        company={{ ...company, why: 'Widening refining margins directly lift Reliance earnings.' }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+      />,
+    );
+    expect(screen.getByText('Widening refining margins directly lift Reliance earnings.')).toBeInTheDocument();
+  });
+
+  it('renders nothing extra for why when absent', () => {
+    render(
+      <InsightCard
+        company={{ ...company, why: null }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+      />,
+    );
+    expect(screen.queryByText(/directly lift Reliance earnings/)).not.toBeInTheDocument();
+  });
+
+  it('builds the sector-membership line from business_desc when present', () => {
+    render(
+      <InsightCard
+        company={{ ...company, sector: 'oil_gas', business_desc: 'Refines crude oil and produces petrochemicals.' }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+      />,
+    );
+    expect(screen.getByText(/Refines crude oil and produces petrochemicals\..*sector\./)).toBeInTheDocument();
+  });
+
+  it('falls back to a generic sector-membership sentence when business_desc is absent', () => {
+    render(
+      <InsightCard
+        company={{ ...company, sector: 'oil_gas', business_desc: null }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+      />,
+    );
+    expect(screen.getByText(/Reliance Industries operates in the .* sector\./)).toBeInTheDocument();
+  });
+
+  it('renders no sector-membership line when the company has no sector', () => {
+    render(
+      <InsightCard
+        company={{ ...company, sector: undefined, business_desc: null }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+      />,
+    );
+    expect(screen.queryByText(/operates in the/)).not.toBeInTheDocument();
+  });
+
   it('fetches and renders a sparkline when a price series is available', async () => {
     vi.spyOn(api, 'getCompanyPrices').mockResolvedValue({
       period: '1mo',

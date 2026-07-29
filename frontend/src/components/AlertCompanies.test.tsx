@@ -46,10 +46,12 @@ const alert: Alert = {
 };
 
 describe('AlertCompanies', () => {
-  it('shows Predicted companies grouped by tier by default', () => {
+  it('shows Predicted companies grouped by impact level by default, Direct expanded', () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
-    expect(screen.getByText('Nifty 50')).toBeInTheDocument();
-    expect(screen.getByText('Nifty Next 50')).toBeInTheDocument();
+    expect(screen.getByText(/Direct Impact/)).toBeInTheDocument();
+    // Both fixture companies default to impact_level 'direct' (unset), so
+    // both land in the one, already-expanded Direct Impact group -- their
+    // collapsed row names are visible without any click.
     expect(screen.getByText('Reliance Industries')).toBeInTheDocument();
     expect(screen.getByText('ONGC')).toBeInTheDocument();
   });
@@ -68,25 +70,50 @@ describe('AlertCompanies', () => {
     expect(screen.getByText(/log in to see holdings-matched alerts/i)).toBeInTheDocument();
   });
 
-  it('renders tier headings in Nifty 50 -> Next 50 -> Midcap 150 -> Smallcap 250 -> Global -> Other order', async () => {
-    const tierAlert: Alert = {
+  it('renders impact-level headings in Direct -> Ripple L1 -> Ripple L2 order', async () => {
+    const levelAlert: Alert = {
       ...alert,
       companies: [
-        { ...alert.companies[1], company_id: 1, name: 'Other Co', index_tier: 'OTHER' },
-        { ...alert.companies[1], company_id: 2, name: 'Global Co', index_tier: 'GLOBAL_LARGE_CAP' },
-        { ...alert.companies[0], company_id: 3, name: 'Fifty Co', index_tier: 'NIFTY50' },
-        { ...alert.companies[1], company_id: 4, name: 'Next Fifty Co', index_tier: 'NIFTYNEXT50' },
-        { ...alert.companies[1], company_id: 5, name: 'Midcap Co', index_tier: 'NIFTYMIDCAP150' },
-        { ...alert.companies[1], company_id: 6, name: 'Smallcap Co', index_tier: 'NIFTYSMALLCAP250' },
+        { ...alert.companies[1], company_id: 1, name: 'L2 Co', impact_level: 'indirect_l2' },
+        { ...alert.companies[0], company_id: 2, name: 'Direct Co', impact_level: 'direct' },
+        { ...alert.companies[1], company_id: 3, name: 'L1 Co', impact_level: 'indirect_l1' },
       ],
     };
-    render(<AlertCompanies alert={tierAlert} isAuthenticated />);
+    render(<AlertCompanies alert={levelAlert} isAuthenticated />);
     const headings = screen.getAllByText(
-      /^(Nifty 50|Nifty Next 50|Nifty Midcap 150|Nifty Smallcap 250|Global|Other)$/,
+      /^(Direct Impact|Indirect Impact — Level 1|Indirect Impact — Level 2)/,
     );
     expect(headings.map((el) => el.textContent)).toEqual([
-      'Nifty 50', 'Nifty Next 50', 'Nifty Midcap 150', 'Nifty Smallcap 250', 'Global', 'Other',
+      expect.stringContaining('Direct Impact'),
+      expect.stringContaining('Indirect Impact — Level 1'),
+      expect.stringContaining('Indirect Impact — Level 2'),
     ]);
+  });
+
+  it('starts Direct Impact expanded and Ripple levels collapsed', () => {
+    const levelAlert: Alert = {
+      ...alert,
+      companies: [
+        { ...alert.companies[0], company_id: 1, name: 'Direct Co', impact_level: 'direct' },
+        { ...alert.companies[1], company_id: 2, name: 'Ripple Co', impact_level: 'indirect_l1' },
+      ],
+    };
+    render(<AlertCompanies alert={levelAlert} isAuthenticated />);
+    expect(screen.getByText('Direct Co')).toBeInTheDocument();
+    expect(screen.queryByText('Ripple Co')).not.toBeInTheDocument();
+  });
+
+  it('expands a Ripple group on click to reveal its companies', async () => {
+    const levelAlert: Alert = {
+      ...alert,
+      companies: [
+        { ...alert.companies[0], company_id: 1, name: 'Direct Co', impact_level: 'direct' },
+        { ...alert.companies[1], company_id: 2, name: 'Ripple Co', impact_level: 'indirect_l1' },
+      ],
+    };
+    render(<AlertCompanies alert={levelAlert} isAuthenticated />);
+    await userEvent.click(screen.getByText(/Indirect Impact — Level 1/));
+    expect(screen.getByText('Ripple Co')).toBeInTheDocument();
   });
 
   // The group-by selector is commented out in AlertCompanies.tsx (no
@@ -165,8 +192,12 @@ describe('AlertCompanies', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/alerts/1/charts');
   });
 
-  it('renders a "Read full analysis" link for each company, routing to its detail page', () => {
+  it('renders a "Read full analysis" link for each company once expanded, routing to its detail page', async () => {
     render(<AlertCompanies alert={alert} isAuthenticated />);
+    // Both fixture companies default to impact_level 'direct', collapsed to
+    // a name-only row until clicked -- expand each before the link exists.
+    await userEvent.click(screen.getByText('Reliance Industries'));
+    await userEvent.click(screen.getByText('ONGC'));
     const links = screen.getAllByRole('link', { name: /read full analysis/i });
     const hrefs = links.map((link) => link.getAttribute('href'));
     expect(hrefs).toContain('/alerts/1/company/1');

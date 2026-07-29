@@ -177,7 +177,15 @@ def _serialize_alert(
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
             "index_tier": ac.company.index_tier, "sector": ac.company.sector,
             "sub_sector": ac.company.sub_sector, "logo_url": logo_url(ac.company),
+            "business_desc": ac.company.business_desc,
             "direction": ac.direction,
+            # The post-measurement, company-specific explanation (see
+            # app.analysis.refinement.refine_alert) -- more accurate than
+            # `rationale` (the pre-measurement cascade-stage estimate,
+            # generic/shared across an entire sector_inference group) once
+            # it exists. Null until refine_alert runs, or for a company
+            # with no real measured move to explain.
+            "why": ac.why,
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": rationale, "key_points": key_points,
             "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
