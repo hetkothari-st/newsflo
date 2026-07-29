@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { avatarColor, sectorColor } from '../features/visualize/colors';
 
 function initials(ticker: string): string {
   const base = ticker.split('.')[0];
@@ -15,26 +16,36 @@ export default function CompanyLogo({
   logoUrl,
   ticker,
   size = 'md',
+  sector,
 }: {
   logoUrl?: string | null;
   ticker: string;
   size?: 'sm' | 'md' | 'lg';
+  // Optional -- when known, the fallback avatar uses this company's real
+  // sector color (the same hue its group-header dot/chart nodes already
+  // use elsewhere), so a company with no logo art still reads as "this
+  // specific real company", not a generic placeholder. Falls back to a
+  // deterministic per-ticker color from the same validated palette when
+  // the caller doesn't have a sector to hand.
+  sector?: string | null;
 }) {
   const [failed, setFailed] = useState(false);
   const showFallback = !logoUrl || failed;
+  const fallbackColor = sector ? sectorColor(sector) : avatarColor(ticker);
 
   return (
     <span
-      className={`flex shrink-0 items-center justify-center overflow-hidden border border-hairline ${
-        showFallback ? 'bg-elevated' : 'bg-page'
+      className={`flex shrink-0 items-center justify-center overflow-hidden ${
+        showFallback ? '' : 'border border-hairline bg-page'
       } ${SIZE_CLASS[size]}`}
+      style={showFallback ? { backgroundColor: fallbackColor } : undefined}
     >
       {showFallback ? (
-        // bg-elevated (one tier lighter than surface) + text-ink, not
-        // bg-page + text-muted -- a company with no real logo art was
-        // reading as "disabled" next to companies with real, colorful
-        // logos, purely from the near-zero contrast of the old fallback.
-        <span className="font-data font-semibold text-ink" aria-hidden="true">
+        // A real, deliberate color (not a flat grey box) -- a company with
+        // no logo art on file was reading as "disabled" next to companies
+        // with real, colorful logos, purely from the old fallback's
+        // near-zero contrast against the page background.
+        <span className="font-data font-semibold text-white" aria-hidden="true">
           {initials(ticker)}
         </span>
       ) : (

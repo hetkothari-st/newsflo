@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confidenceColor, confidenceBandColor, sectorColor, EDGE_RELATIONS, relationColor } from './colors';
+import { avatarColor, confidenceColor, confidenceBandColor, sectorColor, EDGE_RELATIONS, relationColor } from './colors';
 
 describe('sectorColor', () => {
   it('assigns a fixed color to each known sector, not a hash', () => {
@@ -23,6 +23,22 @@ describe('sectorColor', () => {
   it('falls back to a defined color for an unrecognized sector string', () => {
     expect(sectorColor('some_future_sector')).toMatch(/^#[0-9A-Fa-f]{6}$/);
     expect(sectorColor('some_future_sector')).toBe(sectorColor('another_unknown'));
+  });
+});
+
+describe('avatarColor', () => {
+  it('returns a hex color string for any ticker', () => {
+    expect(avatarColor('RELIANCE.NS')).toMatch(/^#[0-9A-Fa-f]{6}$/);
+  });
+
+  it('is deterministic -- the same ticker always gets the same color', () => {
+    expect(avatarColor('ONGC.NS')).toBe(avatarColor('ONGC.NS'));
+  });
+
+  it('draws from the same validated palette as sectorColor, not an arbitrary hex', () => {
+    const known = ['oil_gas', 'banking', 'auto', 'it', 'pharma', 'fmcg', 'metals', 'telecom', 'infra', 'other'];
+    const validatedColors = new Set(known.map(sectorColor));
+    expect(validatedColors.has(avatarColor('SOME_RANDOM_TICKER.NS'))).toBe(true);
   });
 });
 

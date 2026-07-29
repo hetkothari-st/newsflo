@@ -44,7 +44,7 @@ export default function CollapsibleInsightRow({
         >
           ▸
         </span>
-        <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} size="sm" />
+        <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} sector={company.sector} size="sm" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-ink">{company.name}</span>
           <span className="font-data text-xs text-muted">

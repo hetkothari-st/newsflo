@@ -114,7 +114,7 @@ export default function InsightCard({
 
       {!hideHeader && (
         <div className="mt-3 flex items-center gap-3.5">
-          <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} />
+          <CompanyLogo logoUrl={company.logo_url} ticker={company.ticker} sector={company.sector} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[22px] font-semibold leading-tight text-ink">{company.name}</p>
             <p className="font-data text-xs text-muted">{company.ticker}</p>

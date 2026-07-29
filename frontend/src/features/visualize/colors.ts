@@ -32,6 +32,22 @@ export function sectorColor(sector: string): string {
   return SECTOR_COLOR[sector] ?? FALLBACK_COLOR;
 }
 
+// Same 10 already-validated hexes as SECTOR_COLOR, reused as a deterministic
+// per-company fallback avatar color when the sector isn't known to the
+// caller (see CompanyLogo) -- a real color reads as "a designed avatar for a
+// company with no logo art on file" rather than a flat grey box that looks
+// disabled next to companies with real logo art. Not a distinctness
+// guarantee (a hash can collide) -- that guarantee only matters for a
+// legend/chart where two adjacent colors must differ; here it's fine for
+// two different tickers to occasionally land on the same hue.
+const AVATAR_COLORS = Object.values(SECTOR_COLOR);
+
+export function avatarColor(ticker: string): string {
+  let hash = 0;
+  for (let i = 0; i < ticker.length; i++) hash = (hash * 31 + ticker.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
 // Mirrors backend/app/reasoning/rulebook.py's EDGE_RELATIONS exactly (the
 // frontend has no equivalent constant yet -- GraphEdge.relation is typed
 // as a plain string, not a literal union, so this is the closest thing to

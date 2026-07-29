@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import CompanyLogo from './CompanyLogo';
+import { avatarColor, sectorColor } from '../features/visualize/colors';
 
 // The logo is intentionally decorative (alt="") -- the company name is
 // already rendered as adjacent text in every consumer, so a screen reader
@@ -39,10 +40,39 @@ describe('CompanyLogo', () => {
     expect(screen.getByText('RE')).toBeInTheDocument();
   });
 
-  it('gives the monogram fallback visible contrast (bg-elevated), not the near-invisible bg-page', () => {
+  it('gives the monogram fallback a real, deliberate color, not a flat grey box', () => {
     render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" />);
     const wrapper = screen.getByText('RE').parentElement;
-    expect(wrapper?.className).toContain('bg-elevated');
-    expect(wrapper?.className).not.toContain('bg-page');
+    expect(wrapper?.style.backgroundColor).not.toBe('');
+  });
+
+  it('uses the sector color when a sector is given', () => {
+    render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" sector="oil_gas" />);
+    const wrapper = screen.getByText('RE').parentElement;
+    expect(wrapper?.style.backgroundColor).toBe(hexToRgb(sectorColor('oil_gas')));
+  });
+
+  it('falls back to a deterministic per-ticker color when no sector is given', () => {
+    render(<CompanyLogo logoUrl={null} ticker="RELIANCE.NS" />);
+    const wrapper = screen.getByText('RE').parentElement;
+    expect(wrapper?.style.backgroundColor).toBe(hexToRgb(avatarColor('RELIANCE.NS')));
+  });
+
+  it('picks the same fallback color for the same ticker every render (deterministic, not random)', () => {
+    const { unmount } = render(<CompanyLogo logoUrl={null} ticker="ONGC.NS" />);
+    const first = screen.getByText('ON').parentElement?.style.backgroundColor;
+    unmount();
+    render(<CompanyLogo logoUrl={null} ticker="ONGC.NS" />);
+    const second = screen.getByText('ON').parentElement?.style.backgroundColor;
+    expect(first).toBe(second);
   });
 });
+
+// jsdom normalizes inline style hex colors to rgb() on read -- convert the
+// expected hex the same way so these assertions compare like with like.
+function hexToRgb(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgb(${r}, ${g}, ${b})`;
+}
