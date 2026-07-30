@@ -63,6 +63,8 @@ def resolve_article_image(
     fetch=None,
     resolve_wrapper=None,
     provided_is_generic: bool = False,
+    headline: str | None = None,
+    news_search_fetch=None,
 ) -> str | None:
     """Ingest-time image resolution: prefer a real story photo over
     publisher artwork. A provided image with a clean filename is kept
@@ -83,10 +85,18 @@ def resolve_article_image(
     clean filename, e.g. GlobeNewswire's default banner) -- the filename
     heuristic alone cannot see that, and without the flag such an image
     early-returns untouched and never gets a real-photo re-fetch.
+
+    ``headline`` enables the last real-photo tier: a Bing News search for
+    the exact headline returns Bing's cached copy of the story's own
+    image -- which works even for publishers that block direct scraping
+    (Reuters/Bloomberg/BusinessWire). See app.ingestion.bing_news_image.
     """
     if fetch is None:
         from app.ingestion.og_image import fetch_og_image  # late import: circular-free
         fetch = fetch_og_image
+    if news_search_fetch is None:
+        from app.ingestion.bing_news_image import fetch_bing_news_image
+        news_search_fetch = fetch_bing_news_image
     if resolve_wrapper is None:
         from app.ingestion.google_news import is_google_news_url, resolve_google_news_url
 
@@ -101,13 +111,20 @@ def resolve_article_image(
         and not is_generic_image_filename(provided_image_url)
     ):
         return provided_image_url
+
     target_url = resolve_wrapper(article_url)
-    if target_url is None:
-        return provided_image_url
-    fetched = fetch(target_url)
-    if fetched and not is_generic_image_filename(fetched):
-        return fetched
-    return provided_image_url or fetched
+    if target_url is not None:
+        fetched = fetch(target_url)
+        if fetched and not is_generic_image_filename(fetched):
+            return fetched
+
+    # Last real-photo tier: the news-search cache, by headline.
+    if headline:
+        from_search = news_search_fetch(headline)
+        if from_search:
+            return from_search
+
+    return provided_image_url
 
 
 def displayable_image_url(image_url: str | None, repeated: set[str]) -> str | None:

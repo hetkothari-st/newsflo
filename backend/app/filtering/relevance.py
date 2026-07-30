@@ -99,10 +99,19 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
     """Classify every NEW article. ``throttle_seconds`` exists for the same
     rate-limit reason as ``process_new_articles``'s throttle -- one Groq call
     per article here too.
+
+    Non-English articles (foreign-language wire mirrors of the same press
+    release, see app.filtering.language_gate) are FILTERED before the LLM
+    call -- the feed is English-only by default; other languages come from
+    the user's translation picker, never from the source mix.
     """
+    from app.filtering.language_gate import is_english_text
     from app.pipeline import article_text
 
     for article in session.query(Article).filter_by(status="NEW").all():
+        if not is_english_text(article.title, article_text(article)):
+            article.status = "FILTERED"
+            continue  # deterministic gate -- no LLM call, no throttle needed
         if classify_relevance(client, article.title, article_text(article)):
             article.status = "CATEGORIZED"
         else:

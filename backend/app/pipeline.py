@@ -400,6 +400,7 @@ def _persist_alert(
     article.image_url = resolve_article_image(
         article.url, article.image_url, fetch=fetch_og_image,
         provided_is_generic=article.image_url in repeated_images,
+        headline=article.title,
     )
 
     article.status = "ANALYZED"

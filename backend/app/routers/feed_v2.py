@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.companies.branding import logo_url
+from app.filtering.language_gate import is_english_text
 from app.i18n import get_lang
 from app.ingestion.image_filter import displayable_image_url, repeated_image_urls
 from app.translation.lookup import (
@@ -149,6 +150,11 @@ def list_feed_v2_alerts(
 
     results = []
     for alert in alerts:
+        # English-only feed (the base language is uniform; other languages
+        # come from the user's translation picker) -- drops the foreign-
+        # language wire mirrors ingested before the language gate shipped.
+        if not is_english_text(alert.article.title):
+            continue
         measurement = compute_alert_measurement(db, alert)
         if measurement is not None:
             row = _serialize(alert, measurement, held_company_ids, repeated_images, translations)

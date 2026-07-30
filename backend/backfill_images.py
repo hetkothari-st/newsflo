@@ -73,6 +73,7 @@ def main() -> None:
             resolved = resolve_article_image(
                 article.url, article.image_url,
                 provided_is_generic=article.image_url in repeated,
+                headline=article.title,
             )
             # ASCII-safe printing -- Windows consoles choke on unicode titles.
             title = article.title[:60].encode("ascii", "replace").decode()
