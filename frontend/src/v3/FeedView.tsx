@@ -56,14 +56,13 @@ function LayerBlock({
   );
 }
 
-function NewsImage({ src }: { src: string }) {
-  // Hidden entirely on load failure -- a broken-image icon must never
-  // reach the card (CLAUDE.md: no silent failures on the canvas).
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
+function NewsImage({ src, onFail }: { src: string; onFail: () => void }) {
+  // Hidden entirely on load failure (via onFail, so the card front also
+  // drops its has-img layout) -- a broken-image icon must never reach
+  // the card (CLAUDE.md: no silent failures on the canvas).
   return (
     <div className="nimg">
-      <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} />
+      <img src={src} alt="" loading="lazy" onError={onFail} />
     </div>
   );
 }
@@ -108,11 +107,17 @@ function Card({
   onOpenInfo: (row: LayerRow) => void;
 }) {
   const [backTab, setBackTab] = useState<'ripple' | 'timeline'>('ripple');
+  const [imageFailed, setImageFailed] = useState(false);
   const dir = moveDir(alert.excess_move_pct, alert.verdict);
+  const showImage = alert.article.image_url !== null && !imageFailed;
   return (
     <div className={`card ${flipped ? 'flipped' : ''}`} data-card={alert.id}>
       <div className="flip">
-        <div className="face front" onClick={onFlip} data-testid={`front-${alert.id}`}>
+        <div
+          className={`face front ${showImage ? 'has-img' : ''}`}
+          onClick={onFlip}
+          data-testid={`front-${alert.id}`}
+        >
           <div className="ftop">
             <div>
               <div className={`move ${dir}`}>
@@ -126,7 +131,9 @@ function Card({
           </div>
           <div className="headline">{alert.article.title}</div>
           <div className="gist">{alert.summary_short ?? alert.summary_long ?? ''}</div>
-          {alert.article.image_url !== null && <NewsImage src={alert.article.image_url} />}
+          {showImage && (
+            <NewsImage src={alert.article.image_url!} onFail={() => setImageFailed(true)} />
+          )}
           <div className="ffoot">
             <div className="meta">
               <span>{alert.category.replace(/_/g, ' ')}</span>

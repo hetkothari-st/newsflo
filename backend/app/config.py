@@ -156,3 +156,8 @@ LOW_DELIVERY_WARNING_PCT = 50.0
 # cap whose day volume is at least this multiple of its own 20-day average
 # qualifies for the "unusual activity" tab.
 UNUSUAL_VOLUME_MULTIPLE = 2.0
+
+# An image_url attached to at least this many DIFFERENT articles is
+# publisher boilerplate (a logo/default banner), not a story photo -- see
+# app.ingestion.image_filter. Real news photos are unique per story.
+GENERIC_IMAGE_REPEAT_THRESHOLD = 3

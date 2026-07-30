@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.companies.branding import logo_url
+from app.ingestion.image_filter import displayable_image_url, repeated_image_urls
 from app.ist_time import day_utc_window, today_ist
 from app.market.alert_measurement import compute_alert_measurement
 from app.market.discovery import (
@@ -41,7 +42,9 @@ def _held_company_ids(db: Session, current_user: User | None) -> set[int]:
     return {h.company_id for h in db.query(Holding).filter_by(user_id=current_user.id).all()}
 
 
-def _serialize(alert: Alert, measurement: dict, held_company_ids: set[int]) -> dict:
+def _serialize(
+    alert: Alert, measurement: dict, held_company_ids: set[int], repeated_images: set[str],
+) -> dict:
     in_my_holdings = any(ac.company_id in held_company_ids for ac in alert.companies)
     return {
         "id": alert.id,
@@ -51,7 +54,10 @@ def _serialize(alert: Alert, measurement: dict, held_company_ids: set[int]) -> d
         "summary_long": alert.summary_long,
         "article": {
             "id": alert.article.id,
-            "image_url": alert.article.image_url,
+            # Generic publisher artwork (wire-service logos, newspaper
+            # default banners) is nulled out -- the card shows no image
+            # rather than a wrong one. See app.ingestion.image_filter.
+            "image_url": displayable_image_url(alert.article.image_url, repeated_images),
             "title": alert.article.title,
             "url": alert.article.url,
             "source": alert.article.source,
@@ -91,11 +97,13 @@ def list_feed_v2_alerts(
     cap_rows = db.query(Company.ticker, Company.market_cap).filter(Company.market_cap.isnot(None)).all()
     cap_tiers = compute_cap_tiers([(t, c) for t, c in cap_rows])
 
+    repeated_images = repeated_image_urls(db, [a.article.image_url for a in alerts if a.article.image_url])
+
     results = []
     for alert in alerts:
         measurement = compute_alert_measurement(db, alert)
         if measurement is not None:
-            row = _serialize(alert, measurement, held_company_ids)
+            row = _serialize(alert, measurement, held_company_ids, repeated_images)
             row["peak_cap_tier"] = cap_tiers.get(measurement["peak_ticker"])
             results.append(row)
     return results
@@ -180,7 +188,10 @@ def get_feed_v2_alert(
         raise HTTPException(status_code=404, detail="Alert has no measured companies")
 
     held_company_ids = _held_company_ids(db, current_user)
-    result = _serialize(alert, measurement, held_company_ids)
+    repeated_images = repeated_image_urls(
+        db, [alert.article.image_url] if alert.article.image_url else [],
+    )
+    result = _serialize(alert, measurement, held_company_ids, repeated_images)
     # Layered card back (spec v2 §5/§7): every affected company, grouped by
     # relationship into ordered winners/losers layers.
     result["layers"] = compute_ripple_layers(db, alert, held_company_ids)
