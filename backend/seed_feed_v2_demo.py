@@ -92,7 +92,30 @@ RIPPLE_COMPANIONS = [
     # materiality-ranked discovery tab.
     ("CHENNPETRO.NS", "Chennai Petroleum Corporation", "oil_gas", "commodity", "bullish", 4.7, True,
      400.0, 38.0, 20_000_000.0),
+    # Fill out the spec §5 commodity-archetype sections on the crude card:
+    # a producer (upstream), a by-product (paints), a heavy user (airline).
+    ("OILINDIA.NS", "Oil India", "oil_gas", "commodity", "bearish", -3.1, True,
+     45000.0, 61.0, 300_000_000.0),
+    ("ASIANPAINT.NS", "Asian Paints", "chemicals", "input_cost", "bullish", 1.2, True,
+     280000.0, 66.0, 700_000_000.0),
+    ("INDIGO.NS", "InterGlobe Aviation", "railways_transport", "input_cost", "bullish", 2.1, True,
+     160000.0, 59.0, 500_000_000.0),
 ]
+
+# Sub-sector per seeded ticker (app/companies/sub_sectors.py vocabulary) --
+# drives the spec §5 commodity template's producer/refiner split.
+SUB_SECTORS = {
+    "RELIANCE.NS": "refining_marketing",
+    "ONGC.NS": "upstream_exploration",
+    "BPCL.NS": "refining_marketing",
+    "IOC.NS": "refining_marketing",
+    "HPCL.NS": "refining_marketing",
+    "CHENNPETRO.NS": "refining_marketing",
+    "GAIL.NS": "gas_distribution",
+    "OILINDIA.NS": "upstream_exploration",
+    "ASIANPAINT.NS": "paints",
+    "INDIGO.NS": "aviation",
+}
 
 TIMELINE_ENTRIES = [
     ("TODAY", "Markets react immediately to the supply disruption."),
@@ -118,6 +141,20 @@ BUSINESS_DESCRIPTIONS = {
     "GAIL.NS": "Transports and markets natural gas via pipeline infrastructure.",
     "IDEA.NS": "Operates a pan-India mobile telecom network for voice and data.",
     "CHENNPETRO.NS": "A standalone refiner turning crude into fuels; crude is its single biggest input cost.",
+    "OILINDIA.NS": "Explores and produces crude oil and natural gas in India's northeast.",
+    "ASIANPAINT.NS": "India's largest paints maker; crude-derived inputs are a major cost line.",
+    "INDIGO.NS": "India's largest airline; jet fuel is its single biggest operating cost.",
+}
+
+# Alert.event_type per DEMO_ROWS ticker -- keys the spec §5 ripple template
+# archetype (crude alert renders the curated producer/refiner/by-product/
+# heavy-user sections).
+EVENT_TYPES = {
+    "RELIANCE.NS": "crude_oil",
+    "TCS.NS": "earnings",
+    "SOMETEXTILE.NS": "trade_policy",
+    "ONGC.NS": "crude_oil",
+    "IDEA.NS": "corporate_action",
 }
 
 
@@ -161,6 +198,7 @@ def main() -> None:
                 company = Company(
                     ticker=ticker, name=name, sector=sector, index_tier="NIFTY50", market_cap=50000.0,
                     business_desc=BUSINESS_DESCRIPTIONS.get(ticker),
+                    sub_sector=SUB_SECTORS.get(ticker),
                 )
                 session.add(company)
                 session.commit()
@@ -169,11 +207,14 @@ def main() -> None:
                 # was created by an earlier run before these fields existed)
                 # -- re-running this script must be able to fix that, not
                 # leave it stale. market_cap drives the cap-tier tag on
-                # every stock row (spec v2 §4.5).
+                # every stock row (spec v2 §4.5); sub_sector drives the
+                # spec §5 template's producer/refiner split.
                 if company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
                     company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
                 if company.market_cap is None:
                     company.market_cap = 50000.0
+                if ticker in SUB_SECTORS:
+                    company.sub_sector = SUB_SECTORS[ticker]
                 session.commit()
 
             article = Article(
@@ -191,6 +232,7 @@ def main() -> None:
                 article_id=article.id, category=sector if sector != "textiles" else "other",
                 created_at=now - timedelta(minutes=5 * i), summary_short=summary_short,
                 summary_long=f"{summary_short}. {why}",
+                event_type=EVENT_TYPES.get(ticker),
                 # Rumor/denial demo row -> UNCONFIRMED verdict (spec v2 §4.3).
                 is_unconfirmed=1 if ticker == "IDEA.NS" else 0,
             )
@@ -227,15 +269,19 @@ def main() -> None:
                 company = Company(
                     ticker=ticker, name=name, sector=sector, index_tier="OTHER", market_cap=market_cap,
                     business_desc=BUSINESS_DESCRIPTIONS.get(ticker),
+                    sub_sector=SUB_SECTORS.get(ticker),
                 )
                 session.add(company)
                 session.commit()
             else:
                 # Keep companion rows current on re-run (market_cap drives the
-                # MICRO demo path; business_desc drives the (i) popup).
+                # MICRO demo path; business_desc drives the (i) popup;
+                # sub_sector drives the spec §5 template split).
                 company.market_cap = market_cap
                 if company.business_desc is None and ticker in BUSINESS_DESCRIPTIONS:
                     company.business_desc = BUSINESS_DESCRIPTIONS[ticker]
+                if ticker in SUB_SECTORS:
+                    company.sub_sector = SUB_SECTORS[ticker]
                 session.commit()
 
             session.add(AlertCompany(

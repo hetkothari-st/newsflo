@@ -16,6 +16,7 @@ from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import compute_cap_tiers
 from app.market.liquidity import compute_liquidity_tier
+from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
 from app.models import Alert, Company, ImpactEdge, MarketMove
 from app.reasoning.ripple_relationship import is_exposure_only, relation_to_ripple_relationship
 
@@ -98,19 +99,20 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             if company_id is not None and company_id not in relation_by_company_id:
                 relation_by_company_id[company_id] = edge.relation
 
-    grouped: dict[str, list[dict]] = {}
+    rows_flat: list[dict] = []
+    contexts: list[RowContext] = []
+    bucket_keys: list[str] = []
     for alert_company in alert.companies:
         company = alert_company.company
         move = moves_by_company_id.get(alert_company.company_id)
         status = move.measurement_status if move else None
         exposure_only = is_exposure_only(status)
 
+        engine_relation = relation_by_company_id.get(alert_company.company_id, "")
         if alert_company.impact_level == "direct":
             relationship = "DIRECT"
         else:
-            relationship = relation_to_ripple_relationship(
-                relation_by_company_id.get(alert_company.company_id, "")
-            )
+            relationship = relation_to_ripple_relationship(engine_relation)
 
         row = {
             # For serve-time overlays keyed to the AlertCompany row (e.g.
@@ -134,14 +136,61 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         if not exposure_only and move is not None and move.excess_move_pct is not None:
             row["excess_move_pct"] = move.excess_move_pct
             row["intensity"] = _intensity_for_company_move(session, company, move, breadth_score)
-        grouped.setdefault(relationship, []).append(row)
+        rows_flat.append(row)
+        bucket_keys.append(relationship)
+        contexts.append(RowContext(
+            sector=company.sector,
+            sub_sector=company.sub_sector,
+            relation=engine_relation,
+            direction=alert_company.direction,
+            impact_level=alert_company.impact_level,
+        ))
+
+    def _sorted(rows: list[dict]) -> list[dict]:
+        return sorted(rows, key=lambda r: r["intensity"]["score"] if r["intensity"] else -1, reverse=True)
 
     layers = []
+    remaining_indices = list(range(len(rows_flat)))
+
+    # Curated archetype template first (spec §5): named sections like
+    # "Losers — producers" / "Winners — refiners & marketers" for the news
+    # categories a template covers; companies the template doesn't claim
+    # fall through to the generic relationship buckets below.
+    template = template_layers_for(alert.event_type)
+    if template is not None:
+        assigned, unmatched = assign_to_template(template, contexts)
+        for layer_index, layer_def in enumerate(template):
+            row_indices = assigned.get(layer_index)
+            if not row_indices:
+                continue
+            rows = _sorted([rows_flat[i] for i in row_indices])
+            icon = _layer_icon(rows)
+            if layer_def.fixed_title is not None:
+                title = layer_def.fixed_title
+            elif icon == "win":
+                title = f"Winners — {layer_def.label}"
+            elif icon == "lose":
+                title = f"Losers — {layer_def.label}"
+            else:
+                title = f"Mixed — {layer_def.label}"
+            layers.append({
+                "title": title,
+                "relationship": layer_def.relationship,
+                "icon": icon,
+                "note": layer_def.note,
+                "rows": rows,
+            })
+        remaining_indices = unmatched
+
+    grouped: dict[str, list[dict]] = {}
+    for row_index in remaining_indices:
+        grouped.setdefault(bucket_keys[row_index], []).append(rows_flat[row_index])
+
     for relationship in _LAYER_ORDER:
         rows = grouped.pop(relationship, None)
         if not rows:
             continue
-        rows.sort(key=lambda r: r["intensity"]["score"] if r["intensity"] else -1, reverse=True)
+        rows = _sorted(rows)
         icon = _layer_icon(rows)
         layers.append({
             "title": _layer_title(relationship, icon),
