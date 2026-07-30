@@ -9,6 +9,8 @@ direction, never stored as a fixed per-stock attribute (spec §11). A
 company with no real measured move renders as a flagged exposure row --
 no number, no score, never fabricated.
 """
+import json
+
 from sqlalchemy.orm import Session
 
 from app.companies.branding import logo_url
@@ -17,7 +19,7 @@ from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import compute_cap_tiers
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
-from app.models import Alert, Company, ImpactEdge, MarketMove
+from app.models import Alert, AlertRippleLayer, Company, ImpactEdge, MarketMove
 from app.reasoning.ripple_relationship import is_exposure_only, relation_to_ripple_relationship
 
 # Layer-title label per relationship bucket (sentence case, jargon-free --
@@ -152,11 +154,47 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     layers = []
     remaining_indices = list(range(len(rows_flat)))
 
-    # Curated archetype template first (spec §5): named sections like
-    # "Losers — producers" / "Winners — refiners & marketers" for the news
-    # categories a template covers; companies the template doesn't claim
-    # fall through to the generic relationship buckets below.
-    template = template_layers_for(alert.event_type)
+    # 1) Story-adaptive sections generated per alert by the LLM refinement
+    # layer (spec §5: the app adapts sections to the news -- reusing
+    # archetype shapes when they fit, inventing new ones when they don't).
+    # Zero persisted rows -> fall through to the static archetype template.
+    generated = (
+        session.query(AlertRippleLayer)
+        .filter_by(alert_id=alert.id)
+        .order_by(AlertRippleLayer.position.asc())
+        .all()
+    )
+    if generated:
+        index_by_ticker = {rows_flat[i]["ticker"]: i for i in remaining_indices}
+        claimed: set[int] = set()
+        for gen_layer in generated:
+            row_indices = [
+                index_by_ticker[t]
+                for t in json.loads(gen_layer.tickers_json)
+                if t in index_by_ticker and index_by_ticker[t] not in claimed
+            ]
+            if not row_indices:
+                continue
+            claimed.update(row_indices)
+            rows = _sorted([rows_flat[i] for i in row_indices])
+            layers.append({
+                "title": gen_layer.title,
+                "relationship": gen_layer.relationship,
+                "icon": _layer_icon(rows),
+                "note": gen_layer.note,
+                "rows": rows,
+            })
+        remaining_indices = [i for i in remaining_indices if i not in claimed]
+        # Anything the generated sections didn't claim falls through to the
+        # generic buckets below -- never dropped. The static template is
+        # skipped: mixing two section systems on one card reads as noise.
+        template = None
+    else:
+        # 2) Static archetype template (spec §5): named sections like
+        # "Losers — producers" / "Winners — refiners & marketers" for the
+        # news categories a template covers; companies the template doesn't
+        # claim fall through to the generic relationship buckets below.
+        template = template_layers_for(alert.event_type)
     if template is not None:
         assigned, unmatched = assign_to_template(template, contexts)
         for layer_index, layer_def in enumerate(template):

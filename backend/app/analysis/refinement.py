@@ -12,7 +12,7 @@ import json
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
-from app.models import Company, TimelineEffect
+from app.models import AlertRippleLayer, Company, TimelineEffect
 from app.reasoning.compliance import validate_or_none
 
 EVENT_SUMMARY_FRAMING = (
@@ -255,6 +255,139 @@ def generate_impact_whys(client, title: str, content: str, companies: list[dict]
     return result
 
 
+# Spec §5 standard relationship types -- the closed vocabulary a generated
+# section's tag must come from (the tag renders in the layer header).
+RIPPLE_RELATIONSHIP_TYPES = [
+    "DIRECT", "SELLER", "USER", "SUPPLIER", "CUSTOMER", "BYPRODUCT", "SUBSTITUTE",
+    "COMPETITOR", "PROTECTED", "EXPOSED", "RATE_BENEFICIARY", "RATE_SENSITIVE",
+    "DEFENSIVE_ROTATION", "SECTOR_WIDE",
+]
+
+RIPPLE_LAYERS_FRAMING = (
+    "Group this news event's affected companies into the sections a "
+    "market-impact card should show -- adapt the sections to THIS story. "
+    "Classic shapes to reuse WHEN they fit: commodity news often splits "
+    "into producers / refiners & marketers / by-products / heavy users; "
+    "rate news into banks vs NBFCs / rate-sensitive demand / defensive "
+    "rotation; tariff news into protected makers / exposed users / "
+    "suppliers / substitutes. Invent a different, story-specific section "
+    "when none of those describes the real mechanism. Each section: a "
+    "title like 'Winners — <short label>' / 'Losers — <short label>' (or "
+    "'Direct — <label>' / a plain label for mixed or rotation sections), "
+    "one relationship type from the allowed list, a one-line plain-"
+    "language note explaining why this GROUP moves together, and the "
+    "tickers that belong to it (every ticker exactly once, only from the "
+    "provided list). Sentence case, no jargon, no percentages, no "
+    "buy/sell/hold language."
+)
+
+
+def build_ripple_layers_tool() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "record_ripple_layers",
+            "description": "Group the affected companies into story-specific card sections.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "relationship": {"type": "string", "enum": RIPPLE_RELATIONSHIP_TYPES},
+                                "note": {"type": "string"},
+                                "tickers": {"type": "array", "items": {"type": "string"}},
+                            },
+                            "required": ["title", "relationship", "note", "tickers"],
+                        },
+                    },
+                },
+                "required": ["layers"],
+            },
+        },
+    }
+
+
+def generate_ripple_layers(client, title: str, content: str, companies: list[dict]) -> list[dict]:
+    """Story-adaptive card-back sections (spec §5): returns
+    [{"title", "relationship", "note", "tickers"}, ...] or [] on any
+    failure / empty result -- read time then falls back to the static
+    archetype template and generic buckets. Validation: relationship must
+    be in the closed vocabulary (schema-enforced, re-checked), tickers
+    are filtered to the alert's own affected set, a ticker claimed twice
+    keeps only its first section, and a layer left with no tickers is
+    dropped. Companies NOT claimed by any layer are handled at read time
+    (appended to fallback buckets), never invented here.
+
+    ``companies`` is [{"ticker", "name", "sector", "sub_sector",
+    "direction", "why"}, ...] -- the real analyzed attributes the model
+    groups by.
+    """
+    if not companies:
+        return []
+    lines = "\n".join(
+        f"- {c['ticker']}: {c['name']} | sector {c['sector']}"
+        + (f"/{c['sub_sector']}" if c.get("sub_sector") else "")
+        + f" | {c['direction']}"
+        + (f" | {c['why']}" if c.get("why") else "")
+        for c in companies
+    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": (
+            f"{RIPPLE_LAYERS_FRAMING}\n\nTitle: {title}\n\nContent: {content}\n\n"
+            f"Affected companies:\n{lines}"
+        )},
+    ]
+    tool = build_ripple_layers_tool()
+
+    def _call(model: str):
+        return client.chat.completions.create(
+            model=model, max_tokens=1536, tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_ripple_layers"}},
+            messages=messages,
+        )
+
+    try:
+        try:
+            response = _call(MODEL)
+        except RateLimitError:
+            response = _call(FALLBACK_MODEL)
+        message = response.choices[0].message
+        tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_ripple_layers"), None)
+        if tool_call is None:
+            return []
+        arguments = json.loads(tool_call.function.arguments)
+
+        known_tickers = {c["ticker"] for c in companies}
+        seen: set[str] = set()
+        validated = []
+        for layer in arguments.get("layers", []):
+            if layer.get("relationship") not in RIPPLE_RELATIONSHIP_TYPES:
+                continue
+            layer_title = validate_or_none(layer.get("title"))
+            note = validate_or_none(layer.get("note"))
+            if not layer_title or not note:
+                continue
+            tickers = [
+                t for t in layer.get("tickers", [])
+                if t in known_tickers and t not in seen
+            ]
+            if not tickers:
+                continue
+            seen.update(tickers)
+            validated.append({
+                "title": layer_title, "relationship": layer["relationship"],
+                "note": note, "tickers": tickers,
+            })
+        return validated
+    except Exception:
+        return []
+
+
 HORIZONS = ["TODAY", "DAYS", "WEEKS", "MONTHS", "QUARTERS"]
 
 TIMELINE_FRAMING = (
@@ -413,3 +546,23 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
 
     for effect in generate_timeline_effects(client, article.title, text):
         session.add(TimelineEffect(alert_id=alert.id, horizon=effect["horizon"], description=effect["description"]))
+
+    # Story-adaptive card-back sections (spec §5): every affected company
+    # (measured or exposure-only) is offered to the model for grouping --
+    # exposure rows still belong in a section, they just carry no number.
+    layer_companies = []
+    for ac in alert_companies:
+        company = session.get(Company, ac.company_id)
+        if company is None:
+            continue
+        layer_companies.append({
+            "ticker": company.ticker, "name": company.name,
+            "sector": company.sector, "sub_sector": company.sub_sector,
+            "direction": ac.direction, "why": ac.why,
+        })
+    for position, layer in enumerate(generate_ripple_layers(client, article.title, text, layer_companies)):
+        session.add(AlertRippleLayer(
+            alert_id=alert.id, position=position,
+            title=layer["title"], relationship=layer["relationship"],
+            note=layer["note"], tickers_json=json.dumps(layer["tickers"]),
+        ))

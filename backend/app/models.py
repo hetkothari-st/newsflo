@@ -334,6 +334,35 @@ class TimelineEffect(Base):
     alert = relationship("Alert")
 
 
+class AlertRippleLayer(Base):
+    """One story-specific card-back section for an alert (spec v2 §5) --
+    generated per alert by the LLM refinement layer, which adapts the
+    archetype patterns to THIS story (and invents new section shapes when
+    the news doesn't fit an archetype) instead of forcing a fixed
+    template onto every event. Zero rows for an alert means refinement
+    never produced layers (or predates this feature) -- read time falls
+    back to the static archetype template, then to generic relationship
+    buckets. tickers_json is a JSON-encoded, validated list of this
+    alert's own affected tickers; a ticker no layer claims is appended to
+    the fallback buckets at read time -- every company always renders
+    exactly once, never dropped, never duplicated."""
+    __tablename__ = "alert_ripple_layers"
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    position = Column(Integer, nullable=False)
+    title = Column(String, nullable=False)  # e.g. "Winners — refiners & marketers"
+    # NOTE: the ORM relationship to Alert is declared BEFORE this column --
+    # the column is named `relationship` (spec §3.1 RippleLayerDef) and
+    # would otherwise shadow sqlalchemy.orm.relationship inside this class
+    # body.
+    alert = relationship("Alert")
+    relationship = Column(String, nullable=False)  # spec §5 standard relationship types
+    note = Column(Text, nullable=False)
+    tickers_json = Column(Text, nullable=False)  # JSON-encoded list[str]
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class FinancialSnapshot(Base):
     """Cached price/return data for a ticker, refreshed on a TTL by
     app.reasoning.financial_context.get_or_fetch_financial_snapshot -- avoids
