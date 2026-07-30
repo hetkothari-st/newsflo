@@ -134,5 +134,6 @@ def get_directory(
             "name": company.name,
             "sector": company.sector,
             "cap_tier": tier,
+            "logo_url": logo_url(company),
         })
     return results

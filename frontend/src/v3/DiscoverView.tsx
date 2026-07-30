@@ -4,6 +4,7 @@
    never "best to buy". */
 import { useEffect, useState } from 'react';
 import { getDiscovery, type DiscoveryEntry, type DiscoveryTab } from './api';
+import CompanyLogo from './CompanyLogo';
 import { capClass, fmtPct, liqShort, moveColor } from './format';
 import { useAuth } from '../lib/auth';
 
@@ -106,6 +107,12 @@ export default function DiscoverView({
             onClick={() => onOpenDeepDive(entry.ticker, entry.alert_id)}
           >
             <div className="dc-top">
+              <CompanyLogo
+                logoUrl={entry.logo_url}
+                ticker={entry.ticker}
+                sector={entry.sector}
+                size="sm"
+              />
               <span className="dc-name">{entry.name}</span>
               <span className="dc-metric" style={{ color: metric.color }}>
                 {metric.text}

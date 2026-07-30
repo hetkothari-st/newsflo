@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getPortfolioOverlay, type PortfolioOverlay } from './api';
+import CompanyLogo from './CompanyLogo';
 import { useAuth } from '../lib/auth';
 
 export default function PortfolioView({
@@ -66,6 +67,7 @@ export default function PortfolioView({
               onClick={() => onOpenDeepDive(holding.ticker, holding.affected_alert_id ?? undefined)}
             >
               <span className="odot" />
+              <CompanyLogo logoUrl={holding.logo_url} ticker={holding.ticker} size="sm" />
               <div>
                 <div className="de-name">{holding.name}</div>
                 <div className="de-tk">

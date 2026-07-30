@@ -56,6 +56,18 @@ function LayerBlock({
   );
 }
 
+function NewsImage({ src }: { src: string }) {
+  // Hidden entirely on load failure -- a broken-image icon must never
+  // reach the card (CLAUDE.md: no silent failures on the canvas).
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <div className="nimg">
+      <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} />
+    </div>
+  );
+}
+
 function TimelineBlock({ timeline }: { timeline: TimelineEntry[] }) {
   if (timeline.length === 0) {
     return <p className="empty">No timeline analysis for this story yet.</p>;
@@ -114,6 +126,7 @@ function Card({
           </div>
           <div className="headline">{alert.article.title}</div>
           <div className="gist">{alert.summary_short ?? alert.summary_long ?? ''}</div>
+          {alert.article.image_url !== null && <NewsImage src={alert.article.image_url} />}
           <div className="ffoot">
             <div className="meta">
               <span>{alert.category.replace(/_/g, ' ')}</span>

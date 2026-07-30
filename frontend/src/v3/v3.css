@@ -216,3 +216,13 @@
 
 /* empty / loading states (not in the prototype -- real data can be absent) */
 .nf3 .empty { padding: 40px 24px; text-align: center; font-size: 12px; color: var(--ink3); line-height: 1.6; }
+
+/* ---------- COMPANY LOGOS ---------- */
+.nf3 .clogo { border-radius: 50%; overflow: hidden; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: var(--s0); border: 0.5px solid var(--border); color: #fff; font-family: var(--mono); font-weight: 600; }
+.nf3 .clogo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.nf3 .clogo-sm { width: 18px; height: 18px; font-size: 7px; }
+.nf3 .clogo-md { width: 28px; height: 28px; font-size: 10px; }
+
+/* ---------- NEWS IMAGE (card front) ---------- */
+.nf3 .nimg { margin: 2px 0 0; border-radius: 11px; overflow: hidden; border: 0.5px solid var(--border); flex-shrink: 1; min-height: 0; }
+.nf3 .nimg img { width: 100%; height: 100%; max-height: 170px; object-fit: cover; display: block; }

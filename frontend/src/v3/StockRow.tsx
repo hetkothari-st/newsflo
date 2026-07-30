@@ -3,6 +3,7 @@
    dive; tapping (i) -> business popup (stop propagation so the row
    doesn't also open). Low-delivery warning fires below the row. */
 import type { LayerRow } from './api';
+import CompanyLogo from './CompanyLogo';
 import { bandClass, capClass, fmtPct, isLowDelivery, liqShort, moveColor } from './format';
 
 export default function StockRow({
@@ -18,6 +19,7 @@ export default function StockRow({
   return (
     <div>
       <div className="srow" onClick={() => onOpenDeepDive(row.ticker)} data-testid={`srow-${row.ticker}`}>
+        <CompanyLogo logoUrl={row.logo_url} ticker={row.ticker} sector={row.sector} size="sm" />
         <span className="tkr">{row.ticker}</span>
         <span className={`tag ${capClass(row.cap_tier)}`}>{row.cap_tier ?? '—'}</span>
         {row.liquidity_tier !== null && (

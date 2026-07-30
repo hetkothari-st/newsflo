@@ -13,7 +13,7 @@ const FEED_ALERT = {
   summary_long: 'Long summary.',
   article: {
     id: 1,
-    image_url: null,
+    image_url: 'https://example.com/news.jpg',
     title: 'Crude oil slips below $70 as OPEC+ signals higher output',
     url: 'https://example.com/a',
     source: 'Reuters',
@@ -163,6 +163,9 @@ describe('Shell card feed', () => {
     expect(screen.getByText('Cheaper crude helps users, hurts producers.')).toBeInTheDocument();
     expect(screen.getByText('held')).toBeInTheDocument();
     expect(screen.getByText("See who's affected")).toBeInTheDocument();
+    // News image renders on the card front when the article has one.
+    const front = screen.getByTestId('front-7');
+    expect(front.querySelector('.nimg img')).toHaveAttribute('src', 'https://example.com/news.jpg');
   });
 
   it('flips to the layered ripple on card tap and shows stock rows with tags + warnings', async () => {
@@ -177,6 +180,11 @@ describe('Shell card feed', () => {
     expect(within(screen.getByTestId('srow-CHENNPETRO.NS')).getByText('MICRO')).toBeInTheDocument();
     // Low-delivery warning fires for the 38% delivery micro cap.
     expect(screen.getByText(/38% delivery — much of this move was intraday/i)).toBeInTheDocument();
+    // Company logo (initials fallback -- no logo art in the fixture) on
+    // every stock row.
+    expect(within(screen.getByTestId('srow-ONGC.NS')).getByTestId('clogo-ONGC.NS')).toHaveTextContent(
+      'ON',
+    );
     // Compliance footer (spec §9).
     expect(
       screen.getByText(/intensity measures how hard the news hit — not whether a stock is good to own/i),

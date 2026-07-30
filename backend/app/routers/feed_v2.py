@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.companies.branding import logo_url
 from app.ist_time import day_utc_window, today_ist
 from app.market.alert_measurement import compute_alert_measurement
 from app.market.discovery import (
@@ -154,6 +155,7 @@ def get_portfolio_overlay(
             "ticker": company.ticker,
             "name": company.name,
             "quantity": holding.quantity,
+            "logo_url": logo_url(company),
             "affected_alert_id": alert.id if alert else None,
             "affected_headline": (alert.summary_short or alert.article.title) if alert else None,
         })

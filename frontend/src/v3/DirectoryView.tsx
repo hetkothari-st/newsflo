@@ -2,6 +2,7 @@
    filter by cap tier and sector, cap-tag legend in the header. */
 import { useEffect, useMemo, useState } from 'react';
 import { getDirectory, type CapTier, type DirectoryCompany } from './api';
+import CompanyLogo from './CompanyLogo';
 import { capClass } from './format';
 import { useAuth } from '../lib/auth';
 
@@ -96,6 +97,12 @@ export default function DirectoryView({
       )}
       {filtered.map((company) => (
         <div className="direntry" key={company.ticker} onClick={() => onOpenDeepDive(company.ticker)}>
+          <CompanyLogo
+            logoUrl={company.logo_url}
+            ticker={company.ticker}
+            sector={company.sector}
+            size="sm"
+          />
           <div>
             <div className="de-name">{company.name}</div>
             <div className="de-tk">

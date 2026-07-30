@@ -8,6 +8,7 @@ import {
   type LayerRow,
   type StockDeepDive,
 } from './api';
+import CompanyLogo from './CompanyLogo';
 import {
   bandClass,
   capClass,
@@ -25,6 +26,7 @@ export interface InfoSheetData {
   ticker: string;
   sector: string;
   businessDesc: string | null;
+  logoUrl: string | null;
 }
 
 export type SheetRequest =
@@ -36,7 +38,10 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
     <>
       <div className="ddh">
         <div>
-          <div className="ddn">{info.name}</div>
+          <div className="ddn">
+            <CompanyLogo logoUrl={info.logoUrl} ticker={info.ticker} sector={info.sector} size="md" />
+            {info.name}
+          </div>
           <div className="dds">
             {info.ticker} · {info.sector}
           </div>
@@ -74,6 +79,7 @@ function PeerRow({ peer, onOpen }: { peer: LayerRow; onOpen: (ticker: string) =>
   const score = peer.intensity?.score ?? null;
   return (
     <div className="peer" onClick={() => onOpen(peer.ticker)}>
+      <CompanyLogo logoUrl={peer.logo_url} ticker={peer.ticker} sector={peer.sector} size="sm" />
       <span className="tkr">{peer.ticker}</span>
       <span className={`tag ${capClass(peer.cap_tier)}`}>{peer.cap_tier ?? '—'}</span>
       {score != null ? (
@@ -143,6 +149,7 @@ export function DeepDiveSheetContent({
       <div className="ddh">
         <div>
           <div className="ddn">
+            <CompanyLogo logoUrl={data.logo_url} ticker={data.ticker} sector={data.sector} size="md" />
             {data.name} <span className={`tag ${capClass(data.cap_tier)}`}>{data.cap_tier ?? '—'}</span>
           </div>
           <div className="dds">

@@ -137,12 +137,14 @@ export interface DirectoryCompany {
   name: string;
   sector: string;
   cap_tier: CapTier | null;
+  logo_url: string | null;
 }
 
 export interface PortfolioHolding {
   ticker: string;
   name: string;
   quantity: number;
+  logo_url: string | null;
   affected_alert_id: number | null;
   affected_headline: string | null;
 }

@@ -51,6 +51,7 @@ export default function Shell() {
         ticker: row.ticker,
         sector: row.sector,
         businessDesc: row.business_desc,
+        logoUrl: row.logo_url,
       },
     });
   };

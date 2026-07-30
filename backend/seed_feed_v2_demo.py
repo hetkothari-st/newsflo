@@ -179,6 +179,10 @@ def main() -> None:
             article = Article(
                 source="demo", url=f"{URL_MARKER}{i}", title=headline, content=headline,
                 published_at=now - timedelta(minutes=5 * i),
+                # Stable demo image (seeded picsum) so the card front's news
+                # image renders locally -- production articles get a real
+                # og:image via the ingestion scraper.
+                image_url=f"https://picsum.photos/seed/newsflo-{i}/800/400",
             )
             session.add(article)
             session.commit()
