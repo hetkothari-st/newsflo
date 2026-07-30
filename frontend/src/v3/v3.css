@@ -64,6 +64,14 @@
 .nf3 .card { width: 100%; perspective: 1400px; }
 .nf3 .flip { position: relative; width: 100%; height: 100%; transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1); transform-style: preserve-3d; }
 .nf3 .card.flipped .flip { transform: rotateY(180deg); }
+/* Once the flip animation has finished, drop every 3D transform -- text
+   on a rotated layer under perspective gets rasterized through the
+   transform and renders visibly blurry. The settled back face is a flat,
+   untransformed layer with crisp subpixel text; the transforms come back
+   just before un-flipping so the reverse animation still plays. */
+.nf3 .card.flipped.settled .flip { transition: none; transform: none; }
+.nf3 .card.flipped.settled .face.front { visibility: hidden; }
+.nf3 .card.flipped.settled .face.back { transform: none; }
 .nf3 .face { position: absolute; inset: 0; backface-visibility: hidden; background: var(--s1); border: 0.5px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
 .nf3 .back { transform: rotateY(180deg); }
 .nf3 .front { padding: 20px; }

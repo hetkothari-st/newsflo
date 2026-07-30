@@ -116,6 +116,19 @@ function Card({
 }) {
   const { t } = useLanguage();
   const [backTab, setBackTab] = useState<'ripple' | 'timeline'>('ripple');
+  // True once the flip animation has finished -- drops the 3D transforms
+  // so the back face renders as a flat layer with crisp text (see
+  // .card.flipped.settled in v3.css). Falls back to a timer where
+  // transitionend doesn't fire (test environments, reduced motion).
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!flipped) {
+      setSettled(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSettled(true), 550);
+    return () => window.clearTimeout(timer);
+  }, [flipped]);
   // 'story' -> the article's own photo; 'category' -> curated thematic
   // artwork for publishers that block photo scraping (or when the story
   // photo fails to load); 'none' -> clean no-image layout (art failed too).
@@ -131,8 +144,13 @@ function Card({
         : null;
   const showImage = imageSrc !== null;
   return (
-    <div className={`card ${flipped ? 'flipped' : ''}`} data-card={alert.id}>
-      <div className="flip">
+    <div className={`card ${flipped ? 'flipped' : ''} ${settled ? 'settled' : ''}`} data-card={alert.id}>
+      <div
+        className="flip"
+        onTransitionEnd={(event) => {
+          if (event.propertyName === 'transform' && flipped) setSettled(true);
+        }}
+      >
         <div
           className={`face front ${showImage ? 'has-img' : ''}`}
           onClick={onFlip}
