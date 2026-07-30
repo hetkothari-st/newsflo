@@ -15,6 +15,7 @@ import {
   type RippleLayer,
   type TimelineEntry,
 } from './api';
+import { categoryArtUrl } from './categoryArt';
 import StockRow from './StockRow';
 import {
   arrow,
@@ -61,7 +62,7 @@ function NewsImage({ src, onFail }: { src: string; onFail: () => void }) {
   // drops its has-img layout) -- a broken-image icon must never reach
   // the card (CLAUDE.md: no silent failures on the canvas).
   return (
-    <div className="nimg">
+    <div className="nimg" data-testid="news-image">
       <img src={src} alt="" loading="lazy" onError={onFail} />
     </div>
   );
@@ -107,9 +108,20 @@ function Card({
   onOpenInfo: (row: LayerRow) => void;
 }) {
   const [backTab, setBackTab] = useState<'ripple' | 'timeline'>('ripple');
-  const [imageFailed, setImageFailed] = useState(false);
+  // 'story' -> the article's own photo; 'category' -> curated thematic
+  // artwork for publishers that block photo scraping (or when the story
+  // photo fails to load); 'none' -> clean no-image layout (art failed too).
+  const [imageStage, setImageStage] = useState<'story' | 'category' | 'none'>(
+    alert.article.image_url !== null ? 'story' : 'category',
+  );
   const dir = moveDir(alert.excess_move_pct, alert.verdict);
-  const showImage = alert.article.image_url !== null && !imageFailed;
+  const imageSrc =
+    imageStage === 'story'
+      ? alert.article.image_url
+      : imageStage === 'category'
+        ? categoryArtUrl(alert.category)
+        : null;
+  const showImage = imageSrc !== null;
   return (
     <div className={`card ${flipped ? 'flipped' : ''}`} data-card={alert.id}>
       <div className="flip">
@@ -132,7 +144,11 @@ function Card({
           <div className="headline">{alert.article.title}</div>
           <div className="gist">{alert.summary_short ?? alert.summary_long ?? ''}</div>
           {showImage && (
-            <NewsImage src={alert.article.image_url!} onFail={() => setImageFailed(true)} />
+            <NewsImage
+              key={imageSrc!}
+              src={imageSrc!}
+              onFail={() => setImageStage(imageStage === 'story' ? 'category' : 'none')}
+            />
           )}
           <div className="ffoot">
             <div className="meta">

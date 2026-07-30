@@ -20,9 +20,44 @@ _HEADERS = {
 _IMAGE_META_PROPS = ("og:image", "twitter:image")
 
 
+def _extract_image(html: str, base_url: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for prop in _IMAGE_META_PROPS:
+        tag = soup.find("meta", attrs={"property": prop}) or soup.find("meta", attrs={"name": prop})
+        content = tag.get("content") if tag else None
+        if content:
+            # Some publishers emit a relative og:image path -- resolve it
+            # against the (post-redirect) page URL so a usable absolute
+            # URL is stored, never a broken relative one.
+            return urljoin(base_url, content)
+    return None
+
+
+def _fetch_impersonated(url: str) -> str | None:
+    """Second attempt with a real-browser TLS fingerprint (curl_cffi
+    Chrome impersonation) -- Reuters and Bloomberg reject plain HTTP
+    clients by TLS fingerprint, not by User-Agent header, and serve their
+    real story photos to an impersonated client (verified live). Same
+    never-raise contract; also degrades to None when curl_cffi isn't
+    installed."""
+    try:
+        from curl_cffi import requests as cffi_requests
+
+        response = cffi_requests.get(url, impersonate="chrome", timeout=_TIMEOUT * 2)
+        if response.status_code >= 400:
+            return None
+        return _extract_image(response.text, str(getattr(response, "url", None) or url))
+    except Exception:
+        return None
+
+
 def fetch_og_image(url: str) -> str | None:
     """Fetch the article page and return its Open Graph / Twitter Card image
     URL, or ``None`` on any failure (timeout, non-2xx, no such tag).
+
+    Plain httpx first (cheap); on failure, one retry with a browser TLS
+    fingerprint via curl_cffi (see _fetch_impersonated) -- that second
+    attempt is what gets Reuters/Bloomberg story photos.
 
     A missing image is not an error -- see the try/except-swallow convention
     in outcomes/price_fetcher.py -- a single article's failed fetch must
@@ -31,18 +66,9 @@ def fetch_og_image(url: str) -> str | None:
     try:
         response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True, headers=_HEADERS)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        for prop in _IMAGE_META_PROPS:
-            tag = soup.find("meta", attrs={"property": prop}) or soup.find("meta", attrs={"name": prop})
-            content = tag.get("content") if tag else None
-            if content:
-                # Some publishers emit a relative og:image path -- resolve it
-                # against the (post-redirect) page URL so a usable absolute
-                # URL is stored, never a broken relative one. Fall back to
-                # the request URL when the response object carries none
-                # (stubbed responses in tests).
-                base = str(getattr(response, "url", None) or url)
-                return urljoin(base, content)
-        return None
+        found = _extract_image(response.text, str(getattr(response, "url", None) or url))
+        if found:
+            return found
     except Exception:
-        return None
+        pass
+    return _fetch_impersonated(url)

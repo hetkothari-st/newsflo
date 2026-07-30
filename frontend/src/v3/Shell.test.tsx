@@ -168,6 +168,25 @@ describe('Shell card feed', () => {
     expect(front.querySelector('.nimg img')).toHaveAttribute('src', 'https://example.com/news.jpg');
   });
 
+  it('falls back to category artwork when the article has no photo', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        const body =
+          url.match(/\/api\/feed-v2$/) !== null
+            ? [{ ...FEED_ALERT, article: { ...FEED_ALERT.article, image_url: null } }]
+            : [];
+        return Promise.resolve({ ok: true, status: 200, json: async () => body } as unknown as Response);
+      }),
+    );
+    renderShell();
+    const front = await screen.findByTestId('front-7');
+    // Curated thematic art for the alert's category (oil_gas), not the
+    // story's own photo -- publishers that block scraping still get a visual.
+    expect(front.querySelector('.nimg img')?.getAttribute('src')).toContain('images.unsplash.com');
+  });
+
   it('flips to the layered ripple on card tap and shows stock rows with tags + warnings', async () => {
     renderShell();
     fireEvent.click(await screen.findByTestId('front-7'));

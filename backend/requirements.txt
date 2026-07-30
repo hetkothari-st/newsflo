@@ -29,3 +29,4 @@ torch==2.13.0
 transformers==5.13.1
 ctranslate2==4.8.1
 sentencepiece==0.2.2
+curl_cffi

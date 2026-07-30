@@ -27,19 +27,41 @@ def test_falls_back_to_twitter_image(monkeypatch):
     assert fetch_og_image("https://example.com/a") == "https://example.com/tw.jpg"
 
 
+def _no_impersonation(monkeypatch):
+    # Keep unit tests offline: the impersonated (curl_cffi) second attempt
+    # would otherwise fire real HTTP whenever the plain fetch fails.
+    monkeypatch.setattr("app.ingestion.og_image._fetch_impersonated", lambda url: None)
+
+
 def test_returns_none_when_no_image_meta(monkeypatch):
+    _no_impersonation(monkeypatch)
     html = "<html><head><title>No image here</title></head></html>"
     monkeypatch.setattr("app.ingestion.og_image.httpx.get", _fake_get(html))
     assert fetch_og_image("https://example.com/a") is None
 
 
 def test_returns_none_on_http_error(monkeypatch):
+    _no_impersonation(monkeypatch)
     monkeypatch.setattr("app.ingestion.og_image.httpx.get", _fake_get("", status_code=404))
     assert fetch_og_image("https://example.com/missing") is None
 
 
 def test_returns_none_on_network_exception(monkeypatch):
+    _no_impersonation(monkeypatch)
     def boom(*args, **kwargs):
         raise ConnectionError("no route")
     monkeypatch.setattr("app.ingestion.og_image.httpx.get", boom)
     assert fetch_og_image("https://example.com/down") is None
+
+
+def test_plain_fetch_failure_falls_back_to_impersonated_fetch(monkeypatch):
+    # Reuters/Bloomberg path: plain client rejected, browser-TLS client
+    # served the page.
+    def boom(*args, **kwargs):
+        raise ConnectionError("blocked")
+    monkeypatch.setattr("app.ingestion.og_image.httpx.get", boom)
+    monkeypatch.setattr(
+        "app.ingestion.og_image._fetch_impersonated",
+        lambda url: "https://example.com/real-photo.jpg",
+    )
+    assert fetch_og_image("https://example.com/wire-story") == "https://example.com/real-photo.jpg"
