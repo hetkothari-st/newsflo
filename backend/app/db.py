@@ -63,6 +63,7 @@ _ADDED_COLUMNS = [
     ("market_moves", "avg_traded_value", "FLOAT"),
     ("car_outcomes", "car_series_json", "TEXT"),
     ("alerts", "is_unconfirmed", "INTEGER"),
+    ("alert_company_translations", "why", "TEXT"),
 ]
 
 

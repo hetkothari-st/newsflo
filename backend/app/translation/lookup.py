@@ -2,7 +2,7 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.models import AlertCompanyTranslation, ArticleTranslation, CategoryTranslation
+from app.models import AlertCompanyTranslation, AlertTranslation, ArticleTranslation, CategoryTranslation
 
 # Every lookup here silently falls back to the English value when no
 # translation row exists (not yet translated, or translation permanently
@@ -34,6 +34,40 @@ def bulk_alert_company_translations(
         .all()
     )
     return {row.alert_company_id: (row.rationale, json.loads(row.key_points_json)) for row in rows}
+
+
+def bulk_alert_summaries(
+    session: Session, alert_ids: list[int], lang: str
+) -> dict[int, tuple[str | None, str | None]]:
+    """Translated (summary_short, summary_long) per alert (spec-v2 card
+    gist) -- absent keys / None values fall back to English at the caller."""
+    if lang == "en" or not alert_ids:
+        return {}
+    rows = (
+        session.query(AlertTranslation)
+        .filter(AlertTranslation.alert_id.in_(alert_ids), AlertTranslation.lang == lang)
+        .all()
+    )
+    return {row.alert_id: (row.summary_short, row.summary_long) for row in rows}
+
+
+def bulk_alert_company_whys(
+    session: Session, alert_company_ids: list[int], lang: str
+) -> dict[int, str]:
+    """Translated AlertCompany.why per alert-company (spec-v2 card back's
+    causal one-liner) -- only rows that actually carry a translated why."""
+    if lang == "en" or not alert_company_ids:
+        return {}
+    rows = (
+        session.query(AlertCompanyTranslation)
+        .filter(
+            AlertCompanyTranslation.alert_company_id.in_(alert_company_ids),
+            AlertCompanyTranslation.lang == lang,
+            AlertCompanyTranslation.why.isnot(None),
+        )
+        .all()
+    )
+    return {row.alert_company_id: row.why for row in rows}
 
 
 def bulk_category_labels(session: Session, categories: list[str], lang: str) -> dict[str, str]:

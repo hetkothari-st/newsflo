@@ -102,12 +102,17 @@ def _translate_sentences(sentences: list[str], lang_code: str) -> list[str]:
     return decoded
 
 
-def translate_alert(*, lang: str, title: str, content: str, companies: list[dict]) -> dict:
+def translate_alert(
+    *, lang: str, title: str, content: str, companies: list[dict],
+    summary_short: str = "", summary_long: str = "",
+) -> dict:
     """Same call signature/return shape as groq_translator.translate_alert
-    (`{"title", "content", "companies": [{"rationale", "key_points"}, ...]}`),
-    so job.py can dispatch to either provider without changing its own
-    persistence/validation logic. `companies` is
-    `[{"rationale": str, "key_points": list[str]}, ...]`.
+    (`{"title", "content", "summary_short", "summary_long", "companies":
+    [{"rationale", "key_points", "why"}, ...]}`), so job.py can dispatch
+    to either provider without changing its own persistence/validation
+    logic. `companies` is `[{"rationale": str, "key_points": list[str],
+    "why": str}, ...]` (why/summaries may be empty strings -- returned as
+    empty strings, never fed to the model).
 
     Every field's sentences are flattened into ONE list and translated in a
     single batched CT2 call -- batching (not per-field or per-company calls)
@@ -118,17 +123,23 @@ def translate_alert(*, lang: str, title: str, content: str, companies: list[dict
 
     title_sentences = _split_sentences(title)
     content_sentences = _split_sentences(content)
+    summary_short_sentences = _split_sentences(summary_short) if summary_short else []
+    summary_long_sentences = _split_sentences(summary_long) if summary_long else []
     rationale_sentences_per_company = [_split_sentences(c["rationale"]) for c in companies]
     key_points_per_company = [c["key_points"] for c in companies]  # short fragments already, no split needed
+    why_sentences_per_company = [_split_sentences(c.get("why") or "") if c.get("why") else [] for c in companies]
 
-    # Interleaved per company (rationale sentences then that company's own
-    # key_points) so this matches the take() reassembly order below --
-    # batching all rationales first and all key_points after would zip
-    # translated text onto the wrong field/company.
-    batch: list[str] = [*title_sentences, *content_sentences]
-    for rationale_sentences, key_points in zip(rationale_sentences_per_company, key_points_per_company):
+    # Interleaved per company (rationale sentences, that company's own
+    # key_points, then its why) so this matches the take() reassembly order
+    # below -- batching all rationales first and all key_points after would
+    # zip translated text onto the wrong field/company.
+    batch: list[str] = [*title_sentences, *content_sentences, *summary_short_sentences, *summary_long_sentences]
+    for rationale_sentences, key_points, why_sentences in zip(
+        rationale_sentences_per_company, key_points_per_company, why_sentences_per_company,
+    ):
         batch += rationale_sentences
         batch += key_points
+        batch += why_sentences
 
     translated = _translate_sentences(batch, lang_code)
 
@@ -142,14 +153,29 @@ def translate_alert(*, lang: str, title: str, content: str, companies: list[dict
 
     translated_title = " ".join(take(len(title_sentences)))
     translated_content = " ".join(take(len(content_sentences)))
+    translated_summary_short = " ".join(take(len(summary_short_sentences)))
+    translated_summary_long = " ".join(take(len(summary_long_sentences)))
 
     translated_companies = []
-    for rationale_sentences, key_points in zip(rationale_sentences_per_company, key_points_per_company):
+    for rationale_sentences, key_points, why_sentences in zip(
+        rationale_sentences_per_company, key_points_per_company, why_sentences_per_company,
+    ):
         translated_rationale = " ".join(take(len(rationale_sentences)))
         translated_key_points = take(len(key_points))
-        translated_companies.append({"rationale": translated_rationale, "key_points": translated_key_points})
+        translated_why = " ".join(take(len(why_sentences)))
+        translated_companies.append({
+            "rationale": translated_rationale,
+            "key_points": translated_key_points,
+            "why": translated_why,
+        })
 
-    return {"title": translated_title, "content": translated_content, "companies": translated_companies}
+    return {
+        "title": translated_title,
+        "content": translated_content,
+        "summary_short": translated_summary_short,
+        "summary_long": translated_summary_long,
+        "companies": translated_companies,
+    }
 
 
 def translate_categories(categories: list[str], lang: str) -> list[str]:

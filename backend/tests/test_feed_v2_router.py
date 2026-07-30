@@ -234,3 +234,51 @@ def test_list_feed_v2_includes_article_image_url_null_when_absent(db_session):
     assert response.status_code == 200
     assert response.json()[0]["article"]["image_url"] is None
     app.dependency_overrides.clear()
+
+
+def test_list_feed_v2_date_param_reopens_a_previous_day(db_session):
+    from datetime import timedelta
+
+    from app.ist_time import to_ist_date
+    from app.models import utcnow
+
+    _override_db(db_session)
+    alert = _measured_alert(db_session)
+    # Move the alert two days back -- today's feed must be empty, the
+    # calendar date's feed must contain it (spec: calendar mechanism).
+    alert.created_at = utcnow() - timedelta(days=2)
+    db_session.commit()
+    past_day = to_ist_date(alert.created_at).isoformat()
+    client = TestClient(app)
+
+    assert client.get("/api/feed-v2").json() == []
+    body = client.get(f"/api/feed-v2?date={past_day}").json()
+    assert [a["id"] for a in body] == [alert.id]
+    assert client.get("/api/feed-v2?date=not-a-date").status_code == 400
+    app.dependency_overrides.clear()
+
+
+def test_list_feed_v2_serves_translations_for_lang(db_session):
+    from app.models import AlertTranslation, ArticleTranslation, CategoryTranslation
+
+    _override_db(db_session)
+    alert = _measured_alert(db_session)
+    db_session.add(ArticleTranslation(
+        article_id=alert.article_id, lang="hi", title="हिंदी शीर्षक", content="",
+    ))
+    db_session.add(AlertTranslation(
+        alert_id=alert.id, lang="hi", summary_short="हिंदी सार", summary_long="हिंदी विस्तार",
+    ))
+    db_session.add(CategoryTranslation(category="oil_gas", lang="hi", label="तेल और गैस"))
+    db_session.commit()
+    client = TestClient(app)
+
+    english = client.get("/api/feed-v2").json()[0]
+    assert english["article"]["title"] == "Oil surges"
+    assert english["category_label"] is None  # frontend prettifies the slug
+
+    hindi = client.get("/api/feed-v2?lang=hi").json()[0]
+    assert hindi["article"]["title"] == "हिंदी शीर्षक"
+    assert hindi["summary_short"] == "हिंदी सार"
+    assert hindi["category_label"] == "तेल और गैस"
+    app.dependency_overrides.clear()

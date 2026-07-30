@@ -123,31 +123,41 @@ def build_translation_clients(
 
 
 def _alert_translation_schema(num_companies: int) -> dict:
+    # NOTE on the summary_short/summary_long and per-company `why` fields
+    # (spec-v2 card surfaces): the source value may be an empty string when
+    # the alert predates those fields or the LLM refinement never produced
+    # them -- the model is asked to return an empty string back for an
+    # empty input, and validation skips script checks on empty fields.
     company_schema = {
         "type": "object",
         "properties": {
             "rationale": {"type": "string"},
             "key_points": {"type": "array", "items": {"type": "string"}},
+            "why": {"type": "string"},
         },
-        "required": ["rationale", "key_points"],
+        "required": ["rationale", "key_points", "why"],
     }
     return {
         "type": "function",
         "function": {
             "name": "record_translation",
             "description": (
-                "Record the translation of the article title/content and "
-                "each company's rationale/key_points into ONE target "
-                "language. The `companies` array MUST be in EXACTLY the "
-                "same order as the input -- position i corresponds to "
-                "position i in the input list. Never translate or "
-                "transliterate company names, tickers, or numbers."
+                "Record the translation of the article title/content, the "
+                "event summaries, and each company's rationale/key_points/"
+                "why into ONE target language. The `companies` array MUST "
+                "be in EXACTLY the same order as the input -- position i "
+                "corresponds to position i in the input list. An input "
+                "field given as an empty string is returned as an empty "
+                "string. Never translate or transliterate company names, "
+                "tickers, or numbers."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string"},
                     "content": {"type": "string"},
+                    "summary_short": {"type": "string"},
+                    "summary_long": {"type": "string"},
                     "companies": {
                         "type": "array",
                         "items": company_schema,
@@ -155,13 +165,16 @@ def _alert_translation_schema(num_companies: int) -> dict:
                         "maxItems": num_companies,
                     },
                 },
-                "required": ["title", "content", "companies"],
+                "required": ["title", "content", "summary_short", "summary_long", "companies"],
             },
         },
     }
 
 
-def translate_alert(client, *, lang: str, title: str, content: str, companies: list[dict]) -> dict:
+def translate_alert(
+    client, *, lang: str, title: str, content: str, companies: list[dict],
+    summary_short: str = "", summary_long: str = "",
+) -> dict:
     """One Groq call translating a single article's title/content plus every
     one of its companies' rationale/key_points into ONE target language.
 
@@ -175,25 +188,33 @@ def translate_alert(client, *, lang: str, title: str, content: str, companies: l
     on this smaller model. A single language's output is small and simple
     enough to fit comfortably under the per-minute budget and to get right.
 
-    `companies` is `[{"rationale": ..., "key_points": [...]}, ...]`, in the
-    same order as the Alert's AlertCompany rows -- the response's
-    `companies` array is returned in that same positional order so callers
-    can zip it back onto the original rows by index.
+    `companies` is `[{"rationale": ..., "key_points": [...], "why": ...},
+    ...]` (why may be an empty string), in the same order as the Alert's
+    AlertCompany rows -- the response's `companies` array is returned in
+    that same positional order so callers can zip it back onto the
+    original rows by index. summary_short/summary_long are the alert's
+    event summaries (spec-v2 card gist), empty strings when absent.
 
-    Returns `{"title": ..., "content": ..., "companies": [...]}` for the
-    requested language.
+    Returns `{"title": ..., "content": ..., "summary_short": ...,
+    "summary_long": ..., "companies": [...]}` for the requested language.
     """
     if TRANSLATION_PROVIDER == "nllb":
-        return nllb_translator.translate_alert(lang=lang, title=title, content=content, companies=companies)
+        return nllb_translator.translate_alert(
+            lang=lang, title=title, content=content, companies=companies,
+            summary_short=summary_short, summary_long=summary_long,
+        )
     companies_text = "\n".join(
-        f"{i + 1}. Rationale: {c['rationale']}\n   Key points: {c['key_points']}"
+        f"{i + 1}. Rationale: {c['rationale']}\n   Key points: {c['key_points']}\n   Why: {c.get('why') or '(empty)'}"
         for i, c in enumerate(companies)
     )
     user_content = (
         f"Translate the following into {LANG_NAMES[lang]}.\n\n"
         f"Title: {title}\n\nContent: {content or '(no content)'}\n\n"
-        f"Companies (translate each rationale/key_points, preserve this exact "
-        f"order, do not translate company names -- none are given here, only "
+        f"Summary short: {summary_short or '(empty)'}\n\n"
+        f"Summary long: {summary_long or '(empty)'}\n\n"
+        f"Companies (translate each rationale/key_points/why, preserve this "
+        f"exact order, a field marked (empty) is recorded as an empty string, "
+        f"do not translate company names -- none are given here, only "
         f"reasoning text):\n{companies_text or '(no companies)'}"
     )
 

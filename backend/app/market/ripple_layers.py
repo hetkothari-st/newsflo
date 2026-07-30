@@ -113,6 +113,9 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             )
 
         row = {
+            # For serve-time overlays keyed to the AlertCompany row (e.g.
+            # translated `why`, routers/feed_v2.py) -- not shown in the UI.
+            "alert_company_id": alert_company.id,
             "ticker": company.ticker,
             "name": company.name,
             "sector": company.sector,

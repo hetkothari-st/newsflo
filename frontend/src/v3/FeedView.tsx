@@ -26,10 +26,17 @@ import {
   moveColor,
   moveDir,
   TIMELINE_COLORS,
-  VERDICT_LABELS,
   verdictClass,
 } from './format';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/language';
+import type { TranslationKey } from '../lib/i18n';
+
+const VERDICT_KEYS: Record<FeedAlert['verdict'], TranslationKey> = {
+  COMPANY_SPECIFIC: 'v3.verdictCompany',
+  SECTOR_WIDE: 'v3.verdictSector',
+  UNCONFIRMED: 'v3.verdictUnconfirmed',
+};
 
 function LayerBlock({
   layer,
@@ -107,6 +114,7 @@ function Card({
   onOpenDeepDive: (ticker: string) => void;
   onOpenInfo: (row: LayerRow) => void;
 }) {
+  const { t } = useLanguage();
   const [backTab, setBackTab] = useState<'ripple' | 'timeline'>('ripple');
   // 'story' -> the article's own photo; 'category' -> curated thematic
   // artwork for publishers that block photo scraping (or when the story
@@ -135,10 +143,10 @@ function Card({
               <div className={`move ${dir}`}>
                 {arrow(dir)} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </div>
-              <div className="xlabel">excess vs sector</div>
+              <div className="xlabel">{t('v3.excessVsSector')}</div>
             </div>
             <span className={`verdict ${verdictClass(alert.verdict)}`}>
-              {VERDICT_LABELS[alert.verdict]}
+              {t(VERDICT_KEYS[alert.verdict])}
             </span>
           </div>
           <div className="headline">{alert.article.title}</div>
@@ -152,18 +160,18 @@ function Card({
           )}
           <div className="ffoot">
             <div className="meta">
-              <span>{alert.category.replace(/_/g, ' ')}</span>
+              <span>{alert.category_label ?? alert.category.replace(/_/g, ' ')}</span>
               <span>·</span>
               <span>{fmtTime(alert.created_at)}</span>
               {alert.in_my_holdings && (
                 <>
                   <span className="odot" />
-                  <span>held</span>
+                  <span>{t('v3.held')}</span>
                 </>
               )}
             </div>
             <div className="cta">
-              <span>See who's affected</span>
+              <span>{t('v3.seeAffected')}</span>
               <span className="ar">→</span>
             </div>
           </div>
@@ -192,31 +200,31 @@ function Card({
           </div>
           <div className="sumstrip">
             <div className="st">
-              <div className="l">Raw</div>
+              <div className="l">{t('v3.raw')}</div>
               <div className="v" style={{ color: moveColor(alert.raw_move_pct) }}>
                 {fmtPct(alert.raw_move_pct)}
               </div>
             </div>
             <div className="st">
-              <div className="l">Sector</div>
+              <div className="l">{t('v3.sector')}</div>
               <div className="v" style={{ color: moveColor(alert.sector_move_pct) }}>
                 {fmtPct(alert.sector_move_pct)}
               </div>
             </div>
             <div className="st">
-              <div className="l">Volume</div>
+              <div className="l">{t('v3.volume')}</div>
               <div className="v">{fmtVolume(alert.volume_multiple)}</div>
             </div>
           </div>
           <div className="tabsmini">
             <button className={backTab === 'ripple' ? 'on' : ''} onClick={() => setBackTab('ripple')}>
-              Ripple
+              {t('v3.tabRipple')}
             </button>
             <button
               className={backTab === 'timeline' ? 'on' : ''}
               onClick={() => setBackTab('timeline')}
             >
-              Timeline
+              {t('v3.tabTimeline')}
             </button>
           </div>
           <div className="layers">
@@ -235,9 +243,7 @@ function Card({
               <TimelineBlock timeline={detail.timeline} />
             )}
           </div>
-          <div className="bfoot">
-            Intensity measures how hard the news hit — not whether a stock is good to own.
-          </div>
+          <div className="bfoot">{t('v3.disclaimer')}</div>
         </div>
       </div>
     </div>
@@ -247,17 +253,21 @@ function Card({
 export default function FeedView({
   active,
   capFilter,
+  date,
   onOpenDeepDive,
   onOpenInfo,
   onAnyFlip,
 }: {
   active: boolean;
   capFilter: CapTier | 'ALL';
+  // null = today; YYYY-MM-DD reopens that IST day (calendar mechanism).
+  date: string | null;
   onOpenDeepDive: (ticker: string, alertId: number) => void;
   onOpenInfo: (row: LayerRow) => void;
   onAnyFlip: () => void;
 }) {
   const { token } = useAuth();
+  const { language, t } = useLanguage();
   const [alerts, setAlerts] = useState<FeedAlert[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flippedIds, setFlippedIds] = useState<Set<number>>(new Set());
@@ -267,7 +277,14 @@ export default function FeedView({
 
   useEffect(() => {
     let cancelled = false;
-    getFeedAlerts(token)
+    setAlerts(null);
+    setError(null);
+    // Refetches on language switch (server-side translations) and on
+    // calendar date change; cached details are dropped so the card backs
+    // refetch in the new language/day too.
+    setDetails({});
+    setFlippedIds(new Set());
+    getFeedAlerts(token, { lang: language, date: date ?? undefined })
       .then((result) => {
         if (!cancelled) setAlerts(result);
       })
@@ -277,13 +294,13 @@ export default function FeedView({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, language, date]);
 
   const loadDetail = useCallback(
     (alertId: number) => {
       setDetails((current) => {
         if (current[alertId]) return current;
-        getAlertDetail(alertId, token)
+        getAlertDetail(alertId, token, language)
           .then((detail) => {
             setDetails((latest) => ({ ...latest, [alertId]: detail }));
           })
@@ -293,7 +310,7 @@ export default function FeedView({
         return current;
       });
     },
-    [token],
+    [token, language],
   );
 
   const flip = useCallback(
@@ -360,9 +377,7 @@ export default function FeedView({
     <div className={`view ${active ? 'on' : ''}`}>
       <div className="feed" ref={feedRef}>
         {error !== null && <p className="empty">{error}</p>}
-        {alerts !== null && alerts.length === 0 && (
-          <p className="empty">No measured stories yet today. New alerts appear as the market reacts.</p>
-        )}
+        {alerts !== null && alerts.length === 0 && <p className="empty">{t('v3.noStories')}</p>}
         {alerts?.map(
           (alert) =>
             isVisible(alert) && (

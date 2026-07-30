@@ -437,9 +437,33 @@ class AlertCompanyTranslation(Base):
     lang = Column(String, nullable=False)
     rationale = Column(Text, nullable=False)
     key_points_json = Column(Text, nullable=False, default="[]")
+    # Translated AlertCompany.why (the spec-v2 card back's causal one-liner).
+    # NULL for rows translated before this field shipped, or when the
+    # source alert has no why -- lookup falls back to the English why.
+    why = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     alert_company = relationship("AlertCompany")
+
+
+class AlertTranslation(Base):
+    """Translated Alert.summary_short/summary_long (the spec-v2 card
+    front's gist) -- alert-level, unlike ArticleTranslation (title/content,
+    article-level) and AlertCompanyTranslation (per-company reasoning).
+    Written by the same translate_pending_alerts job pass; silent English
+    fallback when a row is missing, same as every other translation
+    lookup."""
+    __tablename__ = "alert_translations"
+    __table_args__ = (UniqueConstraint("alert_id", "lang", name="uq_alert_translation_lang"),)
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    lang = Column(String, nullable=False)
+    summary_short = Column(String, nullable=True)
+    summary_long = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    alert = relationship("Alert")
 
 
 class CategoryTranslation(Base):

@@ -6,12 +6,21 @@ company (excess_move_pct computed, measurement_status == "ok") -- an
 alert with nothing measured has no headline number and is omitted
 entirely (Ground Rules: never fabricate, omit rather than invent).
 """
+from datetime import date as date_cls
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.companies.branding import logo_url
+from app.i18n import get_lang
 from app.ingestion.image_filter import displayable_image_url, repeated_image_urls
+from app.translation.lookup import (
+    bulk_alert_company_whys,
+    bulk_alert_summaries,
+    bulk_article_titles,
+    bulk_category_labels,
+)
 from app.ist_time import day_utc_window, today_ist
 from app.market.alert_measurement import compute_alert_measurement
 from app.market.discovery import (
@@ -43,22 +52,38 @@ def _held_company_ids(db: Session, current_user: User | None) -> set[int]:
 
 
 def _serialize(
-    alert: Alert, measurement: dict, held_company_ids: set[int], repeated_images: set[str],
+    alert: Alert,
+    measurement: dict,
+    held_company_ids: set[int],
+    repeated_images: set[str],
+    translations: dict | None = None,
 ) -> dict:
+    """``translations`` (optional): {"titles": {article_id: str},
+    "summaries": {alert_id: (short, long)}, "categories": {category: str}}
+    -- the bulk-lookup results for the request's lang; every field falls
+    back silently to English (same discipline as routers/alerts.py)."""
+    translations = translations or {}
+    translated_title = translations.get("titles", {}).get(alert.article_id)
+    summary_short, summary_long = translations.get("summaries", {}).get(
+        alert.id, (None, None),
+    )
     in_my_holdings = any(ac.company_id in held_company_ids for ac in alert.companies)
     return {
         "id": alert.id,
         "category": alert.category,
+        # Translated display label for the category chip; English slug
+        # (prettified frontend-side) when no translation exists.
+        "category_label": translations.get("categories", {}).get(alert.category),
         "created_at": alert.created_at.isoformat(),
-        "summary_short": alert.summary_short,
-        "summary_long": alert.summary_long,
+        "summary_short": summary_short or alert.summary_short,
+        "summary_long": summary_long or alert.summary_long,
         "article": {
             "id": alert.article.id,
             # Generic publisher artwork (wire-service logos, newspaper
             # default banners) is nulled out -- the card shows no image
             # rather than a wrong one. See app.ingestion.image_filter.
             "image_url": displayable_image_url(alert.article.image_url, repeated_images),
-            "title": alert.article.title,
+            "title": translated_title or alert.article.title,
             "url": alert.article.url,
             "source": alert.article.source,
             "published_at": alert.article.published_at.isoformat() if alert.article.published_at else None,
@@ -75,12 +100,34 @@ def _query_with_relations(db: Session):
     )
 
 
+def _bulk_translations(db: Session, alerts: list[Alert], lang: str) -> dict:
+    """Three bulk lookups total regardless of alert count (same pattern as
+    routers/alerts.py) -- all empty (silent English) when lang == 'en'."""
+    return {
+        "titles": bulk_article_titles(db, [a.article_id for a in alerts], lang),
+        "summaries": bulk_alert_summaries(db, [a.id for a in alerts], lang),
+        "categories": bulk_category_labels(db, list({a.category for a in alerts}), lang),
+    }
+
+
 @router.get("")
 def list_feed_v2_alerts(
+    date: str | None = None,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
+    lang: str = Depends(get_lang),
 ):
-    start_utc, end_utc = day_utc_window(today_ist())
+    """The card feed. ``date`` (YYYY-MM-DD, IST day) reopens a previous
+    day's news -- the calendar mechanism (spec v2 keeps it: any day is a
+    complete feed). Defaults to today."""
+    if date is not None:
+        try:
+            day = date_cls.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    else:
+        day = today_ist()
+    start_utc, end_utc = day_utc_window(day)
     alerts = (
         _query_with_relations(db)
         .filter(Alert.created_at >= start_utc, Alert.created_at < end_utc)
@@ -89,6 +136,7 @@ def list_feed_v2_alerts(
         .all()
     )
     held_company_ids = _held_company_ids(db, current_user)
+    translations = _bulk_translations(db, alerts, lang)
 
     # Peak company's cap tier -- drives the top-bar cap filter on the card
     # feed (spec v2 §6: "Provide a cap-tier filter (All / Large / Mid /
@@ -103,7 +151,7 @@ def list_feed_v2_alerts(
     for alert in alerts:
         measurement = compute_alert_measurement(db, alert)
         if measurement is not None:
-            row = _serialize(alert, measurement, held_company_ids, repeated_images)
+            row = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
             row["peak_cap_tier"] = cap_tiers.get(measurement["peak_ticker"])
             results.append(row)
     return results
@@ -178,6 +226,7 @@ def get_feed_v2_alert(
     alert_id: int,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
+    lang: str = Depends(get_lang),
 ):
     alert = _query_with_relations(db).filter(Alert.id == alert_id).first()
     if alert is None:
@@ -191,10 +240,20 @@ def get_feed_v2_alert(
     repeated_images = repeated_image_urls(
         db, [alert.article.image_url] if alert.article.image_url else [],
     )
-    result = _serialize(alert, measurement, held_company_ids, repeated_images)
+    translations = _bulk_translations(db, [alert], lang)
+    result = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
     # Layered card back (spec v2 §5/§7): every affected company, grouped by
     # relationship into ordered winners/losers layers.
     result["layers"] = compute_ripple_layers(db, alert, held_company_ids)
+    # Translated per-company `why` overlay (silent English fallback).
+    whys = bulk_alert_company_whys(
+        db, [row["alert_company_id"] for layer in result["layers"] for row in layer["rows"]], lang,
+    )
+    for layer in result["layers"]:
+        for row in layer["rows"]:
+            translated_why = whys.get(row["alert_company_id"])
+            if translated_why and row["why"]:
+                row["why"] = translated_why
     result["timeline"] = get_timeline_entries(db, alert)
     # -- COMMENTED OUT (superseded by result["layers"] above -- the old flat
     # ripple + impact_companies split served the pre-swipe-card UI):

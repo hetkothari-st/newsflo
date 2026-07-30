@@ -33,6 +33,9 @@ export interface FeedArticle {
 export interface FeedAlert {
   id: number;
   category: string;
+  // Server-translated category chip label for the active language; null
+  // for English / untranslated (frontend prettifies the slug).
+  category_label: string | null;
   created_at: string;
   summary_short: string | null;
   summary_long: string | null;
@@ -194,12 +197,30 @@ async function getJson<T>(url: string, token: string | null): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function getFeedAlerts(token: string | null = null): Promise<FeedAlert[]> {
-  return getJson<FeedAlert[]>('/api/feed-v2', token);
+export function getFeedAlerts(
+  token: string | null = null,
+  options: { lang?: string; date?: string } = {},
+): Promise<FeedAlert[]> {
+  const params = new URLSearchParams();
+  if (options.lang && options.lang !== 'en') params.set('lang', options.lang);
+  if (options.date) params.set('date', options.date);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return getJson<FeedAlert[]>(`/api/feed-v2${query}`, token);
 }
 
-export function getAlertDetail(id: number, token: string | null = null): Promise<AlertDetail> {
-  return getJson<AlertDetail>(`/api/feed-v2/${id}`, token);
+export function getAlertDetail(
+  id: number,
+  token: string | null = null,
+  lang?: string,
+): Promise<AlertDetail> {
+  const query = lang && lang !== 'en' ? `?lang=${lang}` : '';
+  return getJson<AlertDetail>(`/api/feed-v2/${id}${query}`, token);
+}
+
+export type CalendarCounts = Record<string, number>;
+
+export function getCalendarCounts(year: number, month: number): Promise<CalendarCounts> {
+  return getJson<CalendarCounts>(`/api/calendar/counts?year=${year}&month=${month}`, null);
 }
 
 export function getStockDeepDive(

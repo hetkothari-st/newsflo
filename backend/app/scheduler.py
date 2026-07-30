@@ -1,8 +1,10 @@
 import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.analysis.claude_client import build_client
+from app.companies.market_caps import alert_referenced_tickers, refresh_market_caps
 from app.config import settings
 from app.db import SessionLocal
 # IndianAPI is disabled (not deleted) -- replaced by thenewsapi.com, see
@@ -171,6 +173,22 @@ def _run_translation() -> None:
         session.close()
 
 
+def _run_market_cap_refresh() -> None:
+    """Refresh Company.market_cap for every company referenced by a recent
+    alert -- the input to the cap-tier ranking behind every LARGE/MID/
+    SMALL/MICRO tag and the feed's cap filter (spec v2 §4.5). Failures
+    logged, never raised, same as every other scheduler job."""
+    session = SessionLocal()
+    try:
+        tickers = alert_referenced_tickers(session, days=7)
+        updated = refresh_market_caps(session, tickers)
+        logger.info("Market-cap refresh: %s/%s companies updated", updated, len(tickers))
+    except Exception:
+        logger.exception("Market-cap refresh failed")
+    finally:
+        session.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     scheduler = BackgroundScheduler()
@@ -221,6 +239,17 @@ def start_scheduler() -> None:
         trigger="interval",
         minutes=settings.translation_interval_minutes,
         id="translation_job",
+    )
+    scheduler.add_job(
+        _run_market_cap_refresh,
+        trigger="interval",
+        hours=12,
+        # Also once shortly after boot -- a fresh deploy against a DB with
+        # mostly-null caps (the state that made every cap tag render "—"
+        # and the L/M/S/µ filter match nothing) fixes itself without
+        # waiting half a day.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        id="market_cap_refresh",
     )
     scheduler.start()
     _scheduler = scheduler

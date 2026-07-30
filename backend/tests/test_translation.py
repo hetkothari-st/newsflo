@@ -8,6 +8,7 @@ from app.models import (
     Alert,
     AlertCompany,
     AlertCompanyTranslation,
+    AlertTranslation,
     Article,
     ArticleTranslation,
     CategoryTranslation,
@@ -23,6 +24,8 @@ from app.translation.job import (
 from app.translation.languages import SCRIPT_RANGES, TARGET_LANGS, normalize_lang
 from app.translation.lookup import (
     bulk_alert_company_translations,
+    bulk_alert_company_whys,
+    bulk_alert_summaries,
     bulk_article_titles,
     bulk_category_labels,
 )
@@ -231,6 +234,48 @@ def test_translate_pending_alerts_persists_all_languages(db_session):
     ac = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
     company_rows = db_session.query(AlertCompanyTranslation).filter_by(alert_company_id=ac.id).all()
     assert {r.lang for r in company_rows} == set(TARGET_LANGS)
+
+
+def test_translate_pending_alerts_persists_summaries_and_whys(db_session):
+    # Spec-v2 card fields: alert summaries -> AlertTranslation rows, per-
+    # company why -> AlertCompanyTranslation.why -- written by the same
+    # job pass as everything else.
+    article = Article(source="test", url="https://example.com/v2job", title="English title", content="body")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(
+        article_id=article.id, category="oil_energy",
+        summary_short="Cheaper crude helps users", summary_long="Two sentences here.",
+    )
+    db_session.add(alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=1, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="english rationale",
+        key_points_json='["point one"]', basis="direct_mention",
+        why="Cheaper crude lifts refining margins.",
+    ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    payload = _payload(1, "v2")
+    payload["summary_short"] = f"ss-v2 {_ALL_SCRIPTS_MARKER}"
+    payload["summary_long"] = f"sl-v2 {_ALL_SCRIPTS_MARKER}"
+    payload["companies"][0]["why"] = f"why-v2 {_ALL_SCRIPTS_MARKER}"
+    client = FakeToolCallClient("record_translation", payload)
+
+    completed = translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS))
+    assert completed == len(TARGET_LANGS)
+
+    summary_rows = db_session.query(AlertTranslation).filter_by(alert_id=alert.id).all()
+    assert {r.lang for r in summary_rows} == set(TARGET_LANGS)
+    assert all(r.summary_short.startswith("ss-v2") for r in summary_rows)
+
+    ac = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    summaries = bulk_alert_summaries(db_session, [alert.id], "hi")
+    assert summaries[alert.id][0].startswith("ss-v2")
+    whys = bulk_alert_company_whys(db_session, [ac.id], "hi")
+    assert whys[ac.id].startswith("why-v2")
 
 
 def test_translate_pending_alerts_splits_work_across_multiple_clients(db_session):
@@ -453,8 +498,11 @@ def test_translate_alert_dispatches_to_nllb_when_provider_is_nllb(monkeypatch):
     monkeypatch.setattr(groq_translator, "TRANSLATION_PROVIDER", "nllb")
     captured = {}
 
-    def fake_translate_alert(*, lang, title, content, companies):
-        captured["kwargs"] = dict(lang=lang, title=title, content=content, companies=companies)
+    def fake_translate_alert(*, lang, title, content, companies, summary_short="", summary_long=""):
+        captured["kwargs"] = dict(
+            lang=lang, title=title, content=content, companies=companies,
+            summary_short=summary_short, summary_long=summary_long,
+        )
         return {"title": "translated", "content": "translated", "companies": []}
 
     monkeypatch.setattr(nllb_translator, "translate_alert", fake_translate_alert)
@@ -467,6 +515,7 @@ def test_translate_alert_dispatches_to_nllb_when_provider_is_nllb(monkeypatch):
     assert captured["kwargs"] == {
         "lang": "hi", "title": "T", "content": "C",
         "companies": [{"rationale": "r", "key_points": ["k"]}],
+        "summary_short": "", "summary_long": "",
     }
 
 

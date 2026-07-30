@@ -3,11 +3,13 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Shell from './Shell';
 import { AuthProvider } from '../lib/auth';
+import { LanguageProvider } from '../lib/language';
 import { ThemeProvider } from '../lib/theme';
 
 const FEED_ALERT = {
   id: 7,
   category: 'oil_gas',
+  category_label: null,
   created_at: '2026-07-29T05:32:00+00:00',
   summary_short: 'Cheaper crude helps users, hurts producers.',
   summary_long: 'Long summary.',
@@ -144,9 +146,11 @@ function renderShell() {
   return render(
     <MemoryRouter>
       <ThemeProvider>
-        <AuthProvider>
-          <Shell />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <Shell />
+          </AuthProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </MemoryRouter>,
   );
@@ -272,6 +276,37 @@ describe('Shell card feed', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
     expect(await screen.findByText(/to review how flagged reactions played out/i)).toBeInTheDocument();
+  });
+
+  it('opens the calendar and reopens a previous day via ?date=', async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    renderShell();
+    await screen.findByTestId('front-7');
+    fireEvent.click(screen.getByTestId('calendar-button'));
+    expect(await screen.findByTestId('calendar-sheet')).toBeInTheDocument();
+    // Pick the 1st of the displayed month (never "today", which maps to null).
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(calls.some((url) => /\/api\/feed-v2\?date=\d{4}-\d{2}-01$/.test(url))).toBe(true);
+    });
+    // Date bar with the back-to-today control appears.
+    expect(await screen.findByText('Back to today')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Back to today'));
+    expect(screen.queryByText('Back to today')).not.toBeInTheDocument();
+  });
+
+  it('refetches the feed with ?lang= when the language changes', async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    renderShell();
+    await screen.findByTestId('front-7');
+    fireEvent.change(screen.getByLabelText('Language'), { target: { value: 'hi' } });
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(calls.some((url) => url.includes('/api/feed-v2?lang=hi'))).toBe(true);
+    });
   });
 
   it('closes the sheet via the scrim', async () => {

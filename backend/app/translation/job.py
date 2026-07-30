@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Alert,
     AlertCompanyTranslation,
+    AlertTranslation,
     Article,
     ArticleTranslation,
     CategoryTranslation,
@@ -35,7 +36,11 @@ class _AlertSnapshot:
     article_id: int
     title: str
     content: str
-    companies: list[dict]  # [{"id": int, "rationale": str, "key_points": list[str]}]
+    # Spec-v2 card gist -- empty strings when the alert predates the field
+    # or refinement never produced it (translated as empty passthrough).
+    summary_short: str
+    summary_long: str
+    companies: list[dict]  # [{"id": int, "rationale": str, "key_points": list[str], "why": str}]
 
 
 def _snapshot_alert(alert: Alert) -> _AlertSnapshot:
@@ -44,8 +49,13 @@ def _snapshot_alert(alert: Alert) -> _AlertSnapshot:
         article_id=alert.article_id,
         title=alert.article.title,
         content=alert.article.content,
+        summary_short=alert.summary_short or "",
+        summary_long=alert.summary_long or "",
         companies=[
-            {"id": ac.id, "rationale": ac.rationale, "key_points": decode_key_points(ac)}
+            {
+                "id": ac.id, "rationale": ac.rationale,
+                "key_points": decode_key_points(ac), "why": ac.why or "",
+            }
             for ac in alert.companies
         ],
     )
@@ -149,7 +159,12 @@ def _fetch_translation(client, snapshot: _AlertSnapshot, lang: str) -> dict:
         lang=lang,
         title=snapshot.title,
         content=snapshot.content,
-        companies=[{"rationale": c["rationale"], "key_points": c["key_points"]} for c in snapshot.companies],
+        summary_short=snapshot.summary_short,
+        summary_long=snapshot.summary_long,
+        companies=[
+            {"rationale": c["rationale"], "key_points": c["key_points"], "why": c["why"]}
+            for c in snapshot.companies
+        ],
     )
 
 
@@ -228,7 +243,27 @@ def _validate_and_persist(session: Session, snapshot: _AlertSnapshot, lang: str,
             lang=lang,
             rationale=tc["rationale"],
             key_points_json=json.dumps(tc["key_points"]),
+            # Empty source why -> store NULL (English fallback), never an
+            # empty translated string masquerading as content.
+            why=(tc.get("why") or None) if company["why"] else None,
         ))
+
+    # Alert-level summaries (spec-v2 gist) -- only when the source has
+    # them; same race guard as ArticleTranslation above.
+    if snapshot.summary_short or snapshot.summary_long:
+        already_has_alert_translation = (
+            session.query(AlertTranslation.id)
+            .filter_by(alert_id=snapshot.alert_id, lang=lang)
+            .first()
+            is not None
+        )
+        if not already_has_alert_translation:
+            session.add(AlertTranslation(
+                alert_id=snapshot.alert_id,
+                lang=lang,
+                summary_short=(translated.get("summary_short") or None) if snapshot.summary_short else None,
+                summary_long=(translated.get("summary_long") or None) if snapshot.summary_long else None,
+            ))
     session.commit()
 
 
