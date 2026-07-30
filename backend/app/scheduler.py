@@ -173,6 +173,35 @@ def _run_translation() -> None:
         session.close()
 
 
+def _run_analysis_retry() -> None:
+    """Give today's ANALYSIS_FAILED articles another chance, once per hour
+    -- analysis failures are overwhelmingly transient provider rate-limit
+    storms (confirmed in production: both Groq orgs' daily token budgets
+    exhausted mid-day marked a whole batch failed), and a failed article
+    otherwise stays failed forever. Hourly cadence keeps this bounded: at
+    most one extra 2-attempt round per article per hour, never a hot loop
+    against a dead quota. Only TODAY's articles -- older news re-analyzed
+    now would surface into the current feed as stale alerts."""
+    from app.ist_time import day_utc_window, today_ist
+    from app.models import Article
+
+    session = SessionLocal()
+    try:
+        start_utc, _ = day_utc_window(today_ist())
+        reset = (
+            session.query(Article)
+            .filter(Article.status == "ANALYSIS_FAILED", Article.fetched_at >= start_utc)
+            .update({"status": "CATEGORIZED"}, synchronize_session=False)
+        )
+        session.commit()
+        if reset:
+            logger.info("Analysis retry: %s of today's failed articles re-queued", reset)
+    except Exception:
+        logger.exception("Analysis retry sweep failed")
+    finally:
+        session.close()
+
+
 def _run_market_cap_refresh() -> None:
     """Refresh Company.market_cap for every company referenced by a recent
     alert -- the input to the cap-tier ranking behind every LARGE/MID/
@@ -239,6 +268,12 @@ def start_scheduler() -> None:
         trigger="interval",
         minutes=settings.translation_interval_minutes,
         id="translation_job",
+    )
+    scheduler.add_job(
+        _run_analysis_retry,
+        trigger="interval",
+        hours=1,
+        id="analysis_retry",
     )
     scheduler.add_job(
         _run_market_cap_refresh,
