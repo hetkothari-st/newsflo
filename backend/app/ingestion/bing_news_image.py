@@ -13,6 +13,7 @@ Same "never raise, degrade to None" contract as fetch_og_image.
 """
 import html
 import re
+import time
 
 import httpx
 
@@ -39,33 +40,65 @@ def _title_overlap(headline: str, candidate_title: str) -> float:
     return len(headline_tokens & _tokens(candidate_title)) / len(headline_tokens)
 
 
+# Bing's news RSS behaves as an AND search -- every extra headline word
+# narrows it, and a boilerplate tail ("... amid Iran tensions") reliably
+# drops the result count to zero (verified live). Progressively shorter
+# prefixes recover recall; the overlap guard still runs against the query
+# actually used.
+_QUERY_TOKEN_COUNTS = (12, 8, 6)
+
+
+def _query_tokens(headline: str) -> list[str]:
+    """Wire prefixes ("EXCLUSIVE:", "UPDATE 2-") stripped, punctuation
+    dropped (a literal "$" makes Bing's RSS return zero items, verified
+    live)."""
+    cleaned = re.sub(r"^(EXCLUSIVE|BREAKING|UPDATE\s*\d*|WRAPUP\s*\d*|REFILE)[:\-\s]+", "", headline, flags=re.I)
+    return re.findall(r"[A-Za-z0-9][A-Za-z0-9.\-]*", cleaned)
+
+
+def _search_once(query: str) -> str | None:
+    response = httpx.get(
+        "https://www.bing.com/news/search",
+        params={"q": query, "format": "rss"},
+        timeout=_TIMEOUT,
+        follow_redirects=True,
+        headers=_HEADERS,
+    )
+    response.raise_for_status()
+    for item in re.findall(r"<item>(.*?)</item>", response.text, re.S):
+        title_match = re.search(r"<title>(.*?)</title>", item, re.S)
+        image_match = re.search(r"<News:Image>(.*?)</News:Image>", item, re.S)
+        if not title_match or not image_match:
+            continue
+        candidate_title = html.unescape(title_match.group(1))
+        if _title_overlap(query, candidate_title) < _MIN_TITLE_OVERLAP:
+            continue
+        image_url = html.unescape(image_match.group(1)).strip()
+        if not image_url:
+            continue
+        # Bing's th endpoint accepts sizing params; request a card-sized
+        # crop and force https.
+        image_url = image_url.replace("http://", "https://")
+        separator = "&" if "?" in image_url else "?"
+        return f"{image_url}{separator}w=800&h=450&c=14"
+    return None
+
+
 def fetch_bing_news_image(headline: str) -> str | None:
     """The story's own image for ``headline`` from Bing News, or None."""
+    tokens = _query_tokens(headline)
     try:
-        response = httpx.get(
-            "https://www.bing.com/news/search",
-            params={"q": headline, "format": "rss"},
-            timeout=_TIMEOUT,
-            follow_redirects=True,
-            headers=_HEADERS,
-        )
-        response.raise_for_status()
-        for item in re.findall(r"<item>(.*?)</item>", response.text, re.S):
-            title_match = re.search(r"<title>(.*?)</title>", item, re.S)
-            image_match = re.search(r"<News:Image>(.*?)</News:Image>", item, re.S)
-            if not title_match or not image_match:
-                continue
-            candidate_title = html.unescape(title_match.group(1))
-            if _title_overlap(headline, candidate_title) < _MIN_TITLE_OVERLAP:
-                continue
-            image_url = html.unescape(image_match.group(1)).strip()
-            if not image_url:
-                continue
-            # Bing's th endpoint accepts sizing params; request a card-
-            # sized crop and force https.
-            image_url = image_url.replace("http://", "https://")
-            separator = "&" if "?" in image_url else "?"
-            return f"{image_url}{separator}w=800&h=450&c=14"
+        for index, count in enumerate(_QUERY_TOKEN_COUNTS):
+            if index > 0:
+                # Bing soft-throttles rapid-fire queries (a burst of
+                # back-to-back searches starts returning empty feeds,
+                # verified live) -- pace the retry tiers.
+                time.sleep(1.0)
+            found = _search_once(" ".join(tokens[:count]))
+            if found:
+                return found
+            if len(tokens) <= count:
+                break  # shorter prefixes would repeat the same query
         return None
     except Exception:
         return None

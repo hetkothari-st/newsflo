@@ -27,8 +27,10 @@ from app.models import Article, utcnow
 from app import config
 
 # Be polite to the source sites -- this can hit dozens of distinct hosts in
-# one run, all fired from the same process back to back.
-DELAY_BETWEEN_FETCHES_SECONDS = 0.5
+# one run, all fired from the same process back to back. Bing's news
+# search (the last image tier) soft-throttles bursts, so the spacing is
+# generous.
+DELAY_BETWEEN_FETCHES_SECONDS = 3.0
 
 
 def _repeated_urls(session) -> set[str]:
