@@ -57,6 +57,29 @@ def repeated_image_urls(session: Session, image_urls: list[str]) -> set[str]:
     return {url for url, _count in rows}
 
 
+def resolve_article_image(
+    article_url: str, provided_image_url: str | None, fetch=None,
+) -> str | None:
+    """Ingest-time image resolution: prefer a real story photo over
+    publisher artwork. A provided image with a clean filename is kept
+    as-is (no extra HTTP). When the feed API handed us a generic image
+    (wire-service logo -- Finnhub does this for Reuters stories) or none
+    at all, fetch the article page's own og:image, which is usually the
+    genuine photo; keep it only when IT isn't generic too. Falls back to
+    whatever existed -- the serve-time filter (displayable_image_url)
+    still decides what reaches a card.
+    """
+    if fetch is None:
+        from app.ingestion.og_image import fetch_og_image  # late import: circular-free
+        fetch = fetch_og_image
+    if provided_image_url and not is_generic_image_filename(provided_image_url):
+        return provided_image_url
+    fetched = fetch(article_url)
+    if fetched and not is_generic_image_filename(fetched):
+        return fetched
+    return provided_image_url or fetched
+
+
 def displayable_image_url(image_url: str | None, repeated: set[str]) -> str | None:
     """The image_url fit to show on a card, or None when it's generic
     publisher artwork (omit rather than show a wrong image -- same

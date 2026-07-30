@@ -18,6 +18,7 @@ from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
 from app.market.measure import measure_company_move
 from app.ingestion.full_text import fetch_pending_full_text
+from app.ingestion.image_filter import resolve_article_image
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, utcnow
 from app.reasoning.confidence import _band as band_for_score
@@ -390,8 +391,10 @@ def _persist_alert(
             relation=edge["relation"], direction=edge["direction"], note=edge["note"], source=edge["source"],
         ))
 
-    if article.image_url is None:
-        article.image_url = fetch_og_image(article.url)
+    # Prefer a real story photo: a missing OR generic (publisher-logo)
+    # provided image triggers an og:image fetch from the article's own
+    # page -- see app.ingestion.image_filter.resolve_article_image.
+    article.image_url = resolve_article_image(article.url, article.image_url, fetch=fetch_og_image)
 
     article.status = "ANALYZED"
     article.category = category

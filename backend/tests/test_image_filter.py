@@ -2,6 +2,7 @@ from app.ingestion.image_filter import (
     displayable_image_url,
     is_generic_image_filename,
     repeated_image_urls,
+    resolve_article_image,
 )
 from app.models import Article
 
@@ -40,6 +41,59 @@ def test_repeated_image_urls_flags_boilerplate(db_session):
 
     repeated = repeated_image_urls(db_session, [boilerplate, unique])
     assert repeated == {boilerplate}
+
+
+def test_resolve_keeps_clean_provided_image_without_fetching():
+    def _fetch_should_not_run(url):
+        raise AssertionError("no HTTP fetch when the provided image is already clean")
+
+    assert (
+        resolve_article_image("https://pub.example.com/story", "https://x.com/story-shot.jpg", fetch=_fetch_should_not_run)
+        == "https://x.com/story-shot.jpg"
+    )
+
+
+def test_resolve_refetches_page_photo_when_provided_image_is_a_logo():
+    # Finnhub hands a wire-service logo -> fetch the article page's own
+    # og:image (the real photo) instead.
+    assert (
+        resolve_article_image(
+            "https://pub.example.com/story", "https://cdn.example.com/reuters-logo.png",
+            fetch=lambda url: "https://pub.example.com/photos/real-shot.jpg",
+        )
+        == "https://pub.example.com/photos/real-shot.jpg"
+    )
+
+
+def test_resolve_keeps_original_when_refetch_finds_nothing_better():
+    # og fetch fails -> keep the (generic) original; the serve-time filter
+    # hides it rather than this function inventing anything.
+    assert (
+        resolve_article_image(
+            "https://pub.example.com/story", "https://cdn.example.com/reuters-logo.png",
+            fetch=lambda url: None,
+        )
+        == "https://cdn.example.com/reuters-logo.png"
+    )
+    # og fetch returns another logo -> also keep the original.
+    assert (
+        resolve_article_image(
+            "https://pub.example.com/story", "https://cdn.example.com/reuters-logo.png",
+            fetch=lambda url: "https://pub.example.com/site-logo.png",
+        )
+        == "https://cdn.example.com/reuters-logo.png"
+    )
+
+
+def test_resolve_fetches_when_no_image_provided():
+    assert (
+        resolve_article_image(
+            "https://pub.example.com/story", None,
+            fetch=lambda url: "https://pub.example.com/photos/real-shot.jpg",
+        )
+        == "https://pub.example.com/photos/real-shot.jpg"
+    )
+    assert resolve_article_image("https://pub.example.com/story", None, fetch=lambda url: None) is None
 
 
 def test_displayable_image_url_nulls_generic_and_repeated():
