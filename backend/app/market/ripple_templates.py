@@ -165,6 +165,13 @@ _ARCHETYPE_BY_EVENT_TYPE = {
     "crude_oil": "COMMODITY",
     "commodity_price": "COMMODITY",
     "monsoon_weather": "COMMODITY",
+    # Geopolitics stories that reach the feed are overwhelmingly energy-
+    # supply-risk shaped (war/sanctions/shipping-route risk moving crude
+    # and gas) -- the commodity archetype's producer/refiner/heavy-user
+    # split is the right lens for their oil_gas + transport fan-out;
+    # companies it can't place (e.g. defense names) fall through to the
+    # per-sector fallback sections.
+    "geopolitics": "COMMODITY",
     "repo_rate_change": "MACRO_POLICY",
     "inflation": "MACRO_POLICY",
     "global_rates": "MACRO_POLICY",

@@ -107,6 +107,46 @@ def test_rows_carry_liquidity_and_delivery_risk_cues(db_session):
     assert winner_row["liquidity_tier"] == "LOW"
 
 
+def test_multi_sector_direct_bucket_splits_into_per_sector_sections(db_session):
+    # A broad event (war, macro shock) marks its whole fan-out "direct" --
+    # without the split, the card back collapsed into one flat blob
+    # (confirmed live on geopolitics alerts). No event_type -> no archetype
+    # template -> the per-sector fallback must still produce sections.
+    oil = Company(ticker="OIL.NS", name="Oil Co", sector="oil_gas", index_tier="NIFTY50", market_cap=900000.0)
+    defense = Company(ticker="DEF.NS", name="Defense Co", sector="defense", index_tier="NIFTY50", market_cap=500000.0)
+    port = Company(ticker="PORT.NS", name="Port Co", sector="railways_transport", index_tier="NIFTY50", market_cap=400000.0)
+    db_session.add_all([oil, defense, port])
+    db_session.commit()
+    article = Article(source="test", url="https://example.com/broad", title="War news", content="c")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="geopolitics", event_type=None)
+    db_session.add(alert)
+    db_session.flush()
+    for company, direction in ((oil, "bullish"), (defense, "bullish"), (port, "bearish")):
+        db_session.add(AlertCompany(
+            alert_id=alert.id, company_id=company.id, direction=direction,
+            magnitude_low=1.0, magnitude_high=2.0, rationale="r", basis="direct_mention",
+            impact_level="direct",
+        ))
+        db_session.add(MarketMove(
+            alert_id=alert.id, company_id=company.id, benchmark_ticker="^NSEI",
+            raw_move_pct=1.0, sector_move_pct=0.0,
+            excess_move_pct=1.0 if direction == "bullish" else -1.0,
+            volume=100.0, avg_volume_20d=100.0, volume_multiple=1.0,
+            measurement_status="ok", measured_at=utcnow(),
+        ))
+    db_session.commit()
+    db_session.refresh(alert)
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+    titles = [l["title"] for l in layers]
+    assert len(layers) == 3
+    assert "Winners — oil & gas" in titles
+    assert "Winners — defense" in titles
+    assert "Losers — transport & logistics" in titles
+
+
 def test_every_company_appears_exactly_once_across_layers(db_session):
     alert = _alert_with_layers(db_session)
     layers = compute_ripple_layers(db_session, alert, held_company_ids=set())

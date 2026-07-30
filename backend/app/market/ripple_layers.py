@@ -39,6 +39,19 @@ _RELATIONSHIP_LABELS = {
 # alert always renders the same way.
 _LAYER_ORDER = ["DIRECT", "SUPPLIER", "CUSTOMER_INPUT_COST", "BENEFICIARY", "COMPETITOR", "SUBSTITUTE", "SECTOR_WIDE"]
 
+# Display names for the per-sector fallback split (see the DIRECT-bucket
+# handling below) -- sentence case per spec §11.
+_SECTOR_LABELS = {
+    "oil_gas": "oil & gas", "banking": "banking & finance", "auto": "autos",
+    "it": "IT services", "pharma": "pharma", "fmcg": "consumer staples",
+    "metals": "metals", "telecom": "telecom", "infra": "infrastructure",
+    "railways_transport": "transport & logistics",
+    "construction_realestate": "real estate", "defense": "defense",
+    "agriculture": "agriculture", "consumer_durables": "consumer durables",
+    "media_entertainment": "media", "chemicals": "chemicals",
+    "textiles": "textiles", "other": "other companies",
+}
+
 
 def _layer_icon(rows: list[dict]) -> str:
     """win when every row is bullish, lose when every row is bearish,
@@ -227,6 +240,39 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     for relationship in _LAYER_ORDER:
         rows = grouped.pop(relationship, None)
         if not rows:
+            continue
+        # A multi-sector DIRECT bucket splits into one section per sector --
+        # a broad event (war, macro shock) marks its whole fan-out "direct",
+        # and one flat all-companies list loses the card back's entire
+        # sectioned structure (confirmed live: geopolitics alerts rendered a
+        # single 10-row DIRECT blob). Per-sector sections keep the layered
+        # reading without inventing relationships that were never analyzed.
+        if relationship == "DIRECT" and len({r["sector"] for r in rows}) > 1:
+            by_sector: dict[str, list[dict]] = {}
+            for row in rows:
+                by_sector.setdefault(row["sector"], []).append(row)
+            sector_groups = sorted(
+                by_sector.items(),
+                key=lambda kv: max((r["intensity"]["score"] if r["intensity"] else -1) for r in kv[1]),
+                reverse=True,
+            )
+            for sector, sector_rows in sector_groups:
+                sector_rows = _sorted(sector_rows)
+                icon = _layer_icon(sector_rows)
+                label = _SECTOR_LABELS.get(sector, sector.replace("_", " "))
+                if icon == "win":
+                    title = f"Winners — {label}"
+                elif icon == "lose":
+                    title = f"Losers — {label}"
+                else:
+                    title = f"Mixed — {label}"
+                layers.append({
+                    "title": title,
+                    "relationship": "DIRECT",
+                    "icon": icon,
+                    "note": _layer_note(edges, relationship),
+                    "rows": sector_rows,
+                })
             continue
         rows = _sorted(rows)
         icon = _layer_icon(rows)
