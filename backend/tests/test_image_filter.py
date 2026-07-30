@@ -96,6 +96,48 @@ def test_resolve_fetches_when_no_image_provided():
     assert resolve_article_image("https://pub.example.com/story", None, fetch=lambda url: None) is None
 
 
+def test_resolve_google_wrapper_fetches_from_the_real_publisher_url():
+    fetched_from = []
+
+    def _fetch(url):
+        fetched_from.append(url)
+        return "https://publisher.example.com/photos/real-shot.jpg"
+
+    result = resolve_article_image(
+        "https://news.google.com/rss/articles/OPAQUE123",
+        "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
+        fetch=_fetch,
+        resolve_wrapper=lambda url: "https://publisher.example.com/story",
+    )
+    assert result == "https://publisher.example.com/photos/real-shot.jpg"
+    assert fetched_from == ["https://publisher.example.com/story"]
+
+
+def test_resolve_skips_og_fetch_when_google_wrapper_resolution_fails():
+    # Fetching the wrapper page itself would only harvest Google's own
+    # logo -- when resolution fails there must be NO og fetch at all.
+    def _fetch_should_not_run(url):
+        raise AssertionError("no og fetch against an unresolved Google News wrapper")
+
+    result = resolve_article_image(
+        "https://news.google.com/rss/articles/OPAQUE123",
+        "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg",
+        fetch=_fetch_should_not_run,
+        resolve_wrapper=lambda url: None,
+    )
+    assert result == "https://static2.finnhub.io/file/finnhub/logo/reuters_logo.jpeg"
+
+
+def test_google_news_url_detection_and_id_extraction():
+    from app.ingestion.google_news import _article_id, is_google_news_url
+
+    assert is_google_news_url("https://news.google.com/rss/articles/CBMiwAFBVV95?oc=5")
+    assert not is_google_news_url("https://www.reuters.com/world/a-story/")
+    assert _article_id("https://news.google.com/rss/articles/CBMiwAFBVV95?oc=5") == "CBMiwAFBVV95"
+    assert _article_id("https://news.google.com/read/CBMiabc") == "CBMiabc"
+    assert _article_id("https://news.google.com/home") is None
+
+
 def test_displayable_image_url_nulls_generic_and_repeated():
     repeated = {"https://pub.example.com/images/photo-banner.jpg"}
     assert displayable_image_url(None, repeated) is None

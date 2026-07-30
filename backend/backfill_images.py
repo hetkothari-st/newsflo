@@ -9,16 +9,21 @@ commits after each article so an interrupted run keeps whatever progress
 it made.
 
 Usage (from the backend/ directory, so `app` is importable):
-    .venv/Scripts/python backfill_images.py
+    .venv/Scripts/python backfill_images.py [--days N]
+
+--days N limits the run to articles fetched in the last N days -- the
+feed only surfaces today's alerts, so a scoped run fixes what users
+actually see in minutes instead of re-crawling the whole archive.
 """
+import argparse
 import time
+from datetime import timedelta
 
 from sqlalchemy import func
 
 from app.db import SessionLocal, init_db
-from app.ingestion.image_filter import is_generic_image_filename
-from app.ingestion.og_image import fetch_og_image
-from app.models import Article
+from app.ingestion.image_filter import is_generic_image_filename, resolve_article_image
+from app.models import Article, utcnow
 from app import config
 
 # Be polite to the source sites -- this can hit dozens of distinct hosts in
@@ -38,11 +43,18 @@ def _repeated_urls(session) -> set[str]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--days", type=int, default=None, help="only articles fetched in the last N days")
+    args = parser.parse_args()
+
     init_db()
     session = SessionLocal()
     try:
         repeated = _repeated_urls(session)
-        analyzed = session.query(Article).filter(Article.status == "ANALYZED").all()
+        query = session.query(Article).filter(Article.status == "ANALYZED")
+        if args.days is not None:
+            query = query.filter(Article.fetched_at >= utcnow() - timedelta(days=args.days))
+        analyzed = query.all()
         pending = [
             a for a in analyzed
             if a.image_url is None
@@ -53,21 +65,20 @@ def main() -> None:
 
         found = 0
         for i, article in enumerate(pending, start=1):
-            image_url = fetch_og_image(article.url)
-            usable = (
-                image_url is not None
-                and image_url != article.image_url
-                and not is_generic_image_filename(image_url)
-            )
-            if usable:
-                article.image_url = image_url
+            # resolve_article_image handles the whole chain: Google News
+            # wrapper resolution -> publisher og:image -> generic checks.
+            resolved = resolve_article_image(article.url, article.image_url)
+            # ASCII-safe printing -- Windows consoles choke on unicode titles.
+            title = article.title[:60].encode("ascii", "replace").decode()
+            if resolved is not None and resolved != article.image_url:
+                article.image_url = resolved
                 session.commit()
                 found += 1
-                print(f"[{i}/{len(pending)}] found: {article.title[:60]}")
+                print(f"[{i}/{len(pending)}] found: {title}")
             else:
                 # Keep whatever was there -- the serve-time filter decides
                 # what reaches a card; never overwrite with a worse image.
-                print(f"[{i}/{len(pending)}] no better image: {article.title[:60]}")
+                print(f"[{i}/{len(pending)}] no better image: {title}")
             time.sleep(DELAY_BETWEEN_FETCHES_SECONDS)
 
         print(f"Done. {found}/{len(pending)} articles now carry a real story photo.")

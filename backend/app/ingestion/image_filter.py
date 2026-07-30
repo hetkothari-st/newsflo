@@ -58,7 +58,7 @@ def repeated_image_urls(session: Session, image_urls: list[str]) -> set[str]:
 
 
 def resolve_article_image(
-    article_url: str, provided_image_url: str | None, fetch=None,
+    article_url: str, provided_image_url: str | None, fetch=None, resolve_wrapper=None,
 ) -> str | None:
     """Ingest-time image resolution: prefer a real story photo over
     publisher artwork. A provided image with a clean filename is kept
@@ -68,13 +68,29 @@ def resolve_article_image(
     genuine photo; keep it only when IT isn't generic too. Falls back to
     whatever existed -- the serve-time filter (displayable_image_url)
     still decides what reaches a card.
+
+    Google News wrapper links are resolved to the real publisher URL
+    first -- the wrapper page's own og:image is Google's logo, never the
+    story photo. When resolution fails, NO og fetch happens for that
+    article (fetching would only harvest Google's logo).
     """
     if fetch is None:
         from app.ingestion.og_image import fetch_og_image  # late import: circular-free
         fetch = fetch_og_image
+    if resolve_wrapper is None:
+        from app.ingestion.google_news import is_google_news_url, resolve_google_news_url
+
+        def resolve_wrapper(url):
+            if not is_google_news_url(url):
+                return url
+            return resolve_google_news_url(url)  # None on failure -> skip og fetch
+
     if provided_image_url and not is_generic_image_filename(provided_image_url):
         return provided_image_url
-    fetched = fetch(article_url)
+    target_url = resolve_wrapper(article_url)
+    if target_url is None:
+        return provided_image_url
+    fetched = fetch(target_url)
     if fetched and not is_generic_image_filename(fetched):
         return fetched
     return provided_image_url or fetched
