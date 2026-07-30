@@ -419,6 +419,30 @@ def test_translate_pending_alerts_stops_retrying_after_max_attempts(db_session):
     assert failure.attempts == MAX_TRANSLATION_ATTEMPTS
 
 
+def test_capped_alert_becomes_retryable_after_the_cooldown(db_session):
+    # A cap must heal, not freeze the alert in English forever -- confirmed
+    # in production: a provider 429 storm capped every recent alert, and a
+    # later provider fix could never retry them.
+    from datetime import timedelta
+
+    from app.models import utcnow
+    from app.translation.job import RETRY_COOLDOWN
+
+    alert = _seed_alert(db_session)
+    db_session.add(TranslationFailure(
+        alert_id=alert.id, attempts=MAX_TRANSLATION_ATTEMPTS,
+        last_attempted_at=utcnow() - RETRY_COOLDOWN - timedelta(minutes=1),
+    ))
+    db_session.commit()
+    client = FakeToolCallClient("record_translation", _payload(1, "healed"))
+
+    completed = translate_pending_alerts(db_session, client, limit=len(TARGET_LANGS))
+
+    assert completed == len(TARGET_LANGS)
+    rows = db_session.query(ArticleTranslation).filter_by(article_id=alert.article_id).all()
+    assert {r.lang for r in rows} == set(TARGET_LANGS)
+
+
 def test_translate_pending_alerts_can_restrict_to_one_language(db_session):
     alert = _seed_alert(db_session)
     client = FakeToolCallClient("record_translation", _payload(1, "x"))

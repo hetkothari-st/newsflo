@@ -3,6 +3,7 @@ import logging
 import queue
 import threading
 import time
+from datetime import timedelta
 from dataclasses import dataclass
 
 from sqlalchemy import func
@@ -28,6 +29,12 @@ logger = logging.getLogger(__name__)
 # stops being retried after this many attempts -- the silent English
 # fallback in app/translation/lookup.py serves it indefinitely regardless.
 MAX_TRANSLATION_ATTEMPTS = 5
+
+# ...but not forever: a capped alert becomes retryable again once its last
+# failure is this old (see _pending_alert_lang_pairs). Transient provider
+# outages/rate-limit storms must heal on their own instead of freezing
+# whole days of alerts in English permanently.
+RETRY_COOLDOWN = timedelta(hours=6)
 
 
 @dataclass
@@ -112,8 +119,18 @@ def _pending_alert_lang_pairs(
     actually bounds token usage, regardless of how that work happens to be
     distributed across alerts.
     """
+    # An alert at the attempt cap is skipped only while its last failure is
+    # recent -- after RETRY_COOLDOWN it becomes eligible again (attempts
+    # keep incrementing, so a genuinely-broken alert settles into one
+    # retry per cooldown, not a hot loop). A permanent skip froze whole
+    # days of alerts in English forever when the failures were transient
+    # provider-side rate limits (confirmed in production: a Groq 429 storm
+    # capped every recent alert, and the later provider switch could never
+    # heal them).
+    retry_cutoff = utcnow() - RETRY_COOLDOWN
     exhausted_alert_ids = session.query(TranslationFailure.alert_id).filter(
-        TranslationFailure.attempts >= MAX_TRANSLATION_ATTEMPTS
+        TranslationFailure.attempts >= MAX_TRANSLATION_ATTEMPTS,
+        TranslationFailure.last_attempted_at > retry_cutoff,
     )
     alerts = (
         session.query(Alert)
