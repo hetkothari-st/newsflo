@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -202,6 +203,45 @@ def _run_analysis_retry() -> None:
         session.close()
 
 
+def _run_business_profile_refresh() -> None:
+    """Enrich alert-referenced companies still missing a business
+    description (the deep-dive's "what they do" section) -- the analysis
+    pipeline creates Company rows without one, so without this sweep every
+    newly-surfaced company shows the "no description yet" fallback
+    forever (confirmed in production: 0 of 1007 companies had one).
+    Small: a handful of companies per sweep, batched 25 per LLM call."""
+    from app.companies.business_profile import generate_business_profiles_batch
+    from app.models import Company
+
+    session = SessionLocal()
+    try:
+        recent = set(alert_referenced_tickers(session, days=7))
+        pending = [
+            c for c in session.query(Company).filter_by(business_desc=None).all()
+            if c.ticker in recent
+        ]
+        if not pending:
+            return
+        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+        enriched = 0
+        for i in range(0, len(pending), 25):
+            batch = pending[i:i + 25]
+            profiles = generate_business_profiles_batch(client, [(c.ticker, c.name, c.sector) for c in batch])
+            for company in batch:
+                profile = profiles.get(company.ticker)
+                if profile:
+                    company.business_desc = profile["business_desc"]
+                    company.supply_chain_suppliers_json = json.dumps(profile["suppliers"])
+                    company.supply_chain_customers_json = json.dumps(profile["customers"])
+                    enriched += 1
+            session.commit()
+        logger.info("Business-profile refresh: %s/%s companies enriched", enriched, len(pending))
+    except Exception:
+        logger.exception("Business-profile refresh failed")
+    finally:
+        session.close()
+
+
 def _run_market_cap_refresh() -> None:
     """Refresh Company.market_cap for every company referenced by a recent
     alert -- the input to the cap-tier ranking behind every LARGE/MID/
@@ -274,6 +314,13 @@ def start_scheduler() -> None:
         trigger="interval",
         hours=1,
         id="analysis_retry",
+    )
+    scheduler.add_job(
+        _run_business_profile_refresh,
+        trigger="interval",
+        hours=6,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+        id="business_profile_refresh",
     )
     scheduler.add_job(
         _run_market_cap_refresh,

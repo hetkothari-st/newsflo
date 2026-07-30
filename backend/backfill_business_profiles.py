@@ -8,12 +8,15 @@ Safe to re-run: only targets companies where business_desc IS NULL,
 commits per-batch so an interrupted run keeps whatever progress it made.
 
 Usage (from the backend/ directory, so `app` is importable):
-    .venv/Scripts/python backfill_business_profiles.py
+    .venv/Scripts/python backfill_business_profiles.py            # every company missing a description
+    .venv/Scripts/python backfill_business_profiles.py --recent   # only companies on recent alerts (cheap, feed-relevant)
 """
+import argparse
 import json
 
 from app.analysis.claude_client import build_client
 from app.companies.business_profile import generate_business_profiles_batch
+from app.companies.market_caps import alert_referenced_tickers
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import Company
@@ -22,12 +25,19 @@ BATCH_SIZE = 25  # companies per LLM call -- keeps prompt/response small and eac
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--recent", action="store_true", help="only companies attached to alerts in the last 7 days")
+    args = parser.parse_args()
+
     init_db()
     session = SessionLocal()
     client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
     total = 0
     try:
         pending = session.query(Company).filter_by(business_desc=None).all()
+        if args.recent:
+            recent = set(alert_referenced_tickers(session, days=7))
+            pending = [c for c in pending if c.ticker in recent]
         print(f"{len(pending)} companies to enrich")
         for i in range(0, len(pending), BATCH_SIZE):
             batch = pending[i : i + BATCH_SIZE]
