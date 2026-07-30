@@ -267,7 +267,7 @@ export default function FeedView({
   onAnyFlip: () => void;
 }) {
   const { token } = useAuth();
-  const { language, t } = useLanguage();
+  const { language, t, translating } = useLanguage();
   const [alerts, setAlerts] = useState<FeedAlert[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flippedIds, setFlippedIds] = useState<Set<number>>(new Set());
@@ -295,6 +295,41 @@ export default function FeedView({
       cancelled = true;
     };
   }, [token, language, date]);
+
+  // Live translation updates (no manual refresh): while the on-demand
+  // drain runs for a non-English language, silently re-pull the feed every
+  // few seconds so translated titles/gists stream in as the backend
+  // finishes them, plus one final pull when the drain completes. Silent =
+  // the list is REPLACED in place, never blanked -- no flicker, no lost
+  // scroll/flip state. Cached card-back details are dropped on completion
+  // so reopened backs pick up translated text too.
+  useEffect(() => {
+    if (language === 'en') return;
+    let cancelled = false;
+    const refetchSilently = () => {
+      getFeedAlerts(token, { lang: language, date: date ?? undefined })
+        .then((result) => {
+          if (!cancelled) setAlerts(result);
+        })
+        .catch(() => {
+          /* transient poll failure -- keep what's on screen */
+        });
+    };
+    if (translating) {
+      const interval = window.setInterval(refetchSilently, 4000);
+      return () => {
+        cancelled = true;
+        window.clearInterval(interval);
+      };
+    }
+    // translating just flipped false (or a fresh non-English mount): pull
+    // the final translated state once and refresh detail caches.
+    refetchSilently();
+    setDetails({});
+    return () => {
+      cancelled = true;
+    };
+  }, [translating, language, date, token]);
 
   const loadDetail = useCallback(
     (alertId: number) => {

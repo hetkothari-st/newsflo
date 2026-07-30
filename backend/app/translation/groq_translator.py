@@ -1,4 +1,5 @@
 import json
+import os
 
 from openai import OpenAI
 
@@ -14,14 +15,16 @@ from app.translation.languages import LANG_NAMES, TARGET_LANGS
 # the Railway deploy target for this service is too small to hold that
 # model alongside FastAPI + scheduler + DB pool, and the process was
 # silently OOM-killed a few translation cycles after boot (no exception,
-# no traceback -- just the container killing the process). Switched to
-# "groq" (GROQ_API_KEY already provisioned and confirmed working in
-# prod) until either the model is moved out of this process or the
-# deploy target's memory is increased -- see this comment's own prior
-# self, which already anticipated exactly this: "flip back if the local
-# model becomes unavailable in some environment (e.g. a deploy target
-# too small to hold the model in memory)."
-TRANSLATION_PROVIDER = "groq"  # "nllb" | "anthropic" | "groq"
+# no traceback -- just the container killing the process).
+#
+# Groq (the prior fallback) is sequential with a ~20s inter-call throttle
+# on this account's free tier -- an on-demand language switch took
+# minutes and the progress bar looked frozen (confirmed by a user in
+# production). Anthropic (key already provisioned in prod) runs
+# ANTHROPIC_CONCURRENCY calls at once with no throttle, so a switch
+# drains in seconds -- now the default; override with the
+# TRANSLATION_PROVIDER env var ("nllb" | "anthropic" | "groq").
+TRANSLATION_PROVIDER = os.environ.get("TRANSLATION_PROVIDER", "anthropic").strip().lower()
 TRANSLATION_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 # Deliberately MODEL (llama-3.3-70b-versatile), not FALLBACK_MODEL, despite
