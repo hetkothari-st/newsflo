@@ -17,38 +17,39 @@ from app.translation.languages import LANG_NAMES, TARGET_LANGS
 # silently OOM-killed a few translation cycles after boot (no exception,
 # no traceback -- just the container killing the process).
 #
-# Groq (the prior fallback) is sequential with a ~20s inter-call throttle
-# on this account's free tier -- an on-demand language switch took
-# minutes and the progress bar looked frozen (confirmed by a user in
-# production). Anthropic (key already provisioned in prod) runs
-# ANTHROPIC_CONCURRENCY calls at once with no throttle, so a switch
-# drains in seconds -- now the default; override with the
+# Provider reality check (2026-07-30, verified live against every
+# provisioned key): Anthropic 401 (invalid key), OpenAI 429 (quota
+# exhausted), OpenRouter 401 (dead key), Gemini 429 (quota exhausted) --
+# Groq is the only working provider. Its pain point was model CHOICE, not
+# the provider: translation previously shared llama-3.3-70b with the
+# analysis pipeline, and Groq rate-limits PER MODEL, so analysis traffic
+# 429-starved translation into multi-minute, frozen-looking drains.
+# Translation now runs on openai/gpt-oss-120b -- its own per-model quota
+# bucket (no contention with analysis), verified live to produce clean
+# native-script output through this exact tool schema. Override with the
 # TRANSLATION_PROVIDER env var ("nllb" | "anthropic" | "groq").
-TRANSLATION_PROVIDER = os.environ.get("TRANSLATION_PROVIDER", "anthropic").strip().lower()
+TRANSLATION_PROVIDER = os.environ.get("TRANSLATION_PROVIDER", "groq").strip().lower()
 TRANSLATION_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
-# Deliberately MODEL (llama-3.3-70b-versatile), not FALLBACK_MODEL, despite
-# the analysis pipeline's own preference for keeping translation off MODEL's
-# shared quota bucket (see claude_client.py). Confirmed in production:
-# FALLBACK_MODEL's structured-output reliability on this multi-field
-# translation schema was bad enough to be unusable -- most calls either
-# failed the tool call outright ("Failed to call a function") or, worse,
-# silently returned garbage (Romanized Hinglish, or once literal Japanese,
-# instead of the requested language). MODEL was reliable across repeated
-# trials. Translation's call volume stays low (throttled, small batches),
-# so the contention risk with the analysis pipeline's own MODEL usage is
-# accepted as the lesser problem.
-TRANSLATION_MODEL = MODEL
+# openai/gpt-oss-120b, deliberately NOT the analysis pipeline's MODEL
+# (llama-3.3-70b-versatile): Groq rate-limits per model, and sharing the
+# analysis model's bucket meant analysis traffic 429-starved translation
+# (confirmed in production: a 429 storm capped every recent alert's
+# translation). gpt-oss-120b has its own quota bucket and was verified
+# live to produce clean native-script output through this exact
+# multi-field tool schema. (The smaller candidates fail it: 8b-instant
+# returns Romanized Hinglish, gpt-oss-20b couldn't hold the schema,
+# qwen3.6-27b fails the forced tool call outright -- all verified live.)
+TRANSLATION_MODEL = "openai/gpt-oss-120b"
 
-# Groq's free tier caps translation calls at a small tokens-per-minute
-# budget (confirmed in production: a single combined multi-language call was
-# rejected outright at ~17000 requested tokens against FALLBACK_MODEL's 6000
-# TPM limit) -- concurrent calls would each eat into that same shared budget
-# within the same rolling minute, so Groq gets throttled down to fully
-# sequential with real spacing between calls. Anthropic has no such
-# per-minute wall at this account's scale, so it runs several calls at once
-# with no artificial delay. See job.py's MAX_CONCURRENT_TRANSLATIONS.
-RECOMMENDED_THROTTLE_SECONDS = 20.0 if TRANSLATION_PROVIDER == "groq" else 0.0
+# Groq's free tier still caps per-minute tokens, but translation now has
+# its OWN per-model bucket (gpt-oss-120b, nothing else uses it) -- the old
+# 20s spacing existed to survive sharing the analysis model's bucket. A
+# light delay keeps a full-language drain inside the per-minute budget
+# without making the progress bar look frozen. Anthropic has no such
+# per-minute wall at this account's scale, so it runs several calls at
+# once with no artificial delay. See job.py's MAX_CONCURRENT_TRANSLATIONS.
+RECOMMENDED_THROTTLE_SECONDS = 3.0 if TRANSLATION_PROVIDER == "groq" else 0.0
 
 SYSTEM_PROMPT = (
     "You are a professional financial-news translator working across English "

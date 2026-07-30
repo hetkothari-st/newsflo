@@ -50,7 +50,10 @@ _lock = threading.Lock()
 if TRANSLATION_PROVIDER == "nllb":
     ON_DEMAND_ALERT_LIMIT = 150
 elif TRANSLATION_PROVIDER == "groq":
-    ON_DEMAND_ALERT_LIMIT = 10 * max(1, len(settings.translation_groq_api_keys))
+    # Translation now runs on its own per-model Groq bucket with a light
+    # throttle (see RECOMMENDED_THROTTLE_SECONDS) -- ~25 alerts drain in
+    # about a minute per lane, covering a full feed page.
+    ON_DEMAND_ALERT_LIMIT = 25 * max(1, len(settings.translation_groq_api_keys))
 else:
     ON_DEMAND_ALERT_LIMIT = 40
 
