@@ -214,6 +214,15 @@ describe('Shell card feed', () => {
     ).toBeInTheDocument();
   });
 
+  it('locks feed scrolling while a card is flipped to its analysis', async () => {
+    renderShell();
+    expect(await screen.findByTestId('feed')).not.toHaveClass('locked');
+    fireEvent.click(screen.getByTestId('front-7'));
+    expect(screen.getByTestId('feed')).toHaveClass('locked');
+    fireEvent.click(await screen.findByLabelText('Back to headline'));
+    expect(screen.getByTestId('feed')).not.toHaveClass('locked');
+  });
+
   it('switches to the timeline tab on the card back', async () => {
     renderShell();
     fireEvent.click(await screen.findByTestId('front-7'));

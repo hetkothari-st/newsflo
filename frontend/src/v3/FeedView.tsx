@@ -375,7 +375,9 @@ export default function FeedView({
 
   return (
     <div className={`view ${active ? 'on' : ''}`}>
-      <div className="feed" ref={feedRef}>
+      {/* locked while any card shows its analysis -- scrolling past the end
+          of the companies list must never advance to the next story. */}
+      <div className={`feed ${flippedIds.size > 0 ? 'locked' : ''}`} ref={feedRef} data-testid="feed">
         {error !== null && <p className="empty">{error}</p>}
         {alerts !== null && alerts.length === 0 && <p className="empty">{t('v3.noStories')}</p>}
         {alerts?.map(
