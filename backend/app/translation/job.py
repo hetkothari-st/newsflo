@@ -19,7 +19,6 @@ from app.models import (
     TranslationFailure,
     utcnow,
 )
-from app.pipeline import decode_key_points
 from app.translation.groq_translator import translate_alert, translate_categories
 from app.translation.languages import TARGET_LANGS, has_expected_script
 
@@ -51,18 +50,22 @@ class _AlertSnapshot:
 
 
 def _snapshot_alert(alert: Alert) -> _AlertSnapshot:
+    # content / rationale / key_points are deliberately NOT captured for
+    # translation anymore: the card-feed UI never renders them (it shows
+    # title, summaries, and per-company why), and translating them burned
+    # ~70% of the provider's daily token budget on invisible text --
+    # confirmed in production (gpt-oss-120b's 200k/day cap exhausted
+    # mid-day). They translate as empty passthroughs; the stored rows keep
+    # empty strings for those columns.
     return _AlertSnapshot(
         alert_id=alert.id,
         article_id=alert.article_id,
         title=alert.article.title,
-        content=alert.article.content,
+        content="",
         summary_short=alert.summary_short or "",
         summary_long=alert.summary_long or "",
         companies=[
-            {
-                "id": ac.id, "rationale": ac.rationale,
-                "key_points": decode_key_points(ac), "why": ac.why or "",
-            }
+            {"id": ac.id, "rationale": "", "key_points": [], "why": ac.why or ""}
             for ac in alert.companies
         ],
     )

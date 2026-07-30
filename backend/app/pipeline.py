@@ -465,6 +465,13 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                     analysis = analyze_article(claude_client, article.title, article_text(article))
                     break
                 except Exception:
+                    # Logged, not swallowed silently -- a burst of
+                    # ANALYSIS_FAILED articles with no trace made a
+                    # provider rate-limit storm undiagnosable in
+                    # production.
+                    logger.exception(
+                        "analyze_article attempt %s failed for article_id=%s", attempt + 1, article.id,
+                    )
                     if attempt == 0:
                         time.sleep(throttle_seconds)
                     continue
