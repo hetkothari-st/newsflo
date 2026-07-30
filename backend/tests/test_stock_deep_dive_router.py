@@ -240,3 +240,45 @@ def test_stock_deep_dive_includes_logo_url(db_session, monkeypatch):
     assert response.status_code == 200
     assert response.json()["logo_url"] == "https://cdn.brandfetch.io/isin/INE002A01018?c=test-client-id"
     app.dependency_overrides.clear()
+
+
+def test_deep_dive_carries_per_story_reasoning_and_section(db_session):
+    # The "why it's under <section>" block below "What they do": causal
+    # why + analysis rationale + the card-back section this company
+    # renders in for this alert.
+    _override_db(db_session)
+    company = _company("STORY.NS", sector="oil_gas", market_cap=900000.0)
+    db_session.add(company)
+    db_session.commit()
+    article = Article(source="test", url="https://example.com/story", title="Oil story", content="c")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+        rationale="Crude costs squeeze its refining margins.",
+        why="Higher crude directly raises its biggest input cost.",
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.8, sector_move_pct=-0.6, excess_move_pct=-4.2,
+        volume=300.0, avg_volume_20d=100.0, volume_multiple=3.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get(f"/api/feed-v2/stock/STORY.NS?alert_id={alert.id}").json()
+
+    assert body["why"] == "Higher crude directly raises its biggest input cost."
+    assert body["rationale"] == "Crude costs squeeze its refining margins."
+    assert body["section_title"] == "Directly affected"
+
+    # Without alert context there is no story to reason about.
+    no_context = client.get("/api/feed-v2/stock/STORY.NS").json()
+    assert no_context["why"] is None
+    assert no_context["section_title"] is None
+    app.dependency_overrides.clear()

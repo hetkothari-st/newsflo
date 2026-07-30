@@ -111,6 +111,11 @@ export interface StockDeepDive {
   delivery_pct: number | null;
   intensity: Intensity | null;
   is_exposure_only: boolean | null;
+  // Per-story reasoning (alert context only): why this company sits in
+  // its card-back section for this news.
+  why: string | null;
+  rationale: string | null;
+  section_title: string | null;
   peers: LayerRow[];
 }
 
@@ -227,8 +232,12 @@ export function getStockDeepDive(
   ticker: string,
   alertId?: number,
   token: string | null = null,
+  lang?: string,
 ): Promise<StockDeepDive> {
-  const query = alertId !== undefined ? `?alert_id=${alertId}` : '';
+  const params = new URLSearchParams();
+  if (alertId !== undefined) params.set('alert_id', String(alertId));
+  if (lang && lang !== 'en') params.set('lang', lang);
+  const query = params.toString() ? `?${params.toString()}` : '';
   return getJson<StockDeepDive>(`/api/feed-v2/stock/${encodeURIComponent(ticker)}${query}`, token);
 }
 

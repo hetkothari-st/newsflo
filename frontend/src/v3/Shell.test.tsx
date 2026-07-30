@@ -115,6 +115,9 @@ const DEEP_DIVE = {
     ],
   },
   is_exposure_only: false,
+  why: 'Cheaper crude lifts refining margins.',
+  rationale: 'A standalone refiner with full crude-cost exposure.',
+  section_title: 'Winners — refiners & marketers',
   peers: [],
 };
 
@@ -242,6 +245,14 @@ describe('Shell card feed', () => {
     expect(sheet.getByText('Materiality')).toBeInTheDocument();
     expect(sheet.getByText(/only 38% of volume went to delivery/i)).toBeInTheDocument();
     expect(sheet.getByText(/small size and thin trading amplify moves/i)).toBeInTheDocument();
+    // Per-story reasoning block below "What they do": section membership +
+    // 1-2 points on why this company is affected by this news.
+    expect(sheet.getByText(/why it's under "winners — refiners & marketers"/i)).toBeInTheDocument();
+    const bullets = within(sheet.getByTestId('why-list')).getAllByRole('listitem');
+    expect(bullets.map((b) => b.textContent)).toEqual([
+      'Cheaper crude lifts refining margins.',
+      'A standalone refiner with full crude-cost exposure.',
+    ]);
     expect(sheet.getByText(/not whether it's a good investment/i)).toBeInTheDocument();
   });
 

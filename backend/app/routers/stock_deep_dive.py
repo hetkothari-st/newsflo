@@ -14,14 +14,17 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user_optional
 from app.companies.branding import logo_url
 from app.companies.price_series import fetch_pe_ratio
+from app.i18n import get_lang
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import compute_cap_tier_for_ticker, compute_cap_tiers
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple import get_sector_peers_for_alert
+from app.market.ripple_layers import compute_ripple_layers
 from app.models import Alert, AlertCompany, Company, MarketMove, User
 from app.routers.articles import get_db
 from app.routers.feed_v2 import _held_company_ids
+from app.translation.lookup import bulk_alert_company_translations, bulk_alert_company_whys
 
 router = APIRouter(prefix="/api/feed-v2", tags=["feed-v2"])
 
@@ -47,6 +50,12 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "delivery_pct": None,
         "intensity": None,
         "is_exposure_only": None,
+        # Per-story reasoning (alert context only): why THIS company sits
+        # in THAT card-back section for THIS news -- the causal one-liner
+        # (why), the analysis rationale, and the section it renders under.
+        "why": None,
+        "rationale": None,
+        "section_title": None,
         "peers": [],
     }
 
@@ -57,6 +66,7 @@ def get_stock_deep_dive(
     alert_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
+    lang: str = Depends(get_lang),
 ):
     company = db.query(Company).filter(Company.ticker == ticker).one_or_none()
     if company is None:
@@ -79,6 +89,18 @@ def get_stock_deep_dive(
     )
     if alert_company is None:
         return result
+
+    # Per-story reasoning block (rendered below "What they do"): the causal
+    # why (translated when available), the analysis rationale, and which
+    # card-back section this company renders under for this alert.
+    translated_why = bulk_alert_company_whys(db, [alert_company.id], lang).get(alert_company.id)
+    translated = bulk_alert_company_translations(db, [alert_company.id], lang).get(alert_company.id)
+    result["why"] = translated_why or alert_company.why
+    result["rationale"] = (translated[0] if translated and translated[0] else None) or alert_company.rationale
+    for layer in compute_ripple_layers(db, alert, held_company_ids):
+        if any(row["ticker"] == company.ticker for row in layer["rows"]):
+            result["section_title"] = layer["title"]
+            break
 
     move = (
         db.query(MarketMove)

@@ -20,6 +20,7 @@ import {
   moveColor,
 } from './format';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/language';
 
 export interface InfoSheetData {
   name: string;
@@ -108,6 +109,7 @@ export function DeepDiveSheetContent({
   onOpenPeer: (ticker: string) => void;
 }) {
   const { token } = useAuth();
+  const { language } = useLanguage();
   const [data, setData] = useState<StockDeepDive | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,7 +117,7 @@ export function DeepDiveSheetContent({
     let cancelled = false;
     setData(null);
     setError(null);
-    getStockDeepDive(ticker, alertId, token)
+    getStockDeepDive(ticker, alertId, token, language)
       .then((result) => {
         if (!cancelled) setData(result);
       })
@@ -125,7 +127,7 @@ export function DeepDiveSheetContent({
     return () => {
       cancelled = true;
     };
-  }, [ticker, alertId, token]);
+  }, [ticker, alertId, token, language]);
 
   if (error) return <p className="empty">{error}</p>;
   if (data === null) return <p className="empty">Loading…</p>;
@@ -219,6 +221,17 @@ export function DeepDiveSheetContent({
       )}
       <p className="seclab">What they do</p>
       <p className="desc">{data.business_desc ?? 'No business description available yet.'}</p>
+      {(data.why !== null || data.rationale !== null) && (
+        <>
+          <p className="seclab">
+            {data.section_title !== null ? `Why it's under "${data.section_title}"` : 'Why it appears in this story'}
+          </p>
+          <ul className="whylist" data-testid="why-list">
+            {data.why !== null && <li>{data.why}</li>}
+            {data.rationale !== null && data.rationale !== data.why && <li>{data.rationale}</li>}
+          </ul>
+        </>
+      )}
       <p className="disc">
         Intensity measures how hard the news hit this stock — not whether it's a good investment.
         Percentages are measured market moves, not forecasts.

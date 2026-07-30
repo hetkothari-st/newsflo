@@ -216,6 +216,10 @@
 .nf3 .comp .cbar { flex: 1; height: 5px; background: var(--s0); border-radius: 3px; overflow: hidden; }
 .nf3 .comp .cw { font-family: var(--mono); font-size: 10px; color: var(--ink2); width: 64px; text-align: right; }
 .nf3 .desc { font-size: 13px; color: var(--ink2); line-height: 1.55; }
+/* Per-story reasoning bullets under "What they do" (deep-dive sheet). */
+.nf3 .whylist { margin: 0; padding-left: 16px; }
+.nf3 .whylist li { font-size: 12.5px; color: var(--ink2); line-height: 1.5; margin-bottom: 6px; }
+.nf3 .whylist li::marker { color: var(--accent); }
 .nf3 .wbox { background: rgba(217, 164, 65, 0.1); border: 0.5px solid rgba(217, 164, 65, 0.3); border-radius: 9px; padding: 10px 12px; font-size: 11px; color: var(--amber); line-height: 1.45; margin-top: 12px; }
 .nf3 .disc { font-size: 10px; color: var(--ink3); line-height: 1.45; margin-top: 16px; padding-top: 12px; border-top: 0.5px solid var(--border); }
 .nf3 .peer { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 0.5px solid var(--border); cursor: pointer; }
