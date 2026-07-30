@@ -85,6 +85,19 @@ def test_resolve_keeps_original_when_refetch_finds_nothing_better():
     )
 
 
+def test_resolve_refetches_when_provided_image_is_repetition_condemned():
+    # Clean filename but flagged by the repetition signal (wire-service
+    # boilerplate) -> must still re-fetch the real photo.
+    assert (
+        resolve_article_image(
+            "https://pub.example.com/story", "https://ml.example.com/Resource/banner-photo.jpg",
+            fetch=lambda url: "https://pub.example.com/photos/real-shot.jpg",
+            provided_is_generic=True,
+        )
+        == "https://pub.example.com/photos/real-shot.jpg"
+    )
+
+
 def test_resolve_fetches_when_no_image_provided():
     assert (
         resolve_article_image(

@@ -67,7 +67,13 @@ def main() -> None:
         for i, article in enumerate(pending, start=1):
             # resolve_article_image handles the whole chain: Google News
             # wrapper resolution -> publisher og:image -> generic checks.
-            resolved = resolve_article_image(article.url, article.image_url)
+            # provided_is_generic carries the repetition verdict -- a
+            # boilerplate image with a clean filename must still trigger
+            # the real-photo re-fetch.
+            resolved = resolve_article_image(
+                article.url, article.image_url,
+                provided_is_generic=article.image_url in repeated,
+            )
             # ASCII-safe printing -- Windows consoles choke on unicode titles.
             title = article.title[:60].encode("ascii", "replace").decode()
             if resolved is not None and resolved != article.image_url:

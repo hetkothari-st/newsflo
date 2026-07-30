@@ -58,7 +58,11 @@ def repeated_image_urls(session: Session, image_urls: list[str]) -> set[str]:
 
 
 def resolve_article_image(
-    article_url: str, provided_image_url: str | None, fetch=None, resolve_wrapper=None,
+    article_url: str,
+    provided_image_url: str | None,
+    fetch=None,
+    resolve_wrapper=None,
+    provided_is_generic: bool = False,
 ) -> str | None:
     """Ingest-time image resolution: prefer a real story photo over
     publisher artwork. A provided image with a clean filename is kept
@@ -73,6 +77,12 @@ def resolve_article_image(
     first -- the wrapper page's own og:image is Google's logo, never the
     story photo. When resolution fails, NO og fetch happens for that
     article (fetching would only harvest Google's logo).
+
+    ``provided_is_generic`` lets callers flag a provided image the
+    REPETITION signal already condemned (wire-service boilerplate with a
+    clean filename, e.g. GlobeNewswire's default banner) -- the filename
+    heuristic alone cannot see that, and without the flag such an image
+    early-returns untouched and never gets a real-photo re-fetch.
     """
     if fetch is None:
         from app.ingestion.og_image import fetch_og_image  # late import: circular-free
@@ -85,7 +95,11 @@ def resolve_article_image(
                 return url
             return resolve_google_news_url(url)  # None on failure -> skip og fetch
 
-    if provided_image_url and not is_generic_image_filename(provided_image_url):
+    if (
+        provided_image_url
+        and not provided_is_generic
+        and not is_generic_image_filename(provided_image_url)
+    ):
         return provided_image_url
     target_url = resolve_wrapper(article_url)
     if target_url is None:

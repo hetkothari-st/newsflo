@@ -18,7 +18,7 @@ from app.companies.resolution import resolve_companies
 from app.filtering.relevance import filter_new_articles
 from app.market.measure import measure_company_move
 from app.ingestion.full_text import fetch_pending_full_text
-from app.ingestion.image_filter import resolve_article_image
+from app.ingestion.image_filter import repeated_image_urls, resolve_article_image
 from app.ingestion.og_image import fetch_og_image
 from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, utcnow
 from app.reasoning.confidence import _band as band_for_score
@@ -393,8 +393,14 @@ def _persist_alert(
 
     # Prefer a real story photo: a missing OR generic (publisher-logo)
     # provided image triggers an og:image fetch from the article's own
-    # page -- see app.ingestion.image_filter.resolve_article_image.
-    article.image_url = resolve_article_image(article.url, article.image_url, fetch=fetch_og_image)
+    # page -- see app.ingestion.image_filter.resolve_article_image. The
+    # repetition signal feeds in too: boilerplate with a clean filename
+    # (e.g. GlobeNewswire's default banner) must still get the re-fetch.
+    repeated_images = repeated_image_urls(session, [article.image_url] if article.image_url else [])
+    article.image_url = resolve_article_image(
+        article.url, article.image_url, fetch=fetch_og_image,
+        provided_is_generic=article.image_url in repeated_images,
+    )
 
     article.status = "ANALYZED"
     article.category = category
