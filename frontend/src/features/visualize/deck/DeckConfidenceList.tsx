@@ -50,11 +50,13 @@ export default function DeckConfidenceList({
   article: _article,
   alertCreatedAt: _alertCreatedAt,
   eventType,
+  displayNumber = 5,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
 
@@ -67,7 +69,7 @@ export default function DeckConfidenceList({
 
   return (
     <DeckChartFrame
-      number={5}
+      number={displayNumber}
       title="Confidence Tree"
       description={`How directly evidenced each call is. The marker on every bar is the ${THRESHOLD}% high-confidence threshold.`}
     >

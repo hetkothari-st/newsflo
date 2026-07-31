@@ -17,18 +17,20 @@ export default function DeckSectors({
   article: _article,
   alertCreatedAt: _alertCreatedAt,
   eventType,
+  displayNumber = 8,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
   const sectors = groupBySectorAndSubSector(companies);
 
   return (
     <DeckChartFrame
-      number={8}
+      number={displayNumber}
       title="Sector Tree"
       description="The same companies regrouped by sector, with each sector's mean measured move."
       legend={sectors.map((s) => ({ label: s.label, color: s.color ?? 'rgb(var(--color-muted))' }))}

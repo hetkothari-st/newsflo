@@ -19,11 +19,13 @@ export default function DeckImpactTree({
   article,
   alertCreatedAt,
   eventType,
+  displayNumber = 1,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
 
@@ -38,7 +40,7 @@ export default function DeckImpactTree({
 
   return (
     <DeckChartFrame
-      number={1}
+      number={displayNumber}
       title="Impact Tree"
       description="How the news branches from directly-hit companies down through the ripple."
       legend={[

@@ -343,17 +343,24 @@
 }
 
 /* Graph charts (2, 3, 9, 10). */
-.deck-flowpane {
-  height: 320px;
+.deck-graphsvg {
   width: 100%;
-  overflow: hidden;
+  display: block;
   border: 1px solid rgb(var(--color-hairline));
   border-radius: 3px;
+  background: rgb(var(--color-page));
 }
-@media (min-width: 640px) {
-  .deck-flowpane {
-    height: 480px;
-  }
+.deck-ringguide {
+  fill: none;
+  stroke: rgb(var(--color-muted) / 0.35);
+  stroke-dasharray: 3 5;
+}
+.deck-graphedge {
+  stroke-width: 1.2;
+}
+.deck-nodefit-center {
+  align-items: center;
+  justify-content: center;
 }
 .deck-prunedtoggle {
   align-self: flex-start;

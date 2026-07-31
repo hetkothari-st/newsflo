@@ -42,15 +42,17 @@ export function reachableCompanyIds(graph: ImpactGraph, startId: string): Set<nu
 export default function DeckEconomicChain({
   graph,
   companies,
+  displayNumber = 9,
 }: {
   graph: ImpactGraph;
   companies: AlertCompany[];
+  displayNumber?: number;
 }) {
   const mechanisms = mechanismBackbone(graph);
 
   return (
     <DeckChartFrame
-      number={9}
+      number={displayNumber}
       title="Economic Chain"
       description="The general macro mechanism this kind of news transmits through, step by step."
     >

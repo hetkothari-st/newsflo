@@ -21,11 +21,13 @@ export default function DeckLevelTree({
   article,
   alertCreatedAt,
   eventType,
+  displayNumber = 4,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
 
@@ -44,7 +46,7 @@ export default function DeckLevelTree({
 
   return (
     <DeckChartFrame
-      number={4}
+      number={displayNumber}
       title="Multi-Level Tree"
       description="Explicit cascade levels with counts; children sit under the company that caused them."
       legend={[

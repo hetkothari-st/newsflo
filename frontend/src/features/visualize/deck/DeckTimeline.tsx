@@ -35,11 +35,13 @@ export default function DeckTimeline({
   article: _article,
   alertCreatedAt: _alertCreatedAt,
   eventType,
+  displayNumber = 7,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
 
@@ -56,7 +58,7 @@ export default function DeckTimeline({
 
   return (
     <DeckChartFrame
-      number={7}
+      number={displayNumber}
       title="Timeline Tree"
       description="When each impact is expected to play out, from days to a year plus."
       legend={visible.map((b) => ({

@@ -218,7 +218,14 @@ function Card({
                 navigate(`/alerts/${alert.id}/charts`);
               }}
             >
-              ◫
+              {/* Mini bar-chart glyph -- reads as "charts" at a glance,
+                  which the old abstract ◫ box did not. currentColor so it
+                  follows the .bx button's own ink in both themes. */}
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+                <rect x="1" y="8" width="3" height="5" rx="0.5" fill="currentColor" />
+                <rect x="5.5" y="4" width="3" height="9" rx="0.5" fill="currentColor" />
+                <rect x="10" y="1" width="3" height="12" rx="0.5" fill="currentColor" />
+              </svg>
             </button>
             <button
               className="bx"

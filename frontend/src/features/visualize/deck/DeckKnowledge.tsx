@@ -1,83 +1,69 @@
-import { useCallback, useMemo, useState } from 'react';
-import {
-  Background, Controls, ReactFlow,
-  type Edge, type Node, type ReactFlowInstance,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+import { useMemo, useState } from 'react';
 import type { AlertCompany, ImpactGraph } from '../../../lib/api';
-import { useTheme } from '../../../lib/theme';
 import ReasoningPanel from '../../../components/ReasoningPanel';
 import { EDGE_RELATIONS, relationColor } from '../colors';
-import { deckForcePositions } from './forcePositions';
 import { useCompanySelection } from '../charts/useCompanySelection';
 import DeckChartFrame from './DeckChartFrame';
-import { EmptyGraphNote, GapsNote, PrunedToggle, deckNodeTypes, type FlowNodeData } from './DeckGraphShared';
+import DeckGraphSvg, { type PositionedNode } from './DeckGraphSvg';
+import { EmptyGraphNote, GapsNote, PrunedToggle } from './DeckGraphShared';
+import { deckForcePositions } from './forcePositions';
 
-// Chart 10 -- Knowledge Graph (Doc-2 §6). The whole payload, force-directed:
-// edge color by relation, node size by confidence_score, portfolio ring on
-// holdings (CompanyNode's own treatment). Labels render through the shared
-// primitives, which use --ink -- the dark-grey-on-black illegibility was a
-// past bug this build must not reintroduce.
+// Chart 10 -- Knowledge Graph. Whole payload, force-directed (deck-local
+// layout with a centering pull so sparse graphs stay compact), rendered as
+// one static fitted SVG -- every node visible at once, same as DeckRipple.
+// Edge color by relation, node size by confidence_score, portfolio ring
+// via CompanyNode's own treatment.
 function sizeFor(confidenceScore: number | undefined): number {
-  return 120 + (confidenceScore ?? 50) * 0.6;
+  return 104 + (confidenceScore ?? 50) * 0.5;
 }
 
 export default function DeckKnowledge({
   graph,
   companies,
   eventType,
+  displayNumber = 10,
 }: {
   graph: ImpactGraph;
   companies: AlertCompany[];
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
-  const { theme } = useTheme();
   const [showPruned, setShowPruned] = useState(true);
 
-  const positions = useMemo(() => deckForcePositions(graph), [graph]);
+  const layout = useMemo(() => {
+    const positions = deckForcePositions(graph);
+    const positioned: PositionedNode[] = graph.nodes.map((node) => {
+      const { x: cx, y: cy } = positions[node.id] ?? { x: 0, y: 0 };
+      const w = node.kind === 'company' ? sizeFor(node.confidence_score) : node.kind === 'news' ? 148 : 110;
+      const h = node.kind === 'company' ? 66 : node.kind === 'news' ? 56 : 44;
+      return { node, cx, cy, x: cx - w / 2, y: cy - h / 2, w, h };
+    });
+    const PAD = 16;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of positioned) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + p.w);
+      maxY = Math.max(maxY, p.y + p.h);
+    }
+    if (positioned.length === 0) {
+      minX = minY = 0;
+      maxX = maxY = 1;
+    }
+    return {
+      positioned,
+      minX: minX - PAD,
+      minY: minY - PAD,
+      width: maxX - minX + PAD * 2,
+      height: maxY - minY + PAD * 2,
+    };
+  }, [graph]);
+
   const visibleEdges = showPruned ? graph.edges : graph.edges.filter((e) => e.source !== 'rulebook_pruned');
-
-  const flowNodes: Node<FlowNodeData>[] = useMemo(
-    () =>
-      graph.nodes.map((node) => {
-        const isCompany = node.kind === 'company' && node.company_id != null;
-        return {
-          id: node.id,
-          type: 'graphNode',
-          position: positions[node.id] ?? { x: 0, y: 0 },
-          data: {
-            node,
-            onClick: isCompany ? () => toggle(node.company_id as number) : undefined,
-            selected: isCompany && selectedId === node.company_id,
-            size: sizeFor(node.confidence_score),
-          },
-        };
-      }),
-    [graph.nodes, positions, selectedId, toggle],
-  );
-
-  const flowEdges: Edge[] = visibleEdges.map((edge, i) => ({
-    id: `${edge.from}-${edge.to}-${i}`,
-    source: edge.from,
-    target: edge.to,
-    type: 'straight',
-    style: {
-      stroke: relationColor(edge.relation),
-      strokeDasharray: edge.source === 'rulebook_pruned' ? '4 4' : undefined,
-      opacity: edge.source === 'rulebook_pruned' ? 0.35 : 1,
-    },
-  }));
-
-  // fitView here, unlike DeckRipple's setCenter: a force-directed layout's
-  // bounding box is bounded (forceCollide keeps it compact), so fitting it
-  // is safe -- and centering (0,0) proved unreliable live (the simulation's
-  // centroid drifts from the origin once collision pushes nodes around,
-  // leaving the pane mostly empty). maxZoom 1 keeps node text full-size.
-  const onInit = useCallback((instance: ReactFlowInstance<Node<FlowNodeData>, Edge>) => {
-    requestAnimationFrame(() => instance.fitView({ padding: 0.1, maxZoom: 1, duration: 0 }));
-  }, []);
-
   const presentRelations = new Set(graph.edges.map((e) => e.relation));
   const legend = EDGE_RELATIONS.filter((r) => presentRelations.has(r)).map((r) => ({
     label: r,
@@ -86,7 +72,7 @@ export default function DeckKnowledge({
 
   return (
     <DeckChartFrame
-      number={10}
+      number={displayNumber}
       title="Knowledge Graph"
       description="Every node and edge this alert resolved, laid out by connection strength; node size tracks confidence."
       legend={legend}
@@ -96,20 +82,15 @@ export default function DeckKnowledge({
       ) : (
         <>
           <PrunedToggle graph={graph} showPruned={showPruned} onToggle={() => setShowPruned((v) => !v)} />
-          <div className="deck-flowpane">
-            <ReactFlow
-              nodes={flowNodes}
-              edges={flowEdges}
-              nodeTypes={deckNodeTypes}
-              onInit={onInit}
-              colorMode={theme}
-              minZoom={0.55}
-              maxZoom={1.5}
-            >
-              <Background />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          </div>
+          <DeckGraphSvg
+            positioned={layout.positioned}
+            edges={visibleEdges}
+            viewBox={layout}
+            edgeColor={(edge) => relationColor(edge.relation)}
+            selectedId={selectedId}
+            onToggle={toggle}
+            label="Knowledge graph"
+          />
           <GapsNote gaps={graph.gaps} />
           {selected && <ReasoningPanel company={selected} eventType={eventType} />}
         </>

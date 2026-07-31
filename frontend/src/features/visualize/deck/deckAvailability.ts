@@ -12,9 +12,9 @@ export interface DeckChartAvailability {
   graph: ImpactGraph;
 }
 
-// Keyed by canonical chart number (Doc-1/Doc-2 numbering). A hidden chart
-// keeps its number -- the rail shows the surviving numbers unrenumbered, so
-// "07" always means the Timeline Tree no matter what else is hidden.
+// Returns the CANONICAL chart numbers (Doc-1/Doc-2 numbering) that have
+// data, ascending. The deck page renumbers the survivors sequentially for
+// display (user rule: skipped charts must not leave gaps in the rail).
 export function availableChartNumbers({ companies, graph }: DeckChartAvailability): number[] {
   const hasCompanies = companies.length > 0;
   const hasGraph = graph.nodes.length > 1;

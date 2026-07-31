@@ -21,9 +21,9 @@ import './deck.css';
 // The charts deck screen, built to the approved chart-1 prototype's shell:
 // a compact header (back / kicker + headline / theme toggle), a numbered
 // mono rail, a horizontally-swipeable chart area, and a quiet foot hint.
-// Chart order matches the two chart-spec docs' numbering 1-10; charts with
-// no data for this alert are hidden entirely (deckAvailability.ts), and
-// the survivors keep their canonical numbers on the rail.
+// Chart order matches the two chart-spec docs' ordering; charts with no
+// data for this alert are hidden entirely (deckAvailability.ts) and the
+// survivors renumber sequentially, so the rail always reads 01..0N.
 
 export default function ChartDeckPage() {
   const { id } = useParams<{ id: string }>();
@@ -84,20 +84,26 @@ export default function ChartDeckPage() {
   };
   const graphProps = { graph, companies: alert.companies, eventType: alert.event_type };
 
-  const slideByNumber: Record<number, JSX.Element> = {
-    1: <DeckImpactTree key="c1" {...treeProps} />,
-    2: <DeckRipple key="c2" {...graphProps} />,
-    3: <DeckSupplyChain key="c3" {...graphProps} />,
-    4: <DeckLevelTree key="c4" {...treeProps} />,
-    5: <DeckConfidenceList key="c5" {...treeProps} />,
-    6: <DeckSplit key="c6" {...treeProps} />,
-    7: <DeckTimeline key="c7" {...treeProps} />,
-    8: <DeckSectors key="c8" {...treeProps} />,
-    9: <DeckEconomicChain key="c9" graph={graph} companies={alert.companies} />,
-    10: <DeckKnowledge key="c10" {...graphProps} />,
+  // Keyed by CANONICAL chart number (availability speaks that language);
+  // each builder receives the SEQUENTIAL display number, so hidden charts
+  // never leave a gap in the numbering the user sees (rail reads 01..0N).
+  const slideByCanonical: Record<number, (displayNumber: number) => JSX.Element> = {
+    1: (dn) => <DeckImpactTree key="c1" {...treeProps} displayNumber={dn} />,
+    2: (dn) => <DeckRipple key="c2" {...graphProps} displayNumber={dn} />,
+    3: (dn) => <DeckSupplyChain key="c3" {...graphProps} displayNumber={dn} />,
+    4: (dn) => <DeckLevelTree key="c4" {...treeProps} displayNumber={dn} />,
+    5: (dn) => <DeckConfidenceList key="c5" {...treeProps} displayNumber={dn} />,
+    6: (dn) => <DeckSplit key="c6" {...treeProps} displayNumber={dn} />,
+    7: (dn) => <DeckTimeline key="c7" {...treeProps} displayNumber={dn} />,
+    8: (dn) => <DeckSectors key="c8" {...treeProps} displayNumber={dn} />,
+    9: (dn) => <DeckEconomicChain key="c9" graph={graph} companies={alert.companies} displayNumber={dn} />,
+    10: (dn) => <DeckKnowledge key="c10" {...graphProps} displayNumber={dn} />,
   };
   const visibleNumbers = availableChartNumbers({ companies: alert.companies, graph });
-  const slides = visibleNumbers.map((n) => ({ number: n, element: slideByNumber[n] }));
+  const slides = visibleNumbers.map((canonical, i) => ({
+    number: i + 1,
+    element: slideByCanonical[canonical](i + 1),
+  }));
 
   return (
     <div className="deck-page">

@@ -50,12 +50,13 @@ describe('ChartDeckPage', () => {
     await waitFor(() => expect(screen.getByText('Impact charts')).toBeInTheDocument());
     expect(screen.getByRole('heading', { name: article.title })).toBeInTheDocument();
     // Numbered mono rail: the fixture's synthesized graph has no mechanism
-    // nodes, so Economic Chain (09) is hidden and its number is absent;
-    // every other canonical number survives unrenumbered.
-    for (const n of ['01', '02', '03', '04', '05', '06', '07', '08', '10']) {
-      expect(screen.getByRole('tab', { name: n })).toBeInTheDocument();
+    // nodes, so Economic Chain is hidden -- and the 9 surviving charts
+    // renumber SEQUENTIALLY (user rule: a skipped chart must not leave a
+    // gap), so the rail reads 01..09 with no 10.
+    for (let i = 1; i <= 9; i++) {
+      expect(screen.getByRole('tab', { name: String(i).padStart(2, '0') })).toBeInTheDocument();
     }
-    expect(screen.queryByRole('tab', { name: '09' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: '10' })).toBeNull();
     expect(screen.getByText('← swipe between charts →')).toBeInTheDocument();
   });
 

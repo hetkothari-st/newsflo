@@ -58,11 +58,13 @@ export default function DeckSplit({
   article: _article,
   alertCreatedAt: _alertCreatedAt,
   eventType,
+  displayNumber = 6,
 }: {
   companies: AlertCompany[];
   article: AlertArticle;
   alertCreatedAt: string;
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
   const bullish = companies.filter((c) => c.direction === 'bullish');
@@ -71,7 +73,7 @@ export default function DeckSplit({
 
   return (
     <DeckChartFrame
-      number={6}
+      number={displayNumber}
       title="Positive / Negative Split"
       description="Who gains and who loses, ranked by the size of the measured move."
     >

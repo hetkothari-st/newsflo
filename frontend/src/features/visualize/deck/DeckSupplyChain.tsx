@@ -50,17 +50,19 @@ export default function DeckSupplyChain({
   graph,
   companies,
   eventType,
+  displayNumber = 3,
 }: {
   graph: ImpactGraph;
   companies: AlertCompany[];
   eventType?: string | null;
+  displayNumber?: number;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
   const { direct, upstream, downstream } = chainTree(graph, companies);
 
   return (
     <DeckChartFrame
-      number={3}
+      number={displayNumber}
       title="Supply Chain"
       description="Suppliers upstream and customers downstream of this alert's directly-hit company."
     >
