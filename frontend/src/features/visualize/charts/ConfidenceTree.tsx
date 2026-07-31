@@ -63,8 +63,7 @@ export default function ConfidenceTree({
                     name={c.name}
                     ticker={c.ticker}
                     direction={c.direction}
-                    magnitudeLow={c.magnitude_low}
-                    magnitudeHigh={c.magnitude_high}
+                    excessMovePct={c.excess_move_pct}
                     confidenceScore={c.confidence_score}
                     inMyHoldings={c.in_my_holdings}
                     onClick={() => toggle(c.company_id)}

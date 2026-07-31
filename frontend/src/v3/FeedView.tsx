@@ -5,6 +5,7 @@
    through stories; taps mirror the swipes on non-touch devices --
    ported from the approved prototype. */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getAlertDetail,
   getFeedAlerts,
@@ -115,6 +116,7 @@ function Card({
   onOpenInfo: (row: LayerRow) => void;
 }) {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [backTab, setBackTab] = useState<'ripple' | 'timeline'>('ripple');
   // True once the flip animation has finished -- drops the 3D transforms
   // so the back face renders as a flat layer with crisp text (see
@@ -205,6 +207,17 @@ function Card({
                 })}
               </div>
             </div>
+            <button
+              className="bx"
+              aria-label="Charts"
+              title="Charts"
+              onClick={(event) => {
+                event.stopPropagation();
+                navigate(`/alerts/${alert.id}/charts`);
+              }}
+            >
+              ◫
+            </button>
             <button
               className="bx"
               aria-label="Back to headline"

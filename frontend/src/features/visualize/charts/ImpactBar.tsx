@@ -1,11 +1,11 @@
 import type { AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { rankByMagnitude } from '../transforms';
+import { rankByMove } from '../transforms';
 import { useCompanySelection } from './useCompanySelection';
 
 // Bar length comes from rank position within this side only (index 0 =
 // nearest the axis = strongest in this alert), never from the raw
-// magnitude float -- see rankByMagnitude's docstring.
+// magnitude float -- see rankByMove's docstring.
 function widthForRank(index: number, total: number): number {
   if (total <= 1) return 100;
   return 100 - (index / total) * 60;
@@ -54,8 +54,8 @@ export default function ImpactBar({
   eventType?: string | null;
 }) {
   const { toggle, selected } = useCompanySelection(companies);
-  const bullish = rankByMagnitude(companies.filter((c) => c.direction === 'bullish'));
-  const bearish = rankByMagnitude(companies.filter((c) => c.direction === 'bearish'));
+  const bullish = rankByMove(companies.filter((c) => c.direction === 'bullish'));
+  const bearish = rankByMove(companies.filter((c) => c.direction === 'bearish'));
 
   if (bullish.length === 0 && bearish.length === 0) return null;
 

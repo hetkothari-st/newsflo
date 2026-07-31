@@ -11,7 +11,7 @@ from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.i18n import get_lang
 from app.ist_time import day_utc_window, today_ist
-from app.models import Alert, AlertCompany, Holding, ImpactEdge, User
+from app.models import Alert, AlertCompany, Holding, ImpactEdge, MarketMove, User
 from app.pipeline import _decode_json_list, decode_key_points
 from app.routers.articles import get_db
 from app.translation.lookup import (
@@ -58,7 +58,9 @@ def _graph_node_id(node_kind: str, label: str, company_id: int | None) -> str:
     return f"mech:{_slugify_mechanism(label)}"
 
 
-def _build_graph(alert: Alert, held_company_ids: set[int]) -> dict:
+def _build_graph(
+    alert: Alert, held_company_ids: set[int], excess_by_company_id: dict[int, float] | None = None,
+) -> dict:
     """Assembles the news -> mechanism -> sector -> company graph from
     already-loaded relationships (alert.companies, alert.impact_edges,
     alert.cascade_gaps) -- no DB session needed here, everything was
@@ -66,12 +68,16 @@ def _build_graph(alert: Alert, held_company_ids: set[int]) -> dict:
     ImpactEdge rows still gets a minimal, valid graph (news connected
     directly to each company), never a 500 or an empty/broken response.
     """
+    excess_by_company_id = excess_by_company_id or {}
     nodes: dict[str, dict] = {"news": {"id": "news", "kind": "news", "label": alert.article.title}}
 
     for ac in alert.companies:
         node_id = f"company:{ac.company_id}"
         nodes[node_id] = {
             "id": node_id, "kind": "company", "company_id": ac.company_id,
+            # Measured move for the node face (chart-spec §2); null ->
+            # direction glyph alone.
+            "excess_move_pct": excess_by_company_id.get(ac.company_id),
             # Every node kind carries "label" (mechanism/sector/news nodes
             # already do) so frontend code can read node.label uniformly
             # without a kind check -- redundant with "name" here, but a
@@ -169,7 +175,9 @@ def _serialize_alert(
     category_labels: dict[str, str],
     mentions_index,
     include_graph: bool = False,
+    excess_by_company_id: dict[int, float] | None = None,
 ) -> dict:
+    excess_by_company_id = excess_by_company_id or {}
     companies = []
     for ac in alert.companies:
         rationale, key_points = ac_translations.get(ac.id, (ac.rationale, decode_key_points(ac)))
@@ -186,6 +194,11 @@ def _serialize_alert(
             # it exists. Null until refine_alert runs, or for a company
             # with no real measured move to explain.
             "why": ac.why,
+            # The MEASURED move (chart-spec §2): what a chart node's face
+            # shows. Null when this company was never measured -- the node
+            # degrades to a direction glyph alone, never to magnitude or
+            # confidence in a percentage's place.
+            "excess_move_pct": excess_by_company_id.get(ac.company_id),
             "magnitude_low": ac.magnitude_low, "magnitude_high": ac.magnitude_high,
             "rationale": rationale, "key_points": key_points,
             "confidence_score": ac.confidence_score, "time_horizon": ac.time_horizon,
@@ -228,7 +241,7 @@ def _serialize_alert(
         "companies": companies,
     }
     if include_graph:
-        result["graph"] = _build_graph(alert, held_company_ids)
+        result["graph"] = _build_graph(alert, held_company_ids, excess_by_company_id)
     return result
 
 
@@ -313,7 +326,17 @@ def get_alert(
     category_labels = bulk_category_labels(db, [alert.category], lang)
     mentions_index = bulk_past_mentions(db, {ac.company_id for ac in alert.companies})
 
+    # Measured moves (chart-spec §2): the % a chart node face shows. One
+    # query; only real measurements qualify -- an unmeasured company stays
+    # absent and its node renders the direction glyph alone.
+    excess_by_company_id = {
+        m.company_id: m.excess_move_pct
+        for m in db.query(MarketMove).filter_by(alert_id=alert.id, measurement_status="ok").all()
+        if m.excess_move_pct is not None
+    }
+
     return _serialize_alert(
         alert, held_company_ids, article_titles, ac_translations, category_labels, mentions_index,
         include_graph=True,
+        excess_by_company_id=excess_by_company_id,
     )

@@ -74,8 +74,7 @@ export default function TimelineTree({
                       name={c.name}
                       ticker={c.ticker}
                       direction={c.direction}
-                      magnitudeLow={c.magnitude_low}
-                      magnitudeHigh={c.magnitude_high}
+                      excessMovePct={c.excess_move_pct}
                       inMyHoldings={c.in_my_holdings}
                       selected={selectedId === c.company_id}
                       onClick={() => toggle(c.company_id)}

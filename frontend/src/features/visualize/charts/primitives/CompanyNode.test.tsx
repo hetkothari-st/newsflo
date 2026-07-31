@@ -4,19 +4,21 @@ import { describe, expect, it, vi } from 'vitest';
 import CompanyNode from './CompanyNode';
 
 describe('CompanyNode', () => {
-  it('shows name first, ticker second, and the magnitude range -- never confidence_score', () => {
-    render(<CompanyNode name="Lockheed Martin" ticker="LMT" direction="bullish" magnitudeLow={2} magnitudeHigh={4} />);
+  it('shows name first, ticker second, and the MEASURED move -- never confidence_score', () => {
+    render(<CompanyNode name="Lockheed Martin" ticker="LMT" direction="bullish" excessMovePct={3.6} />);
     expect(screen.getByText('Lockheed Martin')).toBeInTheDocument();
     expect(screen.getByText('LMT')).toBeInTheDocument();
-    expect(screen.getByText('▲ +2%–+4%')).toBeInTheDocument();
+    expect(screen.getByText('▲ +3.6%')).toBeInTheDocument();
   });
 
-  it('collapses to a single value when magnitude_low equals magnitude_high', () => {
-    render(<CompanyNode name="RTX Corporation" ticker="RTX" direction="bearish" magnitudeLow={-3} magnitudeHigh={-3} />);
+  it('trims a trailing .0 and keeps the measured sign', () => {
+    render(<CompanyNode name="RTX Corporation" ticker="RTX" direction="bearish" excessMovePct={-3} />);
     expect(screen.getByText('▼ -3%')).toBeInTheDocument();
   });
 
-  it('shows the direction glyph alone, never a confidence value, when magnitude is absent', () => {
+  it('shows the direction glyph ALONE when the company was never measured (chart-spec §2)', () => {
+    // The exact prior bug: magnitude/confidence rendered beside the arrow.
+    // An unmeasured company must degrade to the glyph, full stop.
     render(<CompanyNode name="Hindalco Industries" ticker="HINDALCO.NS" direction="bearish" />);
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     expect(screen.getByText('▼')).toBeInTheDocument();
@@ -26,10 +28,10 @@ describe('CompanyNode', () => {
     render(
       <CompanyNode
         name="Reliance Industries" ticker="RELIANCE" direction="bullish"
-        magnitudeLow={2} magnitudeHigh={4} confidenceScore={95}
+        excessMovePct={2.4} confidenceScore={95}
       />,
     );
-    expect(screen.getByText('▲ +2%–+4%')).toBeInTheDocument();
+    expect(screen.getByText('▲ +2.4%')).toBeInTheDocument();
     expect(screen.getByText('Confidence: 95%')).toBeInTheDocument();
   });
 

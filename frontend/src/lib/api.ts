@@ -35,6 +35,10 @@ export interface AlertCompany {
   // match for this company -- CompanyLogo degrades to a monogram either way.
   logo_url?: string | null;
   direction: string; // bullish | bearish
+  // The MEASURED move (excess vs sector, chart-spec Doc-1 §2) -- what a
+  // chart node's face shows. Null when never measured: the node renders
+  // the direction glyph alone (never magnitude/confidence in its place).
+  excess_move_pct?: number | null;
   magnitude_low: number;
   magnitude_high: number;
   rationale: string;
@@ -100,6 +104,8 @@ export interface GraphNode {
   confidence_score?: number;
   impact_level?: string;
   in_my_holdings?: boolean;
+  // Measured move for the node face (chart-spec Doc-1 §2); null -> glyph only.
+  excess_move_pct?: number | null;
 }
 
 export interface GraphEdge {

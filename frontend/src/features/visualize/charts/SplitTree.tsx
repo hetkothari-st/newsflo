@@ -1,6 +1,6 @@
 import type { AlertArticle, AlertCompany } from '../../../lib/api';
 import ReasoningPanel from '../../../components/ReasoningPanel';
-import { rankByMagnitude } from '../transforms';
+import { rankByMove } from '../transforms';
 import ChartCardShell from './ChartCardShell';
 import CompanyNode from './primitives/CompanyNode';
 import NewsHeaderBlock from './primitives/NewsHeaderBlock';
@@ -40,8 +40,7 @@ function SplitColumn({
               name={c.name}
               ticker={c.ticker}
               direction={c.direction}
-              magnitudeLow={c.magnitude_low}
-              magnitudeHigh={c.magnitude_high}
+              excessMovePct={c.excess_move_pct}
               inMyHoldings={c.in_my_holdings}
               selected={selectedId === c.company_id}
               onClick={() => onSelect(c.company_id)}
@@ -65,8 +64,8 @@ export default function SplitTree({
   eventType?: string | null;
 }) {
   const { toggle, selected, selectedId } = useCompanySelection(companies);
-  const bullish = rankByMagnitude(companies.filter((c) => c.direction === 'bullish'));
-  const bearish = rankByMagnitude(companies.filter((c) => c.direction === 'bearish'));
+  const bullish = rankByMove(companies.filter((c) => c.direction === 'bullish'));
+  const bearish = rankByMove(companies.filter((c) => c.direction === 'bearish'));
 
   if (bullish.length === 0 && bearish.length === 0) return null;
 

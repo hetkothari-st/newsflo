@@ -118,12 +118,21 @@ function magnitudeMidpoint(company: AlertCompany): number {
   return (company.magnitude_low + company.magnitude_high) / 2;
 }
 
-// Ordinal ranking, not a claim about absolute scale -- magnitude_low/high
-// values span roughly 0-100 with no fixed calibration, so this only ever
-// answers "stronger than the others in THIS alert's company list," never
-// "this company moved N%." See docs/superpowers/specs/2026-07-14-charts-page-v3-design.md.
-export function rankByMagnitude(companies: AlertCompany[]): AlertCompany[] {
-  return [...companies].sort((a, b) => magnitudeMidpoint(b) - magnitudeMidpoint(a));
+// "Sorted by |move| desc" (chart-spec Doc-1 §4): the MEASURED move ranks
+// first-class; a company with no measurement ranks below every measured
+// one, ordered among its unmeasured peers by the ordinal magnitude
+// midpoint (an honest tie-breaker, never displayed -- see CompanyNode's
+// glyph-only rule).
+export function rankByMove(companies: AlertCompany[]): AlertCompany[] {
+  const key = (c: AlertCompany): [number, number] =>
+    c.excess_move_pct != null
+      ? [1, Math.abs(c.excess_move_pct)]
+      : [0, Math.abs(magnitudeMidpoint(c))];
+  return [...companies].sort((a, b) => {
+    const [aMeasured, aMove] = key(a);
+    const [bMeasured, bMove] = key(b);
+    return bMeasured - aMeasured || bMove - aMove;
+  });
 }
 
 export function rankByConfidence(companies: AlertCompany[]): AlertCompany[] {

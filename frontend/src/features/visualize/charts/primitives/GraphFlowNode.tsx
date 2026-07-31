@@ -27,6 +27,7 @@ export default function GraphFlowNode({
         name={node.name ?? node.label}
         ticker={node.ticker ?? node.label}
         direction={node.direction}
+        excessMovePct={node.excess_move_pct}
         inMyHoldings={node.in_my_holdings}
         onClick={onClick}
         selected={selected}

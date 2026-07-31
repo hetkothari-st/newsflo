@@ -102,12 +102,23 @@ describe('LevelTree', () => {
   // The design-fidelity rebuild fixed one company-node design across every
   // chart (name, ticker, magnitude -- see CompanyNode) -- a per-chart sector
   // chip is no longer part of it, so this replaces the old sector-chip
-  // assertion with a check on the shared design's own magnitude display.
-  it('shows the magnitude range, not confidence_score, on every company card', () => {
+  // assertion with a check on the shared design's own displayed-number
+  // rule (chart-spec Doc-1 §2): the MEASURED move when it exists, the
+  // glyph alone otherwise -- magnitude/confidence never render beside
+  // the arrow.
+  it('shows the measured move when present -- never confidence_score', () => {
+    render([
+      company({ company_id: 1, ticker: 'NVDA', direction: 'bearish', magnitude_low: -23, magnitude_high: -21, excess_move_pct: -21.4, confidence_score: 88, impact_level: 'direct' }),
+    ]);
+    expect(screen.getByText('▼ -21.4%')).toBeInTheDocument();
+    expect(screen.queryByText(/88/)).not.toBeInTheDocument();
+  });
+
+  it('shows the glyph alone for a company with magnitude but NO measured move (chart-spec §2)', () => {
     render([
       company({ company_id: 1, ticker: 'NVDA', direction: 'bearish', magnitude_low: -23, magnitude_high: -21, confidence_score: 88, impact_level: 'direct' }),
     ]);
-    expect(screen.getByText('▼ -23%–-21%')).toBeInTheDocument();
-    expect(screen.queryByText(/88/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    expect(screen.getByText('▼')).toBeInTheDocument();
   });
 });
