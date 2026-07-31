@@ -69,9 +69,16 @@
    transform and renders visibly blurry. The settled back face is a flat,
    untransformed layer with crisp subpixel text; the transforms come back
    just before un-flipping so the reverse animation still plays. */
-.nf3 .card.flipped.settled .flip { transition: none; transform: none; }
+.nf3 .card.flipped.settled .flip { transition: none; transform: none; transform-style: flat; }
 .nf3 .card.flipped.settled .face.front { visibility: hidden; }
-.nf3 .card.flipped.settled .face.back { transform: none; }
+.nf3 .card.flipped.settled .face.back { transform: none; backface-visibility: visible; }
+/* transform:none alone is not enough for crisp text -- perspective on the
+   card and backface-visibility:hidden on the face each still force the
+   back onto its own composited layer, which switches text from subpixel
+   to grayscale antialiasing (visibly soft, reported live). Drop the whole
+   3D rendering context while settled; it returns the moment `settled`
+   clears, before the un-flip transition starts. */
+.nf3 .card.flipped.settled { perspective: none; }
 .nf3 .face { position: absolute; inset: 0; backface-visibility: hidden; background: var(--s1); border: 0.5px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
 .nf3 .back { transform: rotateY(180deg); }
 .nf3 .front { padding: 20px; }
