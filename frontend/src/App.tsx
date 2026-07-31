@@ -9,7 +9,6 @@ import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Shell from './v3/Shell';
-import AlertChartsPage from './pages/AlertChartsPage';
 import { useAuth } from './lib/auth';
 
 // -- COMMENTED OUT (superseded by the card-feed shell at "/", built from
@@ -17,6 +16,7 @@ import { useAuth } from './lib/auth';
 // newsflo_full_frontend.html -- the old feed, feed-v2, charts, company
 // analysis, directory, deep-dive and CAR pages are all replaced by the
 // shell's own views and sheets):
+// import AlertChartsPage from './pages/AlertChartsPage';
 // import AlertCompanyAnalysisPage from './pages/AlertCompanyAnalysisPage';
 // import CarReviewPage from './pages/CarReviewPage';
 // import CompanyPage from './pages/CompanyPage';
@@ -58,9 +58,10 @@ export default function App() {
         <Route path="/alerts/:id/company/:companyId" element={<AlertCompanyAnalysisPage />} />
         <Route path="/car-review" element={<RequireAuth><CarReviewPage /></RequireAuth>} />
         */}
-        {/* Charts deck (Doc-1/Doc-2 chart specs) -- reached from the card
-            back's charts button in the shell. */}
+        {/* -- COMMENTED OUT (charts deck detached per user instruction
+            2026-07-31; components + tests remain in features/visualize):
         <Route path="/alerts/:id/charts" element={<AlertChartsPage />} />
+        */}
         <Route
           path="/holdings"
           element={
