@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getAlert, type Alert } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
 import { useLanguage } from '../../../lib/language';
 import { useTheme } from '../../../lib/theme';
 import { buildGraph } from '../graph/model';
+import { availableChartNumbers } from './deckAvailability';
 import DeckImpactTree from './DeckImpactTree';
 import DeckRipple from './DeckRipple';
 import DeckSupplyChain from './DeckSupplyChain';
@@ -20,8 +21,9 @@ import './deck.css';
 // The charts deck screen, built to the approved chart-1 prototype's shell:
 // a compact header (back / kicker + headline / theme toggle), a numbered
 // mono rail, a horizontally-swipeable chart area, and a quiet foot hint.
-// Chart order matches the two chart-spec docs' numbering 1-10.
-const CHART_COUNT = 10;
+// Chart order matches the two chart-spec docs' numbering 1-10; charts with
+// no data for this alert are hidden entirely (deckAvailability.ts), and
+// the survivors keep their canonical numbers on the rail.
 
 export default function ChartDeckPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,7 +56,7 @@ export default function ChartDeckPage() {
     const strip = stripRef.current;
     if (!strip || strip.clientWidth === 0) return;
     const index = Math.round(strip.scrollLeft / strip.clientWidth);
-    if (index >= 0 && index < CHART_COUNT && index !== activeIndex) setActiveIndex(index);
+    if (index >= 0 && index !== activeIndex) setActiveIndex(index);
   };
 
   const scrollToChart = (index: number) => {
@@ -82,18 +84,20 @@ export default function ChartDeckPage() {
   };
   const graphProps = { graph, companies: alert.companies, eventType: alert.event_type };
 
-  const slides = [
-    <DeckImpactTree key="c1" {...treeProps} />,
-    <DeckRipple key="c2" {...graphProps} />,
-    <DeckSupplyChain key="c3" {...graphProps} />,
-    <DeckLevelTree key="c4" {...treeProps} />,
-    <DeckConfidenceList key="c5" {...treeProps} />,
-    <DeckSplit key="c6" {...treeProps} />,
-    <DeckTimeline key="c7" {...treeProps} />,
-    <DeckSectors key="c8" {...treeProps} />,
-    <DeckEconomicChain key="c9" graph={graph} companies={alert.companies} />,
-    <DeckKnowledge key="c10" {...graphProps} />,
-  ];
+  const slideByNumber: Record<number, JSX.Element> = {
+    1: <DeckImpactTree key="c1" {...treeProps} />,
+    2: <DeckRipple key="c2" {...graphProps} />,
+    3: <DeckSupplyChain key="c3" {...graphProps} />,
+    4: <DeckLevelTree key="c4" {...treeProps} />,
+    5: <DeckConfidenceList key="c5" {...treeProps} />,
+    6: <DeckSplit key="c6" {...treeProps} />,
+    7: <DeckTimeline key="c7" {...treeProps} />,
+    8: <DeckSectors key="c8" {...treeProps} />,
+    9: <DeckEconomicChain key="c9" graph={graph} companies={alert.companies} />,
+    10: <DeckKnowledge key="c10" {...graphProps} />,
+  };
+  const visibleNumbers = availableChartNumbers({ companies: alert.companies, graph });
+  const slides = visibleNumbers.map((n) => ({ number: n, element: slideByNumber[n] }));
 
   return (
     <div className="deck-page">
@@ -109,28 +113,34 @@ export default function ChartDeckPage() {
           ◐
         </button>
       </header>
-      <div className="deck-rail" ref={railRef} role="tablist" aria-label="Charts">
-        {Array.from({ length: CHART_COUNT }, (_, i) => (
-          <button
-            key={i}
-            type="button"
-            role="tab"
-            aria-selected={activeIndex === i}
-            className={activeIndex === i ? 'on' : undefined}
-            onClick={() => scrollToChart(i)}
-          >
-            {String(i + 1).padStart(2, '0')}
-          </button>
-        ))}
-      </div>
-      <div className="deck-strip" ref={stripRef} onScroll={handleScroll}>
-        {slides.map((slide, i) => (
-          <div key={i} className="deck-slide">
-            <div className="deck-slidepad">{slide}</div>
+      {slides.length === 0 ? (
+        <p className="deck-pagestatus">No chart data for this alert.</p>
+      ) : (
+        <>
+          <div className="deck-rail" ref={railRef} role="tablist" aria-label="Charts">
+            {slides.map((slide, i) => (
+              <button
+                key={slide.number}
+                type="button"
+                role="tab"
+                aria-selected={activeIndex === i}
+                className={activeIndex === i ? 'on' : undefined}
+                onClick={() => scrollToChart(i)}
+              >
+                {String(slide.number).padStart(2, '0')}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
-      <footer className="deck-foothint">← swipe between charts →</footer>
+          <div className="deck-strip" ref={stripRef} onScroll={handleScroll}>
+            {slides.map((slide) => (
+              <div key={slide.number} className="deck-slide">
+                <div className="deck-slidepad">{slide.element}</div>
+              </div>
+            ))}
+          </div>
+          <footer className="deck-foothint">← swipe between charts →</footer>
+        </>
+      )}
     </div>
   );
 }

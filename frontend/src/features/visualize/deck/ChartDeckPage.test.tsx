@@ -49,33 +49,37 @@ describe('ChartDeckPage', () => {
     renderPage('1');
     await waitFor(() => expect(screen.getByText('Impact charts')).toBeInTheDocument());
     expect(screen.getByRole('heading', { name: article.title })).toBeInTheDocument();
-    // Numbered mono rail 01-10.
-    for (let i = 1; i <= 10; i++) {
-      expect(screen.getByRole('tab', { name: String(i).padStart(2, '0') })).toBeInTheDocument();
+    // Numbered mono rail: the fixture's synthesized graph has no mechanism
+    // nodes, so Economic Chain (09) is hidden and its number is absent;
+    // every other canonical number survives unrenumbered.
+    for (const n of ['01', '02', '03', '04', '05', '06', '07', '08', '10']) {
+      expect(screen.getByRole('tab', { name: n })).toBeInTheDocument();
     }
+    expect(screen.queryByRole('tab', { name: '09' })).toBeNull();
     expect(screen.getByText('← swipe between charts →')).toBeInTheDocument();
   });
 
-  it('renders all ten chart titles in doc order', async () => {
+  it('renders the available chart titles in doc order and hides no-data charts', async () => {
     vi.spyOn(api, 'getAlert').mockResolvedValue(alertFixture());
     renderPage('1');
     await waitFor(() => expect(screen.getByText('Impact Tree')).toBeInTheDocument());
     for (const title of [
       'Impact Tree', 'Ripple Effect', 'Supply Chain', 'Multi-Level Tree', 'Confidence Tree',
-      'Positive / Negative Split', 'Timeline Tree', 'Sector Tree', 'Economic Chain', 'Knowledge Graph',
+      'Positive / Negative Split', 'Timeline Tree', 'Sector Tree', 'Knowledge Graph',
     ]) {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
+    // No mechanism chain for this alert -> the chart is not shown at all
+    // (user rule: hide, don't render an empty state).
+    expect(screen.queryByText('Economic Chain')).toBeNull();
+    expect(screen.queryByText(/No general transmission mechanism applies/)).toBeNull();
   });
 
-  it('synthesizes a fallback graph for a legacy alert with no graph block (never blank)', async () => {
-    vi.spyOn(api, 'getAlert').mockResolvedValue(alertFixture({ graph: undefined }));
+  it('shows a quiet page-level note when no chart has data', async () => {
+    vi.spyOn(api, 'getAlert').mockResolvedValue(alertFixture({ companies: [] }));
     renderPage('1');
-    // Economic Chain: legacy graph has no mechanism nodes -> honest empty
-    // state rather than a silent blank.
-    await waitFor(() =>
-      expect(screen.getByText(/No general transmission mechanism applies/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('No chart data for this alert.')).toBeInTheDocument());
+    expect(screen.queryByRole('tab', { name: '01' })).toBeNull();
   });
 
   it('shows the error state when the fetch fails', async () => {
