@@ -9,6 +9,7 @@ import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Shell from './v3/Shell';
+import ChartDeckPage from './features/visualize/deck/ChartDeckPage';
 import { useAuth } from './lib/auth';
 
 // -- COMMENTED OUT (superseded by the card-feed shell at "/", built from
@@ -41,6 +42,17 @@ export default function App() {
 
   if (isShell) {
     return <Shell />;
+  }
+
+  // The charts deck (features/visualize/deck, chart-spec Doc-1/Doc-2 +
+  // the approved chart-1 prototype) owns the whole viewport like the shell
+  // does -- its own header, rail, and foot hint; no legacy NavBar chrome.
+  if (/^\/alerts\/\d+\/charts$/.test(location.pathname)) {
+    return (
+      <Routes>
+        <Route path="/alerts/:id/charts" element={<ChartDeckPage />} />
+      </Routes>
+    );
   }
 
   return (

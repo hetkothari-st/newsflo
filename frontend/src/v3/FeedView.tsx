@@ -5,7 +5,7 @@
    through stories; taps mirror the swipes on non-touch devices --
    ported from the approved prototype. */
 import { useCallback, useEffect, useRef, useState } from 'react';
-// import { useNavigate } from 'react-router-dom';  // -- charts entry commented out
+import { useNavigate } from 'react-router-dom';
 import {
   getAlertDetail,
   getFeedAlerts,
@@ -116,7 +116,7 @@ function Card({
   onOpenInfo: (row: LayerRow) => void;
 }) {
   const { t } = useLanguage();
-  // const navigate = useNavigate();  // -- charts entry commented out below
+  const navigate = useNavigate();
   const [backTab, setBackTab] = useState<'ripple' | 'timeline'>('ripple');
   // True once the flip animation has finished -- drops the 3D transforms
   // so the back face renders as a flat layer with crisp text (see
@@ -207,8 +207,8 @@ function Card({
                 })}
               </div>
             </div>
-            {/* -- COMMENTED OUT (charts entry detached per user instruction
-                2026-07-31; route also commented in App.tsx):
+            {/* Charts entry -- opens the rebuilt deck (features/visualize/
+                deck, chart-spec Doc-1/Doc-2 + approved prototype). */}
             <button
               className="bx"
               aria-label="Charts"
@@ -220,7 +220,6 @@ function Card({
             >
               ◫
             </button>
-            */}
             <button
               className="bx"
               aria-label="Back to headline"
