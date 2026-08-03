@@ -1751,7 +1751,14 @@ LEGAL_SUFFIXES = (
     "company", "co", "incorporated", "inc", "plc",
 )
 
-_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
+# AMENDED 2026-08-03. The original single-regex version here contradicted this
+# task's own test: sub(" ") turns "J.B. Chemicals" into "j b chemicals", not
+# "jb chemicals". Checked against all 7,500 real NSE+BSE names — 98 carry an
+# embedded dot, 114 an embedded hyphen — so one rule cannot serve both. Dots
+# abbreviate a single word and must JOIN; every other mark separates two words
+# and must SPLIT. Order matters: dots first.
+_DOTS = re.compile(r"\.")
+_OTHER_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -1759,7 +1766,8 @@ def normalize_name(raw: str | None) -> str:
     if not raw:
         return ""
     text = raw.strip().lower().replace("&", " and ")
-    text = _PUNCTUATION.sub(" ", text)
+    text = _DOTS.sub("", text)
+    text = _OTHER_PUNCTUATION.sub(" ", text)
     text = _WHITESPACE.sub(" ", text).strip()
     if not text:
         return ""
