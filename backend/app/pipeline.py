@@ -510,7 +510,17 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
 
             store_analysis_cache(session, article, analysis)
 
-        resolved = resolve_companies(session, analysis.companies)
+        # Anchor each sector's fan-out to the sub-sectors of the companies
+        # the model actually named there -- see resolve_companies.
+        anchor_sub_sectors: dict[str, set[str]] = {}
+        for mention in analysis.companies:
+            if not (mention.is_direct and mention.ticker and mention.sector):
+                continue
+            company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
+            if company is not None and company.sub_sector:
+                anchor_sub_sectors.setdefault(mention.sector, set()).add(company.sub_sector)
+
+        resolved = resolve_companies(session, analysis.companies, anchor_sub_sectors=anchor_sub_sectors)
         _persist_alert(
             session, article, analysis.category, resolved,
             event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges, client=claude_client,

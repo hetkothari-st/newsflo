@@ -962,6 +962,22 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
     return edges
 
 
+# Event types whose mechanism is genuinely broad enough that "every prominent
+# company in this sector has some exposure" is a defensible claim -- a rate,
+# commodity, currency, or trade/policy move really does reach costs, credit,
+# or spending across a whole sector.
+#
+# Everything else is narrow: one company's earnings, one deal, one contract
+# win. For those, sector-wide fan-out asserts an exposure that does not
+# exist, which is most of what made alerts balloon to 35 companies. A narrow
+# story's companies come from the analyzed stages alone.
+BROAD_EVENT_TYPES = frozenset({
+    "repo_rate_change", "inflation", "macro_data", "fiscal_policy",
+    "monsoon_weather", "crude_oil", "commodity_price", "currency_move",
+    "global_rates", "trade_policy",
+})
+
+
 def _sector_fanout_mentions(
     sectors: list[SectorFinding], impact_level: str, parent_ticker: str | None = None,
 ) -> list[CompanyMention]:
@@ -1042,7 +1058,14 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
         primary_companies = []
     all_companies.extend(primary_companies)
 
-    all_companies.extend(_sector_fanout_mentions(primary_sectors, impact_level="direct"))
+    # Fan-out only for genuinely broad events, and only at the primary level.
+    # A cascade sector is already one hop from the news; fanning it out to
+    # every prominent constituent stacks a generic claim on top of an
+    # indirect one, which is where the worst noise came from (auto and
+    # banking names on a crude-oil story via L1/L2 fan-out).
+    fanout_allowed = facts_result.event_type in BROAD_EVENT_TYPES
+    if fanout_allowed:
+        all_companies.extend(_sector_fanout_mentions(primary_sectors, impact_level="direct"))
 
     l1_parent_tickers_present = [c for c in primary_companies if c.ticker]
     if l1_parent_tickers_present:
@@ -1061,10 +1084,6 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
             l1_companies, l1_gaps = [], []
         all_companies.extend(l1_companies)
         all_gaps.extend(l1_gaps)
-        if l1_sectors:
-            all_companies.extend(_sector_fanout_mentions(
-                l1_sectors, impact_level="indirect_l1", parent_ticker=l1_parent_tickers_present[0].ticker,
-            ))
 
         l2_parent_tickers_present = [c for c in l1_companies if c.ticker]
         if l1_sectors and l2_parent_tickers_present:
@@ -1083,10 +1102,6 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
                 l2_companies, l2_gaps = [], []
             all_companies.extend(l2_companies)
             all_gaps.extend(l2_gaps)
-            if l2_sectors:
-                all_companies.extend(_sector_fanout_mentions(
-                    l2_sectors, impact_level="indirect_l2", parent_ticker=l2_parent_tickers_present[0].ticker,
-                ))
 
     # Verification (see app.analysis.verification): the only stage that asks
     # whether a company BELONGS rather than asking for more companies. Runs

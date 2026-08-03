@@ -27,10 +27,12 @@ def test_resolve_direct_mention(db_session):
     assert resolved[0]["key_points"] == ["Crude prices ease", "Refining margins widen"]
 
 
-def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
-    # 3 top-tier companies plus 5 lower-tier companies: more than 5 total in
-    # the sector, so the resolver must prefer the higher-tier companies.
-    nifty50_tickers = [f"OILN50_{i}.NS" for i in range(3)]
+def test_resolve_sector_inference_picks_top_3_by_index_tier(db_session):
+    # TOP_N_SECTOR_COMPANIES lowered from 5 to 3 (Task 11): 2 top-tier
+    # companies plus 5 lower-tier companies -- more than 3 total in the
+    # sector, so the resolver must still prefer the higher-tier companies
+    # before falling back to fill the remaining slot from OTHER tier.
+    nifty50_tickers = [f"OILN50_{i}.NS" for i in range(2)]
     other_tickers = [f"OILOTHER_{i}.NS" for i in range(5)]
     for ticker in nifty50_tickers:
         _make_company(db_session, ticker, ticker, "oil_gas", market_cap=None, index_tier="NIFTY50")
@@ -45,15 +47,15 @@ def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
 
     resolved = resolve_companies(db_session, [mention])
 
-    assert len(resolved) == 5
+    assert len(resolved) == 3
     assert all(r["basis"] == "sector_inference" for r in resolved)
 
     resolved_tickers = {
         db_session.get(Company, r["company_id"]).ticker for r in resolved
     }
-    # All 3 NIFTY50 companies must be included in preference to OTHER tier.
+    # Both NIFTY50 companies must be included in preference to OTHER tier.
     assert set(nifty50_tickers).issubset(resolved_tickers)
-    assert len(resolved_tickers & set(other_tickers)) == 2
+    assert len(resolved_tickers & set(other_tickers)) == 1
 
 
 def test_resolve_sector_inference_at_indirect_l1_chains_to_the_stated_parent(db_session):
@@ -394,3 +396,54 @@ def test_direct_mention_keeps_its_rationale(db_session):
     )])
 
     assert resolved[0]["rationale"] == "Real, article-specific reasoning."
+
+
+def test_fanout_prefers_companies_sharing_a_named_company_sub_sector(db_session):
+    db_session.add_all([
+        Company(ticker="ITC.NS", name="ITC Ltd.", sector="fmcg",
+                sub_sector="staples_food", index_tier="NIFTY50"),
+        Company(ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg",
+                sub_sector="retail", index_tier="NIFTY50"),
+        Company(ticker="NESTLEIND.NS", name="Nestle India Ltd.", sector="fmcg",
+                sub_sector="staples_food", index_tier="NIFTY50"),
+    ])
+    db_session.commit()
+
+    resolved = resolve_companies(
+        db_session,
+        [CompanyMention(
+            name="fmcg sector", is_direct=False, sector="fmcg",
+            direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+            rationale="r", time_horizon="Short-Term",
+        )],
+        anchor_sub_sectors={"fmcg": {"staples_food"}},
+    )
+
+    tickers = {r["company_id"] for r in resolved}
+    names = {
+        db_session.query(Company).get(cid).ticker for cid in tickers
+    }
+    assert names == {"ITC.NS", "NESTLEIND.NS"}
+
+
+def test_fanout_without_an_anchor_falls_back_to_the_whole_sector(db_session):
+    db_session.add_all([
+        Company(ticker="ITC.NS", name="ITC Ltd.", sector="fmcg",
+                sub_sector="staples_food", index_tier="NIFTY50"),
+        Company(ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg",
+                sub_sector="retail", index_tier="NIFTY50"),
+    ])
+    db_session.commit()
+
+    resolved = resolve_companies(db_session, [CompanyMention(
+        name="fmcg sector", is_direct=False, sector="fmcg",
+        direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+        rationale="r", time_horizon="Short-Term",
+    )])
+
+    assert len(resolved) == 2
+
+
+def test_top_n_sector_companies_is_three():
+    from app.companies.resolution import TOP_N_SECTOR_COMPANIES
+    assert TOP_N_SECTOR_COMPANIES == 3

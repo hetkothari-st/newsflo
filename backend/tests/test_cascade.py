@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.analysis.cascade import (
-    analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
+    BROAD_EVENT_TYPES, analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
     _identify_companies, _identify_sectors, _sector_fanout_mentions, _sector_mechanism_edges,
     build_company_tool, build_sector_tool,
 )
@@ -603,14 +603,19 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
 
     assert result.category == "macro_policy"
     assert result.event_type == "currency_move"
-    assert len(result.companies) == 4
-    direct, sector_wide, cascade, cascade_sector_wide = result.companies
+    # 3, not 4: the deterministic sector-wide fan-out now only fires at the
+    # primary level -- both cascade fan-out call sites (L1/L2) were deleted
+    # entirely (Task 11), so the L1 cascade sector (railways_transport) gets
+    # no sector-wide mention of its own, only the LLM-named cascade company.
+    assert len(result.companies) == 3
+    direct, sector_wide, cascade = result.companies
     assert direct.ticker == "HDFCBANK.NS"
     assert direct.impact_level == "direct"
     assert direct.parent_ticker is None
     # One deterministic sector-wide fan-out mention per primary sector (here
     # just "banking") -- lets resolve_companies's top-N-by-tier lookup add
     # this sector's other real companies regardless of what the LLM named.
+    # currency_move is a BROAD_EVENT_TYPES member, so the gate lets it fire.
     assert sector_wide.is_direct is False
     assert sector_wide.sector == "banking"
     assert sector_wide.direction == "bearish"
@@ -618,13 +623,6 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
     assert cascade.ticker == "IRCTC.NS"
     assert cascade.impact_level == "indirect_l1"
     assert cascade.parent_ticker == "HDFCBANK.NS"
-    # Same deterministic fan-out, now for the L1 cascade sector
-    # (railways_transport) -- chained from the L1 stage's own parent pool
-    # (here just HDFC Bank, the only primary company with a ticker).
-    assert cascade_sector_wide.is_direct is False
-    assert cascade_sector_wide.sector == "railways_transport"
-    assert cascade_sector_wide.impact_level == "indirect_l1"
-    assert cascade_sector_wide.parent_ticker == "HDFCBANK.NS"
     # 8 calls: facts, primary sectors, primary companies, L1 sectors, L1
     # companies, L2 sectors -- the L2-sector call DOES run (L1 sectors and
     # L1 companies-with-tickers are both non-empty, so the orchestrator's
@@ -663,8 +661,11 @@ def test_analyze_article_propagates_primary_sector_stage_failure():
 
 
 def test_analyze_article_truncates_and_returns_direct_companies_when_primary_company_stage_fails():
+    # event_type must be a BROAD_EVENT_TYPES member for the deterministic
+    # fan-out to fire at all (see test_broad_event_types_include_rate_and_
+    # commodity_moves) -- "repo_rate_change" here, not "other".
     client = ScriptedClient({
-        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_facts": {"facts": "f", "category": "other", "event_type": "repo_rate_change"},
         "record_sectors": {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "m"}]},
         "record_sector_companies": ValueError("boom"),
     })
@@ -713,9 +714,10 @@ def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
     # the named company so the L1/L2 cascade stages never trigger (keeps
     # this test scoped to stage 3's own output, not the whole 7-stage chain
     # -- see test_analyze_article_composes_all_seven_stages_end_to_end for
-    # that).
+    # that). event_type must be a BROAD_EVENT_TYPES member for fan-out to
+    # fire at all -- "crude_oil" here, not "other".
     client = ScriptedClient({
-        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_facts": {"facts": "f", "category": "other", "event_type": "crude_oil"},
         "record_sectors": {"sectors": [
             {"sector": "banking", "direction": "bearish", "mechanism": "rate exposure"},
             {"sector": "oil_gas", "direction": "bullish", "mechanism": "crude price pass-through"},
@@ -1073,3 +1075,14 @@ def test_analyze_article_drops_a_company_verification_rejects(monkeypatch):
     tickers = [c.ticker for c in result.companies]
     assert "BAD.NS" not in tickers
     assert "GOOD.NS" in tickers
+
+
+def test_broad_event_types_include_rate_and_commodity_moves():
+    assert "repo_rate_change" in BROAD_EVENT_TYPES
+    assert "crude_oil" in BROAD_EVENT_TYPES
+
+
+def test_narrow_event_types_are_excluded():
+    assert "earnings" not in BROAD_EVENT_TYPES
+    assert "merger_acquisition" not in BROAD_EVENT_TYPES
+    assert "order_win_contract" not in BROAD_EVENT_TYPES

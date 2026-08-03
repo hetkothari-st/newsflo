@@ -5,7 +5,10 @@ from app.analysis.schemas import CompanyMention
 from app.companies.integrity import DEMO_TICKERS, is_demo_company
 from app.models import Company
 
-TOP_N_SECTOR_COMPANIES = 5
+# Lowered from 5. Fan-out is an exposure tier, not an analysis tier -- three
+# prominent constituents convey "this sector has exposure" as well as five
+# do, at 40% less noise.
+TOP_N_SECTOR_COMPANIES = 3
 
 # Portable (SQLite + Postgres) ordering expression: rank companies by index
 # tier so sector-inference picks the most prominent companies first. Lower
@@ -93,7 +96,10 @@ def _find_direct_company(session: Session, mention: CompanyMention) -> Company |
     return None
 
 
-def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[dict]:
+def resolve_companies(
+    session: Session, mentions: list[CompanyMention],
+    anchor_sub_sectors: dict[str, set[str]] | None = None,
+) -> list[dict]:
     """Resolve every mention to a Company, deduplicated by company_id across
     the WHOLE mentions list.
 
@@ -118,6 +124,14 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
     each cascade level), so an indirect one still needs its own
     parent_ticker chain resolved the same way a direct_mention indirect
     entry does.
+
+    anchor_sub_sectors: {sector: {sub_sector, ...}} built from the companies
+    the model NAMED for each sector. When present, a sector's fan-out is
+    restricted to companies sharing one of those sub-sectors, so a crude-oil
+    story reaching "fmcg" pulls staples_food (where the named companies are)
+    rather than every prominent fmcg name regardless of what it sells. Falls
+    back to the whole sector when a sector has no anchor -- an unanchored
+    sector still deserves its exposure tier, just a less targeted one.
     """
     resolved = []
     seen_company_ids: set[int] = set()
@@ -158,11 +172,16 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
             parent_company_id, ok = _resolve_parent(mention)
             if not ok:
                 continue
-            companies = (
+            query = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
                 .filter(Company.ticker.notin_(DEMO_TICKERS))
-                .order_by(_TIER_RANK.asc(), Company.ticker.asc())
+            )
+            anchors = (anchor_sub_sectors or {}).get(mention.sector)
+            if anchors:
+                query = query.filter(Company.sub_sector.in_(anchors))
+            companies = (
+                query.order_by(_TIER_RANK.asc(), Company.ticker.asc())
                 .limit(TOP_N_SECTOR_COMPANIES)
                 .all()
             )
