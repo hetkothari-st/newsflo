@@ -450,6 +450,26 @@ def _persist_alert(
     return alert
 
 
+def build_anchor_sub_sectors(session: Session, companies: list) -> dict[str, set[str]]:
+    """Anchor each sector's fan-out to the sub-sectors of the companies the
+    model actually named there -- see resolve_companies.
+
+    Extracted out of process_new_articles so reanalyze_cascade.py (and any
+    other caller re-running analysis outside the live pipeline) builds the
+    exact same map rather than a hand-rolled copy that can drift -- a
+    duplicated version of this loop is exactly the failure mode that let the
+    fmcg/Eternal sector fan-out bug slip through in the first place.
+    """
+    anchor_sub_sectors: dict[str, set[str]] = {}
+    for mention in companies:
+        if not (mention.is_direct and mention.ticker and mention.sector):
+            continue
+        company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
+        if company is not None and company.sub_sector:
+            anchor_sub_sectors.setdefault(mention.sector, set()).add(company.sub_sector)
+    return anchor_sub_sectors
+
+
 def process_new_articles(session: Session, claude_client, throttle_seconds: float = 0) -> int:
     """Run the filter -> analyze -> resolve -> alert pipeline over every
     CATEGORIZED article.
@@ -521,16 +541,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
 
             store_analysis_cache(session, article, analysis)
 
-        # Anchor each sector's fan-out to the sub-sectors of the companies
-        # the model actually named there -- see resolve_companies.
-        anchor_sub_sectors: dict[str, set[str]] = {}
-        for mention in analysis.companies:
-            if not (mention.is_direct and mention.ticker and mention.sector):
-                continue
-            company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
-            if company is not None and company.sub_sector:
-                anchor_sub_sectors.setdefault(mention.sector, set()).add(company.sub_sector)
-
+        anchor_sub_sectors = build_anchor_sub_sectors(session, analysis.companies)
         resolved = resolve_companies(session, analysis.companies, anchor_sub_sectors=anchor_sub_sectors)
         _persist_alert(
             session, article, analysis.category, resolved,

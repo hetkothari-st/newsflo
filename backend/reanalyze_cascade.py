@@ -24,33 +24,57 @@ on-demand the next time that alert is viewed in a non-English language.
 Prints a before/after company list per alert, including which impact
 levels appeared, so there's a console record of what changed.
 
+Grounded the same way the live pipeline is: passes ``session=`` to
+analyze_article (candidate list + ticker enum -- without it this script
+reanalyzes ungrounded and reproduces the exact pre-fix hallucination
+behavior the precision work exists to remove) and builds the same
+anchor_sub_sectors map process_new_articles does (via
+app.pipeline.build_anchor_sub_sectors) before calling resolve_companies, so
+a sector's fan-out is anchored to the sub-sectors of the companies actually
+named, not the whole sector.
+
 Not part of the test suite and not imported by the app.
 
 Usage (from the backend/ directory, against whichever DATABASE_URL is
 active in the environment -- e.g. `railway run python reanalyze_cascade.py`
 to run against production):
-    .venv/Scripts/python reanalyze_cascade.py [N] [--force]
+    .venv/Scripts/python reanalyze_cascade.py [N] [--days DAYS] [--force]
+
+--days restricts to alerts created in the last N days. When --days is given
+without an explicit N positional, the count limit is dropped entirely (every
+alert in the window is reanalyzed); pass an explicit N alongside --days to
+cap both. --force clears the cached analysis first; without it,
+get_cached_analysis returns whatever was cached under the article's content
+hash by an earlier (possibly pre-fix) run and this script silently changes
+nothing.
 """
-import sys
+import argparse
+from datetime import timedelta
 
 from app.analysis.cascade import analyze_article
 from app.analysis.claude_client import build_client
 from app.companies.resolution import resolve_companies
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import Alert, AlertCompanyTranslation, CascadeGap, Company, ImpactEdge
+from app.models import Alert, AlertCompanyTranslation, CascadeGap, Company, ImpactEdge, utcnow
 from app.pipeline import (
     _build_alert_company, _resolve_edge_endpoint_company_id, article_text,
-    clear_analysis_cache, get_cached_analysis, store_analysis_cache,
+    build_anchor_sub_sectors, clear_analysis_cache, get_cached_analysis, store_analysis_cache,
 )
 
 
-def main(limit: int, force: bool) -> None:
+def main(limit: int | None, days: int | None, force: bool) -> None:
     init_db()
     session = SessionLocal()
     client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
 
-    alerts = session.query(Alert).order_by(Alert.created_at.desc()).limit(limit).all()
+    query = session.query(Alert).order_by(Alert.created_at.desc())
+    if days is not None:
+        cutoff = utcnow() - timedelta(days=days)
+        query = query.filter(Alert.created_at >= cutoff)
+    if limit is not None:
+        query = query.limit(limit)
+    alerts = query.all()
 
     for alert in alerts:
         article = alert.article
@@ -65,13 +89,14 @@ def main(limit: int, force: bool) -> None:
             print("  (using cached analysis -- pass --force for a fresh LLM call)")
         else:
             try:
-                result = analyze_article(client, article.title, article_text(article))
+                result = analyze_article(client, article.title, article_text(article), session=session)
             except Exception as exc:
                 print(f"  SKIPPED (analysis call failed: {exc})")
                 continue
             store_analysis_cache(session, article, result)
 
-        resolved = resolve_companies(session, result.companies)
+        anchor_sub_sectors = build_anchor_sub_sectors(session, result.companies)
+        resolved = resolve_companies(session, result.companies, anchor_sub_sectors=anchor_sub_sectors)
 
         old_company_ids = [ac.id for ac in alert.companies]
         if old_company_ids:
@@ -124,7 +149,20 @@ def main(limit: int, force: bool) -> None:
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--force"]
-    force = "--force" in sys.argv
-    limit = int(args[0]) if args else 5
-    main(limit, force)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "limit", nargs="?", type=int, default=None,
+        help="max number of most-recent alerts to reanalyze (default 5, or "
+             "unlimited if --days is given)",
+    )
+    parser.add_argument(
+        "--days", type=int, default=None,
+        help="only reanalyze alerts created in the last N days",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="clear the cached analysis first so a fresh LLM call is made",
+    )
+    parsed = parser.parse_args()
+    limit = parsed.limit if parsed.limit is not None else (None if parsed.days is not None else 5)
+    main(limit, parsed.days, parsed.force)
