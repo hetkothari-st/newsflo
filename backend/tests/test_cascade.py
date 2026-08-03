@@ -566,6 +566,15 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
                 elif name == "record_sector_companies":
                     response = self._outer._company_responses[self._outer._company_call_count]
                     self._outer._company_call_count += 1
+                elif name == "record_company_verdicts":
+                    # Verification stage (app.analysis.verification) runs
+                    # once over the whole assembled company list, after every
+                    # generative stage and before edges -- not itself under
+                    # test here, just needs a well-formed response (every
+                    # company kept) so this end-to-end test isn't coupled to
+                    # verification behavior.
+                    tickers = kwargs["tools"][0]["function"]["parameters"]["properties"]["verdicts"]["items"]["properties"]["ticker"]["enum"]
+                    response = {"verdicts": [{"ticker": t, "belongs": True} for t in tickers]}
                 elif name == "record_edge_verification":
                     # currency_move has a CHAINS entry, so analyze_article's
                     # final stage (_generate_edges) makes one verification
@@ -616,16 +625,17 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
     assert cascade_sector_wide.sector == "railways_transport"
     assert cascade_sector_wide.impact_level == "indirect_l1"
     assert cascade_sector_wide.parent_ticker == "HDFCBANK.NS"
-    # 7 calls: facts, primary sectors, primary companies, L1 sectors, L1
+    # 8 calls: facts, primary sectors, primary companies, L1 sectors, L1
     # companies, L2 sectors -- the L2-sector call DOES run (L1 sectors and
     # L1 companies-with-tickers are both non-empty, so the orchestrator's
     # guards let it through), but it returns zero L2 sectors, so stage 7
-    # (L2 companies) never runs -- then one final edge-verification call
+    # (L2 companies) never runs -- then one company-verification call (see
+    # app.analysis.verification) and finally one edge-verification call
     # (currency_move has a CHAINS entry) before edges are returned.
     assert client.calls == [
         "record_facts", "record_sectors", "record_sector_companies",
         "record_sectors", "record_sector_companies", "record_sectors",
-        "record_edge_verification",
+        "record_company_verdicts", "record_edge_verification",
     ]
     # Both real sectors found across the run (banking primary, railways_transport
     # L1) get their own news->sector mechanism edge, carrying the actual
@@ -1028,3 +1038,38 @@ def test_identify_companies_without_a_session_stays_ungrounded(db_session):
     )
 
     assert [m.ticker for m in mentions] == ["ANY.NS"]
+
+
+def test_analyze_article_drops_a_company_verification_rejects(monkeypatch):
+    import app.analysis.cascade as cascade_module
+
+    monkeypatch.setattr(
+        cascade_module, "verify_companies",
+        lambda client, facts, title, companies: [c for c in companies if c.ticker != "BAD.NS"],
+    )
+    # ScriptedClient (defined above) keys its canned response by tool name,
+    # not by call order -- reused for every subsequent call to the same
+    # tool (e.g. the L1/L2 cascade sector and company stages that follow
+    # the primary ones), which is fine here: event_type "other" has no
+    # CHAINS entry, so _generate_edges never makes its own verify call, and
+    # verify_companies itself is monkeypatched above rather than exercised
+    # for real. The only thing under test is that analyze_article actually
+    # calls (the monkeypatched) verify_companies and uses its result --
+    # not the cascade's own sector/company reasoning.
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "m"}]},
+        "record_sector_companies": {"sector_companies": [{
+            "sector": "banking",
+            "companies": [
+                _full_company("Good Ltd.", "GOOD.NS"),
+                _full_company("Bad Ltd.", "BAD.NS"),
+            ],
+        }]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    tickers = [c.ticker for c in result.companies]
+    assert "BAD.NS" not in tickers
+    assert "GOOD.NS" in tickers

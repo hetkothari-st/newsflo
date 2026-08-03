@@ -38,6 +38,7 @@ from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
+from app.analysis.verification import verify_companies
 from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
 
 logger = logging.getLogger(__name__)
@@ -1086,6 +1087,12 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
                 all_companies.extend(_sector_fanout_mentions(
                     l2_sectors, impact_level="indirect_l2", parent_ticker=l2_parent_tickers_present[0].ticker,
                 ))
+
+    # Verification (see app.analysis.verification): the only stage that asks
+    # whether a company BELONGS rather than asking for more companies. Runs
+    # once over the whole assembled list, after every generative stage and
+    # before edges, so a dropped company never reaches the graph either.
+    all_companies = verify_companies(client, facts_result.facts, title, all_companies)
 
     try:
         edges = _generate_edges(client, facts_result.facts, facts_result.event_type, all_companies)
