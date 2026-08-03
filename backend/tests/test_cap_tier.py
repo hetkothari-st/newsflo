@@ -134,3 +134,32 @@ def test_global_company_never_gets_a_tier(db_session):
     db_session.add(company)
     db_session.commit()
     assert resolve_cap_tier(db_session, company, today=TODAY) is None
+
+
+def test_global_company_does_not_shift_indian_rankings(db_session):
+    # 100 Indian companies: IND99.NS is rank 100 by cap, exactly on the
+    # LARGE/MID boundary (AMFI_LARGE_CAP_RANK_CUTOFF=100) and must stay
+    # LARGE. A GLOBAL row with a bigger market_cap must never enter this
+    # ranking pool -- if it did, it would take rank 1 and bump every
+    # Indian company (including IND99.NS) down a slot into MID.
+    for i in range(100):
+        db_session.add(Company(
+            ticker=f"IND{i}.NS", name=f"Indian Co {i}", sector="other", index_tier="OTHER",
+            market_cap=float(1000 - i), market="INDIA",
+        ))
+    db_session.add(Company(
+        ticker="GLOBALCO", name="Global Co", sector="it", index_tier="GLOBAL_LARGE_CAP",
+        market="GLOBAL", market_cap=999999.0,
+    ))
+    db_session.commit()
+
+    assert cap_tier.compute_cap_tier_for_ticker(db_session, "IND99.NS") == "LARGE"
+
+
+def test_compute_cap_tier_for_ticker_none_for_global_ticker(db_session):
+    db_session.add(Company(
+        ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP",
+        market="GLOBAL", market_cap=3000000.0,
+    ))
+    db_session.commit()
+    assert cap_tier.compute_cap_tier_for_ticker(db_session, "AAPL") is None
