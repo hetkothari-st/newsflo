@@ -2330,21 +2330,40 @@ def verify_companies(
             logger.warning("verification returned no tool call; keeping every company")
             return companies
         arguments = json.loads(tool_call.function.arguments)
+
+        # This loop MUST stay inside the try. The call site in
+        # cascade.py::analyze_article deliberately has no try/except of its
+        # own -- this module's contract is to be self-contained -- so an
+        # exception here escapes analyze_article entirely, and
+        # app/pipeline.py marks the WHOLE ARTICLE failed, discarding a
+        # complete, successful analysis because the last optional judge-only
+        # pass got a malformed sub-field.
+        known = set(tickers)
+        rejected: dict[str, str] = {}
+        # Shape guards, not paranoia: a model returning a single verdict
+        # object instead of a wrapped array is an ordinary slip, and it is
+        # the same nested-array unreliability documented at cascade.py:282.
+        verdicts = arguments.get("verdicts")
+        if not isinstance(verdicts, list):
+            verdicts = []
+        for verdict in verdicts:
+            if not isinstance(verdict, dict):
+                continue
+            ticker = verdict.get("ticker")
+            # A non-str ticker (e.g. a list) would raise TypeError on the
+            # set-membership check below, not merely fail it.
+            if not isinstance(ticker, str):
+                continue
+            # Defensive: provider enums are not reliably enforced for nested
+            # array items (cascade.py:282). A verdict about a company that is
+            # not on the list cannot mean anything.
+            if ticker not in known:
+                continue
+            if verdict.get("belongs") is False:
+                rejected[ticker] = verdict.get("reason") or "no stated reason"
     except Exception as exc:
         logger.warning("verification call failed, keeping every company: %s", exc)
         return companies
-
-    known = set(tickers)
-    rejected: dict[str, str] = {}
-    for verdict in arguments.get("verdicts", []):
-        ticker = verdict.get("ticker")
-        # Defensive: provider enums are not reliably enforced for nested
-        # array items (cascade.py:282). A verdict about a company that is
-        # not on the list cannot mean anything.
-        if ticker not in known:
-            continue
-        if verdict.get("belongs") is False:
-            rejected[ticker] = verdict.get("reason") or "no stated reason"
 
     for ticker, reason in rejected.items():
         logger.info("verification dropped %s: %s", ticker, reason)
