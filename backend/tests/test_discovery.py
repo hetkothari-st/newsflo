@@ -14,10 +14,24 @@ def _override_db(db_session):
 def _seed_today(db_session):
     """One large parent + one micro child (linked via parent_company_id),
     both measured today. Micro child has high materiality + abnormal
-    volume + low delivery -- qualifies for every discovery tab."""
+    volume + low delivery -- qualifies for every discovery tab.
+
+    Cap tier is rank-based (app/config.py: MICRO_CAP_RANK_CUTOFF=500), so
+    getting the child ranked into MICRO requires 500+ companies ranked
+    above it by market cap. The fillers below carry no alerts/moves/
+    holdings of their own, so they never surface in any discovery tab --
+    they exist purely to give the ranking a realistic population.
+    """
     parent = Company(ticker="BIG.NS", name="Big Co", sector="oil_gas", index_tier="NIFTY50", market_cap=900000.0)
     child = Company(ticker="TINY.NS", name="Tiny Co", sector="oil_gas", index_tier="OTHER", market_cap=400.0)
-    db_session.add_all([parent, child])
+    fillers = [
+        Company(
+            ticker=f"FILLER{i}.NS", name=f"Filler {i}", sector="other", index_tier="OTHER",
+            market_cap=500000.0 - i * 100,
+        )
+        for i in range(500)
+    ]
+    db_session.add_all([parent, child, *fillers])
     db_session.commit()
     article = Article(source="test", url="https://example.com/disc", title="Oil news", content="c")
     db_session.add(article)

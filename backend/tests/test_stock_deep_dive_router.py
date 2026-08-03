@@ -162,14 +162,15 @@ def test_directory_returns_all_companies_with_cap_tier_and_sector(db_session, mo
 
 def test_directory_filters_by_cap_tier(db_session):
     # Cap tier is rank-based (AMFI_LARGE_CAP_RANK_CUTOFF=100,
-    # AMFI_MID_CAP_RANK_CUTOFF=250 -- app/config.py), so ranking TINY.NS into
-    # SMALL requires 250+ companies ranked above it, same convention as
-    # tests/test_cap_tier.py.
+    # AMFI_MID_CAP_RANK_CUTOFF=250, MICRO_CAP_RANK_CUTOFF=500 --
+    # app/config.py), so ranking TINY.NS into MICRO requires 500+ companies
+    # ranked above it by market cap, same convention as tests/test_cap_tier.py.
     _override_db(db_session)
     db_session.add_all([
         _company("BIG.NS", sector="oil_gas", market_cap=900000.0),
-        *[_company(f"FILLER{i}.NS", sector="other", market_cap=100000.0 - i) for i in range(260)],
-        # Below config.MICRO_CAP_FLOOR -> MICRO regardless of rank (spec v2 §4.5).
+        *[_company(f"FILLER{i}.NS", sector="other", market_cap=100000.0 - i) for i in range(499)],
+        # BIG + 499 fillers rank 1-500; TINY.NS ranks 501st -> MICRO
+        # regardless of its own market-cap value (rank-based, no rupee floor).
         _company("TINY.NS", sector="it", market_cap=10.0),
     ])
     db_session.commit()
@@ -180,7 +181,7 @@ def test_directory_filters_by_cap_tier(db_session):
     assert response.status_code == 200
     body = response.json()
     assert all(row["cap_tier"] == "SMALL" for row in body)
-    # TINY.NS is MICRO now (below the market-cap floor), not SMALL.
+    # TINY.NS is MICRO (rank 502, past MICRO_CAP_RANK_CUTOFF), not SMALL.
     assert "TINY.NS" not in {row["ticker"] for row in body}
     assert "BIG.NS" not in {row["ticker"] for row in body}
 
