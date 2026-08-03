@@ -54,3 +54,22 @@ def test_tokens_ignore_order():
 
 def test_tokens_of_empty_is_empty():
     assert normalize.tokens("") == frozenset()
+
+
+def test_hyphen_and_parens_split_into_separate_tokens():
+    assert normalize.normalize_name("Agri-Tech (India) Limited") == "agri tech india"
+
+
+def test_hyphen_splits_in_embedded_word():
+    assert normalize.normalize_name("BLS E-Services Limited") == "bls e services"
+
+
+def test_dots_join_with_no_separator():
+    assert normalize.normalize_name("D.B.Corp Limited") == "dbcorp"
+
+
+def test_hyphenated_and_spaced_forms_produce_same_tokens():
+    # The token-set match rung depends on this equality: a news mention
+    # rendering "Agri Tech India" must collide with the registry's
+    # "Agri-Tech India".
+    assert normalize.tokens("Agri-Tech India") == normalize.tokens("Agri Tech India")
