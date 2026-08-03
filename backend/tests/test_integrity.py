@@ -1,6 +1,7 @@
 from app.companies.integrity import (
-    delete_demo_companies, is_demo_company, check_sub_sectors,
+    ALERT_COMPANY_DEPENDENTS, delete_demo_companies, is_demo_company, check_sub_sectors,
 )
+from app.db import Base
 from app.models import (
     Alert,
     AlertCompany,
@@ -19,6 +20,31 @@ from app.models import (
 )
 from app.analysis.schemas import CompanyMention
 from app.companies.resolution import resolve_companies
+
+
+def test_alert_company_dependents_covers_every_referencing_model():
+    """ALERT_COMPANY_DEPENDENTS is the single source of truth shared by
+    delete_demo_companies, cleanup_orphan_company_refs.py, and
+    migrate_precision.py for which tables reference alert_companies.id --
+    a second, hand-maintained copy of this list anywhere is exactly the
+    failure mode this task fixed three times over (a model gains a new FK
+    to alert_companies.id, one copy of the list gets updated, the other
+    doesn't, and the next orphan generation appears silently under
+    SQLite's default off FK enforcement).
+
+    Derives the expected set by introspecting SQLAlchemy metadata --
+    every mapped class with a column whose ForeignKey targets
+    "alert_companies.id" -- rather than hardcoding a second list, so this
+    test itself cannot drift out of sync with the schema.
+    """
+    expected = set()
+    for mapper in Base.registry.mappers:
+        for column in mapper.local_table.columns:
+            for fk in column.foreign_keys:
+                if fk.target_fullname == "alert_companies.id":
+                    expected.add(mapper.class_)
+
+    assert set(ALERT_COMPANY_DEPENDENTS) == expected
 
 
 def test_known_demo_ticker_is_flagged():

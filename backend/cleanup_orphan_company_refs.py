@@ -25,14 +25,19 @@ operation and only surface when something runs `PRAGMA foreign_key_check`):
    8 alert_company_translations rows + 4 calibration_samples rows pointing
    at alert_company_ids that migrate_precision.py had already deleted).
    Fixed at the root in migrate_precision.py (it now deletes
-   _ALERT_COMPANY_DEPENDENTS rows before the alert_companies row itself,
-   reusing the same list this script exports), but this script still needs
-   to find and clean up whatever was left behind by the buggy version that
-   already ran.
+   ALERT_COMPANY_DEPENDENTS rows before the alert_companies row itself),
+   but this script still needs to find and clean up whatever was left
+   behind by the buggy version that already ran.
 
 Reported and cleaned up separately (case 1's counts vs. case 2's) so the
 two causes stay distinguishable -- they are unrelated bugs that happen to
 produce the same symptom in the same four tables.
+
+ALERT_COMPANY_DEPENDENTS itself lives in app.companies.integrity (not
+redefined here, and not in migrate_precision.py either) -- a second copy of
+that list is exactly the failure mode this task fixed three times over:
+see app.companies.integrity's module comment and
+test_integrity.py::test_alert_company_dependents_covers_every_referencing_model.
 
 Separate, single-purpose script: fixes a different problem than either
 repair_rationale_nullable.py (schema) or migrate_precision.py (presentation
@@ -43,22 +48,9 @@ import argparse
 
 from sqlalchemy import select
 
+from app.companies.integrity import ALERT_COMPANY_DEPENDENTS
 from app.db import SessionLocal
-from app.models import (
-    AlertCompany,
-    AlertCompanyTranslation,
-    CalibrationSample,
-    CarOutcome,
-    Company,
-    EmailNotification,
-    MarketMove,
-)
-
-# Tables that reference alert_companies.id via alert_company_id -- must be
-# cleared before an alert_companies row (orphaned or otherwise) is deleted.
-# Imported by migrate_precision.py too, so both scripts agree on exactly
-# which tables reference alert_companies.
-_ALERT_COMPANY_DEPENDENTS = (CalibrationSample, CarOutcome, EmailNotification, AlertCompanyTranslation)
+from app.models import AlertCompany, Company, MarketMove
 
 
 def main() -> None:
@@ -87,7 +79,7 @@ def main() -> None:
 
         case1_dependent_rows = []
         if orphan_alert_company_ids:
-            for model in _ALERT_COMPANY_DEPENDENTS:
+            for model in ALERT_COMPANY_DEPENDENTS:
                 case1_dependent_rows.extend(
                     session.query(model)
                     .filter(model.alert_company_id.in_(orphan_alert_company_ids))
@@ -101,7 +93,7 @@ def main() -> None:
         # the alert_companies row here is ALREADY gone, not merely about to
         # be deleted in this run.
         case2_dependent_rows = []
-        for model in _ALERT_COMPANY_DEPENDENTS:
+        for model in ALERT_COMPANY_DEPENDENTS:
             case2_dependent_rows.extend(
                 session.query(model)
                 .filter(~model.alert_company_id.in_(existing_alert_company_ids))

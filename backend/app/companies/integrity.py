@@ -37,7 +37,17 @@ DEMO_TICKERS = frozenset({"SOMETEXTILE.NS"})
 # this: SOMETEXTILE.NS's own alert_companies rows were left dangling by an
 # earlier version of this function, and 7 alert_company_translations rows
 # referencing them were themselves one silent step from becoming orphans).
-_ALERT_COMPANY_DEPENDENTS = (CalibrationSample, CarOutcome, EmailNotification, AlertCompanyTranslation)
+#
+# Single source of truth: cleanup_orphan_company_refs.py and
+# migrate_precision.py both import this rather than redefining it -- a
+# second copy of this list is exactly the failure mode this task fixed
+# three times over (a referencing table gets added to the model but not to
+# every copy of this list, and the next orphan generation appears silently
+# under SQLite's default off FK enforcement). See
+# test_integrity.py::test_alert_company_dependents_covers_every_referencing_model,
+# which derives the expected set by introspecting SQLAlchemy metadata so
+# this list itself cannot silently drift.
+ALERT_COMPANY_DEPENDENTS = (CalibrationSample, CarOutcome, EmailNotification, AlertCompanyTranslation)
 
 
 def is_demo_company(ticker: str) -> bool:
@@ -78,7 +88,7 @@ def delete_demo_companies(session: Session) -> list[str]:
     # Rows that reference this company's own alert_companies rows -- gone
     # before the alert_companies rows themselves.
     if alert_company_ids:
-        for model in _ALERT_COMPANY_DEPENDENTS:
+        for model in ALERT_COMPANY_DEPENDENTS:
             session.query(model).filter(
                 model.alert_company_id.in_(alert_company_ids)
             ).delete(synchronize_session=False)

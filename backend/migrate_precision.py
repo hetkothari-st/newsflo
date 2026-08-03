@@ -33,9 +33,11 @@ the same class of bug Task 2 introduced against `companies` (fixed in
 app.companies.integrity.delete_demo_companies) and a first, buggy version
 of this script introduced against `alert_companies` itself -- confirmed
 live: deleting sub-floor rows left 8 alert_company_translations and 4
-calibration_samples rows orphaned. _ALERT_COMPANY_DEPENDENTS is imported
-from cleanup_orphan_company_refs.py rather than redefined here, since both
-scripts must agree on exactly which tables reference alert_companies.
+calibration_samples rows orphaned. ALERT_COMPANY_DEPENDENTS is imported
+from app.companies.integrity -- the single source of truth also used by
+cleanup_orphan_company_refs.py and delete_demo_companies -- rather than
+redefined here, since a second copy of that list is exactly the failure
+mode this task fixed three times over.
 
 Idempotent: re-running changes nothing further. Pass --dry-run to see counts
 without writing.
@@ -45,11 +47,10 @@ import argparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.companies.integrity import DEMO_TICKERS
+from app.companies.integrity import ALERT_COMPANY_DEPENDENTS, DEMO_TICKERS
 from app.db import SessionLocal
 from app.models import AlertCompany, Company
 from app.pipeline import CONFIDENCE_FLOOR
-from cleanup_orphan_company_refs import _ALERT_COMPANY_DEPENDENTS
 
 
 def run_migration(session: Session, dry_run: bool = False) -> None:
@@ -103,7 +104,7 @@ def run_migration(session: Session, dry_run: bool = False) -> None:
     # Dependents of the alert_companies rows we're about to delete, gone
     # first -- or they become new orphans the moment those rows disappear.
     if rows_to_delete_ids:
-        for model in _ALERT_COMPANY_DEPENDENTS:
+        for model in ALERT_COMPANY_DEPENDENTS:
             session.query(model).filter(
                 model.alert_company_id.in_(rows_to_delete_ids)
             ).delete(synchronize_session=False)
