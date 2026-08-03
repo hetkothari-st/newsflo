@@ -105,9 +105,21 @@ every stage runs on `gemini-flash-latest`.
 `temperature` is never set on any call, so Gemini defaults to 1.0 on what is
 fundamentally an extraction task.
 
-### 7. Confidence is computed but never gates anything
+### 7. Confidence is computed, never gates anything, and has almost no range
 
-Eternal scored 37/100 and shipped. No threshold anywhere.
+Eternal scored 37/100 and shipped. No threshold exists anywhere.
+
+Gating on it barely helps, though. Median `confidence_score` is 50 across
+every impact level (`direct` n=846, `indirect_l1` n=25, `indirect_l2` n=10),
+because two of the six signals — historical calibration (weight 0.30) and
+rulebook match (0.20) — contribute 0.0 for nearly every row. Half the weight
+is inert, so scores cluster tightly around 50 and the number shown to users
+carries little information.
+
+The score also measures the wrong thing for this bug: citation density,
+source credibility, and freshness, but never whether the company belongs to
+the story. Restoring the score's dynamic range is a real problem but a
+separate one, and is out of scope here.
 
 ### 8. Text/direction incoherence
 
@@ -166,13 +178,30 @@ No API calls. Immediate.
 2. Sector-inference rows persist `rationale = None` rather than the template
    string. `is_exposure_only` already renders such rows without a number or
    score.
-3. Confidence floor: drop rows below a threshold at persist time. Starting
-   value 40 (Eternal scored 37; a plain `direct_mention` row scores 50), tuned
-   against the Section 0 harness. Note the interaction with
-   `LEVEL_CONFIDENCE_MULTIPLIER` — an `indirect_l2` row is multiplied by 0.45,
-   so a floor of 40 removes essentially all of them. Given that the L2 rows
-   are already almost entirely fan-out padding, that is the intended effect,
-   not a side effect to design around.
+3. Confidence floor at 40 — minor cleanup only, explicitly **not** a defense
+   against the bug. Measured against production data, a floor of 40 removes
+   20 rows of 881: 3 of 846 `direct`, and only 16 of 557 `sector_inference`
+   (2%) — 2% of exactly the category that produced Eternal.
+
+   The reason is structural. Median `confidence_score` is 50 at every impact
+   level, because `calibration` contributes 0.0 for nearly every row (fewer
+   than `CALIBRATION_SAMPLE_THRESHOLD`=5 outcome samples per company exist
+   yet) and `rulebook match` is usually 0 as well — half the total weight is
+   dead, so scores cluster. Raising the floor to 50 does not help: it starts
+   cutting correct `direct_mention` rows at the median while still keeping
+   half the fan-out.
+
+   More fundamentally, none of the six `compute_confidence` signals asks
+   whether a company belongs to the story. They measure citation density,
+   source, and freshness. Eternal scored 37 for lacking a rulebook match and
+   calibration history, not for being a food-delivery company on a crude-oil
+   story. A well-cited, entirely irrelevant company scores 50 like a correct
+   one.
+
+   Relevance filtering is therefore carried by Section 1's re-bucketing
+   (structural), Section 2 (grounding), and Section 3 (an explicit
+   per-company belongs/does-not-belong judgment). The floor is retained only
+   to trim the genuinely degenerate tail.
 
 After this, alert 9020 is no longer misleading. It is not yet correct — that
 is Sections 2-4.
@@ -263,10 +292,10 @@ false positives.
 
 ## Known consequences
 
-Section 1's confidence floor and Section 4's narrowing will visibly thin some
-alerts, including within the `SECTOR_WIDE` band. This is the accepted trade of
-the chosen output shape. The thinning will be felt before Section 2 lands and
-begins adding *correct* companies back.
+Section 4's narrowing (and, to a much smaller degree, Section 1's floor) will
+visibly thin some alerts, including within the `SECTOR_WIDE` band. This is the
+accepted trade of the chosen output shape. The thinning will be felt before
+Section 2 lands and begins adding *correct* companies back.
 
 `indirect_l1` (25 rows) and `indirect_l2` (10 rows) across 607 alerts are
 already almost entirely fan-out padding rather than real ripple reasoning.
@@ -280,3 +309,5 @@ assumed here.
 - Full reanalysis of all 607 alerts (deferred to the paid-API migration, where
   it is a cheap batch job).
 - Replacing the rulebook/playbook system.
+- Restoring dynamic range to `confidence_score` (see root cause 7). Real, but
+  a separate problem from the hallucination bug this design addresses.
