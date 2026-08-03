@@ -8,6 +8,8 @@ from openai import RateLimitError
 
 from app.analysis.claude_client import (
     ANTHROPIC_MODEL,
+    FALLBACK_MODEL,
+    MODEL,
     AnthropicAdapter,
     FallbackClient,
     RotatingClient,
@@ -495,3 +497,70 @@ def test_fallback_client_falls_through_to_secondary_on_gemini_network_failure():
     result = FallbackClient(primary, secondary).chat.completions.create(model="m", messages=[])
 
     assert result is sentinel
+
+
+from app.analysis.claude_client import (
+    ANALYSIS_TEMPERATURE, GEMINI_MODEL, GEMINI_STRONG_MODEL, GeminiAdapter,
+)
+
+
+def test_gemini_maps_the_strong_model_slot_to_the_strong_model(monkeypatch):
+    captured = {}
+
+    def _fake_post(url, json, timeout):
+        captured["url"] = url
+        captured["body"] = json
+        return SimpleNamespace(status_code=200, json=lambda: {"candidates": []})
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", _fake_post)
+
+    adapter = GeminiAdapter("key")
+    adapter.chat.completions.create(
+        model=MODEL, max_tokens=100, tools=[_tool()],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    assert GEMINI_STRONG_MODEL in captured["url"]
+
+
+def test_gemini_maps_the_fallback_model_slot_to_the_cheap_model(monkeypatch):
+    captured = {}
+
+    def _fake_post(url, json, timeout):
+        captured["url"] = url
+        return SimpleNamespace(status_code=200, json=lambda: {"candidates": []})
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", _fake_post)
+
+    adapter = GeminiAdapter("key")
+    adapter.chat.completions.create(
+        model=FALLBACK_MODEL, max_tokens=100, tools=[_tool()],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    assert GEMINI_MODEL in captured["url"]
+
+
+def test_gemini_sets_a_low_temperature(monkeypatch):
+    captured = {}
+
+    def _fake_post(url, json, timeout):
+        captured["body"] = json
+        return SimpleNamespace(status_code=200, json=lambda: {"candidates": []})
+
+    monkeypatch.setattr("app.analysis.claude_client.httpx.post", _fake_post)
+
+    GeminiAdapter("key").chat.completions.create(
+        model=MODEL, max_tokens=100, tools=[_tool()],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    assert captured["body"]["generationConfig"]["temperature"] == ANALYSIS_TEMPERATURE
+    assert ANALYSIS_TEMPERATURE <= 0.3
+
+
+def _tool():
+    return {"type": "function", "function": {
+        "name": "t", "description": "d",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }}
