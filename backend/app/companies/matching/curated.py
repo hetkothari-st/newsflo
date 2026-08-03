@@ -25,4 +25,6 @@ CURATED_TRADE_NAMES: dict[str, tuple[str, ...]] = {
     "IOC.NS": ("IOC", "Indian Oil"),
     "OIL.NS": ("Oil India",),
     "SBICARD.NS": ("SBI Cards",),
+    "APOLLOHOSP.NS": ("Apollo Hospitals",),
+    "SBILIFE.NS": ("SBI Life",),
 }

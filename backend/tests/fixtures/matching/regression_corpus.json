@@ -1,0 +1,1257 @@
+{
+  "companies": [
+    {
+      "ticker": "RELIANCE.NS",
+      "name": "Reliance Industries Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "ADANIENT.NS",
+      "name": "Adani Enterprises Ltd.",
+      "sector": "metals"
+    },
+    {
+      "ticker": "ADANIPORTS.NS",
+      "name": "Adani Ports and Special Economic Zone Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "APOLLOHOSP.NS",
+      "name": "Apollo Hospitals Enterprise Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "ASIANPAINT.NS",
+      "name": "Asian Paints Ltd.",
+      "sector": "chemicals"
+    },
+    {
+      "ticker": "AXISBANK.NS",
+      "name": "Axis Bank Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "BAJAJ-AUTO.NS",
+      "name": "Bajaj Auto Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "BAJFINANCE.NS",
+      "name": "Bajaj Finance Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "BAJAJFINSV.NS",
+      "name": "Bajaj Finserv Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "BEL.NS",
+      "name": "Bharat Electronics Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "BHARTIARTL.NS",
+      "name": "Bharti Airtel Ltd.",
+      "sector": "telecom"
+    },
+    {
+      "ticker": "CIPLA.NS",
+      "name": "Cipla Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "COALINDIA.NS",
+      "name": "Coal India Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "DRREDDY.NS",
+      "name": "Dr. Reddy's Laboratories Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "EICHERMOT.NS",
+      "name": "Eicher Motors Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "ETERNAL.NS",
+      "name": "Eternal Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "GRASIM.NS",
+      "name": "Grasim Industries Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "HCLTECH.NS",
+      "name": "HCL Technologies Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "HDFCBANK.NS",
+      "name": "HDFC Bank Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "HDFCLIFE.NS",
+      "name": "HDFC Life Insurance Company Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "HINDALCO.NS",
+      "name": "Hindalco Industries Ltd.",
+      "sector": "metals"
+    },
+    {
+      "ticker": "HINDUNILVR.NS",
+      "name": "Hindustan Unilever Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "ICICIBANK.NS",
+      "name": "ICICI Bank Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "ITC.NS",
+      "name": "ITC Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "INFY.NS",
+      "name": "Infosys Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "INDIGO.NS",
+      "name": "InterGlobe Aviation Ltd.",
+      "sector": "railways_transport"
+    },
+    {
+      "ticker": "JSWSTEEL.NS",
+      "name": "JSW Steel Ltd.",
+      "sector": "metals"
+    },
+    {
+      "ticker": "KOTAKBANK.NS",
+      "name": "Kotak Mahindra Bank Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "LT.NS",
+      "name": "Larsen & Toubro Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "M&M.NS",
+      "name": "Mahindra & Mahindra Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "MARUTI.NS",
+      "name": "Maruti Suzuki India Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "MAXHEALTH.NS",
+      "name": "Max Healthcare Institute Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "NTPC.NS",
+      "name": "NTPC Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "NESTLEIND.NS",
+      "name": "Nestle India Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "ONGC.NS",
+      "name": "Oil & Natural Gas Corporation Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "POWERGRID.NS",
+      "name": "Power Grid Corporation of India Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "SBIN.NS",
+      "name": "State Bank of India",
+      "sector": "banking"
+    },
+    {
+      "ticker": "SUNPHARMA.NS",
+      "name": "Sun Pharmaceutical Industries Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "TCS.NS",
+      "name": "Tata Consultancy Services Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "TATACONSUM.NS",
+      "name": "Tata Consumer Products Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "TMPV.NS",
+      "name": "Tata Motors Passenger Vehicles Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "TATASTEEL.NS",
+      "name": "Tata Steel Ltd.",
+      "sector": "metals"
+    },
+    {
+      "ticker": "TECHM.NS",
+      "name": "Tech Mahindra Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "TITAN.NS",
+      "name": "Titan Company Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "ULTRACEMCO.NS",
+      "name": "UltraTech Cement Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "WIPRO.NS",
+      "name": "Wipro Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "ABB.NS",
+      "name": "ABB India Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "ADANIPOWER.NS",
+      "name": "Adani Power Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "DMART.NS",
+      "name": "Avenue Supermarts Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "BPCL.NS",
+      "name": "Bharat Petroleum Corporation Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "CGPOWER.NS",
+      "name": "CG Power and Industrial Solutions Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "CANBK.NS",
+      "name": "Canara Bank",
+      "sector": "banking"
+    },
+    {
+      "ticker": "DIVISLAB.NS",
+      "name": "Divi's Laboratories Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "GAIL.NS",
+      "name": "GAIL (India) Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "HDFCAMC.NS",
+      "name": "HDFC Asset Management Company Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "HINDZINC.NS",
+      "name": "Hindustan Zinc Ltd.",
+      "sector": "metals"
+    },
+    {
+      "ticker": "IOC.NS",
+      "name": "Indian Oil Corporation Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "LTM.NS",
+      "name": "LTM Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "LODHA.NS",
+      "name": "Lodha Developers Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "PFC.NS",
+      "name": "Power Finance Corporation Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "PNB.NS",
+      "name": "Punjab National Bank",
+      "sector": "banking"
+    },
+    {
+      "ticker": "TATACAP.NS",
+      "name": "Tata Capital Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "TORNTPHARM.NS",
+      "name": "Torrent Pharmaceuticals Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "UNIONBANK.NS",
+      "name": "Union Bank of India",
+      "sector": "banking"
+    },
+    {
+      "ticker": "VBL.NS",
+      "name": "Varun Beverages Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "VEDL.NS",
+      "name": "Vedanta Ltd.",
+      "sector": "metals"
+    },
+    {
+      "ticker": "3MINDIA.NS",
+      "name": "3M India Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "AEGISLOG.NS",
+      "name": "Aegis Logistics Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "AEGISVOPAK.NS",
+      "name": "Aegis Vopak Terminals Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "ANANDRATHI.NS",
+      "name": "Anand Rathi Wealth Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "ANGELONE.NS",
+      "name": "Angel One Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "APOLLOTYRE.NS",
+      "name": "Apollo Tyres Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "ATHERENERG.NS",
+      "name": "Ather Energy Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "BANKINDIA.NS",
+      "name": "Bank of India",
+      "sector": "banking"
+    },
+    {
+      "ticker": "BIOCON.NS",
+      "name": "Biocon Ltd.",
+      "sector": "pharma"
+    },
+    {
+      "ticker": "BLUESTARCO.NS",
+      "name": "Blue Star Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "CARTRADE.NS",
+      "name": "Cartrade Tech Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "CEATLTD.NS",
+      "name": "Ceat Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "CHENNPETRO.NS",
+      "name": "Chennai Petroleum Corporation Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "DABUR.NS",
+      "name": "Dabur India Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "DIXON.NS",
+      "name": "Dixon Technologies (India) Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "HDBFS.NS",
+      "name": "HDB Financial Services Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "HEROMOTOCO.NS",
+      "name": "Hero MotoCorp Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "HINDPETRO.NS",
+      "name": "Hindustan Petroleum Corporation Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "ICICIAMC.NS",
+      "name": "ICICI Prudential Asset Management Company Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "ICICIPRULI.NS",
+      "name": "ICICI Prudential Life Insurance Company Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "INDIANB.NS",
+      "name": "Indian Bank",
+      "sector": "banking"
+    },
+    {
+      "ticker": "JKTYRE.NS",
+      "name": "JK Tyre & Industries Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "KALYANKJIL.NS",
+      "name": "Kalyan Jewellers India Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "KAYNES.NS",
+      "name": "Kaynes Technology India Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "LTTS.NS",
+      "name": "L&T Technology Services Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "MRF.NS",
+      "name": "MRF Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "NAM-INDIA.NS",
+      "name": "Nippon Life India Asset Management Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "NUVOCO.NS",
+      "name": "Nuvoco Vistas Corporation Ltd.",
+      "sector": "infra"
+    },
+    {
+      "ticker": "OIL.NS",
+      "name": "Oil India Ltd.",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "PATANJALI.NS",
+      "name": "Patanjali Foods Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "SBICARD.NS",
+      "name": "SBI Cards and Payment Services Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "SUMICHEM.NS",
+      "name": "Sumitomo Chemical India Ltd.",
+      "sector": "other"
+    },
+    {
+      "ticker": "SWIGGY.NS",
+      "name": "Swiggy Ltd.",
+      "sector": "fmcg"
+    },
+    {
+      "ticker": "TATAELXSI.NS",
+      "name": "Tata Elxsi Ltd.",
+      "sector": "it"
+    },
+    {
+      "ticker": "NIACL.NS",
+      "name": "The New India Assurance Company Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "UNOMINDA.NS",
+      "name": "UNO Minda Ltd.",
+      "sector": "auto"
+    },
+    {
+      "ticker": "IDEA.NS",
+      "name": "Vodafone Idea Ltd.",
+      "sector": "telecom"
+    },
+    {
+      "ticker": "YESBANK.NS",
+      "name": "Yes Bank Ltd.",
+      "sector": "banking"
+    },
+    {
+      "ticker": "NVDA",
+      "name": "NVIDIA",
+      "sector": "it"
+    },
+    {
+      "ticker": "INTC",
+      "name": "Intel",
+      "sector": "it"
+    },
+    {
+      "ticker": "AMD",
+      "name": "Advanced Micro Devices",
+      "sector": "it"
+    },
+    {
+      "ticker": "IBM",
+      "name": "IBM",
+      "sector": "it"
+    },
+    {
+      "ticker": "MU",
+      "name": "Micron Technology",
+      "sector": "it"
+    },
+    {
+      "ticker": "PYPL",
+      "name": "PayPal",
+      "sector": "it"
+    },
+    {
+      "ticker": "JPM",
+      "name": "JPMorgan Chase",
+      "sector": "banking"
+    },
+    {
+      "ticker": "C",
+      "name": "Citigroup",
+      "sector": "banking"
+    },
+    {
+      "ticker": "GS",
+      "name": "Goldman Sachs",
+      "sector": "banking"
+    },
+    {
+      "ticker": "MUFG",
+      "name": "Mitsubishi UFJ Financial Group",
+      "sector": "banking"
+    },
+    {
+      "ticker": "XOM",
+      "name": "ExxonMobil",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "CVX",
+      "name": "Chevron",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "SHEL",
+      "name": "Shell",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "BP",
+      "name": "BP",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "AA",
+      "name": "Alcoa",
+      "sector": "metals"
+    },
+    {
+      "ticker": "AMX",
+      "name": "America Movil",
+      "sector": "telecom"
+    },
+    {
+      "ticker": "ATUS",
+      "name": "Altice USA",
+      "sector": "telecom"
+    },
+    {
+      "ticker": "AMT",
+      "name": "American Tower",
+      "sector": "telecom"
+    },
+    {
+      "ticker": "ATEX",
+      "name": "Anterix",
+      "sector": "telecom"
+    },
+    {
+      "ticker": "IEX",
+      "name": "IDEX Corporation",
+      "sector": "infra"
+    },
+    {
+      "ticker": "BRK.B",
+      "name": "Berkshire Hathaway",
+      "sector": "other"
+    },
+    {
+      "ticker": "AAL",
+      "name": "American Airlines Group",
+      "sector": "other"
+    },
+    {
+      "ticker": "UNP",
+      "name": "Union Pacific Corporation",
+      "sector": "other"
+    },
+    {
+      "ticker": "NSC",
+      "name": "Norfolk Southern Corporation",
+      "sector": "other"
+    },
+    {
+      "ticker": "RTX",
+      "name": "RTX Corporation",
+      "sector": "defense"
+    },
+    {
+      "ticker": "LMT",
+      "name": "Lockheed Martin",
+      "sector": "defense"
+    },
+    {
+      "ticker": "ASML",
+      "name": "ASML",
+      "sector": "it"
+    },
+    {
+      "ticker": "TSM",
+      "name": "TSMC",
+      "sector": "it"
+    },
+    {
+      "ticker": "005930.KS",
+      "name": "Samsung",
+      "sector": "it"
+    },
+    {
+      "ticker": "AMAT",
+      "name": "Applied Materials",
+      "sector": "it"
+    },
+    {
+      "ticker": "LRCX",
+      "name": "Lam Research",
+      "sector": "it"
+    },
+    {
+      "ticker": "KLAC",
+      "name": "KLA",
+      "sector": "it"
+    },
+    {
+      "ticker": "SNPS",
+      "name": "Synopsys",
+      "sector": "it"
+    },
+    {
+      "ticker": "HPCL.NS",
+      "name": "Hindustan Petroleum Corporation",
+      "sector": "oil_gas"
+    },
+    {
+      "ticker": "OILINDIA.NS",
+      "name": "Oil India",
+      "sector": "oil_gas"
+    }
+  ],
+  "cases": [
+    {
+      "mention": "Reliance Industries Ltd.",
+      "expect": "RELIANCE.NS"
+    },
+    {
+      "mention": "Adani Enterprises Ltd.",
+      "expect": "ADANIENT.NS"
+    },
+    {
+      "mention": "Adani Ports and Special Economic Zone Ltd.",
+      "expect": "ADANIPORTS.NS"
+    },
+    {
+      "mention": "Apollo Hospitals Enterprise Ltd.",
+      "expect": "APOLLOHOSP.NS"
+    },
+    {
+      "mention": "Asian Paints Ltd.",
+      "expect": "ASIANPAINT.NS"
+    },
+    {
+      "mention": "Axis Bank Ltd.",
+      "expect": "AXISBANK.NS"
+    },
+    {
+      "mention": "Bajaj Auto Ltd.",
+      "expect": "BAJAJ-AUTO.NS"
+    },
+    {
+      "mention": "Bajaj Finance Ltd.",
+      "expect": "BAJFINANCE.NS"
+    },
+    {
+      "mention": "Bajaj Finserv Ltd.",
+      "expect": "BAJAJFINSV.NS"
+    },
+    {
+      "mention": "Bharat Electronics Ltd.",
+      "expect": "BEL.NS"
+    },
+    {
+      "mention": "Bharti Airtel Ltd.",
+      "expect": "BHARTIARTL.NS"
+    },
+    {
+      "mention": "Cipla Ltd.",
+      "expect": "CIPLA.NS"
+    },
+    {
+      "mention": "Coal India Ltd.",
+      "expect": "COALINDIA.NS"
+    },
+    {
+      "mention": "Dr. Reddy's Laboratories Ltd.",
+      "expect": "DRREDDY.NS"
+    },
+    {
+      "mention": "Eicher Motors Ltd.",
+      "expect": "EICHERMOT.NS"
+    },
+    {
+      "mention": "Eternal Ltd.",
+      "expect": "ETERNAL.NS"
+    },
+    {
+      "mention": "Grasim Industries Ltd.",
+      "expect": "GRASIM.NS"
+    },
+    {
+      "mention": "HCL Technologies Ltd.",
+      "expect": "HCLTECH.NS"
+    },
+    {
+      "mention": "HDFC Bank Ltd.",
+      "expect": "HDFCBANK.NS"
+    },
+    {
+      "mention": "HDFC Life Insurance Company Ltd.",
+      "expect": "HDFCLIFE.NS"
+    },
+    {
+      "mention": "Hindalco Industries Ltd.",
+      "expect": "HINDALCO.NS"
+    },
+    {
+      "mention": "Hindustan Unilever Ltd.",
+      "expect": "HINDUNILVR.NS"
+    },
+    {
+      "mention": "ICICI Bank Ltd.",
+      "expect": "ICICIBANK.NS"
+    },
+    {
+      "mention": "ITC Ltd.",
+      "expect": "ITC.NS"
+    },
+    {
+      "mention": "Infosys Ltd.",
+      "expect": "INFY.NS"
+    },
+    {
+      "mention": "InterGlobe Aviation Ltd.",
+      "expect": "INDIGO.NS"
+    },
+    {
+      "mention": "JSW Steel Ltd.",
+      "expect": "JSWSTEEL.NS"
+    },
+    {
+      "mention": "Kotak Mahindra Bank Ltd.",
+      "expect": "KOTAKBANK.NS"
+    },
+    {
+      "mention": "Larsen & Toubro Ltd.",
+      "expect": "LT.NS"
+    },
+    {
+      "mention": "Mahindra & Mahindra Ltd.",
+      "expect": "M&M.NS"
+    },
+    {
+      "mention": "Maruti Suzuki India Ltd.",
+      "expect": "MARUTI.NS"
+    },
+    {
+      "mention": "Max Healthcare Institute Ltd.",
+      "expect": "MAXHEALTH.NS"
+    },
+    {
+      "mention": "NTPC Ltd.",
+      "expect": "NTPC.NS"
+    },
+    {
+      "mention": "Nestle India Ltd.",
+      "expect": "NESTLEIND.NS"
+    },
+    {
+      "mention": "Oil & Natural Gas Corporation Ltd.",
+      "expect": "ONGC.NS"
+    },
+    {
+      "mention": "Power Grid Corporation of India Ltd.",
+      "expect": "POWERGRID.NS"
+    },
+    {
+      "mention": "State Bank of India",
+      "expect": "SBIN.NS"
+    },
+    {
+      "mention": "Sun Pharmaceutical Industries Ltd.",
+      "expect": "SUNPHARMA.NS"
+    },
+    {
+      "mention": "Tata Consultancy Services Ltd.",
+      "expect": "TCS.NS"
+    },
+    {
+      "mention": "Tata Consumer Products Ltd.",
+      "expect": "TATACONSUM.NS"
+    },
+    {
+      "mention": "Tata Motors Passenger Vehicles Ltd.",
+      "expect": "TMPV.NS"
+    },
+    {
+      "mention": "Tata Steel Ltd.",
+      "expect": "TATASTEEL.NS"
+    },
+    {
+      "mention": "Tech Mahindra Ltd.",
+      "expect": "TECHM.NS"
+    },
+    {
+      "mention": "Titan Company Ltd.",
+      "expect": "TITAN.NS"
+    },
+    {
+      "mention": "UltraTech Cement Ltd.",
+      "expect": "ULTRACEMCO.NS"
+    },
+    {
+      "mention": "Wipro Ltd.",
+      "expect": "WIPRO.NS"
+    },
+    {
+      "mention": "ABB India Ltd.",
+      "expect": "ABB.NS"
+    },
+    {
+      "mention": "Adani Power Ltd.",
+      "expect": "ADANIPOWER.NS"
+    },
+    {
+      "mention": "Avenue Supermarts Ltd.",
+      "expect": "DMART.NS"
+    },
+    {
+      "mention": "Bharat Petroleum Corporation Ltd.",
+      "expect": "BPCL.NS"
+    },
+    {
+      "mention": "CG Power and Industrial Solutions Ltd.",
+      "expect": "CGPOWER.NS"
+    },
+    {
+      "mention": "Canara Bank",
+      "expect": "CANBK.NS"
+    },
+    {
+      "mention": "Divi's Laboratories Ltd.",
+      "expect": "DIVISLAB.NS"
+    },
+    {
+      "mention": "GAIL (India) Ltd.",
+      "expect": "GAIL.NS"
+    },
+    {
+      "mention": "HDFC Asset Management Company Ltd.",
+      "expect": "HDFCAMC.NS"
+    },
+    {
+      "mention": "Hindustan Zinc Ltd.",
+      "expect": "HINDZINC.NS"
+    },
+    {
+      "mention": "Indian Oil Corporation Ltd.",
+      "expect": "IOC.NS"
+    },
+    {
+      "mention": "LTM Ltd.",
+      "expect": "LTM.NS"
+    },
+    {
+      "mention": "Lodha Developers Ltd.",
+      "expect": "LODHA.NS"
+    },
+    {
+      "mention": "Power Finance Corporation Ltd.",
+      "expect": "PFC.NS"
+    },
+    {
+      "mention": "Punjab National Bank",
+      "expect": "PNB.NS"
+    },
+    {
+      "mention": "Tata Capital Ltd.",
+      "expect": "TATACAP.NS"
+    },
+    {
+      "mention": "Torrent Pharmaceuticals Ltd.",
+      "expect": "TORNTPHARM.NS"
+    },
+    {
+      "mention": "Union Bank of India",
+      "expect": "UNIONBANK.NS"
+    },
+    {
+      "mention": "Varun Beverages Ltd.",
+      "expect": "VBL.NS"
+    },
+    {
+      "mention": "Vedanta Ltd.",
+      "expect": "VEDL.NS"
+    },
+    {
+      "mention": "3M India Ltd.",
+      "expect": "3MINDIA.NS"
+    },
+    {
+      "mention": "Aegis Logistics Ltd.",
+      "expect": "AEGISLOG.NS"
+    },
+    {
+      "mention": "Aegis Vopak Terminals Ltd.",
+      "expect": "AEGISVOPAK.NS"
+    },
+    {
+      "mention": "Anand Rathi Wealth Ltd.",
+      "expect": "ANANDRATHI.NS"
+    },
+    {
+      "mention": "Angel One Ltd.",
+      "expect": "ANGELONE.NS"
+    },
+    {
+      "mention": "Apollo Tyres Ltd.",
+      "expect": "APOLLOTYRE.NS"
+    },
+    {
+      "mention": "Ather Energy Ltd.",
+      "expect": "ATHERENERG.NS"
+    },
+    {
+      "mention": "Bank of India",
+      "expect": "BANKINDIA.NS"
+    },
+    {
+      "mention": "Biocon Ltd.",
+      "expect": "BIOCON.NS"
+    },
+    {
+      "mention": "Blue Star Ltd.",
+      "expect": "BLUESTARCO.NS"
+    },
+    {
+      "mention": "Cartrade Tech Ltd.",
+      "expect": "CARTRADE.NS"
+    },
+    {
+      "mention": "Ceat Ltd.",
+      "expect": "CEATLTD.NS"
+    },
+    {
+      "mention": "Chennai Petroleum Corporation Ltd.",
+      "expect": "CHENNPETRO.NS"
+    },
+    {
+      "mention": "Dabur India Ltd.",
+      "expect": "DABUR.NS"
+    },
+    {
+      "mention": "Dixon Technologies (India) Ltd.",
+      "expect": "DIXON.NS"
+    },
+    {
+      "mention": "HDB Financial Services Ltd.",
+      "expect": "HDBFS.NS"
+    },
+    {
+      "mention": "Hero MotoCorp Ltd.",
+      "expect": "HEROMOTOCO.NS"
+    },
+    {
+      "mention": "Hindustan Petroleum Corporation Ltd.",
+      "expect": "HINDPETRO.NS"
+    },
+    {
+      "mention": "ICICI Prudential Asset Management Company Ltd.",
+      "expect": "ICICIAMC.NS"
+    },
+    {
+      "mention": "ICICI Prudential Life Insurance Company Ltd.",
+      "expect": "ICICIPRULI.NS"
+    },
+    {
+      "mention": "Indian Bank",
+      "expect": "INDIANB.NS"
+    },
+    {
+      "mention": "JK Tyre & Industries Ltd.",
+      "expect": "JKTYRE.NS"
+    },
+    {
+      "mention": "Kalyan Jewellers India Ltd.",
+      "expect": "KALYANKJIL.NS"
+    },
+    {
+      "mention": "Kaynes Technology India Ltd.",
+      "expect": "KAYNES.NS"
+    },
+    {
+      "mention": "L&T Technology Services Ltd.",
+      "expect": "LTTS.NS"
+    },
+    {
+      "mention": "MRF Ltd.",
+      "expect": "MRF.NS"
+    },
+    {
+      "mention": "Nippon Life India Asset Management Ltd.",
+      "expect": "NAM-INDIA.NS"
+    },
+    {
+      "mention": "Nuvoco Vistas Corporation Ltd.",
+      "expect": "NUVOCO.NS"
+    },
+    {
+      "mention": "Oil India Ltd.",
+      "expect": "OIL.NS"
+    },
+    {
+      "mention": "Patanjali Foods Ltd.",
+      "expect": "PATANJALI.NS"
+    },
+    {
+      "mention": "SBI Cards and Payment Services Ltd.",
+      "expect": "SBICARD.NS"
+    },
+    {
+      "mention": "Sumitomo Chemical India Ltd.",
+      "expect": "SUMICHEM.NS"
+    },
+    {
+      "mention": "Swiggy Ltd.",
+      "expect": "SWIGGY.NS"
+    },
+    {
+      "mention": "Tata Elxsi Ltd.",
+      "expect": "TATAELXSI.NS"
+    },
+    {
+      "mention": "The New India Assurance Company Ltd.",
+      "expect": "NIACL.NS"
+    },
+    {
+      "mention": "UNO Minda Ltd.",
+      "expect": "UNOMINDA.NS"
+    },
+    {
+      "mention": "Vodafone Idea Ltd.",
+      "expect": "IDEA.NS"
+    },
+    {
+      "mention": "Yes Bank Ltd.",
+      "expect": "YESBANK.NS"
+    },
+    {
+      "mention": "NVIDIA",
+      "expect": "NVDA"
+    },
+    {
+      "mention": "Intel",
+      "expect": "INTC"
+    },
+    {
+      "mention": "Advanced Micro Devices",
+      "expect": "AMD"
+    },
+    {
+      "mention": "IBM",
+      "expect": "IBM"
+    },
+    {
+      "mention": "Micron Technology",
+      "expect": "MU"
+    },
+    {
+      "mention": "PayPal",
+      "expect": "PYPL"
+    },
+    {
+      "mention": "JPMorgan Chase",
+      "expect": "JPM"
+    },
+    {
+      "mention": "Citigroup",
+      "expect": "C"
+    },
+    {
+      "mention": "Goldman Sachs",
+      "expect": "GS"
+    },
+    {
+      "mention": "Mitsubishi UFJ Financial Group",
+      "expect": "MUFG"
+    },
+    {
+      "mention": "ExxonMobil",
+      "expect": "XOM"
+    },
+    {
+      "mention": "Chevron",
+      "expect": "CVX"
+    },
+    {
+      "mention": "Shell",
+      "expect": "SHEL"
+    },
+    {
+      "mention": "BP",
+      "expect": "BP"
+    },
+    {
+      "mention": "Alcoa",
+      "expect": "AA"
+    },
+    {
+      "mention": "America Movil",
+      "expect": "AMX"
+    },
+    {
+      "mention": "Altice USA",
+      "expect": "ATUS"
+    },
+    {
+      "mention": "American Tower",
+      "expect": "AMT"
+    },
+    {
+      "mention": "Anterix",
+      "expect": "ATEX"
+    },
+    {
+      "mention": "IDEX Corporation",
+      "expect": "IEX"
+    },
+    {
+      "mention": "Berkshire Hathaway",
+      "expect": "BRK.B"
+    },
+    {
+      "mention": "American Airlines Group",
+      "expect": "AAL"
+    },
+    {
+      "mention": "Union Pacific Corporation",
+      "expect": "UNP"
+    },
+    {
+      "mention": "Norfolk Southern Corporation",
+      "expect": "NSC"
+    },
+    {
+      "mention": "RTX Corporation",
+      "expect": "RTX"
+    },
+    {
+      "mention": "Lockheed Martin",
+      "expect": "LMT"
+    },
+    {
+      "mention": "ASML",
+      "expect": "ASML"
+    },
+    {
+      "mention": "TSMC",
+      "expect": "TSM"
+    },
+    {
+      "mention": "Samsung",
+      "expect": "005930.KS"
+    },
+    {
+      "mention": "Applied Materials",
+      "expect": "AMAT"
+    },
+    {
+      "mention": "Lam Research",
+      "expect": "LRCX"
+    },
+    {
+      "mention": "KLA",
+      "expect": "KLAC"
+    },
+    {
+      "mention": "Synopsys",
+      "expect": "SNPS"
+    },
+    {
+      "mention": "Hindustan Petroleum Corporation",
+      "expect": "HPCL.NS"
+    },
+    {
+      "mention": "Oil India",
+      "expect": "OILINDIA.NS"
+    }
+  ]
+}
