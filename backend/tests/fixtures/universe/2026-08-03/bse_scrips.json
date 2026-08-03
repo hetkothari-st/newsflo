@@ -1,0 +1,18 @@
+[
+  {"SCRIP_CD": "500325", "Scrip_Name": "Reliance Industries Ltd", "Status": "Active",
+   "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE002A01018",
+   "INDUSTRY": null, "scrip_id": "RELIANCE", "Segment": "Equity",
+   "Issuer_Name": "Reliance Industries Limited", "Mktcap": "1750000.00"},
+  {"SCRIP_CD": "543210", "Scrip_Name": "BSE Only Ltd", "Status": "Active",
+   "GROUP": "X", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE777Z01013",
+   "INDUSTRY": null, "scrip_id": "BSEONLY", "Segment": "Equity",
+   "Issuer_Name": "BSE Only Limited", "Mktcap": "120.00"},
+  {"SCRIP_CD": "590001", "Scrip_Name": "SME Co Ltd", "Status": "Active",
+   "GROUP": "M", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE666Z01014",
+   "INDUSTRY": null, "scrip_id": "SMECO", "Segment": "Equity",
+   "Issuer_Name": "SME Co Limited", "Mktcap": ""},
+  {"SCRIP_CD": "999999", "Scrip_Name": "Some ETF Units", "Status": "Active",
+   "GROUP": "B", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INF204KB14I5",
+   "INDUSTRY": null, "scrip_id": "SOMEETF", "Segment": "Equity",
+   "Issuer_Name": "Some ETF", "Mktcap": "500.00"}
+]
