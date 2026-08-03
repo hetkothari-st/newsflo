@@ -2,6 +2,44 @@ from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, Market
 from app.market.ripple_layers import compute_ripple_layers
 
 
+def _alert_with_companies(db_session, companies):
+    """Build one Alert with one AlertCompany per dict in `companies`. Each
+    dict must have at least `ticker` and `sector`; any other Company or
+    AlertCompany field (e.g. `basis`, `impact_level`, `direction`) may be
+    overridden. Returns the flushed Alert. Local to this module -- kept
+    minimal on purpose, unlike `_alert_with_layers` which also wires up
+    MarketMove/ImpactEdge for the layer-ordering tests above."""
+    article = Article(source="test", url=f"https://example.com/{id(companies)}", title="News", content="c")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="test")
+    db_session.add(alert)
+    db_session.flush()
+    for spec in companies:
+        company = Company(
+            ticker=spec["ticker"],
+            name=spec.get("name", spec["ticker"]),
+            sector=spec["sector"],
+            index_tier=spec.get("index_tier", "OTHER"),
+            market_cap=spec.get("market_cap", 10000.0),
+        )
+        db_session.add(company)
+        db_session.commit()
+        db_session.add(AlertCompany(
+            alert_id=alert.id, company_id=company.id,
+            direction=spec.get("direction", "bullish"),
+            magnitude_low=spec.get("magnitude_low", 1.0),
+            magnitude_high=spec.get("magnitude_high", 2.0),
+            rationale=spec.get("rationale", "r"),
+            basis=spec.get("basis", "direct_mention"),
+            impact_level=spec.get("impact_level", "direct"),
+        ))
+    db_session.commit()
+    db_session.flush()
+    db_session.refresh(alert)
+    return alert
+
+
 def _alert_with_layers(db_session):
     """One direct bearish company + one indirect bullish supplier + one
     indirect exposure-only (no measured move) supplier."""
@@ -152,3 +190,38 @@ def test_every_company_appears_exactly_once_across_layers(db_session):
     layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
     tickers = [r["ticker"] for layer in layers for r in layer["rows"]]
     assert sorted(tickers) == ["DIRECT.NS", "EXPO.NS", "WINNER.NS"]
+
+
+def test_sector_inference_row_goes_to_sector_wide_not_direct(db_session):
+    # Build one alert with a direct_mention row and a sector_inference row,
+    # both at impact_level="direct" -- exactly the shape _sector_fanout_mentions
+    # produces for a primary sector.
+    alert = _alert_with_companies(db_session, [
+        {"ticker": "HPCL.NS", "sector": "oil_gas", "basis": "direct_mention",
+         "impact_level": "direct", "direction": "bullish"},
+        {"ticker": "ETERNAL.NS", "sector": "fmcg", "basis": "sector_inference",
+         "impact_level": "direct", "direction": "bullish"},
+    ])
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+
+    by_ticker = {
+        row["ticker"]: layer
+        for layer in layers for row in layer["rows"]
+    }
+    assert by_ticker["HPCL.NS"]["relationship"] == "DIRECT"
+    assert by_ticker["ETERNAL.NS"]["relationship"] == "SECTOR_WIDE"
+
+
+def test_every_company_still_appears_exactly_once(db_session):
+    alert = _alert_with_companies(db_session, [
+        {"ticker": "HPCL.NS", "sector": "oil_gas", "basis": "direct_mention",
+         "impact_level": "direct", "direction": "bullish"},
+        {"ticker": "ETERNAL.NS", "sector": "fmcg", "basis": "sector_inference",
+         "impact_level": "direct", "direction": "bullish"},
+    ])
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+
+    tickers = [row["ticker"] for layer in layers for row in layer["rows"]]
+    assert sorted(tickers) == ["ETERNAL.NS", "HPCL.NS"]

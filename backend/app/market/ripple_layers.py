@@ -124,7 +124,18 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         exposure_only = is_exposure_only(status)
 
         engine_relation = relation_by_company_id.get(alert_company.company_id, "")
-        if alert_company.impact_level == "direct":
+        # basis, not impact_level, decides the bucket. A sector-inference row
+        # is deterministic fan-out (app.analysis.cascade._sector_fanout_mentions
+        # -> app.companies.resolution's top-N-by-tier expansion) with no
+        # article-specific reasoning behind it, and it carries
+        # impact_level="direct" for a PRIMARY sector -- so dispatching on
+        # impact_level rendered it identically to a genuinely analyzed
+        # company. Confirmed live: ETERNAL.NS (food delivery) shown as
+        # "directly affected" by a crude-oil supply shock. Sector exposure is
+        # still shown, but only ever in the SECTOR_WIDE bucket.
+        if alert_company.basis == "sector_inference":
+            relationship = "SECTOR_WIDE"
+        elif alert_company.impact_level == "direct":
             relationship = "DIRECT"
         else:
             relationship = relation_to_ripple_relationship(engine_relation)
