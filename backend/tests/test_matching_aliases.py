@@ -1,6 +1,7 @@
 from datetime import date
 
 from app.companies.matching import aliases
+from app.companies.matching.curated import CURATED_TRADE_NAMES
 from app.models import Company, CompanyAlias, Listing
 
 
@@ -51,12 +52,19 @@ def test_load_bearing_curated_names_produce_trade_name_rows(db_session):
 
 
 def test_redundant_curated_name_collapses_to_legal_row(db_session):
-    # "Infosys" (curated TRADE_NAME) and "Infosys Limited" (LEGAL, suffix
-    # stripped) normalize identically, so first-writer-wins keeps the LEGAL
-    # row per the UNIQUE(normalized, company_id) constraint -- the same
-    # collapse rule exercised in test_duplicate_normalized_forms_collapse_to_one_row.
-    # This locks in that behaviour as intended: the curated "Infosys" entry
-    # is a documented no-op for this ticker, not a bug in curated.py.
+    # This curated entry is intentionally a no-op: "Infosys" (curated
+    # TRADE_NAME) and "Infosys Limited" (LEGAL, suffix stripped) normalize
+    # identically, so first-writer-wins keeps the LEGAL row per the
+    # UNIQUE(normalized, company_id) constraint -- the same collapse rule
+    # exercised in test_duplicate_normalized_forms_collapse_to_one_row. The
+    # test exists so nobody "fixes" the dedup rule and silently changes
+    # which row wins.
+    #
+    # Assert the premise first: without "Infosys" actually present in
+    # CURATED_TRADE_NAMES, this test would pass vacuously (no competing
+    # candidate to dedupe against), proving nothing about curated.py.
+    assert "Infosys" in CURATED_TRADE_NAMES["INFY.NS"]
+
     _company(db_session, ticker="INFY.NS", name="Infosys Limited")
     aliases.rebuild_aliases(db_session)
 
