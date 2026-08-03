@@ -34,6 +34,17 @@ def test_orders_by_index_tier_so_prominent_names_survive_the_limit(db_session):
     assert [c.ticker for c in result] == ["BIG.NS"]
 
 
+def test_unknown_tier_sorts_last_not_by_ticker(db_session):
+    _seed(db_session, [
+        ("AAA.NS", "AAA Ltd.", "oil_gas", "NIFTY100", "desc"),
+        ("ZZZ.NS", "ZZZ Ltd.", "oil_gas", "NIFTY50", "desc"),
+    ])
+
+    result = candidate_companies(db_session, ["oil_gas"])
+
+    assert [c.ticker for c in result] == ["ZZZ.NS", "AAA.NS"]
+
+
 def test_excludes_demo_companies(db_session):
     _seed(db_session, [
         ("SOMETEXTILE.NS", "Demo Textiles Ltd", "textiles", "NIFTY50", "Demo."),
