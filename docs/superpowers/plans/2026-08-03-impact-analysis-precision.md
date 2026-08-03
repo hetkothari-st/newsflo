@@ -3362,32 +3362,60 @@ def main() -> None:
     table = Base.metadata.tables["alert_companies"]
     columns = ", ".join(c.name for c in table.columns)
 
-    with engine.begin() as conn:
-        before = conn.execute(text("SELECT COUNT(*) FROM alert_companies")).scalar_one()
-        print(f"rows before: {before}")
-
+    # Both pragmas are CONNECTION-level and are silent no-ops inside an open
+    # transaction, so they must run in autocommit. Getting this wrong is not
+    # loud -- the first version of this script set foreign_keys=OFF inside
+    # engine.begin() and it simply did nothing.
+    #
+    # legacy_alter_table=ON is the load-bearing one. Since SQLite 3.25,
+    # ALTER TABLE ... RENAME TO rewrites foreign-key references to the renamed
+    # table in EVERY OTHER TABLE. Four tables reference alert_companies
+    # (calibration_samples, email_notifications, alert_company_translations,
+    # car_outcomes), so renaming the original to _old silently repointed all
+    # four at the table about to be dropped -- 469+ foreign_key_check
+    # violations, confirmed live on SQLite 3.49.1. With the legacy pragma on,
+    # the rename leaves those references alone, which is what we want: they
+    # should keep pointing at the NAME alert_companies, which the rebuilt
+    # table then occupies.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
-        conn.execute(text("ALTER TABLE alert_companies RENAME TO alert_companies_old"))
+        conn.execute(text("PRAGMA legacy_alter_table=ON"))
 
-    # Recreates the table AND its indexes from the ORM definition.
-    table.create(engine)
+        # ONE transaction for the whole rebuild. The first version split this
+        # across three engine.begin() blocks; the first two committed, so when
+        # the third raised, the database was left in a half-state (an empty
+        # alert_companies alongside a full alert_companies_old) rather than
+        # rolled back.
+        trans = conn.begin()
+        try:
+            before = conn.execute(text("SELECT COUNT(*) FROM alert_companies")).scalar_one()
+            print(f"rows before: {before}")
 
-    with engine.begin() as conn:
-        # Explicit column list, never SELECT * -- column ORDER must not be
-        # assumed to match between the old table and the ORM definition.
-        conn.execute(text(
-            f"INSERT INTO alert_companies ({columns}) SELECT {columns} FROM alert_companies_old"
-        ))
-        after = conn.execute(text("SELECT COUNT(*) FROM alert_companies")).scalar_one()
-        print(f"rows after:  {after}")
-        if after != before:
-            raise RuntimeError(f"row count changed ({before} -> {after}); NOT dropping the old table")
+            conn.execute(text("ALTER TABLE alert_companies RENAME TO alert_companies_old"))
+            table.create(conn)
 
-        conn.execute(text("DROP TABLE alert_companies_old"))
-        conn.execute(text("PRAGMA foreign_keys=ON"))
-        violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
-        if violations:
-            raise RuntimeError(f"foreign_key_check reported violations: {violations}")
+            # Explicit column list, never SELECT * -- column ORDER must not be
+            # assumed to match between the old table and the ORM definition.
+            conn.execute(text(
+                f"INSERT INTO alert_companies ({columns}) SELECT {columns} FROM alert_companies_old"
+            ))
+            after = conn.execute(text("SELECT COUNT(*) FROM alert_companies")).scalar_one()
+            print(f"rows after:  {after}")
+            if after != before:
+                raise RuntimeError(f"row count changed ({before} -> {after})")
+
+            conn.execute(text("DROP TABLE alert_companies_old"))
+
+            violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+            if violations:
+                raise RuntimeError(f"foreign_key_check reported violations: {violations}")
+            trans.commit()
+        except Exception:
+            trans.rollback()
+            raise
+        finally:
+            conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
 
     print("done; rationale is now nullable" if rationale_is_nullable() else "FAILED: still NOT NULL")
 
