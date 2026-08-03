@@ -77,7 +77,9 @@ export default function InsightCard({
   }, [company.company_id]);
 
   const DEFAULT_VISIBLE_POINTS = 3;
-  const points_ = company.key_points.length > 0 ? company.key_points : [truncatedRationale(company.rationale)];
+  const points_ = company.key_points.length > 0
+    ? company.key_points
+    : (company.rationale ? [truncatedRationale(company.rationale)] : []);
   const visiblePoints = points_.slice(0, DEFAULT_VISIBLE_POINTS);
   const extraPoints = points_.slice(DEFAULT_VISIBLE_POINTS);
 

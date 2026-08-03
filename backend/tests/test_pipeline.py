@@ -15,7 +15,17 @@ from app.models import (
     ImpactEdge,
     User,
 )
-from app.pipeline import process_new_articles
+from app.pipeline import _persist_alert, process_new_articles
+
+
+def _article(session):
+    article = Article(
+        source="test", url="https://example.com/confidence-floor",
+        title="Confidence floor test article", content="c",
+    )
+    session.add(article)
+    session.commit()
+    return article
 
 
 def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
@@ -637,7 +647,14 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            time_horizon="Short-Term", reasons=["Refining margins widen."], evidence_refs=[],
+            time_horizon="Short-Term", reasons=["Refining margins widen."],
+            # A matched rule (plus the fully-cited claim) keeps this row's
+            # confidence_score above CONFIDENCE_FLOOR despite the reasoning-
+            # consistency penalty below, so the row this test asserts on is
+            # actually persisted rather than dropped by the floor -- the
+            # contradiction-detection behavior under test is independent of
+            # evidence completeness.
+            evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
@@ -706,16 +723,24 @@ def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confid
     fake_output = AnalysisOutput(
         category="it", event_type="other",
         companies=[
+            # Both mentions carry a matched rule + fully-cited claim so their
+            # baseline confidence_score clears CONFIDENCE_FLOOR even after
+            # the indirect entry's 0.7x LEVEL_CONFIDENCE_MULTIPLIER discount
+            # below -- this test is about the discount being applied and
+            # being strictly smaller than the direct entry's score, not about
+            # the floor, so both rows must actually survive to be compared.
             CompanyMention(
                 name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban hits Nvidia directly",
                 time_horizon="Short-Term", impact_level="direct",
+                reasons=["Export ban restricts chip shipments."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
             CompanyMention(
                 name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
                 rationale="TSMC fabs Nvidia's chips; lower Nvidia orders reduce TSMC's foundry revenue.",
                 time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+                reasons=["Lower Nvidia orders reduce TSMC's foundry revenue."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
         ],
     )
@@ -750,15 +775,22 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     fake_output = AnalysisOutput(
         category="it",
         companies=[
+            # Matched rule + fully-cited claim on both, same reasoning as
+            # test_process_new_articles_persists_indirect_impact_chain_with_decayed_confidence
+            # above: keeps the indirect row's confidence_score above
+            # CONFIDENCE_FLOOR after its 0.7x discount, so it survives to be
+            # reused on the second (dedup) pass this test exercises.
             CompanyMention(
                 name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
                 time_horizon="Short-Term", impact_level="direct",
+                reasons=["Export ban restricts chip shipments."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
             CompanyMention(
                 name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
                 time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+                reasons=["Lower Nvidia orders reduce TSMC's foundry revenue."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
         ],
     )
@@ -1049,3 +1081,56 @@ def test_process_new_articles_persists_edges_from_analysis(db_session, monkeypat
 
     alert = db_session.query(Alert).one()
     assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 1
+
+
+from app.pipeline import CONFIDENCE_FLOOR
+
+
+def test_entries_below_the_confidence_floor_are_not_persisted(db_session, monkeypatch):
+    # compute_confidence is deterministic; force a below-floor score rather
+    # than trying to construct inputs that happen to produce one.
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR - 1, band="LOW"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "direct",
+    }])
+
+    assert alert.companies == []
+
+
+def test_entries_at_the_confidence_floor_are_persisted(db_session, monkeypatch):
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR, band="MODERATE"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "direct",
+    }])
+
+    assert len(alert.companies) == 1

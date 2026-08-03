@@ -34,7 +34,15 @@ def _to_resolved(
         "direction": mention.direction,
         "magnitude_low": mention.magnitude_low,
         "magnitude_high": mention.magnitude_high,
-        "rationale": mention.rationale,
+        # A sector-inference row's "rationale" is a template built from the
+        # sector's own one-line mechanism (app.analysis.cascade.
+        # _sector_fanout_mentions), not reasoning about THIS company -- and
+        # it reads exactly like analysis, which is how a food-delivery
+        # company came to carry a paragraph about crude-driven packaging
+        # costs. Persist nothing rather than something that misrepresents
+        # itself; the row still renders as a flagged exposure via
+        # app.reasoning.ripple_relationship.is_exposure_only.
+        "rationale": None if basis == "sector_inference" else mention.rationale,
         "key_points": mention.key_points,
         # Raw LLM value if present, otherwise None -- always overwritten by
         # app.reasoning.confidence.compute_confidence before persistence

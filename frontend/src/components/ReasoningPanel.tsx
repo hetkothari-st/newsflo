@@ -22,7 +22,9 @@ export default function ReasoningPanel({
   // key_points is the model's own short, terse summary -- prefer it. Fall
   // back to sentence-splitting the full rationale only for alerts analyzed
   // before key_points existed (empty array).
-  const points = company.key_points.length > 0 ? company.key_points : splitRationaleIntoPoints(company.rationale);
+  const points = company.key_points.length > 0
+    ? company.key_points
+    : (company.rationale ? splitRationaleIntoPoints(company.rationale) : []);
   const reasons = company.reasons ?? [];
   const evidenceRefs = company.evidence_refs ?? [];
   const caveats = [...(company.risks ?? []), ...(company.assumptions ?? []), ...(company.unknowns ?? [])];

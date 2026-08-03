@@ -44,6 +44,23 @@ DEDUP_LOOKBACK_HOURS = 24
 # real evidence/calibration signal, just discounted by distance.
 LEVEL_CONFIDENCE_MULTIPLIER = {"direct": 1.0, "indirect_l1": 0.7, "indirect_l2": 0.45}
 
+# Minimum confidence_score for an AlertCompany row to be persisted.
+#
+# Deliberately modest, and NOT the relevance defence. Measured on production
+# data, a floor of 40 removes 20 rows of 881 -- and only 16 of 557
+# sector_inference rows (2%), the exact category that produced the reported
+# bug. Median confidence_score is 50 at every impact level because
+# calibration (weight 0.30) and rulebook match (0.20) contribute 0.0 for
+# nearly every row, so half the weight is inert and scores cluster. Raising
+# the floor to 50 would cut correct direct_mention rows at the median while
+# still keeping half the fan-out.
+#
+# Relevance is enforced structurally instead: basis-keyed bucketing
+# (app.market.ripple_layers), candidate grounding (app.companies.candidates),
+# and the per-company verification pass (app.analysis.verification). This
+# floor only trims the degenerate tail.
+CONFIDENCE_FLOOR = 40
+
 
 def _decode_json_list(value: str | None) -> list[str]:
     if not value:
@@ -317,10 +334,19 @@ def _persist_alert(
     session.flush()
 
     alert_companies = []
+    kept_entries = []
     for entry in entries:
         alert_company = _build_alert_company(session, alert.id, article, category, entry)
+        if alert_company.confidence_score < CONFIDENCE_FLOOR:
+            logger.info(
+                "dropping company_id=%s from alert_id=%s: confidence %s below floor %s",
+                entry["company_id"], alert.id, alert_company.confidence_score, CONFIDENCE_FLOOR,
+            )
+            continue
         session.add(alert_company)
         alert_companies.append(alert_company)
+        kept_entries.append(entry)
+    entries = kept_entries
 
     market_moves = []
     for entry in entries:

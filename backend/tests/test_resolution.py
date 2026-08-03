@@ -365,3 +365,32 @@ def test_resolve_drops_indirect_entry_whose_parent_ticker_never_resolved(db_sess
     resolved = resolve_companies(db_session, [mention])
 
     assert resolved == []
+
+
+def test_sector_inference_entry_has_no_rationale(db_session):
+    db_session.add(Company(ticker="ITC.NS", name="ITC Ltd.", sector="fmcg", index_tier="NIFTY50"))
+    db_session.commit()
+
+    resolved = resolve_companies(db_session, [CompanyMention(
+        name="fmcg sector", is_direct=False, sector="fmcg",
+        direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+        rationale="Sector-wide exposure via fmcg: some template text",
+        time_horizon="Short-Term",
+    )])
+
+    assert len(resolved) == 1
+    assert resolved[0]["basis"] == "sector_inference"
+    assert resolved[0]["rationale"] is None
+
+
+def test_direct_mention_keeps_its_rationale(db_session):
+    db_session.add(Company(ticker="HPCL.NS", name="Hindustan Petroleum Corporation", sector="oil_gas", index_tier="NIFTY50"))
+    db_session.commit()
+
+    resolved = resolve_companies(db_session, [CompanyMention(
+        name="Hindustan Petroleum Corporation", ticker="HPCL.NS", is_direct=True,
+        direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+        rationale="Real, article-specific reasoning.", time_horizon="Short-Term",
+    )])
+
+    assert resolved[0]["rationale"] == "Real, article-specific reasoning."
