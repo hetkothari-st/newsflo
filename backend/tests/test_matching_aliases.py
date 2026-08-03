@@ -32,17 +32,37 @@ def test_listing_symbols_become_aliases(db_session):
     assert [r.normalized for r in rows] == ["reliance"]
 
 
-def test_curated_trade_names_are_added(db_session):
+def test_load_bearing_curated_names_produce_trade_name_rows(db_session):
+    # These curated names are NOT derivable from the legal name -- news
+    # copy says "SBI"/"LIC" but the registry says "State Bank of India"/
+    # "Life Insurance Corporation of India". Without curated.py these
+    # mentions never resolve; this is the whole reason the file exists.
+    sbi = _company(db_session, ticker="SBIN.NS", name="State Bank of India")
+    lic = _company(db_session, ticker="LICI.NS", name="Life Insurance Corporation of India")
+    aliases.rebuild_aliases(db_session)
+
+    sbi_row = db_session.query(CompanyAlias).filter_by(normalized="sbi").one()
+    assert sbi_row.alias_type == "TRADE_NAME"
+    assert sbi_row.company_id == sbi.id
+
+    lic_row = db_session.query(CompanyAlias).filter_by(normalized="lic").one()
+    assert lic_row.alias_type == "TRADE_NAME"
+    assert lic_row.company_id == lic.id
+
+
+def test_redundant_curated_name_collapses_to_legal_row(db_session):
     # "Infosys" (curated TRADE_NAME) and "Infosys Limited" (LEGAL, suffix
     # stripped) normalize identically, so first-writer-wins keeps the LEGAL
     # row per the UNIQUE(normalized, company_id) constraint -- the same
     # collapse rule exercised in test_duplicate_normalized_forms_collapse_to_one_row.
-    # The guarantee this test is actually after is that the curated name
-    # resolves to *some* alias, not which alias_type label wins the race.
+    # This locks in that behaviour as intended: the curated "Infosys" entry
+    # is a documented no-op for this ticker, not a bug in curated.py.
     _company(db_session, ticker="INFY.NS", name="Infosys Limited")
     aliases.rebuild_aliases(db_session)
-    normalized = {a.normalized for a in db_session.query(CompanyAlias).all()}
-    assert "infosys" in normalized
+
+    rows = db_session.query(CompanyAlias).filter_by(normalized="infosys").all()
+    assert len(rows) == 1
+    assert rows[0].alias_type == "LEGAL"
 
 
 def test_rebuild_is_idempotent(db_session):
