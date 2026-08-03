@@ -8,9 +8,28 @@ mismatched companies. The one tiebreak allowed: when exactly one candidate
 is normally tradeable and the rest are SME or suspended shells, the
 tradeable one wins.
 
-Lookups are indexed queries against company_aliases, not the old full-table
-scan into Python, so growing the universe from 509 to ~4,967 does not slow
-resolution proportionally.
+Deliberately NOT in this ladder: any token-subset rung ("mention's tokens
+are all present in some alias's tokens"). It was tried and reverted -- at
+the real 507-company universe, 488 of 718 distinct alias tokens belong to
+exactly one company and aren't themselves an exact alias, so a subset rung
+resolves with false confidence on bare/short mentions like "Air India" (->
+Tenneco Clean Air India), "cards" (-> SBI Cards), "authority" (-> SAIL).
+The hazard scales with universe size, not down. Ambiguous cases being
+protected by 2+ colliding aliases (as "Apollo"/"Bharat" are in the small
+test fixture) is a lucky accident of a small universe, not a property that
+holds at scale. Abbreviated mentions belong in curated.py as reviewed
+TRADE_NAME aliases (e.g. "SBI Cards"), not resolved by loosening the
+ladder.
+
+The ticker, isin, and alias-exact rungs are indexed queries -- an equality
+filter on a unique/indexed column each. The token_set and fuzzy rungs are
+NOT indexed: they pull every (company_id, normalized) row in
+company_aliases into Python, because neither "same token set regardless of
+order" nor edit-distance scoring can be expressed as a single indexed
+predicate. Measured at ~1ms for 523 aliases (507-company universe); expect
+roughly 15-30ms at ~15k aliases (~4,967 companies with dual listings) -- a
+full table scan of a small, in-memory-sized table, not one that scales
+with article or request volume.
 """
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -88,19 +107,6 @@ def resolve(
     ]
     if token_hits:
         return _disambiguate(session, token_hits, "token_set")
-
-    # A news mention is often an abbreviated prefix of the full registered
-    # name ("SBI Cards" for "SBI Cards and Payment Services Limited") --
-    # every mention token must appear in the alias's tokens, exact set
-    # membership, no scoring. Still routed through _disambiguate, so a
-    # mention generic enough to be a token-subset of several aliases (e.g.
-    # a single common word) resolves to None rather than guessing.
-    subset_hits = [
-        company_id for company_id, alias_normalized in candidates
-        if mention_tokens <= frozenset(alias_normalized.split(" "))
-    ]
-    if subset_hits:
-        return _disambiguate(session, subset_hits, "token_subset")
 
     scored: list[tuple[float, int]] = []
     for company_id, alias_normalized in candidates:

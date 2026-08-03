@@ -15,6 +15,7 @@ def universe(db_session):
         ("SBIN.NS", "State Bank of India", "banking", "INE062A01020", "NORMAL"),
         ("SBICARD.NS", "SBI Cards and Payment Services Limited", "banking", "INE018E01016", "NORMAL"),
         ("SHELL.BO", "Reliance Industries Limited", "other", "INE999Z01099", "SUSPENDED"),
+        ("TENNIND.NS", "Tenneco Clean Air India Limited", "auto", "INE999T01011", "NORMAL"),
     ]
     for ticker, name, sector, isin, tradeability in rows:
         db_session.add(Company(
@@ -90,3 +91,29 @@ def test_normal_company_beats_suspended_shell_on_identical_name(universe):
 def test_empty_input_returns_none(universe):
     assert matcher.resolve(universe, ticker=None, name=None) is None
     assert matcher.resolve(universe, ticker="", name="  ") is None
+
+
+# --- Regression lock: no token-subset rung. ---
+#
+# A token-subset rung ("every mention token appears in some alias's token
+# set") was added and reverted during review. At the real 507-company
+# universe, 488 of 718 distinct alias tokens belong to exactly ONE company
+# and are not themselves an exact alias -- so a subset rung resolves with
+# false confidence on bare/short mentions, and the hazard gets worse (not
+# better) as the universe grows toward ~4,967. "Air India" matching
+# Tenneco's "Tenneco Clean Air India" and a bare "cards" matching SBI Cards
+# are two of the reviewer's real examples. These tests exist so nobody
+# re-adds subset matching without confronting this failure mode again.
+
+def test_air_india_mention_does_not_match_single_subset_company(universe):
+    # "Air India" is a token-subset of ONLY "Tenneco Clean Air India" in
+    # this fixture -- exactly the unprotected case (no colliding alias to
+    # force the ambiguity rule to kick in). A subset rung would return a
+    # confident wrong match here; the ladder without it must return None.
+    assert matcher.resolve(universe, ticker=None, name="Air India") is None
+
+
+def test_bare_cards_mention_does_not_match_sbi_cards(universe):
+    # A bare, generic word that happens to be one token of a curated trade
+    # name ("SBI Cards") must not resolve on its own.
+    assert matcher.resolve(universe, ticker=None, name="cards") is None
