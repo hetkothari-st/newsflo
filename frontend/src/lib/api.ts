@@ -223,7 +223,7 @@ export interface LatestAlertSignal {
   alert_id: number;
   created_at: string;
   direction: string; // bullish | bearish
-  rationale: string;
+  rationale: string | null; // null for sector_inference rows and for rows whose direction measurement flipped
   key_points: string[];
   confidence: string; // llm_estimate | calibrated
   category: string;

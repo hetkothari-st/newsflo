@@ -73,6 +73,27 @@ describe('CompanyPage', () => {
     expect(await screen.findByText('Crude eases, margins widen')).toBeInTheDocument();
   });
 
+  it('renders the latest alert without crashing when rationale is null and key_points is empty (a sector_inference row)', async () => {
+    // A sector_inference AlertCompany persists rationale: null (see
+    // app.companies.resolution._to_resolved) and _sector_fanout_mentions
+    // never sets key_points either, so this is the exact shape of the most
+    // recent alert for a large share of companies (~63% of alert_company
+    // rows are sector_inference). Before the null guard below,
+    // splitRationaleIntoPoints(null) threw at render time.
+    vi.spyOn(api, 'getCompanyProfile').mockResolvedValue({
+      ...baseProfile,
+      latest_alert: {
+        alert_id: 6, created_at: '2026-07-01T00:00:00+00:00', direction: 'bullish',
+        rationale: null, key_points: [],
+        confidence: 'llm_estimate', category: 'oil_energy', category_label: 'Oil & Energy',
+        article: { id: 1, title: 'Crude prices ease', url: 'https://example.com/a', image_url: null },
+      },
+    });
+    mockHistoryAndPrices();
+    renderPage();
+    expect(await screen.findByText('Oil & Energy')).toBeInTheDocument();
+  });
+
   it('shows a no-alerts message when latest_alert is null', async () => {
     vi.spyOn(api, 'getCompanyProfile').mockResolvedValue(baseProfile);
     mockHistoryAndPrices();

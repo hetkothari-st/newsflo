@@ -202,7 +202,7 @@ export default function CompanyPage() {
             <ul className="space-y-1.5 text-sm text-ink">
               {(profile.latest_alert.key_points.length > 0
                 ? profile.latest_alert.key_points
-                : splitRationaleIntoPoints(profile.latest_alert.rationale)
+                : (profile.latest_alert.rationale ? splitRationaleIntoPoints(profile.latest_alert.rationale) : [])
               ).map((point, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="text-muted" aria-hidden="true">•</span>
