@@ -11,6 +11,7 @@ Both exchanges reject non-browser User-Agents; BSE additionally requires a
 Referer header. Verified against live endpoints on 2026-08-03.
 """
 import ssl
+import time
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -66,3 +67,62 @@ def fetch_nse_equity_list(root: str, day: date, opener=None) -> Path:
 def fetch_bse_scrip_list(root: str, day: date, opener=None) -> Path:
     fetch = opener or fetch_bytes
     return _write_master(root, day, "bse_scrips.json", fetch(BSE_SCRIP_LIST_URL))
+
+
+_BACKOFF_BASE_SECONDS = 2.0
+
+
+def fetch_bse_details(
+    root: str,
+    day: date,
+    scrip_codes: list[str],
+    opener=None,
+    sleep=None,
+    throttle_seconds: float = 0.3,
+    max_retries: int = 3,
+) -> dict:
+    """Fetch the official 4-level classification for each scrip, one call
+    each (~5,000 for a full run). Resumable: codes already on disk for
+    ``day`` are skipped, so a rate-limit partway through costs only the
+    remainder.
+
+    Unlike the master fetchers, a per-scrip failure does NOT raise -- one
+    dead scrip must not cost the other 4,999. The code is recorded in
+    ``failed`` and its company is later ingested with NULL classification
+    rather than a guessed sector.
+    """
+    fetch = opener or fetch_bytes
+    pause = sleep if sleep is not None else time.sleep
+    already = snapshot.fetched_scrip_codes(root, day)
+
+    fetched = 0
+    skipped = 0
+    failed: list[str] = []
+
+    for scrip_code in scrip_codes:
+        if scrip_code in already:
+            skipped += 1
+            continue
+
+        payload = None
+        for attempt in range(max_retries):
+            try:
+                payload = fetch(BSE_DETAIL_URL_TEMPLATE.format(scrip_code=scrip_code))
+                break
+            except Exception:
+                if attempt == max_retries - 1:
+                    break
+                pause(_BACKOFF_BASE_SECONDS * (2 ** attempt))
+
+        if not payload:
+            failed.append(scrip_code)
+            continue
+
+        path = snapshot.detail_path(root, day, scrip_code)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        fetched += 1
+        if throttle_seconds:
+            pause(throttle_seconds)
+
+    return {"fetched": fetched, "skipped": skipped, "failed": failed}
