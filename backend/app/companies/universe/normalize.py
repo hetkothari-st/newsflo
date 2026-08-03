@@ -204,3 +204,46 @@ def _blank_record(isin: str, as_of: date) -> dict:
         "ticker": "",
         "listings": [],
     }
+
+
+# AMFI's half-yearly "Average Market Capitalization of listed companies"
+# workbook -- verified live on 2026-08-03 at
+# https://portal.amfiindia.com/spages/AverageMarketCapitalization30Jun2026.xlsx
+# (linked from https://www.amfiindia.com/otherdata/categorisation-of-stocks;
+# the previously-documented /research-information/... URL 404s). Real header
+# row: "Sr. No.", "Company name", "ISIN", "BSE Symbol",
+# "BSE 6 month Avg Total Market Cap in (Rs. Crs.)", "NSE Symbol",
+# "NSE 6 month Avg Total Market Cap (Rs. Crs.)", "MSEI Symbol",
+# "MSEI 6 month Avg Total Market Cap in (Rs Crs.)",
+# "Average of All Exchanges (Rs. Cr.)",
+# "Categorization as per SEBI Circular dated Oct 6, 2017" -- NOT the
+# documented "Company Name" / "Average Market Cap" / "Categorization"
+# shape. Only ISIN and the categorization column are needed here; the
+# per-exchange cap columns are not read.
+_AMFI_CATEGORIZATION_COLUMN = "Categorization as per SEBI Circular dated Oct 6, 2017"
+
+_AMFI_TIER_VOCABULARY = {
+    "large cap": "LARGE", "largecap": "LARGE",
+    "mid cap": "MID", "midcap": "MID",
+    "small cap": "SMALL", "smallcap": "SMALL",
+}
+
+
+def parse_amfi_rows(csv_text: str) -> list[dict]:
+    """AMFI's half-yearly categorisation list -- the only PUBLISHED source
+    for the regulatory LARGE/MID/SMALL split. Rank is the row's position in
+    the file, which AMFI publishes in descending average-market-cap order.
+
+    Rows whose tier is outside the published vocabulary are dropped rather
+    than guessed at.
+    """
+    reader = csv.DictReader(io.StringIO(csv_text))
+    rows = []
+    for position, raw in enumerate(reader, start=1):
+        row = {(k or "").strip(): _clean(v) for k, v in raw.items()}
+        isin = row.get("ISIN", "").upper()
+        tier = _AMFI_TIER_VOCABULARY.get(row.get(_AMFI_CATEGORIZATION_COLUMN, "").lower())
+        if not is_company_isin(isin) or tier is None:
+            continue
+        rows.append({"isin": isin, "amfi_tier": tier, "amfi_rank": position})
+    return rows

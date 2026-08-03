@@ -172,3 +172,22 @@ def upsert_records(session: Session, records: list[dict]) -> dict:
         "created": created, "updated": updated,
         "listings": listings_written, "skipped": skipped,
     }
+
+
+def apply_amfi_categorisation(session: Session, rows: list[dict], as_of) -> int:
+    """Write AMFI's published tier onto companies matched by ISIN.
+
+    Never creates a company: AMFI's list is a categorisation of the
+    universe, not a source for it. An ISIN we don't hold is skipped.
+    """
+    updated = 0
+    for row in rows:
+        company = session.query(Company).filter_by(isin=row["isin"]).one_or_none()
+        if company is None:
+            continue
+        company.amfi_tier = row["amfi_tier"]
+        company.amfi_rank = row["amfi_rank"]
+        company.amfi_as_of = as_of
+        updated += 1
+    session.commit()
+    return updated
