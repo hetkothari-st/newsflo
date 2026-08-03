@@ -57,7 +57,12 @@ def build_verification_tool(valid_tickers: list[str]) -> dict:
                                 "belongs": {"type": "boolean"},
                                 "reason": {
                                     "type": "string",
-                                    "description": "One line. Required when belongs is false.",
+                                    "description": (
+                                        "One line explaining the verdict. Strongly encouraged "
+                                        "when belongs is false -- not schema-required, since "
+                                        "code here tolerates a missing reason (falls back to "
+                                        "a generic one) rather than losing the whole verdict."
+                                    ),
                                 },
                             },
                             "required": ["ticker", "belongs"],
@@ -119,23 +124,39 @@ def verify_companies(
             logger.warning("verification returned no tool call; keeping every company")
             return companies
         arguments = json.loads(tool_call.function.arguments)
+
+        # The whole verdict-processing loop lives inside this same try: this
+        # module's contract (see analyze_article's call site, which wraps it
+        # in NO try/except of its own) is to be entirely self-contained, so a
+        # malformed sub-field here must degrade the same way a malformed
+        # top-level response does -- keep every company -- rather than raise
+        # and take the whole article down with it. Provider tool-calling is
+        # not reliably schema-shaped even at the top level (a model can
+        # return "verdicts" as a single object, null, or a list of strings
+        # instead of the expected list of objects), so every shape is
+        # defensively checked rather than assumed.
+        known = set(tickers)
+        rejected: dict[str, str] = {}
+        verdicts = arguments.get("verdicts")
+        if not isinstance(verdicts, list):
+            verdicts = []
+        for verdict in verdicts:
+            if not isinstance(verdict, dict):
+                continue
+            ticker = verdict.get("ticker")
+            # Defensive: provider enums are not reliably enforced for nested
+            # array items (cascade.py:282). A verdict about a company that is
+            # not on the list cannot mean anything. A non-string ticker (e.g.
+            # a list) would also raise TypeError on the `in` check below.
+            if not isinstance(ticker, str) or ticker not in known:
+                continue
+            if verdict.get("belongs") is False:
+                rejected[ticker] = verdict.get("reason") or "no stated reason"
+
+        for ticker, reason in rejected.items():
+            logger.info("verification dropped %s: %s", ticker, reason)
+
+        return [c for c in companies if not (c.ticker and c.ticker in rejected)]
     except Exception as exc:
         logger.warning("verification call failed, keeping every company: %s", exc)
         return companies
-
-    known = set(tickers)
-    rejected: dict[str, str] = {}
-    for verdict in arguments.get("verdicts", []):
-        ticker = verdict.get("ticker")
-        # Defensive: provider enums are not reliably enforced for nested
-        # array items (cascade.py:282). A verdict about a company that is
-        # not on the list cannot mean anything.
-        if ticker not in known:
-            continue
-        if verdict.get("belongs") is False:
-            rejected[ticker] = verdict.get("reason") or "no stated reason"
-
-    for ticker, reason in rejected.items():
-        logger.info("verification dropped %s: %s", ticker, reason)
-
-    return [c for c in companies if not (c.ticker and c.ticker in rejected)]
