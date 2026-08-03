@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.analysis.claude_client import build_client
 from app.analysis.refinement import run_pending_refinements
 from app.companies.market_caps import alert_referenced_tickers, refresh_market_caps
+from app.companies.universe import fetchers, snapshot
 from app.config import settings
 from app.db import SessionLocal
 # IndianAPI is disabled (not deleted) -- replaced by thenewsapi.com, see
@@ -285,6 +286,61 @@ def _run_market_cap_refresh() -> None:
         session.close()
 
 
+def _run_universe_master_refresh() -> None:
+    """Daily: refetch both exchange masters and reload. Two requests.
+
+    Detail fetching is deliberately NOT done here -- that is ~5,000
+    requests and runs on its own monthly job (_run_universe_detail_refresh).
+    Any failure is logged, never raised, same as every other scheduler job."""
+    from datetime import date
+
+    import ingest_universe
+
+    session = SessionLocal()
+    try:
+        today = date.today()
+        fetchers.fetch_nse_equity_list(snapshot.DEFAULT_ROOT, today)
+        fetchers.fetch_bse_scrip_list(snapshot.DEFAULT_ROOT, today)
+        result = ingest_universe.run_ingest(
+            snapshot.DEFAULT_ROOT, today, session, fetch=False,
+        )
+        logger.info("Universe master refresh: %s", result)
+    except Exception:
+        logger.exception("Universe master refresh failed")
+    finally:
+        session.close()
+
+
+def _run_universe_detail_refresh() -> None:
+    """Monthly: the ~5,000-request official-classification pass against the
+    latest master snapshot on disk. Resumable -- fetch_bse_details skips
+    codes already fetched for that day, so an interrupted run continues
+    from disk on the next firing. Any failure is logged, never raised, same
+    as every other scheduler job."""
+    from app.companies.universe import normalize
+
+    try:
+        day = snapshot.latest_snapshot_day(snapshot.DEFAULT_ROOT)
+        if day is None:
+            logger.warning("Universe detail refresh skipped: no snapshot on disk")
+            return
+
+        bse_path = snapshot.master_path(snapshot.DEFAULT_ROOT, day, "bse_scrips.json")
+        rows = normalize.parse_bse_rows(bse_path.read_text(encoding="utf-8"))
+        codes = [(r.get("SCRIP_CD") or "").strip() for r in rows]
+        result = fetchers.fetch_bse_details(
+            snapshot.DEFAULT_ROOT, day, [c for c in codes if c],
+        )
+        # Never silent: the count of scrips whose detail fetch failed must
+        # always be visible, not just buried in a list.
+        logger.info(
+            "Universe detail refresh: fetched=%s skipped=%s failed=%s",
+            result["fetched"], result["skipped"], len(result["failed"]),
+        )
+    except Exception:
+        logger.exception("Universe detail refresh failed")
+
+
 def start_scheduler() -> None:
     global _scheduler
     scheduler = BackgroundScheduler()
@@ -365,6 +421,21 @@ def start_scheduler() -> None:
         # waiting half a day.
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         id="market_cap_refresh",
+    )
+    scheduler.add_job(
+        _run_universe_master_refresh,
+        trigger="interval",
+        hours=24,
+        id="universe_master_refresh",
+    )
+    scheduler.add_job(
+        _run_universe_detail_refresh,
+        trigger="interval",
+        days=30,
+        # Never at boot: this is ~5,000 throttled requests taking 30-40
+        # minutes, and a restart loop would hammer BSE.
+        next_run_time=datetime.now(timezone.utc) + timedelta(days=1),
+        id="universe_detail_refresh",
     )
     scheduler.start()
     _scheduler = scheduler
