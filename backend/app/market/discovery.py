@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session, selectinload
 from app import config
 from app.companies.branding import logo_url
 from app.ist_time import day_utc_window, today_ist
-from app.market.cap_tier import compute_cap_tiers
+from app.market.cap_tier import cap_tier_map
 from app.market.liquidity import compute_liquidity_tier
-from app.models import Alert, AlertCompany, Company, Holding, MarketMove, User
+from app.models import Alert, AlertCompany, Holding, MarketMove, User
 
 RESULT_LIMIT = 20
 
@@ -43,8 +43,9 @@ def _today_measured_rows(session: Session) -> list[tuple[AlertCompany, MarketMov
 
 
 def _cap_tiers(session: Session) -> dict[str, str]:
-    rows = session.query(Company.ticker, Company.market_cap).filter(Company.market_cap.isnot(None)).all()
-    return compute_cap_tiers([(t, c) for t, c in rows])
+    # Staleness- and market-aware (spec §6.3): a company whose cap is too
+    # old to rank honestly is absent from the map and renders as no-data.
+    return cap_tier_map(session)
 
 
 def _entry(alert_company: AlertCompany, move: MarketMove, alert: Alert, cap_tiers: dict[str, str]) -> dict:
