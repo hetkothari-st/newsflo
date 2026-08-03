@@ -209,20 +209,37 @@ what documentation claims.
 | `api.bseindia.com/BseIndiaAPI/api/ComHeadernew/w` (per scrip) | official Sector / IndustryNew / IGroup / ISubGroup, group, index | 1 call per scrip | Verified on scrip 500325 |
 | `api.bseindia.com/BseIndiaAPI/api/ddlIndustry/w` | closed industry vocabulary | — | Verified |
 | `niftyindices.com/IndexConstituent/*.csv` | index membership, `Industry` for members | ~750 | Verified |
-| AMFI categorisation list | published tier + rank | Unknown | **Documented URL returns 404 — unresolved** |
+| AMFI categorisation list | published tier + rank | **5,427 companies** | ✅ **RESOLVED 2026-08-03** — file moved; see §6.1 |
 | `nseindia.com/api/quote-equity` | NSE's own classification | 2,409 | Returns 403 without a browser cookie flow — **not relied on** |
 
-### 6.1 The AMFI gap
+### 6.1 The AMFI gap — RESOLVED 2026-08-03
 
-The design does not depend on locating the AMFI file. `amfi_tier` is nullable. When
-absent, every company falls back to a tier derived from exchange-published caps using
-AMFI's *published cutoff methodology* — rank 1-100 LARGE, 101-250 MID, 251+ SMALL —
-which is documented independently of the file itself. The derived tier then subdivides
-AMFI's open-ended SMALL band into SMALL (251-500) and MICRO (501+) per §7.
+The timeboxed spike succeeded. The documented page
+(`/research-information/other-data/categorization-of-stocks`) does 404, but the list
+moved rather than disappearing:
 
-Implementation begins with a timeboxed spike to locate the current file location. If
-it cannot be found, the system ships derived-only with `amfi_tier` NULL everywhere.
-Nothing else in the design changes.
+- Landing page: `https://www.amfiindia.com/otherdata/categorisation-of-stocks`
+- Data file (note the different subdomain):
+  `https://portal.amfiindia.com/spages/AverageMarketCapitalization30Jun2026.xlsx`
+- Categorisation column is **`Categorization as per SEBI Circular dated Oct 6, 2017`**,
+  not the plain `Categorization` this design originally assumed. A parser keyed on the
+  assumed name silently drops every row, so the real header is pinned as a constant in
+  `app/companies/universe/normalize.py`.
+- Coverage: **5,427 companies — 100 LARGE / 150 MID / 5,177 SMALL.** That split is
+  exactly AMFI's published rank methodology (1-100 LARGE, 101-250 MID, rest SMALL), and
+  is the strongest available check that both the source and the parse are correct.
+
+Coverage exceeds this project's ~4,967-company universe, so `amfi_tier` should be
+populated for essentially every Indian company we hold.
+
+The fallback below remains in place and is still exercised whenever the list is stale
+or a company is absent from it. `amfi_tier` stays nullable. When absent, a company
+falls back to a tier derived from exchange-published caps using AMFI's *published
+cutoff methodology* — rank 1-100 LARGE, 101-250 MID, 251+ SMALL — documented
+independently of the file itself. The derived tier then subdivides AMFI's open-ended
+SMALL band into SMALL (251-500) and MICRO (501+) per §7.
+
+The file is fetched at runtime into the gitignored snapshot directory, not committed.
 
 ### 6.2 Coverage gaps and fallbacks
 
@@ -439,7 +456,7 @@ No test contacts NSE, BSE, or AMFI. That is the purpose of the two-stage split.
 
 | Risk | Mitigation |
 |---|---|
-| AMFI file location unknown | Timeboxed spike; derived-only fallback already designed in |
+| ~~AMFI file location unknown~~ | **Resolved 2026-08-03**: located at `portal.amfiindia.com`, 5,427 companies, real column name pinned. See §6.1 |
 | BSE endpoints are undocumented and may change or rate-limit | Two-stage split fails loudly at stage 1; resumable fetch; daily masters are only 2 requests |
 | ~~Yahoo symbol format for BSE-only scrips~~ | **Resolved 2026-08-03**: `scrip_id.BO` verified against live Yahoo on five BSE-only companies; the numeric form fails on recent listings. See §9.1 |
 | ~5,000 per-scrip detail calls | Monthly cadence, throttled, resumable, on-demand for new ISINs only |
