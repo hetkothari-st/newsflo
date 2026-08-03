@@ -26,6 +26,19 @@ def rationale_is_nullable() -> bool:
 
 
 def main() -> None:
+    # This script's whole rebuild-the-table approach (RENAME, CreateTable,
+    # copy, DROP, legacy_alter_table PRAGMAs) is SQLite-specific -- running
+    # it against Postgres would fail on the first PRAGMA statement at best,
+    # or silently do the wrong thing at worst. Its name invites running it
+    # during this branch's deploy without checking which database it's
+    # pointed at -- guard explicitly rather than rely on that not happening.
+    if engine.dialect.name != "sqlite":
+        raise RuntimeError(
+            f"repair_rationale_nullable.py is a SQLite-only table rebuild; "
+            f"this database is {engine.dialect.name!r}. On Postgres, run "
+            f"instead: ALTER TABLE alert_companies ALTER COLUMN rationale DROP NOT NULL;"
+        )
+
     if rationale_is_nullable():
         print("alert_companies.rationale is already nullable -- nothing to do.")
         return

@@ -73,13 +73,16 @@ describe('CompanyPage', () => {
     expect(await screen.findByText('Crude eases, margins widen')).toBeInTheDocument();
   });
 
-  it('renders the latest alert without crashing when rationale is null and key_points is empty (a sector_inference row)', async () => {
+  it('hides the latest signal section entirely (no crash) when rationale is null and key_points is empty (a sector_inference row)', async () => {
     // A sector_inference AlertCompany persists rationale: null (see
     // app.companies.resolution._to_resolved) and _sector_fanout_mentions
     // never sets key_points either, so this is the exact shape of the most
     // recent alert for a large share of companies (~63% of alert_company
-    // rows are sector_inference). Before the null guard below,
-    // splitRationaleIntoPoints(null) threw at render time.
+    // rows are sector_inference). Before the null guard, splitRationaleIntoPoints(null)
+    // threw at render time; the locked empty-state rule (hide a section
+    // entirely rather than show it empty) means this must not just avoid
+    // crashing -- the whole "Latest signal" section must not render at all,
+    // since there are zero points to show.
     vi.spyOn(api, 'getCompanyProfile').mockResolvedValue({
       ...baseProfile,
       latest_alert: {
@@ -91,7 +94,12 @@ describe('CompanyPage', () => {
     });
     mockHistoryAndPrices();
     renderPage();
-    expect(await screen.findByText('Oil & Energy')).toBeInTheDocument();
+    // Renders without crashing -- the rest of the page still shows.
+    expect(await screen.findByText('Reliance Industries')).toBeInTheDocument();
+    // The section itself (header, direction badge, category label) must be
+    // entirely absent, not present with an empty bullet list under it.
+    expect(screen.queryByText('Latest signal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Oil & Energy')).not.toBeInTheDocument();
   });
 
   it('shows a no-alerts message when latest_alert is null', async () => {

@@ -979,7 +979,7 @@ BROAD_EVENT_TYPES = frozenset({
 
 
 def _sector_fanout_mentions(
-    sectors: list[SectorFinding], impact_level: str, parent_ticker: str | None = None,
+    sectors: list[SectorFinding], impact_level: str,
 ) -> list[CompanyMention]:
     """Deterministic sector-wide fan-out: whatever specific companies the LLM
     named for a sector (direct or cascade alike) is confirmed in production to
@@ -991,16 +991,13 @@ def _sector_fanout_mentions(
     already deduplicated against the LLM's own picks by resolve_companies's
     seen_company_ids, so a company already named is never added twice.
 
-    impact_level/parent_ticker: for a cascade sector (indirect_l1/l2), every
-    company this deterministic add resolves to needs SOME parent to chain
-    from (resolve_companies drops an indirect entry with no resolvable
-    parent) -- parent_ticker should be the cascade stage's own parent pool's
-    first ticker. A deterministic add has no LLM-stated specific link to any
-    ONE parent (unlike the LLM's own cascade picks, which each state which
-    specific parent they chain from), so attributing it to the pool's first
-    company is an honest simplification, not a real claim about that
-    specific link -- same "reach for the strongest available signal, don't
-    fabricate specificity" discipline used elsewhere in this pipeline.
+    impact_level is stamped onto every returned mention. The sole caller
+    (analyze_article) only ever invokes this at the primary/direct level --
+    fan-out is deliberately never applied to a cascade sector (see
+    BROAD_EVENT_TYPES's usage below: "a cascade sector is already one hop
+    from the news; fanning it out ... stacks a generic claim on top of an
+    indirect one") -- so parent_ticker is always left at its default (None)
+    here; a direct-level CompanyMention needs no parent to chain from.
 
     magnitude_low/high are placeholders (this is a sector, not a company the
     LLM ever estimated a range for) -- unused by feed-v2 (which only ever
@@ -1012,7 +1009,7 @@ def _sector_fanout_mentions(
             name=f"{sector.sector} sector", is_direct=False, sector=sector.sector,
             direction=sector.direction, magnitude_low=1.0, magnitude_high=3.0,
             rationale=f"Sector-wide exposure via {sector.sector}: {sector.mechanism}",
-            time_horizon="Short-Term", impact_level=impact_level, parent_ticker=parent_ticker,
+            time_horizon="Short-Term", impact_level=impact_level,
         )
         for sector in sectors
     ]

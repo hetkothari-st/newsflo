@@ -682,18 +682,21 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
     assert result.companies[0].sector == "banking"
 
 
-def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level_and_parent():
+def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level():
+    # parent_ticker was removed as a dead parameter -- the L1/L2 cascade call
+    # sites that used to pass it were deleted, and the sole remaining caller
+    # (analyze_article, at the primary/direct level only) never does.
     sectors = [
         SectorFinding(sector="auto", direction="bearish", mechanism="input cost pass-through"),
         SectorFinding(sector="metals", direction="bullish", mechanism="commodity price rise"),
     ]
 
-    mentions = _sector_fanout_mentions(sectors, impact_level="indirect_l2", parent_ticker="MARUTI.NS")
+    mentions = _sector_fanout_mentions(sectors, impact_level="indirect_l2")
 
     assert len(mentions) == 2
     assert all(m.is_direct is False for m in mentions)
     assert all(m.impact_level == "indirect_l2" for m in mentions)
-    assert all(m.parent_ticker == "MARUTI.NS" for m in mentions)
+    assert all(m.parent_ticker is None for m in mentions)
     assert {m.sector for m in mentions} == {"auto", "metals"}
     assert {m.direction for m in mentions} == {"bearish", "bullish"}
 

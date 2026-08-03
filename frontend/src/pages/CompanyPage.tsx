@@ -152,6 +152,18 @@ export default function CompanyPage() {
     );
   }
 
+  // Locked rule: hide a section entirely rather than show an empty state.
+  // profile.latest_alert existing does not by itself mean there's anything
+  // to show -- when both key_points and rationale are empty, there are no
+  // points to render, and the "Latest Signal" section must not render at
+  // all rather than a header over an empty bullet list.
+  const latestSignalPoints = profile.latest_alert
+    ? (profile.latest_alert.key_points.length > 0
+        ? profile.latest_alert.key_points
+        : (profile.latest_alert.rationale ? splitRationaleIntoPoints(profile.latest_alert.rationale) : []))
+    : [];
+  const showLatestSignal = !profile.latest_alert || latestSignalPoints.length > 0;
+
   return (
     <main className="mx-auto flex max-w-feed flex-col gap-6 px-4 py-8">
       <div className="flex items-center gap-3">
@@ -191,30 +203,29 @@ export default function CompanyPage() {
         )}
       </section>
 
-      <section className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface p-6">
-        <h2 className="text-xs uppercase tracking-widest text-muted">{t('company.latestSignalHeading')}</h2>
-        {profile.latest_alert ? (
-          <>
-            <p className="flex items-center gap-1.5 text-sm text-ink">
-              <DirectionArrow direction={profile.latest_alert.direction} />
-              {profile.latest_alert.category_label}
-            </p>
-            <ul className="space-y-1.5 text-sm text-ink">
-              {(profile.latest_alert.key_points.length > 0
-                ? profile.latest_alert.key_points
-                : (profile.latest_alert.rationale ? splitRationaleIntoPoints(profile.latest_alert.rationale) : [])
-              ).map((point, i) => (
-                <li key={i} className="flex gap-2">
-                  <span className="text-muted" aria-hidden="true">•</span>
-                  <span>{point}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="text-xs text-muted">{t('company.noAlertsYet')}</p>
-        )}
-      </section>
+      {showLatestSignal && (
+        <section className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface p-6">
+          <h2 className="text-xs uppercase tracking-widest text-muted">{t('company.latestSignalHeading')}</h2>
+          {profile.latest_alert ? (
+            <>
+              <p className="flex items-center gap-1.5 text-sm text-ink">
+                <DirectionArrow direction={profile.latest_alert.direction} />
+                {profile.latest_alert.category_label}
+              </p>
+              <ul className="space-y-1.5 text-sm text-ink">
+                {latestSignalPoints.map((point, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-muted" aria-hidden="true">•</span>
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs text-muted">{t('company.noAlertsYet')}</p>
+          )}
+        </section>
+      )}
 
       <section className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface p-6">
         <h2 className="text-xs uppercase tracking-widest text-muted">{t('company.trackRecordHeading')}</h2>

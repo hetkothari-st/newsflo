@@ -59,6 +59,18 @@ LEVEL_CONFIDENCE_MULTIPLIER = {"direct": 1.0, "indirect_l1": 0.7, "indirect_l2":
 # (app.market.ripple_layers), candidate grounding (app.companies.candidates),
 # and the per-company verification pass (app.analysis.verification). This
 # floor only trims the degenerate tail.
+#
+# Compared against compute_confidence()'s PRE-multiplier score (see
+# _build_alert_company's `pre_multiplier_score` return value), never the
+# post-LEVEL_CONFIDENCE_MULTIPLIER value stored in confidence_score. The
+# floor and the multiplier answer different questions -- "is this
+# reasoning well-evidenced?" vs. "how far from the article is this?" -- and
+# compounding them was never intended: with calibration contributing 0.0 for
+# nearly every row, a typical pre-multiplier score of ~69 survives the floor
+# fine on its own, but 69 * 0.45 (indirect_l2's multiplier) = 31, BELOW this
+# floor -- so comparing the floor to the post-multiplier value meant no
+# indirect_l2 row could ever be persisted, for any article, silently killing
+# the entire L2 cascade stage.
 CONFIDENCE_FLOOR = 40
 
 
@@ -214,12 +226,20 @@ def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
 
 def _build_alert_company(
     session: Session, alert_id: int, article: Article, category: str, entry: dict,
-) -> AlertCompany:
+) -> tuple[AlertCompany, int]:
     """Build one AlertCompany row (unattached -- caller must session.add it)
     from a resolved entry dict, computing calibration/confidence fresh. Split
     out of _persist_alert so a one-off re-analysis script can attach fresh
     rows to an EXISTING alert without duplicating this calibration logic --
     see backend/reanalyze_cascade.py.
+
+    Returns (alert_company, pre_multiplier_score): the AlertCompany's own
+    confidence_score is the LEVEL_CONFIDENCE_MULTIPLIER-discounted value
+    (what's displayed/persisted); pre_multiplier_score is
+    compute_confidence()'s raw score before that discount, which
+    CONFIDENCE_FLOOR must be compared against (see CONFIDENCE_FLOOR's own
+    comment) -- returned here rather than recomputed by the caller so this
+    stays the single place that calls compute_confidence.
     """
     calibrated = get_calibrated_magnitude(session, category=category, company_id=entry["company_id"])
     if calibrated is not None:
@@ -260,7 +280,7 @@ def _build_alert_company(
     confidence_score = round(result.score * level_multiplier)
     confidence_band = result.band if level_multiplier == 1.0 else band_for_score(confidence_score)
 
-    return AlertCompany(
+    alert_company = AlertCompany(
         alert_id=alert_id,
         company_id=entry["company_id"],
         direction=entry["direction"],
@@ -289,6 +309,7 @@ def _build_alert_company(
         impact_level=impact_level,
         parent_company_id=entry.get("parent_company_id"),
     )
+    return alert_company, result.score
 
 
 def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: str) -> int | None:
@@ -336,11 +357,15 @@ def _persist_alert(
     alert_companies = []
     kept_entries = []
     for entry in entries:
-        alert_company = _build_alert_company(session, alert.id, article, category, entry)
-        if alert_company.confidence_score < CONFIDENCE_FLOOR:
+        alert_company, pre_multiplier_score = _build_alert_company(session, alert.id, article, category, entry)
+        # Floor check is against the PRE-multiplier score, not the
+        # LEVEL_CONFIDENCE_MULTIPLIER-discounted alert_company.confidence_score
+        # -- see CONFIDENCE_FLOOR's own comment. Compounding the two meant no
+        # indirect_l2 row (0.45x) could ever clear the floor.
+        if pre_multiplier_score < CONFIDENCE_FLOOR:
             logger.info(
                 "dropping company_id=%s from alert_id=%s: confidence %s below floor %s",
-                entry["company_id"], alert.id, alert_company.confidence_score, CONFIDENCE_FLOOR,
+                entry["company_id"], alert.id, pre_multiplier_score, CONFIDENCE_FLOOR,
             )
             continue
         session.add(alert_company)

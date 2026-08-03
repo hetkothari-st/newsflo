@@ -64,6 +64,42 @@ def test_send_marks_failed_on_false_without_raising(db_session):
     assert refreshed.sent_at is None
 
 
+def test_send_omits_why_line_entirely_when_rationale_is_none(db_session):
+    # rationale is nullable -- a sector_inference/fan-out row persists none,
+    # and a row whose direction was flipped by measurement has its
+    # now-contradictory rationale cleared. The email must never show a
+    # literal "Why: None" line; it must omit the line entirely.
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    article = Article(source="test", url="https://example.com/why-none", title="Oil news headline", content="")
+    user = User(email="send3@example.com", hashed_password="x")
+    db_session.add_all([company, article, user])
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_energy")
+    db_session.add(alert)
+    db_session.commit()
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=2.0, magnitude_high=4.0, rationale=None, basis="sector_inference",
+    )
+    db_session.add(ac)
+    db_session.commit()
+    notification = EmailNotification(user_id=user.id, alert_company_id=ac.id, status="pending")
+    db_session.add(notification)
+    db_session.commit()
+
+    captured = {}
+
+    def fake_email(to, subject, body):
+        captured["body"] = body
+        return True
+
+    sent = send_pending_notifications(db_session, [notification], email_fn=fake_email)
+
+    assert sent == 1
+    assert "Why:" not in captured["body"]
+    assert "None" not in captured["body"]
+
+
 def test_send_marks_failed_on_exception_and_continues_batch(db_session):
     n1 = _seed_notification(db_session)
     # A second notification for a different user on the same alert_company.

@@ -1197,6 +1197,71 @@ def test_entries_at_the_confidence_floor_are_persisted(db_session, monkeypatch):
     assert len(alert.companies) == 1
 
 
+def test_indirect_l2_row_clearing_the_floor_pre_multiplier_is_persisted_with_multiplied_score(db_session, monkeypatch):
+    # Regression test for the CONFIDENCE_FLOOR / LEVEL_CONFIDENCE_MULTIPLIER
+    # compounding bug: with calibration contributing 0.0 for nearly every
+    # row, a typical pre-multiplier score (~69) survives the floor on its
+    # own, but 69 * 0.45 (indirect_l2's multiplier) = 31 < CONFIDENCE_FLOOR
+    # (40) -- so comparing the floor against the POST-multiplier value meant
+    # no indirect_l2 row could ever be persisted, for any article. The floor
+    # must be checked against the raw, pre-multiplier compute_confidence()
+    # score; the persisted confidence_score must still carry the multiplier.
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    # Exactly at the floor pre-multiplier -- passes the check.
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR, band="MODERATE"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "indirect_l2",
+    }])
+
+    assert len(alert.companies) == 1
+    # Persisted value still carries the 0.45x indirect_l2 discount --
+    # strictly below the floor, proving the floor gate itself used the
+    # pre-multiplier score, not this one.
+    expected_score = round(CONFIDENCE_FLOOR * pipeline_module.LEVEL_CONFIDENCE_MULTIPLIER["indirect_l2"])
+    assert alert.companies[0].confidence_score == expected_score
+    assert expected_score < CONFIDENCE_FLOOR
+
+
+def test_indirect_l2_row_genuinely_failing_the_floor_pre_multiplier_is_dropped(db_session, monkeypatch):
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    # Below the floor even before any multiplier is applied -- must still
+    # be dropped, same as a direct row with the same raw score.
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR - 1, band="LOW"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "indirect_l2",
+    }])
+
+    assert alert.companies == []
+
+
 def _stub_measurement(monkeypatch, excess_move_pct):
     """Monkeypatch app.pipeline.measure_company_move to return an "ok"
     MarketMove with the given excess_move_pct, for any company passed in.

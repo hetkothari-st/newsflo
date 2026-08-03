@@ -2,6 +2,11 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+# One-off pre-migration/pre-repair backup copies of the dev DB (e.g.
+# newsflo.db.pre-task2, newsflo.db.pre-cleanup) -- *.db only matches a
+# literal ".db" suffix, not these, so `git add -A` would otherwise commit
+# several untracked multi-MB backup files.
+*.db.*
 .env
 
 # Self-hosted NLLB model weights (~1-2GB per model) -- provisioned locally

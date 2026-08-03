@@ -53,10 +53,11 @@ from datetime import timedelta
 
 from app.analysis.cascade import analyze_article
 from app.analysis.claude_client import build_client
+from app.companies.integrity import ALERT_COMPANY_DEPENDENTS
 from app.companies.resolution import resolve_companies
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import Alert, AlertCompanyTranslation, CascadeGap, Company, ImpactEdge, utcnow
+from app.models import Alert, CascadeGap, Company, ImpactEdge, utcnow
 from app.pipeline import (
     _build_alert_company, _resolve_edge_endpoint_company_id, article_text,
     build_anchor_sub_sectors, clear_analysis_cache, get_cached_analysis, store_analysis_cache,
@@ -100,9 +101,19 @@ def main(limit: int | None, days: int | None, force: bool) -> None:
 
         old_company_ids = [ac.id for ac in alert.companies]
         if old_company_ids:
-            session.query(AlertCompanyTranslation).filter(
-                AlertCompanyTranslation.alert_company_id.in_(old_company_ids),
-            ).delete(synchronize_session=False)
+            # Every table that references alert_companies.id via
+            # alert_company_id must be cleared before the alert_companies
+            # rows themselves are deleted below -- ALERT_COMPANY_DEPENDENTS
+            # is the single source of truth for that table list (see
+            # app.companies.integrity's module comment). An earlier version
+            # of this loop cleared only AlertCompanyTranslation, leaving
+            # CalibrationSample/CarOutcome/EmailNotification rows dangling:
+            # invisible on SQLite (FK enforcement off by default), a
+            # ForeignKeyViolation mid-run on Postgres.
+            for model in ALERT_COMPANY_DEPENDENTS:
+                session.query(model).filter(
+                    model.alert_company_id.in_(old_company_ids),
+                ).delete(synchronize_session=False)
         for ac in list(alert.companies):
             session.delete(ac)
         # Edges/gaps from a prior real analysis (Phase 3) must also be
@@ -114,7 +125,14 @@ def main(limit: int | None, days: int | None, force: bool) -> None:
         session.flush()
 
         for entry in resolved:
-            session.add(_build_alert_company(session, alert.id, article, result.category, entry))
+            # _build_alert_company now returns (alert_company,
+            # pre_multiplier_score) -- see app.pipeline.CONFIDENCE_FLOOR's
+            # comment. This script has never applied the confidence floor
+            # (unlike the live pipeline's _persist_alert), so the score is
+            # simply discarded here, matching this script's existing
+            # behavior of persisting every resolved entry.
+            alert_company, _pre_multiplier_score = _build_alert_company(session, alert.id, article, result.category, entry)
+            session.add(alert_company)
         for edge in result.edges:
             from_company_id = _resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"])
             to_company_id = _resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"])

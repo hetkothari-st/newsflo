@@ -125,6 +125,31 @@ def test_template_layer_cannot_claim_a_sector_inference_row(db_session):
     assert sorted(tickers) == ["AXISBANK.NS", "HDFCBANK.NS"]
 
 
+def test_generated_layer_can_claim_an_analyzed_indirect_row_with_no_impact_edge(db_session):
+    # Regression test: an analyzed (basis="direct_mention") indirect_l1 row
+    # with no ImpactEdge at all gets engine_relation="" ->
+    # relation_to_ripple_relationship("") -> "SECTOR_WIDE" as its bucket_key
+    # -- purely because that function's fallback for an unrecognized/empty
+    # relation IS SECTOR_WIDE, not because this row is fan-out. It must
+    # still be claimable by a generated (tier-1) layer; the old
+    # `bucket_keys[i] != "SECTOR_WIDE"` proxy incorrectly excluded it.
+    alert = _alert_with_companies(db_session, [
+        {"ticker": "TSM.NS", "sector": "it", "basis": "direct_mention",
+         "impact_level": "indirect_l1", "direction": "bullish"},
+    ])
+    db_session.add(AlertRippleLayer(
+        alert_id=alert.id, position=0, title="Winners — foundry partners",
+        relationship="SUPPLIER", note="n",
+        tickers_json=json.dumps(["TSM.NS"]),
+    ))
+    db_session.commit()
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+
+    assert layers[0]["title"] == "Winners — foundry partners"
+    assert [r["ticker"] for r in layers[0]["rows"]] == ["TSM.NS"]
+
+
 def test_generated_layer_cannot_claim_a_sector_inference_row(db_session):
     alert = _alert_with_companies(db_session, [
         {"ticker": "HPCL.NS", "sector": "oil_gas", "basis": "direct_mention",
