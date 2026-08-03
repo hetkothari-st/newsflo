@@ -1,8 +1,13 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.market.cap_tier import resolve_cap_tier
 from app.models import Alert, AlertCompany, Article, Company, MarketMove, utcnow
 from app.routers.articles import get_db
+
+TODAY = date.today()
 
 
 def _override_db(db_session):
@@ -106,6 +111,66 @@ def test_list_feed_v2_returns_only_measured_alerts(db_session):
     assert body[0]["summary_short"] == "Oil supply shock hits refiners"
     assert body[0]["peak_ticker"] == "RELIANCE.NS"
     assert body[0]["article"]["title"] == "Oil surges"
+    app.dependency_overrides.clear()
+
+
+def test_peak_cap_tier_excludes_global_companies_from_the_ranking_pool(db_session):
+    """The card feed's peak_cap_tier (GET /api/feed-v2) must not let GLOBAL
+    companies shift Indian ranks. Before this fix, feed_v2's own cap-tier
+    query had no ``market == 'INDIA'`` filter, so 10 GLOBAL megacaps could
+    push an Indian peak sitting right at rank 100 out of LARGE into MID
+    here, while the single-company /stock/{ticker} endpoint (already
+    India-filtered) still called it LARGE -- same company, two tiers, two
+    screens."""
+    _override_db(db_session)
+    peak = Company(
+        ticker="PEAK.NS", name="Peak Co", sector="oil_gas", index_tier="OTHER",
+        market_cap=1000.0, market_cap_as_of=TODAY,
+    )
+    # 99 more Indian companies ranked above PEAK.NS so it sits exactly at
+    # rank 100 -- the LARGE/MID boundary a GLOBAL company bumping everyone
+    # down by even one slot would flip to MID.
+    fillers = [
+        Company(
+            ticker=f"F{i}.NS", name=f"Filler {i}", sector="other", index_tier="OTHER",
+            market_cap=100000.0 - i, market_cap_as_of=TODAY,
+        )
+        for i in range(99)
+    ]
+    global_megacaps = [
+        Company(
+            ticker=f"GLOB{i}", name=f"Global {i}", sector="it", index_tier="GLOBAL_LARGE_CAP",
+            market="GLOBAL", market_cap=10_000_000.0 + i, market_cap_as_of=TODAY,
+        )
+        for i in range(10)
+    ]
+    db_session.add_all([peak, *fillers, *global_megacaps])
+    db_session.commit()
+    article = Article(source="test", url="https://example.com/peak", title="Peak news", content="c")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=peak.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", basis="direct_mention",
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.8, sector_move_pct=-0.6, excess_move_pct=-4.2,
+        volume=300.0, avg_volume_20d=100.0, volume_multiple=3.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get("/api/feed-v2").json()
+
+    assert body[0]["peak_cap_tier"] == "LARGE"
+    # Same company, single-lookup path (as used by /stock/{ticker}) --
+    # must agree with the batch path above.
+    assert resolve_cap_tier(db_session, peak, today=TODAY).tier == "LARGE"
     app.dependency_overrides.clear()
 
 

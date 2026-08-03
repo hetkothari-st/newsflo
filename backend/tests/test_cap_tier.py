@@ -38,6 +38,27 @@ def test_boundary_is_config_driven():
     assert tiers[boundary_ticker] == "LARGE"
 
 
+def test_tied_market_caps_break_ties_by_ticker_deterministically():
+    # 105 companies, all tied at the exact same market cap, straddling the
+    # LARGE/MID boundary (rank 100). Neither compute_cap_tier_for_ticker's
+    # nor cap_tier_map's DB query carries an ORDER BY, so without a total
+    # sort key here, sorted()'s stability means ties rank by whatever
+    # physical row order the DB returns -- stable-but-arbitrary on SQLite,
+    # genuinely unstable across Postgres query plans. Submitting the exact
+    # same set of companies in reverse order must produce the exact same
+    # tier assignment; ticker-ascending as the tie-break key guarantees
+    # that regardless of input/row order.
+    companies_in_order = [(f"T{i:03d}.NS", 1000.0) for i in range(105)]
+    reversed_order = list(reversed(companies_in_order))
+
+    tiers_in_order = cap_tier.compute_cap_tiers(companies_in_order)
+    tiers_reversed = cap_tier.compute_cap_tiers(reversed_order)
+
+    assert tiers_in_order == tiers_reversed
+    assert tiers_in_order["T099.NS"] == "LARGE"
+    assert tiers_in_order["T100.NS"] == "MID"
+
+
 def test_compute_cap_tier_for_ticker_ranks_from_live_db_state(db_session):
     for i in range(105):
         db_session.add(Company(

@@ -1,8 +1,12 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import Alert, AlertCompany, Article, Company, MarketMove, utcnow
 from app.routers.articles import get_db
+
+TODAY = date.today()
 
 
 def _override_db(db_session):
@@ -11,10 +15,10 @@ def _override_db(db_session):
     app.dependency_overrides[get_db] = _get_db
 
 
-def _company(ticker, sector="oil_gas", business_desc=None, market_cap=None):
+def _company(ticker, sector="oil_gas", business_desc=None, market_cap=None, market_cap_as_of=None):
     return Company(
         ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier="NIFTY50",
-        business_desc=business_desc, market_cap=market_cap,
+        business_desc=business_desc, market_cap=market_cap, market_cap_as_of=market_cap_as_of,
     )
 
 
@@ -142,8 +146,8 @@ from app.market.cap_tier import compute_cap_tiers
 def test_directory_returns_all_companies_with_cap_tier_and_sector(db_session, monkeypatch):
     _override_db(db_session)
     db_session.add_all([
-        _company("BIG.NS", sector="oil_gas", market_cap=900000.0),
-        _company("SMALL.NS", sector="it", market_cap=500.0),
+        _company("BIG.NS", sector="oil_gas", market_cap=900000.0, market_cap_as_of=TODAY),
+        _company("SMALL.NS", sector="it", market_cap=500.0, market_cap_as_of=TODAY),
     ])
     db_session.commit()
 
@@ -167,11 +171,14 @@ def test_directory_filters_by_cap_tier(db_session):
     # ranked above it by market cap, same convention as tests/test_cap_tier.py.
     _override_db(db_session)
     db_session.add_all([
-        _company("BIG.NS", sector="oil_gas", market_cap=900000.0),
-        *[_company(f"FILLER{i}.NS", sector="other", market_cap=100000.0 - i) for i in range(499)],
+        _company("BIG.NS", sector="oil_gas", market_cap=900000.0, market_cap_as_of=TODAY),
+        *[
+            _company(f"FILLER{i}.NS", sector="other", market_cap=100000.0 - i, market_cap_as_of=TODAY)
+            for i in range(499)
+        ],
         # BIG + 499 fillers rank 1-500; TINY.NS ranks 501st -> MICRO
         # regardless of its own market-cap value (rank-based, no rupee floor).
-        _company("TINY.NS", sector="it", market_cap=10.0),
+        _company("TINY.NS", sector="it", market_cap=10.0, market_cap_as_of=TODAY),
     ])
     db_session.commit()
     client = TestClient(app)
@@ -220,6 +227,43 @@ def test_directory_omits_companies_with_no_market_cap(db_session):
 
     assert response.status_code == 200
     assert response.json() == []
+    app.dependency_overrides.clear()
+
+
+def test_directory_and_single_stock_endpoint_agree_on_cap_tier_with_global_pollution(db_session, monkeypatch):
+    """Card-front (batch /directory, now cap_tier_map) and card-back
+    (single /stock/{ticker}, now resolve_cap_tier) must report the
+    identical tier for the same company. Before this fix, /directory's (and
+    feed_v2's card-list peak_cap_tier's) ranking pool query had no
+    ``market == 'INDIA'`` filter, so 10 GLOBAL megacaps outranked every
+    Indian company and pushed IND90..IND99 (the true rank 91-100 Indian
+    companies) out of LARGE into MID on the card front, while the card back
+    (whose single-company helper was already India-filtered) still said
+    LARGE for the same tickers -- the same company showing two different
+    tiers on two screens."""
+    monkeypatch.setattr("app.routers.stock_deep_dive.fetch_pe_ratio", lambda ticker: None)
+    _override_db(db_session)
+    indian = [
+        _company(f"IND{i}.NS", sector="other", market_cap=float(1000 - i), market_cap_as_of=TODAY)
+        for i in range(100)
+    ]
+    global_megacaps = [
+        Company(
+            ticker=f"GLOB{i}", name=f"Global {i}", sector="it", index_tier="GLOBAL_LARGE_CAP",
+            market="GLOBAL", market_cap=1_000_000.0 + i, market_cap_as_of=TODAY,
+        )
+        for i in range(10)
+    ]
+    db_session.add_all(indian + global_megacaps)
+    db_session.commit()
+    client = TestClient(app)
+
+    directory = {row["ticker"]: row["cap_tier"] for row in client.get("/api/feed-v2/directory").json()}
+
+    for i in range(90, 100):
+        ticker = f"IND{i}.NS"
+        single_tier = client.get(f"/api/feed-v2/stock/{ticker}").json()["cap_tier"]
+        assert directory[ticker] == single_tier == "LARGE"
     app.dependency_overrides.clear()
 
 
