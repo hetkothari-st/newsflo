@@ -1,7 +1,13 @@
 import json
 from types import SimpleNamespace
 
-from app.analysis.refinement import HORIZONS, generate_event_summary, generate_impact_whys, generate_timeline_effects
+from app.analysis.refinement import (
+    HORIZONS,
+    generate_event_summary,
+    generate_impact_whys,
+    generate_ripple_layers,
+    generate_timeline_effects,
+)
 
 
 class FakeToolCall:
@@ -239,3 +245,55 @@ def test_generate_timeline_effects_retries_only_invalid_horizons():
 
 def test_all_five_horizon_values_are_recognized():
     assert HORIZONS == ["TODAY", "DAYS", "WEEKS", "MONTHS", "QUARTERS"]
+
+
+class _FakeClientReturning:
+    """Minimal chat.completions.create fake returning one canned tool call
+    for ``tool_name``, or NO tool calls at all when ``payload`` is None --
+    matching the shape generate_ripple_layers checks for a starved/absent
+    model response (message.tool_calls == [] / None)."""
+
+    def __init__(self, tool_name: str, payload: dict | None):
+        if payload is None:
+            message = SimpleNamespace(tool_calls=None)
+        else:
+            message = SimpleNamespace(tool_calls=[FakeToolCall(tool_name, payload)])
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response))
+
+
+def _fake_client_returning(tool_name: str, payload: dict | None) -> _FakeClientReturning:
+    return _FakeClientReturning(tool_name, payload)
+
+
+def test_generate_ripple_layers_returns_a_validated_layer():
+    client = _fake_client_returning("record_ripple_layers", {"layers": [{
+        "title": "Losers — refiners",
+        "relationship": "DIRECT",
+        "note": "Crude costs rise faster than pump prices can follow.",
+        "tickers": ["HPCL.NS", "BPCL.NS"],
+    }]})
+
+    layers = generate_ripple_layers(client, "title", "content", [
+        {"ticker": "HPCL.NS", "name": "HPCL", "sector": "oil_gas",
+         "sub_sector": "refining_marketing", "direction": "bearish", "why": None},
+        {"ticker": "BPCL.NS", "name": "BPCL", "sector": "oil_gas",
+         "sub_sector": "refining_marketing", "direction": "bearish", "why": None},
+    ])
+
+    assert len(layers) == 1
+    assert layers[0]["tickers"] == ["HPCL.NS", "BPCL.NS"]
+    assert layers[0]["relationship"] == "DIRECT"
+
+
+def test_generate_ripple_layers_logs_and_returns_empty_on_no_tool_call(caplog):
+    client = _fake_client_returning("record_ripple_layers", None)
+
+    with caplog.at_level("WARNING"):
+        layers = generate_ripple_layers(client, "title", "content", [
+            {"ticker": "HPCL.NS", "name": "HPCL", "sector": "oil_gas",
+             "sub_sector": "refining_marketing", "direction": "bearish", "why": None},
+        ])
+
+    assert layers == []
+    assert "no tool call" in caplog.text

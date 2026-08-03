@@ -8,12 +8,15 @@ top of it. Built up across the plan's Tasks 4 (generate_event_summary), 5
 (refine_alert, the orchestrator).
 """
 import json
+import logging
 
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
 from app.models import AlertRippleLayer, Company, TimelineEffect
 from app.reasoning.compliance import validate_or_none
+
+logger = logging.getLogger(__name__)
 
 EVENT_SUMMARY_FRAMING = (
     "Summarize this news event for a retail investor with no finance "
@@ -278,7 +281,9 @@ RIPPLE_LAYERS_FRAMING = (
     "language note explaining why this GROUP moves together, and the "
     "tickers that belong to it (every ticker exactly once, only from the "
     "provided list). Sentence case, no jargon, no percentages, no "
-    "buy/sell/hold language."
+    "buy/sell/hold language. Never use the words buy, sell, hold, or any "
+    "rating or price-target language in a title or note -- such a section "
+    "is discarded entirely."
 )
 
 
@@ -345,8 +350,14 @@ def generate_ripple_layers(client, title: str, content: str, companies: list[dic
     tool = build_ripple_layers_tool()
 
     def _call(model: str):
+        # 1536 was too tight for this tool's nested per-layer schema
+        # (title/relationship/note/tickers x N sections) -- the same
+        # starved-response failure mode documented in
+        # cascade.py::_identify_cascade_companies_per_sector, where a
+        # too-small budget for a nested-array response makes the model
+        # return no tool call at all rather than a partial one.
         return client.chat.completions.create(
-            model=model, max_tokens=1536, tools=[tool],
+            model=model, max_tokens=4096, tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_ripple_layers"}},
             messages=messages,
         )
@@ -359,6 +370,9 @@ def generate_ripple_layers(client, title: str, content: str, companies: list[dic
         message = response.choices[0].message
         tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_ripple_layers"), None)
         if tool_call is None:
+            logger.warning(
+                "ripple-layer generation returned no tool call for %d companies", len(companies),
+            )
             return []
         arguments = json.loads(tool_call.function.arguments)
 
@@ -367,24 +381,37 @@ def generate_ripple_layers(client, title: str, content: str, companies: list[dic
         validated = []
         for layer in arguments.get("layers", []):
             if layer.get("relationship") not in RIPPLE_RELATIONSHIP_TYPES:
+                logger.warning("ripple layer rejected: bad relationship %r", layer.get("relationship"))
                 continue
             layer_title = validate_or_none(layer.get("title"))
             note = validate_or_none(layer.get("note"))
             if not layer_title or not note:
+                logger.warning(
+                    "ripple layer rejected by compliance: title=%r note=%r",
+                    layer.get("title"), layer.get("note"),
+                )
                 continue
             tickers = [
                 t for t in layer.get("tickers", [])
                 if t in known_tickers and t not in seen
             ]
             if not tickers:
+                logger.warning(
+                    "ripple layer %r rejected: no known unclaimed tickers in %r",
+                    layer_title, layer.get("tickers"),
+                )
                 continue
             seen.update(tickers)
             validated.append({
                 "title": layer_title, "relationship": layer["relationship"],
                 "note": note, "tickers": tickers,
             })
+        if not validated:
+            logger.warning("ripple-layer generation produced no valid layers from %d raw layers",
+                           len(arguments.get("layers", [])))
         return validated
-    except Exception:
+    except Exception as exc:
+        logger.warning("ripple-layer generation failed: %s", exc)
         return []
 
 
