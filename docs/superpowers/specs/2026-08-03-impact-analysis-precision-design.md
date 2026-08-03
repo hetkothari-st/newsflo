@@ -430,3 +430,48 @@ assumed here.
 - Replacing the rulebook/playbook system.
 - Restoring dynamic range to `confidence_score` (see root cause 7). Real, but
   a separate problem from the hallucination bug this design addresses.
+
+## Status at merge
+
+Measured on the Section 0 evaluation harness:
+
+1. **Zero must-exclude companies on the golden set:** VERIFIED, but on one
+   labelled case. `score_golden.py` reports alert 9020 at precision 1.00,
+   recall 1.00, 0 forbidden. `tests/golden/cases.py` holds one case; ~29 more
+   remain to be labelled by a human.
+
+2. **Alerts with zero companies well below 61%:** NOT MET. Live database is
+   377/607 = 62.1%, essentially unmoved. The migration structurally cannot
+   change this — only a grounded reanalysis can, and that is blocked on
+   exhausted provider quota.
+
+3. **No sector_inference row in a DIRECT-family bucket:** VERIFIED at code
+   level across all three claiming tiers, with tests.
+
+4. **alert_ripple_layers populated:** NOT MET. Still zero rows. Root cause
+   unconfirmed because reproduction requires a live LLM call and quota is
+   exhausted; two plausible fixes plus exhaustive diagnostic logging shipped,
+   so the next real run will name the cause rather than degrade silently.
+
+## Known limitations at merge
+
+- `business_desc` is populated for only 12 of 1016 companies, so the candidate
+  grounding currently ships as ticker + name + sub-sector, with the
+  description field largely absent. `backfill_business_profiles.py` is
+  resumable and ready to run.
+
+- Moving the confidence floor to compare against the pre-multiplier score
+  materially widens persistence: `indirect_l1` rows scoring 40–56 and
+  `indirect_l2` rows scoring 40–87 now persist where previously they never
+  could. On a change themed around reducing company counts, expect counts to
+  rise somewhat on the first production run.
+
+- `reanalyze_cascade.py` now correctly deletes `CalibrationSample` and
+  `CarOutcome` rows alongside the `AlertCompany` rows it replaces. That is
+  correct — they are meaningless without their parent — but it means a
+  reanalysis irrecoverably discards outcome and calibration history for the
+  alerts it touches. Anyone running it over a date range should know that.
+
+- `reanalyze_cascade.py` does not apply `CONFIDENCE_FLOOR`, unlike the live
+  pipeline. Pre-existing divergence between the one-off script and
+  `_persist_alert`, not introduced by this work.
