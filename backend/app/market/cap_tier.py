@@ -112,3 +112,51 @@ def resolve_cap_tier(session: Session, company: Company, today: date | None = No
     if company.amfi_tier == "SMALL" and derived == "MICRO":
         return CapTier("MICRO", f"{amfi_stamp} + NSE index methodology", company.amfi_as_of)
     return CapTier(company.amfi_tier, amfi_stamp, company.amfi_as_of)
+
+
+def cap_tier_map(session: Session, today: date | None = None) -> dict[str, str]:
+    """{ticker: tier} for every Indian company with a fresh market cap.
+
+    The batch counterpart to resolve_cap_tier, for callers that tag many
+    companies at once (app.market.discovery, app.market.ripple_layers).
+    Applies the same precedence and the same staleness rule -- a ticker
+    absent from the result has no honest tier and must render as "no data",
+    never as a default bucket.
+
+    The ranking pool is every ``market == 'INDIA'`` company with a non-null
+    market_cap, staleness notwithstanding -- the same pool
+    compute_cap_tier_for_ticker uses for a single-company lookup. A stale
+    company's cap still occupies a rank slot (it did trade at that
+    valuation once; excluding it would shift every other company's rank),
+    it just never itself receives a tier. Filtering the pool down to fresh
+    rows before ranking would give this function a different rank order
+    than resolve_cap_tier computes for the exact same ticker -- the two
+    entry points would disagree.
+    """
+    today = today or date.today()
+    companies = (
+        session.query(Company)
+        .filter(Company.market == "INDIA")
+        .filter(Company.market_cap.isnot(None))
+        .all()
+    )
+    derived = compute_cap_tiers([(c.ticker, c.market_cap) for c in companies])
+
+    tiers: dict[str, str] = {}
+    for company in companies:
+        if _is_stale(company.market_cap_as_of, config.MARKET_CAP_MAX_AGE_DAYS, today):
+            continue
+        base = derived.get(company.ticker)
+        if base is None:
+            continue
+        amfi_fresh = (
+            company.amfi_tier
+            and not _is_stale(company.amfi_as_of, config.AMFI_MAX_AGE_DAYS, today)
+        )
+        if not amfi_fresh:
+            tiers[company.ticker] = base
+        elif company.amfi_tier == "SMALL" and base == "MICRO":
+            tiers[company.ticker] = "MICRO"
+        else:
+            tiers[company.ticker] = company.amfi_tier
+    return tiers

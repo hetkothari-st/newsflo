@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 
+from app import config
 from app.market import cap_tier
-from app.market.cap_tier import resolve_cap_tier
+from app.market.cap_tier import cap_tier_map, resolve_cap_tier
 from app.models import Company
 
 TODAY = date(2026, 8, 3)
@@ -163,3 +164,70 @@ def test_compute_cap_tier_for_ticker_none_for_global_ticker(db_session):
     ))
     db_session.commit()
     assert cap_tier.compute_cap_tier_for_ticker(db_session, "AAPL") is None
+
+
+def test_cap_tier_map_excludes_stale_caps(db_session):
+    db_session.add(Company(
+        ticker="FRESH.NS", name="Fresh Ltd", sector="other", index_tier="OTHER",
+        market_cap=1000.0, market_cap_source="BSE", market_cap_as_of=TODAY,
+    ))
+    db_session.add(Company(
+        ticker="STALE.NS", name="Stale Ltd", sector="other", index_tier="OTHER",
+        market_cap=2000.0, market_cap_source="BSE",
+        market_cap_as_of=TODAY - timedelta(days=400),
+    ))
+    db_session.commit()
+
+    tiers = cap_tier_map(db_session, today=TODAY)
+    assert tiers == {"FRESH.NS": "LARGE"}
+
+
+def test_cap_tier_map_excludes_global_companies(db_session):
+    db_session.add(Company(
+        ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP",
+        market="GLOBAL", market_cap=3000000.0, market_cap_source="yfinance",
+        market_cap_as_of=TODAY,
+    ))
+    db_session.commit()
+    assert cap_tier_map(db_session, today=TODAY) == {}
+
+
+def test_cap_tier_map_prefers_published_amfi_tier(db_session):
+    db_session.add(Company(
+        ticker="BIG.NS", name="Big Ltd", sector="other", index_tier="OTHER",
+        market_cap=9000.0, market_cap_source="BSE", market_cap_as_of=TODAY,
+        amfi_tier="MID", amfi_rank=120, amfi_as_of=TODAY,
+    ))
+    db_session.commit()
+    # Rank 1 by cap would be LARGE; AMFI's published MID wins.
+    assert cap_tier_map(db_session, today=TODAY) == {"BIG.NS": "MID"}
+
+
+def test_cap_tier_map_agrees_with_resolve_cap_tier_when_a_stale_giant_is_in_the_pool(db_session):
+    # A stale company with a huge cap must still occupy a rank slot for
+    # everyone else -- exactly as it does for a single-company lookup via
+    # resolve_cap_tier/compute_cap_tier_for_ticker. If cap_tier_map instead
+    # ranked only the fresh subset, this same fresh company could come out
+    # LARGE in the batch map while resolve_cap_tier (ranking against the
+    # unfiltered pool) puts it at MID for the identical inputs -- the two
+    # entry points disagreeing about the same ticker.
+    db_session.add(Company(
+        ticker="GIANT.NS", name="Giant Ltd", sector="other", index_tier="OTHER",
+        market_cap=1_000_000.0, market_cap_source="BSE",
+        market_cap_as_of=TODAY - timedelta(days=400),
+    ))
+    for i in range(config.AMFI_LARGE_CAP_RANK_CUTOFF):
+        db_session.add(Company(
+            ticker=f"F{i}.NS", name=f"Fresh Co {i}", sector="other", index_tier="OTHER",
+            market_cap=float(1000 - i), market_cap_source="BSE", market_cap_as_of=TODAY,
+        ))
+    db_session.commit()
+
+    last_ticker = f"F{config.AMFI_LARGE_CAP_RANK_CUTOFF - 1}.NS"
+    last_company = db_session.query(Company).filter_by(ticker=last_ticker).one()
+
+    batch_tier = cap_tier_map(db_session, today=TODAY).get(last_ticker)
+    single_tier = resolve_cap_tier(db_session, last_company, today=TODAY)
+
+    assert single_tier is not None
+    assert batch_tier == single_tier.tier == "MID"

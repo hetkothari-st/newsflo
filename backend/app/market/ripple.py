@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.companies.branding import logo_url
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
-from app.market.cap_tier import compute_cap_tier_for_ticker
+from app.market.cap_tier import resolve_cap_tier
 from app.models import Alert, Company, ImpactEdge, MarketMove
 from app.reasoning.ripple_relationship import is_exposure_only, relation_to_ripple_relationship
 
@@ -61,7 +61,7 @@ def _alert_company_rows(
             "ticker": company.ticker,
             "name": company.name,
             "sector": company.sector,
-            "cap_tier": compute_cap_tier_for_ticker(session, company.ticker),
+            "cap_tier": (resolved := resolve_cap_tier(session, company)) and resolved.tier,
             "business_desc": company.business_desc,
             "direction": alert_company.direction,
             "excess_move_pct": None,

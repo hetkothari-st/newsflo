@@ -1,8 +1,12 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import Alert, AlertCompany, Article, Company, Holding, MarketMove, User, utcnow
 from app.routers.articles import get_db
+
+TODAY = date.today()
 
 
 def _override_db(db_session):
@@ -22,12 +26,18 @@ def _seed_today(db_session):
     holdings of their own, so they never surface in any discovery tab --
     they exist purely to give the ranking a realistic population.
     """
-    parent = Company(ticker="BIG.NS", name="Big Co", sector="oil_gas", index_tier="NIFTY50", market_cap=900000.0)
-    child = Company(ticker="TINY.NS", name="Tiny Co", sector="oil_gas", index_tier="OTHER", market_cap=400.0)
+    parent = Company(
+        ticker="BIG.NS", name="Big Co", sector="oil_gas", index_tier="NIFTY50",
+        market_cap=900000.0, market_cap_source="BSE", market_cap_as_of=TODAY,
+    )
+    child = Company(
+        ticker="TINY.NS", name="Tiny Co", sector="oil_gas", index_tier="OTHER",
+        market_cap=400.0, market_cap_source="BSE", market_cap_as_of=TODAY,
+    )
     fillers = [
         Company(
             ticker=f"FILLER{i}.NS", name=f"Filler {i}", sector="other", index_tier="OTHER",
-            market_cap=500000.0 - i * 100,
+            market_cap=500000.0 - i * 100, market_cap_source="BSE", market_cap_as_of=TODAY,
         )
         for i in range(500)
     ]
