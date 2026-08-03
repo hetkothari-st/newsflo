@@ -740,6 +740,35 @@ def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
     assert all(c.ticker is None for c in sector_wide)
 
 
+def test_analyze_article_skips_fanout_for_a_narrow_event_type():
+    # Same setup as test_analyze_article_adds_one_sector_wide_mention_per_
+    # primary_sector (two primary sectors, one LLM-named direct company in
+    # "banking" only, "oil_gas" left with no specific company) -- but
+    # event_type is "earnings", a NARROW event NOT in BROAD_EVENT_TYPES.
+    # This directly proves the gate is wired into the call site itself, not
+    # just that BROAD_EVENT_TYPES contains the right strings in isolation --
+    # the two "other"-event tests elsewhere in this file don't assert
+    # company composition, so they'd pass identically whether the gate
+    # existed or not.
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "earnings"},
+        "record_sectors": {"sectors": [
+            {"sector": "banking", "direction": "bearish", "mechanism": "rate exposure"},
+            {"sector": "oil_gas", "direction": "bullish", "mechanism": "crude price pass-through"},
+        ]},
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [_full_company("HDFC Bank", None)]},
+        ]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    named = [c for c in result.companies if c.name == "HDFC Bank"]
+    sector_wide = [c for c in result.companies if c.is_direct is False]
+    assert len(named) == 1
+    assert sector_wide == []
+
+
 def test_analyze_article_logs_swallowed_stage_failures(caplog):
     import logging
     client = ScriptedClient({

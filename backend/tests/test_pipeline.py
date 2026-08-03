@@ -554,6 +554,67 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
     assert all(r.time_horizon == "Medium-Term" for r in rows)
 
 
+def test_process_new_articles_anchors_fan_out_to_the_named_companys_sub_sector(db_session, monkeypatch):
+    # Models the reported production bug directly: a crude-oil story's fmcg
+    # fan-out pulled in Eternal (food delivery, fmcg/retail) alongside HUL
+    # (fmcg/personal_care) with no article-specific reason for Eternal at
+    # all. process_new_articles must build the anchor_sub_sectors map from
+    # the model's own direct mention (HUL, personal_care) and pass it
+    # through to resolve_companies, so the sector-wide fan-out mention for
+    # "fmcg" only reaches Dabur (also personal_care) and never Eternal
+    # (retail) -- this is the one thing that actually excludes Eternal; if
+    # app.pipeline's anchor-map construction were silently wrong (empty, or
+    # keyed on the wrong field), fan-out would revert to whole-sector and
+    # Eternal would come straight back with every other test still green.
+    hul = Company(
+        ticker="HINDUNILVR.NS", name="Hindustan Unilever Ltd.", sector="fmcg",
+        sub_sector="personal_care", index_tier="NIFTY50", market_cap=1.0,
+    )
+    dabur = Company(
+        ticker="DABUR.NS", name="Dabur India Ltd.", sector="fmcg",
+        sub_sector="personal_care", index_tier="NIFTYNEXT50", market_cap=1.0,
+    )
+    eternal = Company(
+        ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg",
+        sub_sector="retail", index_tier="NIFTY50", market_cap=1.0,
+    )
+    db_session.add_all([hul, dabur, eternal])
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/anchor-fanout", title="Crude oil spikes", content="x")
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_gas", event_type="crude_oil",
+        companies=[
+            CompanyMention(
+                name="Hindustan Unilever", ticker="HINDUNILVR.NS", is_direct=True, sector="fmcg",
+                direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0,
+                rationale="Palm oil and packaging costs rise with crude.",
+                key_points=[], confidence_score=60, time_horizon="Medium-Term",
+                impact_level="direct",
+            ),
+            CompanyMention(
+                name="fmcg sector", ticker=None, is_direct=False, sector="fmcg",
+                direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
+                rationale="Sector-wide input cost exposure.",
+                key_points=[], confidence_score=50, time_horizon="Medium-Term",
+            ),
+        ],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+
+    process_new_articles(db_session, claude_client=object())
+
+    alert = db_session.query(Alert).one()
+    rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
+    resolved_tickers = {r.company.ticker for r in rows}
+
+    assert resolved_tickers == {"HINDUNILVR.NS", "DABUR.NS"}
+    assert "ETERNAL.NS" not in resolved_tickers
+
+
 def test_process_new_articles_persists_evidence_discipline_fields(db_session, monkeypatch):
     company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
     db_session.add(company)
