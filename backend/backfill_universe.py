@@ -107,32 +107,53 @@ _HISTORY_FKS = (
 # (table, company column) -> the other column of that table's unique
 # constraint that also covers company_id:
 #   market_moves               uq_market_move_alert_company (alert_id, company_id)
-#   holdings                   uq_holdings_user_company (user_id, company_id)
 #   user_watchlist_companies   uq_watchlist_company_user_company (user_id, company_id)
 # A blind bulk UPDATE of company_id on these tables can violate that
-# constraint (e.g. the same user already holds/watches the canonical
-# company). Rows whose sibling value the canonical already owns are
-# deleted instead of reassigned -- the fact is already recorded against
-# the canonical company -- and only the non-colliding rows are moved.
-# The other _HISTORY_FKS tables have no such constraint (alert_companies,
+# constraint (e.g. the same user already watches the canonical company).
+# Rows whose sibling value the canonical already owns are deleted instead
+# of reassigned -- the fact is already recorded against the canonical
+# company -- and only the non-colliding rows are moved.
+#
+# `holdings` ALSO has such a constraint (uq_holdings_user_company, on
+# user_id + company_id) but is deliberately NOT listed here: a Holding
+# carries `quantity` (and implicitly cost basis), so a colliding pair is a
+# financial-data reconciliation decision, not a duplicate to discard. See
+# _holdings_collision -- a collision there refuses the whole merge instead.
+#
+# The remaining _HISTORY_FKS tables have no such constraint (alert_companies,
 # impact_edges) or one that doesn't involve company_id (calibration_samples,
 # car_outcomes), so a plain bulk UPDATE is safe for them.
 _HISTORY_SIBLING_KEY = {
     ("market_moves", "company_id"): "alert_id",
-    ("holdings", "company_id"): "user_id",
     ("user_watchlist_companies", "company_id"): "user_id",
 }
+
+
+def _sibling_keys(session: Session, table: str, column: str, sibling: str, id_: int) -> set:
+    return {
+        row[0] for row in session.execute(
+            text(f"SELECT {sibling} FROM {table} WHERE {column} = :id"), {"id": id_},
+        )
+    }
+
+
+def _holdings_collision(session: Session, phantom_id: int, canonical_id: int) -> bool:
+    """True if the phantom and the canonical both carry a Holding for the
+    same user. Checked before any write for a pair -- see the docstring of
+    merge_duplicate_companies for why this refuses the whole merge rather
+    than reconciling."""
+    canonical_users = _sibling_keys(session, "holdings", "company_id", "user_id", canonical_id)
+    if not canonical_users:
+        return False
+    phantom_users = _sibling_keys(session, "holdings", "company_id", "user_id", phantom_id)
+    return bool(canonical_users & phantom_users)
 
 
 def _reassign_with_collision_guard(
     session: Session, table: str, column: str, sibling: str, phantom_id: int, canonical_id: int,
 ) -> dict[str, int]:
     counts: dict[str, int] = {}
-    canonical_keys = {
-        row[0] for row in session.execute(
-            text(f"SELECT {sibling} FROM {table} WHERE {column} = :cid"), {"cid": canonical_id},
-        )
-    }
+    canonical_keys = _sibling_keys(session, table, column, sibling, canonical_id)
     phantom_rows = session.execute(
         text(f"SELECT id, {sibling} FROM {table} WHERE {column} = :pid"), {"pid": phantom_id},
     ).all()
@@ -176,7 +197,11 @@ def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[
     because the canonical company already has its own and they regenerate.
     History rows are reassigned. A history row that would violate a unique
     constraint after reassignment is deleted instead, and counted, so the
-    merge cannot fail partway and strand the rest.
+    merge cannot fail partway and strand the rest -- EXCEPT `holdings`,
+    where a collision is a financial-data reconciliation call (a Holding
+    carries quantity/cost basis) this script has no business making: that
+    check runs before any write for the pair, and a collision refuses the
+    whole merge, leaving both companies and both holdings untouched.
     """
     report = []
     for phantom_ticker, canonical_ticker in pairs:
@@ -192,10 +217,21 @@ def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[
             report.append({"phantom": phantom_ticker, "skipped": "canonical has no ISIN -- cannot confirm identity"})
             continue
 
-        # Capture ids before the delete/commit below -- session.commit()
-        # expires ORM attributes by default, and reading an attribute off a
-        # deleted, expired instance raises ObjectDeletedError.
+        # Capture ids up front: used after `phantom` is deleted below.
         phantom_id, canonical_id = phantom.id, canonical.id
+
+        # Refuse the whole pair BEFORE any write if holdings collide --
+        # unlike market_moves/user_watchlist_companies, a Holding is user
+        # financial data (quantity, and implicitly cost basis). Deleting
+        # one silently destroys a position; summing is a decision this
+        # script must not make unasked. Checked first so nothing is
+        # half-applied for this pair.
+        if _holdings_collision(session, phantom_id, canonical_id):
+            report.append({
+                "phantom": phantom_ticker, "canonical": canonical_ticker,
+                "skipped": "holdings collision -- needs manual reconciliation",
+            })
+            continue
 
         moved: dict[str, int] = {}
         for table in _DERIVABLE_TABLES:
@@ -220,6 +256,17 @@ def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[
                 _reassign_with_collision_guard(session, table, column, sibling, phantom_id, canonical_id)
             )
 
+        # The derivable-table DELETEs above already removed `phantom`'s
+        # company_aliases/listings rows via raw SQL, bypassing the ORM. If
+        # either relationship collection is still loaded on `phantom` (e.g.
+        # a caller touched `.aliases`/`.listings`, or rebuild_aliases ran
+        # earlier in this session), SQLAlchemy's default nullify-on-delete
+        # cascade would try to UPDATE those now-gone child rows when
+        # `phantom` is deleted, match 0 rows, and raise StaleDataError ->
+        # PendingRollbackError -- the exact "fail partway" this function
+        # promises cannot happen. Expiring first forces a fresh (empty)
+        # reload of both collections, so the cascade has nothing to do.
+        session.expire(phantom, ["aliases", "listings"])
         session.delete(phantom)
         session.commit()
         report.append({
