@@ -2440,9 +2440,19 @@ git commit -m "test: adversarial and production-derived regression gate for the 
 ### Task 12: Swap resolution to the matcher
 
 **Files:**
-- Modify: `app/companies/resolution.py:13-19` (`_TIER_RANK`), `:64-93` (`_find_direct_company`), `:161-168` (fan-out query)
+- Modify: `app/companies/resolution.py` — `_find_direct_company` (~line 64), fan-out query (~lines 175-187)
 - Modify: `app/config.py`
 - Test: `tests/test_resolution.py`
+
+**AMENDED 2026-08-03 — concurrent work already changed this file.** Commit
+`f39fd55` ("constrain sector fan-out to broad events, primary level, anchored
+sub-sectors") landed on this branch from parallel work and rewrote the fan-out.
+**Preserve all of it.** Specifically: `TOP_N_SECTOR_COMPANIES = 3` (do NOT restore
+5), the `anchor_sub_sectors` parameter on `resolve_companies`, the
+`Company.sub_sector.in_(anchors)` filter, and the `DEMO_TICKERS` filter. `_TIER_RANK`
+is **kept**, demoted to a tiebreak behind market cap — the spec (§8.4) says "with
+`index_tier` as tiebreak", so keeping it is correct. This task adds exactly two
+filters and one ordering key. Nothing else in the fan-out changes.
 
 **Interfaces:**
 - Consumes: `matcher.resolve`.
@@ -2455,101 +2465,86 @@ git commit -m "test: adversarial and production-derived regression gate for the 
 Append to `tests/test_resolution.py`:
 
 ```python
-from app.companies import resolution
+Reuse the file's existing `_make_company` helper and construct `CompanyMention`
+the way the existing tests in this file already do — do NOT add a duplicate
+mention factory. `resolve_companies`' second parameter (`anchor_sub_sectors`)
+has a default, so two-argument calls remain valid.
+
+```python
 from app.companies.matching import aliases
-from app.models import Company
 
 
-def _mention(**kw):
-    from app.analysis.schemas import CompanyMention
-    defaults = dict(
-        ticker=None, name=None, sector=None, is_direct=True, direction="POSITIVE",
-        magnitude_low=1.0, magnitude_high=2.0, rationale="r", key_points=[],
-        confidence_score=50, time_horizon="Short-Term", reasons=[], evidence_refs=[],
-        risks=[], assumptions=[], unknowns=[], alternative_hypothesis=None,
-        impact_level="direct", parent_ticker=None,
+def _sector_mention(sector):
+    return CompanyMention(
+        name=None, ticker=None, is_direct=False, sector=sector,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", key_points=[], confidence_score=50, time_horizon="Short-Term",
     )
-    defaults.update(kw)
-    return CompanyMention(**defaults)
+
+
+def _name_mention(name):
+    return CompanyMention(
+        name=name, ticker=None, is_direct=True, sector=None,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", key_points=[], confidence_score=50, time_horizon="Short-Term",
+    )
 
 
 def test_matcher_resolves_a_name_without_a_ticker(db_session):
-    db_session.add(Company(
-        ticker="APOLLOTYRE.NS", name="Apollo Tyres Limited", sector="auto",
-        index_tier="OTHER", tradeability="NORMAL",
-    ))
-    db_session.commit()
+    _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
     aliases.rebuild_aliases(db_session)
 
-    resolved = resolution.resolve_companies(db_session, [_mention(name="Apollo Tyres Ltd")])
+    resolved = resolve_companies(db_session, [_name_mention("Apollo Tyres Ltd")])
     assert len(resolved) == 1
 
 
 def test_ambiguous_name_resolves_to_nothing(db_session):
-    for ticker, name in [
-        ("APOLLOTYRE.NS", "Apollo Tyres Limited"),
-        ("APOLLOHOSP.NS", "Apollo Hospitals Enterprise Limited"),
-    ]:
-        db_session.add(Company(
-            ticker=ticker, name=name, sector="auto", index_tier="OTHER",
-            tradeability="NORMAL",
-        ))
-    db_session.commit()
+    _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
+    _make_company(db_session, "APOLLOHOSP.NS", "Apollo Hospitals Enterprise Limited", "pharma", None)
     aliases.rebuild_aliases(db_session)
 
-    assert resolution.resolve_companies(db_session, [_mention(name="Apollo")]) == []
+    assert resolve_companies(db_session, [_name_mention("Apollo")]) == []
 
 
 def test_sector_fanout_ranks_by_market_cap(db_session):
-    db_session.add(Company(
-        ticker="BIG.NS", name="Big Oil Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=900000.0, tradeability="NORMAL",
-    ))
-    db_session.add(Company(
-        ticker="SMALL.NS", name="Small Oil Limited", sector="oil_gas",
-        index_tier="NIFTY50", market_cap=100.0, tradeability="NORMAL",
-    ))
-    db_session.commit()
+    # BIG is in the lowest index tier but is far larger. Under the old
+    # _TIER_RANK-first ordering SMALL won; market cap now leads.
+    _make_company(db_session, "BIG.NS", "Big Oil Limited", "oil_gas", 900000.0, index_tier="OTHER")
+    _make_company(db_session, "SMALL.NS", "Small Oil Limited", "oil_gas", 100.0, index_tier="NIFTY50")
 
-    resolved = resolution.resolve_companies(
-        db_session, [_mention(is_direct=False, sector="oil_gas")]
-    )
-    first = db_session.get(Company, resolved[0]["company_id"])
-    assert first.ticker == "BIG.NS"
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    assert db_session.get(Company, resolved[0]["company_id"]).ticker == "BIG.NS"
+
+
+def test_sector_fanout_still_falls_back_to_index_tier_without_caps(db_session):
+    # Guards the concurrent work in f39fd55: when no company has a market
+    # cap, nullslast() leaves every row tied and _TIER_RANK must still
+    # decide the order.
+    _make_company(db_session, "LOW.NS", "Low Tier Oil Limited", "oil_gas", None, index_tier="OTHER")
+    _make_company(db_session, "HIGH.NS", "High Tier Oil Limited", "oil_gas", None, index_tier="NIFTY50")
+
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    assert db_session.get(Company, resolved[0]["company_id"]).ticker == "HIGH.NS"
 
 
 def test_sector_fanout_excludes_non_tradeable_companies(db_session):
-    db_session.add(Company(
-        ticker="SHELL.BO", name="Dormant Shell Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=5000000.0, tradeability="SUSPENDED",
-    ))
-    db_session.add(Company(
-        ticker="REAL.NS", name="Real Oil Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=100.0, tradeability="NORMAL",
-    ))
+    shell = _make_company(db_session, "SHELL.BO", "Dormant Shell Limited", "oil_gas", 5000000.0, index_tier="OTHER")
+    shell.tradeability = "SUSPENDED"
     db_session.commit()
+    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
 
-    resolved = resolution.resolve_companies(
-        db_session, [_mention(is_direct=False, sector="oil_gas")]
-    )
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
 
 
 def test_sector_fanout_excludes_global_companies(db_session):
-    db_session.add(Company(
-        ticker="XOM", name="Exxon Mobil", sector="oil_gas", index_tier="GLOBAL_LARGE_CAP",
-        market_cap=9000000.0, market="GLOBAL", tradeability="NORMAL",
-    ))
-    db_session.add(Company(
-        ticker="REAL.NS", name="Real Oil Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=100.0, tradeability="NORMAL",
-    ))
+    xom = _make_company(db_session, "XOM", "Exxon Mobil", "oil_gas", 9000000.0, index_tier="GLOBAL_LARGE_CAP")
+    xom.market = "GLOBAL"
     db_session.commit()
+    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
 
-    resolved = resolution.resolve_companies(
-        db_session, [_mention(is_direct=False, sector="oil_gas")]
-    )
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
 ```
@@ -2557,7 +2552,7 @@ def test_sector_fanout_excludes_global_companies(db_session):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_resolution.py -k "matcher or fanout or ambiguous" -v`
-Expected: FAIL — `test_sector_fanout_ranks_by_market_cap` returns `SMALL.NS` first (index-tier ordering still wins).
+Expected: FAIL — `test_sector_fanout_ranks_by_market_cap` returns `SMALL.NS` first (index-tier ordering still wins), and the global/non-tradeable tests fail because no filter excludes those rows yet.
 
 - [ ] **Step 3: Add the config flag**
 
@@ -2605,22 +2600,41 @@ from app.config import settings
 
 - [ ] **Step 5: Replace the fan-out ordering**
 
-In `app/companies/resolution.py`, delete the `_TIER_RANK` definition (lines 13-19) and replace the fan-out query (lines 161-168) with:
+**Keep `_TIER_RANK`** — it becomes the tiebreak, per spec §8.4. Keep
+`TOP_N_SECTOR_COMPANIES = 3`, the `anchor_sub_sectors` parameter, and the
+`anchors` filter exactly as `f39fd55` left them.
+
+In `app/companies/resolution.py`, make two changes inside the existing fan-out
+block. Add the two filters to the base query:
 
 ```python
-            companies = (
+            query = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
                 .filter(Company.ticker.notin_(DEMO_TICKERS))
-                # Rank by real size, not Nifty membership: after the full
-                # universe ingest ~4,200 of ~4,967 companies sit in
-                # index_tier='OTHER', which collapses the old tier ranking
-                # into alphabetical order. Non-tradeable and global rows are
-                # excluded so dormant shells never surface as affected
-                # companies (spec §8.4).
+                # Dormant shells and non-Indian rows must never surface as
+                # affected companies once the universe grows from 509 to
+                # ~4,967 (spec §8.4).
                 .filter(Company.market == "INDIA")
                 .filter(Company.tradeability == "NORMAL")
-                .order_by(Company.market_cap.desc().nullslast(), Company.ticker.asc())
+            )
+```
+
+and change only the `order_by` in the block below it:
+
+```python
+            companies = (
+                # Rank by real size, not Nifty membership: after the full
+                # universe ingest ~4,200 of ~4,967 companies sit in
+                # index_tier='OTHER', which collapses the tier ranking into
+                # alphabetical order. _TIER_RANK stays as the tiebreak, which
+                # is also what keeps the pre-existing fan-out tests (whose
+                # companies have no market cap) ordering as before.
+                query.order_by(
+                    Company.market_cap.desc().nullslast(),
+                    _TIER_RANK.asc(),
+                    Company.ticker.asc(),
+                )
                 .limit(TOP_N_SECTOR_COMPANIES)
                 .all()
             )
@@ -2634,7 +2648,7 @@ Expected: all pass, including the pre-existing tests in that file.
 - [ ] **Step 7: Run the full suite**
 
 Run: `python -m pytest -q`
-Expected: no new failures. `tests/test_cascade.py` and `tests/test_end_to_end.py` exercise fan-out — if they assert a specific company order, update those assertions to the market-cap ordering and note it in the commit body.
+Expected: no new failures against the 814-test baseline. `tests/test_cascade.py` and `tests/test_end_to_end.py` exercise fan-out. The pre-existing fan-out tests in `tests/test_resolution.py` pass `market_cap=None`, so `nullslast()` plus the retained `_TIER_RANK` tiebreak must leave their ordering unchanged — **if any of them break, the fix is in your change, not in their assertions.** Do not edit tests written by the concurrent `f39fd55` work to make your change pass; report it as a concern instead.
 
 - [ ] **Step 8: Commit**
 
