@@ -18,7 +18,16 @@ LEGAL_SUFFIXES = (
     "company", "co", "incorporated", "inc", "plc",
 )
 
-_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
+# Dots and all other punctuation are NOT interchangeable. Dots abbreviate a
+# single word ("J.B. Chemicals" -> "jb chemicals", "D.B.Corp" -> "dbcorp"),
+# so they join with no separator. Every other punctuation mark separates two
+# distinct words ("Agri-Tech" -> "agri tech", "BLS E-Services" -> "bls e
+# services", "(India)" -> " india "), so it splits into a space. Collapsing
+# both cases the same way breaks one of the two: replacing dots with a space
+# splits abbreviations that should join, and removing hyphens outright fuses
+# words that a news mention will report separately.
+_DOTS = re.compile(r"\.")
+_OTHER_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -26,7 +35,8 @@ def normalize_name(raw: str | None) -> str:
     if not raw:
         return ""
     text = raw.strip().lower().replace("&", " and ")
-    text = _PUNCTUATION.sub("", text)
+    text = _DOTS.sub("", text)
+    text = _OTHER_PUNCTUATION.sub(" ", text)
     text = _WHITESPACE.sub(" ", text).strip()
     if not text:
         return ""
