@@ -2904,9 +2904,35 @@ git commit -m "feat: rank-based MICRO tier and cap-tier resolution with provenan
 
 **Interfaces:**
 - Consumes: `normalize.build_records`, `loader.upsert_records`, `aliases.rebuild_aliases`.
-- Produces: `TICKER_CORRECTIONS: dict[str, str]`, `apply_ticker_corrections(session) -> list[tuple[str, str]]`, `flag_missing_tickers(session, known_symbols: set[str]) -> list[str]`.
+- Produces: `TICKER_CORRECTIONS: dict[str, str]`, `apply_ticker_corrections(session) -> list[tuple[str, str]]`, `flag_missing_tickers(session, known_symbols: set[str]) -> list[str]`, `merge_duplicate_companies(session, pairs) -> list[dict]`.
 
 Verified against the live NSE master on 2026-08-03: `HPCL` and `OILINDIA` are not NSE symbols; the real ones are `HINDPETRO` and `OIL`. `JBCHEPHARM` is absent from the master entirely.
+
+**AMENDED 2026-08-03 — the real data is not the shape this task assumed.** Task 11's
+regression corpus surfaced the actual rows. `HPCL.NS` and `OILINDIA.NS` are not
+mis-typed tickers on the real companies; they are **spurious duplicate rows sitting
+alongside the correct ones**:
+
+| id | ticker | ISIN | alert_companies rows |
+|---|---|---|---|
+| 271 | `HINDPETRO.NS` | INE094A01015 | 5 |
+| 1016 | `HPCL.NS` | *none* | 2 |
+| 385 | `OIL.NS` | INE274J01014 | 2 |
+| 1017 | `OILINDIA.NS` | *none* | 1 |
+| 305 | `JBCHEPHARM.NS` | INE572A01036 | 0 |
+
+Consequences for this task:
+
+1. `apply_ticker_corrections` will correctly SKIP both renames (the target ticker
+   already exists) — but that leaves **3 alert rows attached to phantom companies
+   that have no ISIN and will never appear in the exchange masters**. Skipping is
+   necessary but not sufficient, so this task now also implements
+   `merge_duplicate_companies` (below).
+2. The claim that `JBCHEPHARM.NS` must not be deleted because "it has alert history"
+   is **factually wrong** — it has 0 alerts. It carries a valid ISIN and is a real
+   company simply absent from the current NSE master (delisted or merged). Flagging
+   it `SUSPENDED` remains correct, but for that reason, not the stated one. Fix the
+   docstring accordingly.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2914,7 +2940,8 @@ Create `tests/test_backfill_universe.py`:
 
 ```python
 import backfill_universe
-from app.models import Alert, AlertCompany, Article, Company
+from app.companies.matching import aliases
+from app.models import Alert, AlertCompany, Article, Company, CompanyAlias
 
 
 def _alert(session):
@@ -2988,6 +3015,89 @@ def test_unknown_ticker_is_flagged_suspended_not_deleted(db_session):
     assert refreshed.tradeability == "SUSPENDED"
 
 
+def test_merge_moves_alert_history_and_deletes_the_phantom(db_session):
+    canonical = Company(
+        ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+        sector="oil_gas", index_tier="NIFTY50", isin="INE094A01015",
+    )
+    phantom = Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas",
+        index_tier="OTHER",
+    )
+    db_session.add_all([canonical, phantom])
+    db_session.commit()
+    canonical_id, phantom_id = canonical.id, phantom.id
+
+    alert = _alert(db_session)
+    db_session.add(AlertCompany(alert_id=alert.id, company_id=phantom_id, direction="POSITIVE"))
+    db_session.commit()
+
+    report = backfill_universe.merge_duplicate_companies(
+        db_session, [("HPCL.NS", "HINDPETRO.NS")],
+    )
+
+    assert db_session.get(Company, phantom_id) is None
+    assert db_session.get(Company, canonical_id) is not None
+    assert db_session.query(AlertCompany).one().company_id == canonical_id
+    assert report[0]["moved"]["alert_companies.company_id"] == 1
+
+
+def test_merge_refuses_when_the_phantom_has_an_isin(db_session):
+    # The safety rule: never delete a company that carries an ISIN.
+    db_session.add(Company(
+        ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+        sector="oil_gas", index_tier="NIFTY50", isin="INE094A01015",
+    ))
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas",
+        index_tier="OTHER", isin="INE999Z01099",
+    ))
+    db_session.commit()
+
+    report = backfill_universe.merge_duplicate_companies(
+        db_session, [("HPCL.NS", "HINDPETRO.NS")],
+    )
+    assert "skipped" in report[0]
+    assert db_session.query(Company).filter_by(ticker="HPCL.NS").count() == 1
+
+
+def test_merge_refuses_when_the_canonical_has_no_isin(db_session):
+    db_session.add(Company(
+        ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+        sector="oil_gas", index_tier="NIFTY50",
+    ))
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas", index_tier="OTHER",
+    ))
+    db_session.commit()
+
+    report = backfill_universe.merge_duplicate_companies(
+        db_session, [("HPCL.NS", "HINDPETRO.NS")],
+    )
+    assert "skipped" in report[0]
+    assert db_session.query(Company).count() == 2
+
+
+def test_merge_deletes_derivable_rows_rather_than_reassigning_them(db_session):
+    canonical = Company(
+        ticker="OIL.NS", name="Oil India Ltd.", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE274J01014",
+    )
+    phantom = Company(
+        ticker="OILINDIA.NS", name="Oil India", sector="oil_gas", index_tier="OTHER",
+    )
+    db_session.add_all([canonical, phantom])
+    db_session.commit()
+    # Both companies normalize to aliases that would collide on reassignment.
+    aliases.rebuild_aliases(db_session)
+    assert db_session.query(CompanyAlias).filter_by(company_id=phantom.id).count() > 0
+
+    backfill_universe.merge_duplicate_companies(db_session, [("OILINDIA.NS", "OIL.NS")])
+
+    assert db_session.query(CompanyAlias).filter_by(company_id=phantom.id).count() == 0
+    assert db_session.query(CompanyAlias).filter_by(company_id=canonical.id).count() > 0
+
+
 def test_global_companies_are_never_flagged(db_session):
     db_session.add(Company(
         ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market="GLOBAL",
@@ -3023,6 +3133,7 @@ absent from the master entirely.
 import json
 from datetime import date
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.companies.matching import aliases
@@ -3042,7 +3153,8 @@ def apply_ticker_corrections(session: Session) -> list[tuple[str, str]]:
 
     A correction whose target ticker already exists is SKIPPED rather than
     merged -- merging two companies means reassigning FK rows, which is a
-    separate, deliberate operation, not a side effect of a backfill.
+    separate, deliberate operation. In this database BOTH corrections hit
+    that path (see merge_duplicate_companies, which handles them).
     """
     changed = []
     for wrong, right in TICKER_CORRECTIONS.items():
@@ -3060,8 +3172,11 @@ def apply_ticker_corrections(session: Session) -> list[tuple[str, str]]:
 
 def flag_missing_tickers(session: Session, known_symbols: set[str]) -> list[str]:
     """Mark Indian companies whose symbol is absent from the exchange master
-    as SUSPENDED. Never deletes: these rows carry alert history, and a
-    delisting is a fact to record, not a reason to erase the past."""
+    as SUSPENDED. Never deletes: a company that has left the exchange is
+    still a real company with a real ISIN (JBCHEPHARM.NS, INE572A01036, is
+    the live example), and a delisting is a fact to record, not a reason to
+    erase the past. Deleting is reserved for the phantom no-ISIN duplicates
+    that merge_duplicate_companies handles."""
     flagged = []
     for company in session.query(Company).filter(Company.market == "INDIA").all():
         symbol = company.ticker.rsplit(".", 1)[0]
@@ -3071,6 +3186,93 @@ def flag_missing_tickers(session: Session, known_symbols: set[str]) -> list[str]
         flagged.append(company.ticker)
     session.commit()
     return flagged
+
+
+DUPLICATE_MERGES = [
+    # (phantom ticker, canonical ticker). Both phantoms were created without
+    # an ISIN and duplicate a real company that has one.
+    ("HPCL.NS", "HINDPETRO.NS"),
+    ("OILINDIA.NS", "OIL.NS"),
+]
+
+# Derivable rows: regenerated by rebuild_aliases / the ingest, so the
+# phantom's copies are deleted rather than reassigned (reassigning would
+# collide with the canonical company's own rows on their unique keys).
+_DERIVABLE_TABLES = ("company_aliases", "listings", "company_index_memberships")
+
+# History rows: irreplaceable, so these are REASSIGNED to the canonical id.
+# (table, column) for every remaining FK onto companies.id.
+_HISTORY_FKS = (
+    ("alert_companies", "company_id"),
+    ("alert_companies", "parent_company_id"),
+    ("impact_edges", "from_company_id"),
+    ("impact_edges", "to_company_id"),
+    ("calibration_samples", "company_id"),
+    ("car_outcomes", "company_id"),
+    ("market_moves", "company_id"),
+    ("holdings", "company_id"),
+    ("user_watchlist_companies", "company_id"),
+)
+
+
+def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[dict]:
+    """Fold a phantom duplicate company into the real one and delete it.
+
+    Task 11's regression corpus proved these exist: HPCL.NS (no ISIN, 2
+    alerts) shadowing HINDPETRO.NS (INE094A01015, 5 alerts), and
+    OILINDIA.NS (no ISIN, 1 alert) shadowing OIL.NS (INE274J01014). The
+    phantoms will never appear in an exchange master, so without a merge
+    their alert history is stranded on rows that can never be enriched,
+    ranked, or priced.
+
+    SAFETY RULE, enforced not assumed: a merge only proceeds when the
+    phantom has NO ISIN and the canonical HAS one. Anything else is
+    reported and skipped -- this function must never be able to delete a
+    real company.
+
+    Derivable rows (aliases, listings, index memberships) are deleted
+    because the canonical company already has its own and they regenerate.
+    History rows are reassigned. A history row that would violate a unique
+    constraint after reassignment is deleted instead, and counted, so the
+    merge cannot fail partway and strand the rest.
+    """
+    report = []
+    for phantom_ticker, canonical_ticker in pairs:
+        phantom = session.query(Company).filter_by(ticker=phantom_ticker).one_or_none()
+        canonical = session.query(Company).filter_by(ticker=canonical_ticker).one_or_none()
+        if phantom is None or canonical is None:
+            report.append({"phantom": phantom_ticker, "skipped": "not found"})
+            continue
+        if phantom.isin:
+            report.append({"phantom": phantom_ticker, "skipped": "phantom has an ISIN -- not a phantom"})
+            continue
+        if not canonical.isin:
+            report.append({"phantom": phantom_ticker, "skipped": "canonical has no ISIN -- cannot confirm identity"})
+            continue
+
+        moved: dict[str, int] = {}
+        for table in _DERIVABLE_TABLES:
+            result = session.execute(
+                text(f"DELETE FROM {table} WHERE company_id = :pid"), {"pid": phantom.id},
+            )
+            if result.rowcount:
+                moved[f"{table} (deleted)"] = result.rowcount
+
+        for table, column in _HISTORY_FKS:
+            result = session.execute(
+                text(f"UPDATE {table} SET {column} = :cid WHERE {column} = :pid"),
+                {"cid": canonical.id, "pid": phantom.id},
+            )
+            if result.rowcount:
+                moved[f"{table}.{column}"] = result.rowcount
+
+        session.delete(phantom)
+        session.commit()
+        report.append({
+            "phantom": phantom_ticker, "canonical": canonical_ticker,
+            "phantom_id": phantom.id, "canonical_id": canonical.id, "moved": moved,
+        })
+    return report
 
 
 def main() -> None:
@@ -3093,6 +3295,11 @@ def main() -> None:
     session = SessionLocal()
     try:
         print("corrections:", apply_ticker_corrections(session))
+        # Runs AFTER corrections (which will skip both, since the canonical
+        # tickers already exist) and BEFORE the upsert, so the phantom rows
+        # are gone before aliases are rebuilt for them.
+        for entry in merge_duplicate_companies(session):
+            print("merge:", entry)
 
         records = normalize.build_records(nse_rows, bse_rows, details, day)
         existing_tickers = {
