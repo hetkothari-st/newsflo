@@ -27,7 +27,21 @@ def is_company_isin(isin: str | None) -> bool:
 
 
 def _clean(value) -> str:
-    return (value or "").strip() if isinstance(value, str) else ""
+    """Coerce a raw field to a stripped string. ``None`` and bools yield ""
+    (a bool is never a legitimate SCRIP_CD/Mktcap/ISIN value, so treating it
+    as absent is safer than stringifying True/False into the data). Any
+    other scalar (str/int/float) is stringified rather than silently
+    discarded -- BSE's JSON does not guarantee SCRIP_CD or Mktcap come back
+    as strings, and dropping a numeric SCRIP_CD/Mktcap to "" caused total,
+    silent loss of market cap and official classification for every row it
+    touched."""
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return str(value)
+    return ""
 
 
 def parse_nse_rows(csv_text: str) -> list[dict]:
@@ -59,7 +73,9 @@ def parse_bse_detail(json_text: str) -> dict:
 
 
 def _parse_float(value) -> float | None:
-    text = _clean(value)
+    # Indian-grouped cap strings ("1,32,904.62") are valid input; strip
+    # thousands separators before parsing rather than silently failing.
+    text = _clean(value).replace(",", "")
     if not text:
         return None
     try:
