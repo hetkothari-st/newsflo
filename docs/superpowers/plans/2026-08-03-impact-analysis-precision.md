@@ -3311,6 +3311,105 @@ if __name__ == "__main__":
     main()
 ```
 
+- [ ] **Step 1b: Repair the dev database's stale schema first**
+
+Task 6 changed `AlertCompany.rationale` to `nullable=True` in the ORM, but `backend/newsflo.db` is a persistent file created under the old schema and still has `rationale TEXT NOT NULL`. The repo has no Alembic, and `app/db.py` only ever ADDS columns — nothing relaxes an existing constraint. The test suite cannot catch this because it builds a fresh in-memory schema every run.
+
+This blocks more than the migration: the pipeline now writes `rationale=None` for every `sector_inference` row, so **any new alert containing a fan-out company raises `IntegrityError` against this database**.
+
+Confirmed drift is exactly one column:
+
+```
+columns NOT NULL in DB but nullable in ORM: {'rationale'}
+```
+
+SQLite has no `ALTER COLUMN DROP NOT NULL`, so the table must be rebuilt. Do NOT hand-transcribe the ~30-column DDL — derive the new table from the ORM so it matches by construction:
+
+```python
+# backend/repair_rationale_nullable.py
+"""One-off SQLite schema repair: alert_companies.rationale NOT NULL -> nullable.
+
+Task 6 relaxed this in the ORM (a sector_inference row persists no rationale,
+and a row whose direction was flipped by measurement has its contradictory
+rationale cleared). The persistent dev database predates that change and the
+project has no migration tool, so the constraint is still live there --
+meaning any new alert with a fan-out company fails to persist.
+
+Rebuilds the table from the ORM definition rather than hand-written DDL, so
+the new schema matches the model by construction. Idempotent: exits without
+touching anything if the column is already nullable.
+"""
+import sys
+
+from sqlalchemy import inspect, text
+
+from app.db import Base, engine
+from app.models import AlertCompany  # noqa: F401  registers the table on Base
+
+
+def rationale_is_nullable() -> bool:
+    for column in inspect(engine).get_columns("alert_companies"):
+        if column["name"] == "rationale":
+            return bool(column["nullable"])
+    raise RuntimeError("alert_companies.rationale not found")
+
+
+def main() -> None:
+    if rationale_is_nullable():
+        print("alert_companies.rationale is already nullable -- nothing to do.")
+        return
+
+    table = Base.metadata.tables["alert_companies"]
+    columns = ", ".join(c.name for c in table.columns)
+
+    with engine.begin() as conn:
+        before = conn.execute(text("SELECT COUNT(*) FROM alert_companies")).scalar_one()
+        print(f"rows before: {before}")
+
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("ALTER TABLE alert_companies RENAME TO alert_companies_old"))
+
+    # Recreates the table AND its indexes from the ORM definition.
+    table.create(engine)
+
+    with engine.begin() as conn:
+        # Explicit column list, never SELECT * -- column ORDER must not be
+        # assumed to match between the old table and the ORM definition.
+        conn.execute(text(
+            f"INSERT INTO alert_companies ({columns}) SELECT {columns} FROM alert_companies_old"
+        ))
+        after = conn.execute(text("SELECT COUNT(*) FROM alert_companies")).scalar_one()
+        print(f"rows after:  {after}")
+        if after != before:
+            raise RuntimeError(f"row count changed ({before} -> {after}); NOT dropping the old table")
+
+        conn.execute(text("DROP TABLE alert_companies_old"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+        if violations:
+            raise RuntimeError(f"foreign_key_check reported violations: {violations}")
+
+    print("done; rationale is now nullable" if rationale_is_nullable() else "FAILED: still NOT NULL")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Run order and safety:
+
+1. `cp newsflo.db newsflo.db.pre-schema-repair`
+2. `python repair_rationale_nullable.py` — expect matching before/after row counts and `done; rationale is now nullable`
+3. Re-run it once to confirm idempotence — expect `already nullable -- nothing to do.`
+4. If anything raises, the transaction rolls back and `alert_companies_old` may still exist. Do not improvise a cleanup: restore from the backup and report.
+5. If you hit `database is locked`, STOP — another session holds the file. Do not retry in a loop, do not delete any journal or lock file.
+
+Production Postgres still needs its own one-liner, which does support the in-place change:
+
+```sql
+ALTER TABLE alert_companies ALTER COLUMN rationale DROP NOT NULL;
+```
+
 - [ ] **Step 2: Dry-run it**
 
 Run: `python migrate_precision.py --dry-run`
