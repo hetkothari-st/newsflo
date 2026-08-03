@@ -22,14 +22,32 @@ TRADE_NAME aliases (e.g. "SBI Cards"), not resolved by loosening the
 ladder.
 
 The ticker, isin, and alias-exact rungs are indexed queries -- an equality
-filter on a unique/indexed column each. The token_set and fuzzy rungs are
-NOT indexed: they pull every (company_id, normalized) row in
-company_aliases into Python, because neither "same token set regardless of
-order" nor edit-distance scoring can be expressed as a single indexed
-predicate. Measured at ~1ms for 523 aliases (507-company universe); expect
-roughly 15-30ms at ~15k aliases (~4,967 companies with dual listings) -- a
-full table scan of a small, in-memory-sized table, not one that scales
-with article or request volume.
+filter on a unique/indexed column each. The company_name, token_set, and
+fuzzy rungs are NOT indexed: they pull every (company_id, name-or-normalized)
+row in companies or company_aliases into Python, because neither "same
+token set regardless of order" nor edit-distance scoring (nor, for
+company_name, comparing a value that only exists normalized in Python) can
+be expressed as a single indexed predicate. Measured at ~1ms for 523
+aliases (507-company universe); expect roughly 15-30ms at ~15k aliases
+(~4,967 companies with dual listings) -- a full table scan of a small,
+in-memory-sized table, not one that scales with article or request volume.
+
+company_name (between alias-exact and token_set): a direct exact-match
+fallback against Company.name itself, not against company_aliases. Added
+because the alias table is a derived side table -- company_aliases.LEGAL
+rows are themselves built FROM Company.name (see
+app.companies.matching.aliases.build_aliases_for_company), so if that table
+is ever empty, stale, or missing a row for a company (a rebuild that hasn't
+run yet, a company inserted outside the normal ingest path), a name-only
+mention that would have matched a freshly-built alias table instead
+silently resolves to nothing -- the resolver never even tries the one
+piece of data that's always present, the company's own name. This rung
+produces ZERO new match surface versus a correctly-built alias table: it is
+exact equality on the same normalized form the LEGAL alias would have used,
+not containment and not scoring, so it is not a repeat of the removed
+token_subset rung above. It removes a freshness *dependency*, not a
+precision guarantee. Do not delete this rung as "redundant with alias" --
+it exists for exactly the case where alias is NOT there yet.
 """
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -92,6 +110,18 @@ def resolve(
     ]
     if exact:
         return _disambiguate(session, exact, "alias")
+
+    # Fallback for a stale/empty/missing alias table -- see module docstring.
+    # Exact equality on the same normalized form the LEGAL alias would use,
+    # so it matches nothing the alias rung wouldn't already have matched had
+    # aliases been built.
+    company_name_hits = [
+        company_id for company_id, company_name in
+        session.query(Company.id, Company.name).all()
+        if normalize_name(company_name) == normalized
+    ]
+    if company_name_hits:
+        return _disambiguate(session, company_name_hits, "company_name")
 
     mention_tokens = tokens(name)
     if not mention_tokens:

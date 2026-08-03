@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # brandfetch_client_id) -- local dev/CI never opens an outbound
     # WebSocket connection unless this is explicitly set.
     zerodha_hub_url: str = os.environ.get("ZERODHA_HUB_URL", "")
+    # Gates app.companies.matching.matcher (spec §8). Set to "false" to
+    # restore the pre-rebuild substring resolver without a deploy.
+    use_alias_matcher: bool = os.environ.get("USE_ALIAS_MATCHER", "true").lower() == "true"
 
 
 settings = Settings()
