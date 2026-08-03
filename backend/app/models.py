@@ -102,6 +102,26 @@ class Alert(Base):
     # by the same refinement LLM call as summary_short; NULL for alerts
     # refined before this shipped (treated as confirmed).
     is_unconfirmed = Column(Integer, nullable=True)
+    # The stage-1 distilled article (app.analysis.cascade._extract_facts's
+    # `facts` string) this alert's whole cascade reasoned from. Persisted so
+    # the refinement layer reasons from the SAME evidence base as the
+    # cascade rather than re-reading the raw article -- and so a refinement
+    # re-run (or the deferred refinement pass) has that evidence available
+    # long after the analysis call. NULL for alerts persisted before this
+    # shipped; app.analysis.refinement.refine_alert falls back to the
+    # article text in that case.
+    facts = Column(Text, nullable=True)
+    # Deferred-refinement bookkeeping (docs: cost-optimization phase 5).
+    # NULL means this alert was refined inline as part of its own analysis
+    # run -- the historical behavior and still the default. "pending" means
+    # the alert was persisted without its refinement fields and a later
+    # batch pass owes them; "done" and "failed" are that pass's outcomes.
+    # Every consumer already tolerates the null refinement fields a pending
+    # alert has (see app/routers/alerts.py and app/translation/job.py), so
+    # a pending alert renders exactly like one whose refinement call
+    # returned nothing.
+    refinement_status = Column(String, nullable=True)
+    refinement_attempts = Column(Integer, nullable=False, default=0)
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -520,3 +540,37 @@ class TranslationFailure(Base):
     attempts = Column(Integer, nullable=False, default=0)
     last_error = Column(Text, nullable=True)
     last_attempted_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class LLMCallUsage(Base):
+    """One row per LLM call: which call it was, which model and tier served
+    it, and what it actually cost in tokens (docs: cost-optimization phase
+    6). Written by app.analysis.usage_log, which is called from the client
+    adapters, so every provider path is covered by construction rather than
+    by remembering to instrument each call site.
+
+    Deliberately append-only and unlinked to alerts/articles: this is
+    operational cost telemetry, not product data, and joining it to an
+    alert would make it a retention concern it has no reason to be.
+    Persistence is off unless settings.llm_usage_db_logging is set -- the
+    structured log line is always emitted.
+    """
+    __tablename__ = "llm_call_usage"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    # The logical call, e.g. "extract_facts" / "impact_whys" -- see
+    # app.config.LLM_TIERABLE_CALLS and LLM_PROTECTED_CALLS.
+    call_name = Column(String, nullable=True)
+    provider = Column(String, nullable=False)  # gemini | groq | anthropic
+    model = Column(String, nullable=True)
+    tier = Column(String, nullable=True)  # reasoning | cheap
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    # Prompt-cache accounting (phase 2). cache_read_tokens are input tokens
+    # served from a warm cache (billed at a discount); cache_write_tokens
+    # are the ones that populated it. Both NULL for a provider that reports
+    # no cache breakdown, which is not the same as a cache miss -- a null
+    # means "unknown", a zero means "measured, nothing cached".
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)

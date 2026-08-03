@@ -8,12 +8,17 @@ top of it. Built up across the plan's Tasks 4 (generate_event_summary), 5
 (refine_alert, the orchestrator).
 """
 import json
+import logging
+import time
 
 from openai import RateLimitError
 
-from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
+from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
+from app.config import settings
 from app.models import AlertRippleLayer, Company, TimelineEffect
 from app.reasoning.compliance import validate_or_none
+
+logger = logging.getLogger(__name__)
 
 EVENT_SUMMARY_FRAMING = (
     "Summarize this news event for a retail investor with no finance "
@@ -57,7 +62,7 @@ def build_event_summary_tool() -> dict:
     }
 
 
-def _call_event_summary_tool(client, title: str, content: str) -> dict | None:
+def _call_event_summary_tool(client, title: str, facts: str) -> dict | None:
     """Returns the parsed tool-call arguments, or None on any failure --
     a malformed/truncated JSON response, an exhausted RateLimitError
     fallback, or any other client error all degrade to None rather than
@@ -65,7 +70,7 @@ def _call_event_summary_tool(client, title: str, content: str) -> dict | None:
     app.market.measure.measure_company_move."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"{EVENT_SUMMARY_FRAMING}\n\nTitle: {title}\n\nContent: {content}"},
+        {"role": "user", "content": f"{EVENT_SUMMARY_FRAMING}\n\nTitle: {title}\n\nFacts: {facts}"},
     ]
     tool = build_event_summary_tool()
 
@@ -73,7 +78,7 @@ def _call_event_summary_tool(client, title: str, content: str) -> dict | None:
         return client.chat.completions.create(
             model=model, max_tokens=512, tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_event_summary"}},
-            messages=messages,
+            messages=messages, **tier_kwargs("event_summary"),
         )
 
     try:
@@ -90,13 +95,13 @@ def _call_event_summary_tool(client, title: str, content: str) -> dict | None:
         return None
 
 
-def generate_event_summary(client, title: str, content: str) -> dict | None:
+def generate_event_summary(client, title: str, facts: str) -> dict | None:
     """Returns {"summary_short", "summary_long"} (either may be None if it
     never passed validation, even after one retry), or None entirely if
     NEITHER field ever became usable. Never raises -- a malformed or
     missing tool-call response degrades to None, same "never crash the
     alert" discipline as app.market.measure.measure_company_move."""
-    first = _call_event_summary_tool(client, title, content)
+    first = _call_event_summary_tool(client, title, facts)
     if first is None:
         return None
 
@@ -104,7 +109,7 @@ def generate_event_summary(client, title: str, content: str) -> dict | None:
     summary_long = validate_or_none(first.get("summary_long"))
 
     if summary_short is None or summary_long is None:
-        retry = _call_event_summary_tool(client, title, content)
+        retry = _call_event_summary_tool(client, title, facts)
         if retry is not None:
             if summary_short is None:
                 summary_short = validate_or_none(retry.get("summary_short"))
@@ -167,7 +172,7 @@ def build_impact_why_tool(tickers: list[str]) -> dict:
     }
 
 
-def _call_impact_why_tool(client, title: str, content: str, companies: list[dict]) -> dict[str, str]:
+def _call_impact_why_tool(client, title: str, facts: str, companies: list[dict]) -> dict[str, str]:
     """Returns {ticker: why} parsed from the tool call, or {} on any
     failure -- a malformed/truncated JSON response, an exhausted
     RateLimitError fallback, a missing tool-call, or any other client
@@ -187,7 +192,7 @@ def _call_impact_why_tool(client, title: str, content: str, companies: list[dict
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"{IMPACT_WHY_FRAMING}\n\nArticle: {title}\n\n{content}\n\nCompanies:\n{company_lines}",
+            "content": f"{IMPACT_WHY_FRAMING}\n\nArticle: {title}\n\nFacts: {facts}\n\nCompanies:\n{company_lines}",
         },
     ]
     tool = build_impact_why_tool(tickers)
@@ -196,7 +201,7 @@ def _call_impact_why_tool(client, title: str, content: str, companies: list[dict
         return client.chat.completions.create(
             model=model, max_tokens=2048, tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_impact_whys"}},
-            messages=messages,
+            messages=messages, **tier_kwargs("impact_whys"),
         )
 
     try:
@@ -217,7 +222,7 @@ def _call_impact_why_tool(client, title: str, content: str, companies: list[dict
         return {}
 
 
-def generate_impact_whys(client, title: str, content: str, companies: list[dict]) -> dict[str, str]:
+def generate_impact_whys(client, title: str, facts: str, companies: list[dict]) -> dict[str, str]:
     """companies: [{"ticker", "name", "direction", "excess_move_pct"}, ...]
     -- only companies with a real measured excess_move_pct
     (measurement_status == "ok") should ever be passed in; this function
@@ -231,7 +236,7 @@ def generate_impact_whys(client, title: str, content: str, companies: list[dict]
     if not companies:
         return {}
     tickers = [c["ticker"] for c in companies]
-    first = _call_impact_why_tool(client, title, content, companies)
+    first = _call_impact_why_tool(client, title, facts, companies)
 
     result: dict[str, str] = {}
     retry_tickers = []
@@ -246,7 +251,7 @@ def generate_impact_whys(client, title: str, content: str, companies: list[dict]
 
     if retry_tickers:
         retry_companies = [c for c in companies if c["ticker"] in retry_tickers]
-        retry = _call_impact_why_tool(client, title, content, retry_companies)
+        retry = _call_impact_why_tool(client, title, facts, retry_companies)
         for ticker in retry_tickers:
             text = validate_or_none(retry.get(ticker))
             if text is not None:
@@ -311,7 +316,7 @@ def build_ripple_layers_tool() -> dict:
     }
 
 
-def generate_ripple_layers(client, title: str, content: str, companies: list[dict]) -> list[dict]:
+def generate_ripple_layers(client, title: str, facts: str, companies: list[dict]) -> list[dict]:
     """Story-adaptive card-back sections (spec §5): returns
     [{"title", "relationship", "note", "tickers"}, ...] or [] on any
     failure / empty result -- read time then falls back to the static
@@ -338,7 +343,7 @@ def generate_ripple_layers(client, title: str, content: str, companies: list[dic
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": (
-            f"{RIPPLE_LAYERS_FRAMING}\n\nTitle: {title}\n\nContent: {content}\n\n"
+            f"{RIPPLE_LAYERS_FRAMING}\n\nTitle: {title}\n\nFacts: {facts}\n\n"
             f"Affected companies:\n{lines}"
         )},
     ]
@@ -348,7 +353,7 @@ def generate_ripple_layers(client, title: str, content: str, companies: list[dic
         return client.chat.completions.create(
             model=model, max_tokens=1536, tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_ripple_layers"}},
-            messages=messages,
+            messages=messages, **tier_kwargs("ripple_layers"),
         )
 
     try:
@@ -430,7 +435,7 @@ def build_timeline_tool() -> dict:
     }
 
 
-def _call_timeline_tool(client, title: str, content: str) -> list[dict]:
+def _call_timeline_tool(client, title: str, facts: str) -> list[dict]:
     """Returns [{"horizon", "description"}, ...] parsed from the tool
     call, dropping any entry whose horizon isn't one of the five
     recognized values or whose description is empty -- or [] on any
@@ -443,7 +448,7 @@ def _call_timeline_tool(client, title: str, content: str) -> list[dict]:
     ever propagate."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"{TIMELINE_FRAMING}\n\nTitle: {title}\n\nContent: {content}"},
+        {"role": "user", "content": f"{TIMELINE_FRAMING}\n\nTitle: {title}\n\nFacts: {facts}"},
     ]
     tool = build_timeline_tool()
 
@@ -451,7 +456,7 @@ def _call_timeline_tool(client, title: str, content: str) -> list[dict]:
         return client.chat.completions.create(
             model=model, max_tokens=1536, tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_timeline_effects"}},
-            messages=messages,
+            messages=messages, **tier_kwargs("timeline_effects"),
         )
 
     try:
@@ -473,7 +478,7 @@ def _call_timeline_tool(client, title: str, content: str) -> list[dict]:
         return []
 
 
-def generate_timeline_effects(client, title: str, content: str) -> list[dict]:
+def generate_timeline_effects(client, title: str, facts: str) -> list[dict]:
     """Returns [{"horizon", "description"}, ...], zero or more -- only for
     horizons the model gave genuine distinct content for AND whose
     description passes validation, retrying once (batched) for any
@@ -481,7 +486,7 @@ def generate_timeline_effects(client, title: str, content: str) -> list[dict]:
     Unrecognized horizon values are dropped during parsing in
     _call_timeline_tool and never reach here, so they are never
     persisted or retried. Never raises -- see _call_timeline_tool."""
-    first = _call_timeline_tool(client, title, content)
+    first = _call_timeline_tool(client, title, facts)
 
     valid = []
     invalid_horizons = []
@@ -493,7 +498,7 @@ def generate_timeline_effects(client, title: str, content: str) -> list[dict]:
             invalid_horizons.append(entry["horizon"])
 
     if invalid_horizons:
-        retry_by_horizon = {e["horizon"]: e["description"] for e in _call_timeline_tool(client, title, content)}
+        retry_by_horizon = {e["horizon"]: e["description"] for e in _call_timeline_tool(client, title, facts)}
         for horizon in invalid_horizons:
             text = validate_or_none(retry_by_horizon.get(horizon))
             if text is not None:
@@ -512,10 +517,22 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     returning None/empty simply leaves the corresponding field(s) unset,
     same "omit rather than fabricate" discipline as the rest of this
     pipeline.
-    """
-    text = article.full_content or article.content
 
-    summary = generate_event_summary(client, article.title, text)
+    Reasons from ``alert.facts`` -- the stage-1 distilled article the
+    cascade itself reasoned from (app.analysis.cascade._extract_facts) --
+    not from the raw article body. Two reasons, in this order: refinement
+    then explains the SAME evidence base the cascade used to pick these
+    companies and directions (previously the two layers could disagree
+    because they were reading different text), and the ~1500-token article
+    stops being re-sent on all four of the calls below. ``article`` is
+    still taken for its title (cheap, and the headline is the one piece of
+    framing `facts` deliberately does not repeat) and as the fallback text
+    for an alert with no stored facts -- one persisted before this shipped,
+    or reused from such an alert via the dedup path.
+    """
+    facts = alert.facts or article.full_content or article.content
+
+    summary = generate_event_summary(client, article.title, facts)
     if summary:
         alert.summary_short = summary.get("summary_short")
         alert.summary_long = summary.get("summary_long")
@@ -536,7 +553,7 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
                 })
 
     if measured:
-        whys = generate_impact_whys(client, article.title, text, [
+        whys = generate_impact_whys(client, article.title, facts, [
             {k: v for k, v in m.items() if k != "_alert_company"} for m in measured
         ])
         for m in measured:
@@ -544,7 +561,7 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
             if why:
                 m["_alert_company"].why = why
 
-    for effect in generate_timeline_effects(client, article.title, text):
+    for effect in generate_timeline_effects(client, article.title, facts):
         session.add(TimelineEffect(alert_id=alert.id, horizon=effect["horizon"], description=effect["description"]))
 
     # Story-adaptive card-back sections (spec §5): every affected company
@@ -560,9 +577,79 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
             "sector": company.sector, "sub_sector": company.sub_sector,
             "direction": ac.direction, "why": ac.why,
         })
-    for position, layer in enumerate(generate_ripple_layers(client, article.title, text, layer_companies)):
+    for position, layer in enumerate(generate_ripple_layers(client, article.title, facts, layer_companies)):
         session.add(AlertRippleLayer(
             alert_id=alert.id, position=position,
             title=layer["title"], relationship=layer["relationship"],
             note=layer["note"], tickers_json=json.dumps(layer["tickers"]),
         ))
+
+
+# --- Deferred refinement (docs: cost-optimization phase 5) ---
+
+# A pending alert that keeps failing must not be retried forever. Same
+# retry-cap discipline as app.models.TranslationFailure's attempts column:
+# past this many tries the alert is marked "failed" and simply keeps the
+# null refinement fields every consumer already tolerates.
+MAX_REFINEMENT_ATTEMPTS = 3
+
+REFINEMENT_PENDING = "pending"
+REFINEMENT_DONE = "done"
+REFINEMENT_FAILED = "failed"
+
+
+def run_pending_refinements(client, session, limit: int | None = None, throttle_seconds: float = 0) -> int:
+    """Refine alerts that were persisted with their refinement deferred,
+    oldest first. Returns how many were refined.
+
+    Taking these four calls off the analysis run's critical path is the
+    point: they are the only LLM work in this pipeline that nothing waits
+    on -- an alert is stored, measured, matched to holdings and broadcast
+    before refinement contributes anything, and every field it writes is
+    nullable at every read site. Running them here means they no longer
+    compete with the cascade for the provider's rate-limit headroom, and it
+    is the shape a provider batch queue needs (one pass, N independent
+    items, no caller blocked on the result).
+
+    Per-alert failures are contained: an alert whose refinement raises is
+    counted and left pending for the next pass, up to
+    MAX_REFINEMENT_ATTEMPTS, and never stops the others in the batch.
+    """
+    from app.models import Alert, AlertCompany, MarketMove
+
+    pending = (
+        session.query(Alert)
+        .filter(Alert.refinement_status == REFINEMENT_PENDING)
+        .order_by(Alert.id)
+        .limit(limit if limit is not None else settings.refinement_batch_limit)
+        .all()
+    )
+
+    refined = 0
+    for alert in pending:
+        alert_companies = session.query(AlertCompany).filter_by(alert_id=alert.id).all()
+        market_moves = session.query(MarketMove).filter_by(alert_id=alert.id).all()
+        try:
+            refine_alert(client, session, alert, alert.article, alert_companies, market_moves)
+            alert.refinement_status = REFINEMENT_DONE
+            refined += 1
+        except Exception:
+            alert.refinement_attempts = (alert.refinement_attempts or 0) + 1
+            if alert.refinement_attempts >= MAX_REFINEMENT_ATTEMPTS:
+                alert.refinement_status = REFINEMENT_FAILED
+                logger.exception(
+                    "deferred refinement gave up on alert_id=%s after %s attempts; "
+                    "it keeps the null refinement fields every reader already tolerates",
+                    alert.id, alert.refinement_attempts,
+                )
+            else:
+                logger.exception(
+                    "deferred refinement failed for alert_id=%s (attempt %s), leaving it pending",
+                    alert.id, alert.refinement_attempts,
+                )
+        session.commit()
+        time.sleep(throttle_seconds)
+
+    if pending:
+        logger.info("deferred refinement pass: %s of %s pending alerts refined", refined, len(pending))
+    return refined
