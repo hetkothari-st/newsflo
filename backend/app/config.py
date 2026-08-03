@@ -140,10 +140,20 @@ CAR_SUMMARY_SAMPLE_THRESHOLD = 5  # matches calibration/track_record.py's WIN_RA
 AMFI_LARGE_CAP_RANK_CUTOFF = 100
 AMFI_MID_CAP_RANK_CUTOFF = 250
 
-# MICRO cutoff (spec v2 §4.5: "apply a micro cutoff below a chosen
-# market-cap floor"): a company below this market-cap floor is MICRO
-# regardless of rank. Same unit as Company.market_cap.
-MICRO_CAP_FLOOR = 500.0
+# MICRO cutoff. Spec v2 §4.5 originally chose a rupee floor; that was an
+# invented boundary. Replaced by NSE's PUBLISHED index methodology: ranks
+# 501-750 are the Nifty Microcap 250 universe, so rank 501+ is MICRO.
+# See docs/superpowers/specs/2026-08-03-stock-universe-cap-tiers-design.md §7.2.
+MICRO_CAP_RANK_CUTOFF = 500
+
+# Staleness thresholds (spec §6.3). Past these, a value is reported stale
+# and the derived cap tier is WITHHELD rather than computed from old caps
+# and presented as current -- same discipline as app.market.measure
+# returning measurement_status='no_data' instead of a number.
+UNIVERSE_MAX_AGE_DAYS = 7
+MARKET_CAP_MAX_AGE_DAYS = 30
+CLASSIFICATION_MAX_AGE_DAYS = 180
+AMFI_MAX_AGE_DAYS = 240
 
 # Liquidity tier thresholds (spec v2 §4.6): derived from 20-day average
 # traded value (close x volume, same unit as prices x shares). LOW liquidity
