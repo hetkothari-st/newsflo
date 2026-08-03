@@ -7,3 +7,10 @@ __pycache__/
 # Self-hosted NLLB model weights (~1-2GB per model) -- provisioned locally
 # by scripts/download_translation_model.py, never committed.
 models/
+
+# Universe ingest snapshots -- raw fetch-stage output (NSE/BSE masters, the
+# ~5,000-file monthly BSE detail pass, AMFI categorisation copies), written
+# at runtime by app/companies/universe/fetchers.py + snapshot.py. Never
+# committed: it's regenerated daily/monthly and would flood git status with
+# thousands of entries per run.
+data/universe/

@@ -220,6 +220,11 @@ def _blank_record(isin: str, as_of: date) -> dict:
 # documented "Company Name" / "Average Market Cap" / "Categorization"
 # shape. Only ISIN and the categorization column are needed here; the
 # per-exchange cap columns are not read.
+#
+# The file itself is fetched at runtime (like the NSE/BSE masters) into the
+# data/universe/<day>/ snapshot directory -- it is NOT committed to the repo
+# (see backend/.gitignore). Landing page to re-fetch from:
+# https://www.amfiindia.com/otherdata/categorisation-of-stocks
 _AMFI_CATEGORIZATION_COLUMN = "Categorization as per SEBI Circular dated Oct 6, 2017"
 
 _AMFI_TIER_VOCABULARY = {
