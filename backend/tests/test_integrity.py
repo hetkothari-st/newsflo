@@ -1,5 +1,5 @@
 from app.companies.integrity import (
-    delete_demo_companies, is_demo_company,
+    delete_demo_companies, is_demo_company, check_sub_sectors,
 )
 from app.models import Company
 from app.analysis.schemas import CompanyMention
@@ -57,3 +57,50 @@ def test_sector_fanout_never_returns_a_demo_company(db_session):
     )])
 
     assert resolved == []
+
+
+def test_valid_pairing_is_not_a_violation(db_session):
+    db_session.add(Company(
+        ticker="HINDUNILVR.NS", name="Hindustan Unilever Ltd.",
+        sector="fmcg", sub_sector="personal_care", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    assert check_sub_sectors(db_session) == []
+
+
+def test_sub_sector_from_another_sector_is_a_violation(db_session):
+    db_session.add(Company(
+        ticker="ASIANPAINT.NS", name="Asian Paints Ltd.",
+        sector="fmcg", sub_sector="paints", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    violations = check_sub_sectors(db_session)
+
+    assert len(violations) == 1
+    assert violations[0].ticker == "ASIANPAINT.NS"
+    assert violations[0].sector == "fmcg"
+    assert violations[0].sub_sector == "paints"
+    # "paints" appears in exactly one sector's branch, so the fix is
+    # unambiguous and can be suggested.
+    assert violations[0].correct_sector == "chemicals"
+
+
+def test_null_sub_sector_is_not_a_violation(db_session):
+    db_session.add(Company(ticker="X.NS", name="X Ltd.", sector="other", sub_sector=None, index_tier="OTHER"))
+    db_session.commit()
+
+    assert check_sub_sectors(db_session) == []
+
+
+def test_unknown_sub_sector_reports_no_suggested_sector(db_session):
+    db_session.add(Company(
+        ticker="Y.NS", name="Y Ltd.", sector="fmcg", sub_sector="not_a_real_subsector", index_tier="NIFTY100",
+    ))
+    db_session.commit()
+
+    violations = check_sub_sectors(db_session)
+
+    assert len(violations) == 1
+    assert violations[0].correct_sector is None
