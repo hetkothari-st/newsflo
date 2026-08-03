@@ -43,7 +43,19 @@ def run_ingest(root: str, day: date, session: Session, fetch: bool = True, opene
             # Never silent: these companies land with NULL classification.
             print(f"  no classification for {len(detail_result['failed'])} scrips")
 
-    detail_dir = snapshot.snapshot_dir(root, day) / snapshot.DETAIL_DIRNAME
+    # The BSE detail (official classification) pass runs on its own monthly
+    # schedule (_run_universe_detail_refresh) and writes into whatever
+    # snapshot day was latest AT THE TIME IT RAN -- not necessarily ``day``,
+    # which for the daily master refresh is always today's fresh (and
+    # detail-empty) directory. Read details from the newest day that
+    # actually HAS them, falling back to ``day`` itself (e.g. the manual
+    # `python ingest_universe.py` full run, which fetches details straight
+    # into ``day``'s own directory above). A missing/empty detail directory
+    # still leaves stored classification untouched -- loader.upsert_records
+    # only overwrites classification fields when the record actually
+    # carries one (record["classification_source"] is truthy).
+    detail_day = snapshot.latest_detail_day(root) or day
+    detail_dir = snapshot.snapshot_dir(root, detail_day) / snapshot.DETAIL_DIRNAME
     details = {
         p.stem: normalize.parse_bse_detail(p.read_text(encoding="utf-8"))
         for p in detail_dir.glob("*.json")

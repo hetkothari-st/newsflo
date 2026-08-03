@@ -2,6 +2,8 @@ import json
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from app.companies.universe import normalize
 
 FIXTURES = Path(__file__).parent / "fixtures" / "universe" / "2026-08-03"
@@ -72,8 +74,10 @@ def test_official_classification_is_stored_verbatim():
 
 
 def test_market_cap_comes_from_bse_with_provenance():
+    # Fixture Mktcap is "1750000.00" (Rs crore, BSE's published unit) ->
+    # normalized to absolute rupees (x 1e7) to match yfinance's unit.
     record = next(r for r in _load() if r["isin"] == "INE002A01018")
-    assert record["market_cap"] == 1750000.0
+    assert record["market_cap"] == 1750000.0 * 1e7
     assert record["market_cap_source"] == "BSE"
     assert record["market_cap_as_of"] == AS_OF
 
@@ -126,7 +130,7 @@ def test_numeric_scrip_cd_and_mktcap_still_produce_cap_and_classification():
     details = {"590002": normalize.parse_bse_detail(detail_json)}
     record = normalize.build_records([], bse_rows, details, AS_OF)[0]
 
-    assert record["market_cap"] == 999.5
+    assert record["market_cap"] == 999.5 * 1e7
     assert record["market_cap_source"] == "BSE"
     assert record["market_cap_as_of"] == AS_OF
     assert record["official_sector"] == "Information Technology"
@@ -144,5 +148,75 @@ def test_comma_grouped_market_cap_string_parses_correctly():
     bse_rows = normalize.parse_bse_rows(bse_json)
     record = normalize.build_records([], bse_rows, {}, AS_OF)[0]
 
-    assert record["market_cap"] == 132904.62
+    assert record["market_cap"] == 132904.62 * 1e7
     assert record["market_cap_source"] == "BSE"
+
+
+def test_bse_crore_market_cap_is_normalized_to_absolute_rupees():
+    # RELIANCE's real live BSE Mktcap on 2026-08-03: "1771409.32" (Rs
+    # crore). Must land in Company.market_cap as absolute rupees, the same
+    # unit yfinance's fast_info["marketCap"] already uses for the 42 caps
+    # already in production.
+    bse_json = json.dumps([{
+        "SCRIP_CD": "500325", "Scrip_Name": "Reliance Industries Ltd", "Status": "Active",
+        "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE002A01018",
+        "INDUSTRY": None, "scrip_id": "RELIANCE", "Segment": "Equity",
+        "Issuer_Name": "Reliance Industries Limited", "Mktcap": "1771409.32",
+    }])
+    bse_rows = normalize.parse_bse_rows(bse_json)
+    record = normalize.build_records([], bse_rows, {}, AS_OF)[0]
+
+    assert record["market_cap"] == pytest.approx(1.771409_32e13)
+
+
+def test_infinite_market_cap_is_rejected_not_ranked_first():
+    bse_json = json.dumps([{
+        "SCRIP_CD": "590004", "Scrip_Name": "Infinite Cap Ltd", "Status": "Active",
+        "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE555Z01017",
+        "INDUSTRY": None, "scrip_id": "INFCO", "Segment": "Equity",
+        "Issuer_Name": "Infinite Cap Limited", "Mktcap": "inf",
+    }])
+    bse_rows = normalize.parse_bse_rows(bse_json)
+    record = normalize.build_records([], bse_rows, {}, AS_OF)[0]
+
+    assert record["market_cap"] is None
+    assert record["market_cap_source"] is None
+
+
+def test_mixed_bse_and_yfinance_unit_population_ranks_correctly():
+    """A regression for the unit-mixing bug: 403 BSE-crore-sourced large/mid
+    caps plus one yfinance-absolute-rupee microcap (~Rs 300 crore) must rank
+    the microcap outside LARGE. Before the fix, the un-normalized BSE pool
+    (raw crore numbers, e.g. ~50,000) was numerically smaller than the raw
+    yfinance absolute number (~3,000,000,000), so the microcap (never
+    actually the biggest company) came out ranked #1 -- LARGE.
+    """
+    from app.market import cap_tier
+
+    bse_rows_json = [
+        {
+            "SCRIP_CD": str(600000 + i), "Scrip_Name": f"BSE Co {i}", "Status": "Active",
+            "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": f"INE{i:06d}Z01011",
+            "INDUSTRY": None, "scrip_id": f"BSECO{i}", "Segment": "Equity",
+            "Issuer_Name": f"BSE Co {i} Limited",
+            "Mktcap": str(50000 - i),  # crore; 403 companies, descending
+        }
+        for i in range(403)
+    ]
+    bse_rows = normalize.parse_bse_rows(json.dumps(bse_rows_json))
+    bse_records = normalize.build_records([], bse_rows, {}, AS_OF)
+
+    # yfinance-sourced microcap: ~Rs 300 crore in ABSOLUTE rupees already
+    # (this is what app.companies.market_caps.refresh_market_caps writes
+    # directly to Company.market_cap -- normalize.py is never involved for
+    # this half of the population, hence the raw absolute-rupee number here).
+    microcap_cap = 300 * 1e7  # ~Rs 300 crore, absolute rupees
+
+    pool = [(r["ticker"], r["market_cap"]) for r in bse_records]
+    pool.append(("MICROCAP.NS", microcap_cap))
+
+    tiers = cap_tier.compute_cap_tiers(pool)
+    assert tiers["MICROCAP.NS"] != "LARGE"
+    # The genuine largest BSE company (rank 1 by crore value) must still be
+    # LARGE. BSE-only listings get a ".BO" ticker (no NSE row was fed in).
+    assert tiers["BSECO0.BO"] == "LARGE"

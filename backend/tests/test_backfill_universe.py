@@ -1,7 +1,13 @@
+import hashlib
 from datetime import date
+from pathlib import Path
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as SASession
 
 import backfill_universe
 from app.companies.matching import aliases
+from app.db import Base
 from app.models import (
     Alert,
     AlertCompany,
@@ -18,6 +24,8 @@ from app.models import (
     User,
     UserWatchlistCompany,
 )
+
+FIXTURES = Path(__file__).parent / "fixtures" / "universe" / "2026-08-03"
 
 
 def _alert(session, url="https://example.test/1"):
@@ -458,3 +466,80 @@ def test_isin_invariant_passes_on_a_clean_universe(db_session):
     ))
     db_session.commit()
     assert backfill_universe.validate_isin_invariant(db_session) == []
+
+
+def _file_sha256(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def test_dry_run_leaves_the_database_byte_identical(tmp_path):
+    """--dry-run must run the real pipeline (apply_ticker_corrections,
+    mark_global_companies, merge_duplicate_companies -- including the
+    irreversible phantom-company delete, upsert_records, flag_missing_
+    tickers, rebuild_aliases) far enough to report a real, non-empty
+    result, and STILL leave the on-disk database exactly as it started.
+    Uses a real file-backed SQLite DB (not the in-memory db_session
+    fixture) so the file's bytes can be hashed before and after -- proof
+    that goes beyond "the row counts look right" to "literally nothing was
+    written or fsynced".
+    """
+    db_path = tmp_path / "dry_run_target.db"
+    seed_engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(seed_engine)
+
+    with SASession(seed_engine) as session:
+        # The exact HPCL.NS/HINDPETRO.NS phantom-duplicate scenario backfill
+        # is built to resolve, plus alert history riding on the phantom --
+        # if the merge (which deletes a company row) leaked past the
+        # rollback, this history and row count would visibly change.
+        canonical = Company(
+            ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+            sector="oil_gas", index_tier="NIFTY50", isin="INE094A01015",
+        )
+        phantom = Company(
+            ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas", index_tier="OTHER",
+        )
+        session.add_all([canonical, phantom])
+        session.commit()
+        article = Article(source="test", url="https://example.test/dry-run", title="t", content="c")
+        session.add(article)
+        session.commit()
+        alert = Alert(article_id=article.id, category="test")
+        session.add(alert)
+        session.commit()
+        session.add(AlertCompany(
+            alert_id=alert.id, company_id=phantom.id, direction="POSITIVE",
+            magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+        ))
+        session.commit()
+    seed_engine.dispose()
+
+    before_hash = _file_sha256(db_path)
+    before_mtime_size = db_path.stat().st_size
+
+    run_engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        result = backfill_universe.run(
+            root=str(FIXTURES.parent), day=date(2026, 8, 3), dry_run=True, engine=run_engine,
+        )
+    finally:
+        run_engine.dispose()
+
+    # Sanity: the dry run actually exercised the merge path (proving this
+    # assertion isn't vacuously true because nothing happened to roll back).
+    assert result["merges"]
+    assert "skipped" not in result["merges"][0]
+    assert result["merges"][0]["phantom"] == "HPCL.NS"
+    assert result["merges"][0]["moved"]["alert_companies.company_id"] == 1
+
+    after_hash = _file_sha256(db_path)
+    assert db_path.stat().st_size == before_mtime_size
+    assert after_hash == before_hash
+
+    # And a fresh read confirms the phantom row (and its alert history)
+    # are still exactly where they started -- the merge's delete never
+    # actually landed.
+    with SASession(create_engine(f"sqlite:///{db_path}")) as verify:
+        assert verify.query(Company).filter_by(ticker="HPCL.NS").count() == 1
+        assert verify.query(Company).filter_by(ticker="HINDPETRO.NS").count() == 1
+        assert verify.query(AlertCompany).count() == 1

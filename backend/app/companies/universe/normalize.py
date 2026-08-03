@@ -10,6 +10,7 @@ into ONE record with TWO listings; keying on ticker instead would duplicate
 import csv
 import io
 import json
+import math
 from datetime import date
 
 from app.companies.universe import sector_map
@@ -82,7 +83,40 @@ def _parse_float(value) -> float | None:
         parsed = float(text)
     except ValueError:
         return None
+    # float("inf")/float("-inf")/float("nan") all parse without raising.
+    # An infinite Mktcap/FACE_VALUE would rank #1 in a ~5,000-company pool
+    # (compute_cap_tiers sorts by cap descending) and demote a genuine
+    # large cap out of LARGE -- reject anything non-finite, same as
+    # app.companies.market_caps.fetch_market_cap already does for the
+    # yfinance path.
+    if not math.isfinite(parsed):
+        return None
     return parsed if parsed > 0 else None
+
+
+# BSE's "Mktcap" field is published in RUPEES CRORE (RELIANCE was
+# "1771409.32" live on 2026-08-03); yfinance's fast_info["marketCap"] --
+# the other source written to this same Company.market_cap column via
+# app.companies.market_caps.refresh_market_caps -- is ABSOLUTE RUPEES
+# (RELIANCE was 17,662,582,622,436 live the same day). Mixing the two units
+# in one column ranks a yfinance-unit microcap 1e7x too high against a
+# BSE-unit peer -- a probe of 403 BSE-crore companies plus 30 yfinance-unit
+# ~Rs 300 crore microcaps returned all 30 microcaps as LARGE.
+#
+# BSE is converted UP to absolute rupees (crore * 1e7), not yfinance down
+# to crore, for three reasons:
+#   1. The 42 caps already in the production DB are yfinance-sourced
+#      (absolute). Converting BSE up leaves those 42 correct as-is and
+#      needs no data migration; converting yfinance down would require one.
+#   2. app.market.measure.compute_materiality divides excess_traded_value
+#      (day_volume * close, always absolute rupees) by market_cap. The
+#      divisor must share units with that numerator or the ratio is
+#      meaningless -- crore-unit caps would inflate materiality 1e7x for
+#      every BSE-sourced company.
+#   3. The frontend renders Company.market_cap raw. Absolute rupees keeps
+#      existing display behaviour (calibrated against yfinance's scale)
+#      unchanged.
+_BSE_CRORE_TO_RUPEES = 10_000_000  # 1 crore = 1e7
 
 
 def _parse_nse_date(value: str) -> date | None:
@@ -137,9 +171,9 @@ def build_records(
         group_code = _clean(row.get("GROUP")).upper() or None
         record["bse_name"] = _clean(row.get("Issuer_Name")) or _clean(row.get("Scrip_Name"))
 
-        market_cap = _parse_float(row.get("Mktcap"))
-        if market_cap is not None:
-            record["market_cap"] = market_cap
+        market_cap_cr = _parse_float(row.get("Mktcap"))
+        if market_cap_cr is not None:
+            record["market_cap"] = market_cap_cr * _BSE_CRORE_TO_RUPEES
             record["market_cap_source"] = "BSE"
             record["market_cap_as_of"] = as_of
 

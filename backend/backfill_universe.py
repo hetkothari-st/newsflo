@@ -21,13 +21,16 @@ apply_ticker_corrections correctly SKIPS both renames (the target ticker
 already exists); merge_duplicate_companies is what actually resolves them,
 by folding the phantom into the canonical company and deleting it.
 """
-from sqlalchemy import bindparam, text
+import argparse
+import contextlib
+
+from sqlalchemy import bindparam, event, text
 from sqlalchemy.orm import Session
 
 from app.companies.global_seed import GLOBAL_COMPANIES
 from app.companies.matching import aliases
 from app.companies.universe import loader, normalize, snapshot
-from app.db import SessionLocal
+from app.db import SessionLocal, engine as _default_engine
 from app.models import Company
 
 TICKER_CORRECTIONS = {
@@ -309,9 +312,135 @@ def validate_isin_invariant(session: Session) -> list[str]:
     ]
 
 
-def main() -> None:
-    root = snapshot.DEFAULT_ROOT
-    day = snapshot.latest_snapshot_day(root)
+def _apply(session: Session, nse_rows: list[dict], bse_rows: list[dict], details: dict, day) -> dict:
+    """The actual backfill pipeline, shared verbatim by a real run and a
+    --dry-run: dry-run's honesty depends on running the EXACT SAME code
+    path (not a hand-maintained parallel "preview" implementation that
+    could silently drift from what a real run does), with only the
+    enclosing transaction's fate differing (see run() / _dry_run_session).
+    """
+    corrections = apply_ticker_corrections(session)
+    print("corrections:", corrections)
+    globals_marked = mark_global_companies(session)
+    print("globals marked:", globals_marked)
+    # Runs AFTER corrections (which will skip both, since the canonical
+    # tickers already exist) and BEFORE the upsert, so the phantom rows
+    # are gone before aliases are rebuilt for them.
+    merges = merge_duplicate_companies(session)
+    for entry in merges:
+        print("merge:", entry)
+
+    records = normalize.build_records(nse_rows, bse_rows, details, day)
+    existing_tickers = {
+        ticker for ticker, in
+        session.query(Company.ticker).filter(Company.market == "INDIA").all()
+    }
+    # Backfill ONLY the companies already present. The full ingest is a
+    # separate, later step (ingest_universe.py) so this run can never
+    # grow the universe by accident.
+    scoped = [r for r in records if r["ticker"] in existing_tickers]
+    upsert_result = loader.upsert_records(session, scoped)
+    print("upsert:", upsert_result)
+
+    known = {r["SYMBOL"] for r in nse_rows} | {
+        (r.get("scrip_id") or "").strip() for r in bse_rows
+    }
+    flagged = flag_missing_tickers(session, known)
+    print("flagged missing:", flagged)
+    alias_result = aliases.rebuild_aliases(session)
+    print("aliases:", alias_result)
+
+    offenders = validate_isin_invariant(session)
+    if offenders:
+        print(f"WARNING: {len(offenders)} Indian companies still lack an ISIN: {offenders[:10]}")
+
+    return {
+        "corrections": corrections,
+        "globals_marked": globals_marked,
+        "merges": merges,
+        "upsert": upsert_result,
+        "flagged_missing": flagged,
+        "aliases": alias_result,
+        "isin_offenders": offenders,
+    }
+
+
+_sqlite_savepoint_patched: set[int] = set()
+
+
+def _ensure_sqlite_savepoint_support(bind_engine) -> None:
+    """SQLite's pysqlite DBAPI driver runs its own implicit
+    BEGIN/COMMIT underneath SQLAlchemy's transaction management, which
+    silently lets writes escape an outer, externally-controlled
+    transaction's rollback -- confirmed empirically: without this, a bare
+    connection.begin() + session.begin_nested() + rollback() on an
+    unmodified SQLite engine still PERSISTS everything written inside.
+    Standard SQLAlchemy workaround: disable pysqlite's own transaction
+    handling (isolation_level = None) and issue BEGIN ourselves. PostgreSQL
+    (production, via psycopg2) needs no such workaround and this is a
+    no-op for it. Applied once per engine.
+    """
+    if bind_engine.dialect.name != "sqlite" or id(bind_engine) in _sqlite_savepoint_patched:
+        return
+    _sqlite_savepoint_patched.add(id(bind_engine))
+
+    @event.listens_for(bind_engine, "connect")
+    def _do_connect(dbapi_connection, connection_record):
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(bind_engine, "begin")
+    def _do_begin(conn):
+        conn.exec_driver_sql("BEGIN")
+
+
+@contextlib.contextmanager
+def _dry_run_session(bind_engine):
+    """Yield a Session whose writes CANNOT reach the database, regardless
+    of how many times code running inside it calls session.commit() --
+    every helper this module's pipeline calls (apply_ticker_corrections,
+    mark_global_companies, merge_duplicate_companies, upsert_records,
+    flag_missing_tickers, rebuild_aliases) commits internally, and --dry-run
+    must run that exact same code (see _apply's docstring) while writing
+    nothing.
+
+    This is SQLAlchemy's documented "join a Session to an external
+    transaction" recipe: bind the Session to a Connection that owns its own
+    transaction, open a SAVEPOINT, and re-open a fresh SAVEPOINT every time
+    the Session's own commit() releases the current one (via the
+    after_transaction_end hook). session.commit() then only ever
+    releases/reopens the SAVEPOINT; the outer Connection-level transaction
+    -- which is what actually persists anything to disk -- is rolled back
+    unconditionally on exit, real exception or not.
+    """
+    _ensure_sqlite_savepoint_support(bind_engine)
+    connection = bind_engine.connect()
+    outer_transaction = connection.begin()
+    session = Session(bind=connection)
+    session.begin_nested()
+
+    @event.listens_for(session, "after_transaction_end")
+    def _restart_savepoint(session_, transaction):
+        if transaction.nested and not transaction._parent.nested:
+            session_.begin_nested()
+
+    try:
+        yield session
+    finally:
+        session.close()
+        outer_transaction.rollback()
+        connection.close()
+
+
+def run(root: str | None = None, day=None, dry_run: bool = False, engine=None) -> dict:
+    """Load the latest (or given) snapshot and run the full backfill
+    pipeline against it. ``engine`` defaults to the app's real database
+    engine; overridable for tests. When ``dry_run`` is True, every helper
+    below still runs -- and prints/returns the exact same report a real run
+    would -- but nothing is written (see _dry_run_session)."""
+    root = root or snapshot.DEFAULT_ROOT
+    bind_engine = engine or _default_engine
+    if day is None:
+        day = snapshot.latest_snapshot_day(root)
     if day is None:
         raise SystemExit(f"no snapshot found under {root}; fetch the masters first")
 
@@ -326,38 +455,32 @@ def main() -> None:
         for p in (snapshot.snapshot_dir(root, day) / snapshot.DETAIL_DIRNAME).glob("*.json")
     }
 
-    session = SessionLocal()
+    if dry_run:
+        print("DRY RUN -- reporting every would-be change, writing nothing")
+        with _dry_run_session(bind_engine) as session:
+            result = _apply(session, nse_rows, bse_rows, details, day)
+        print("DRY RUN complete -- nothing was written")
+        return result
+
+    session = SessionLocal() if engine is None else Session(bind=bind_engine)
     try:
-        print("corrections:", apply_ticker_corrections(session))
-        print("globals marked:", mark_global_companies(session))
-        # Runs AFTER corrections (which will skip both, since the canonical
-        # tickers already exist) and BEFORE the upsert, so the phantom rows
-        # are gone before aliases are rebuilt for them.
-        for entry in merge_duplicate_companies(session):
-            print("merge:", entry)
-
-        records = normalize.build_records(nse_rows, bse_rows, details, day)
-        existing_tickers = {
-            ticker for ticker, in
-            session.query(Company.ticker).filter(Company.market == "INDIA").all()
-        }
-        # Backfill ONLY the companies already present. The full ingest is a
-        # separate, later step (ingest_universe.py) so this run can never
-        # grow the universe by accident.
-        scoped = [r for r in records if r["ticker"] in existing_tickers]
-        print("upsert:", loader.upsert_records(session, scoped))
-
-        known = {r["SYMBOL"] for r in nse_rows} | {
-            (r.get("scrip_id") or "").strip() for r in bse_rows
-        }
-        print("flagged missing:", flag_missing_tickers(session, known))
-        print("aliases:", aliases.rebuild_aliases(session))
-
-        offenders = validate_isin_invariant(session)
-        if offenders:
-            print(f"WARNING: {len(offenders)} Indian companies still lack an ISIN: {offenders[:10]}")
+        return _apply(session, nse_rows, bse_rows, details, day)
     finally:
         session.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help=(
+            "print every correction, merge (with its per-table FK row "
+            "counts), global mark, and flagged-suspended company that "
+            "WOULD happen, and write nothing"
+        ),
+    )
+    args = parser.parse_args()
+    run(dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

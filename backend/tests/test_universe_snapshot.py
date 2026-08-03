@@ -43,3 +43,35 @@ def test_latest_snapshot_day_ignores_non_date_directories(tmp_path):
     (tmp_path / "scratch").mkdir()
     (tmp_path / "2026-08-03").mkdir()
     assert snapshot.latest_snapshot_day(str(tmp_path)) == date(2026, 8, 3)
+
+
+def test_latest_detail_day_is_none_when_no_snapshots(tmp_path):
+    assert snapshot.latest_detail_day(str(tmp_path)) is None
+
+
+def test_latest_detail_day_ignores_days_with_no_detail_dir(tmp_path):
+    # A master-only day (the daily refresh's fresh, detail-empty directory)
+    # must not be picked as the detail day.
+    (tmp_path / "2026-08-03").mkdir()
+    assert snapshot.latest_detail_day(str(tmp_path)) is None
+
+
+def test_latest_detail_day_ignores_days_with_an_empty_detail_dir(tmp_path):
+    (tmp_path / "2026-08-03" / snapshot.DETAIL_DIRNAME).mkdir(parents=True)
+    assert snapshot.latest_detail_day(str(tmp_path)) is None
+
+
+def test_latest_detail_day_picks_the_newest_day_that_actually_has_details(tmp_path):
+    # Day B (newer) is a master-only refresh with an empty bse_detail/.
+    # Day A (older) is where the monthly detail pass actually landed.
+    # This is exactly the daily-drift scenario: latest_snapshot_day would
+    # return B, but the classification files only exist under A.
+    day_a = date(2026, 7, 1)
+    day_b = date(2026, 8, 3)
+    detail_a = snapshot.detail_path(str(tmp_path), day_a, "500325")
+    detail_a.parent.mkdir(parents=True, exist_ok=True)
+    detail_a.write_text("{}", encoding="utf-8")
+    (tmp_path / day_b.isoformat() / snapshot.DETAIL_DIRNAME).mkdir(parents=True)
+
+    assert snapshot.latest_snapshot_day(str(tmp_path)) == day_b
+    assert snapshot.latest_detail_day(str(tmp_path)) == day_a
