@@ -36,13 +36,24 @@ def compute_cap_tiers(companies: list[tuple[str, float]]) -> dict[str, str]:
 
 
 def compute_cap_tier_for_ticker(session: Session, ticker: str) -> str | None:
-    """Convenience wrapper: rank every Company with a non-null market_cap
-    in the DB right now and return this ticker's tier, or None if it has
-    no market_cap or isn't found. Queries fresh every call -- cap_tier is
-    derived, never stored (spec §3.2)."""
+    """Convenience wrapper: rank every ``market == 'INDIA'`` Company with a
+    non-null market_cap in the DB right now and return this ticker's tier,
+    or None if it has no market_cap, isn't Indian, or isn't found. Queries
+    fresh every call -- cap_tier is derived, never stored (spec §3.2).
+
+    The pool is India-only because the AMFI-style rank cutoffs
+    (config.AMFI_LARGE_CAP_RANK_CUTOFF etc.) are an India-only construct:
+    they approximate AMFI's actual published LARGE/MID/SMALL universe,
+    which only ranks Indian-listed companies. Mixing in
+    ``market == 'GLOBAL'`` rows (curated non-Indian companies, often with
+    market caps in a different currency/scale) would shift every Indian
+    company's rank and silently misclassify them -- a foreign mega-cap
+    could bump a real Indian large-cap into MID. A GLOBAL ticker is simply
+    absent from the pool, so this returns None for it, consistent with
+    resolve_cap_tier's own "no tier for non-Indian companies" rule."""
     rows = (
         session.query(Company.ticker, Company.market_cap)
-        .filter(Company.market_cap.isnot(None))
+        .filter(Company.market == "INDIA", Company.market_cap.isnot(None))
         .all()
     )
     tiers = compute_cap_tiers([(t, c) for t, c in rows])
