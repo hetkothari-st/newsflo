@@ -550,8 +550,18 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     # Story-adaptive card-back sections (spec §5): every affected company
     # (measured or exposure-only) is offered to the model for grouping --
     # exposure rows still belong in a section, they just carry no number.
+    # Only analyzed rows are offered for grouping. A sector-inference row is
+    # deterministic fan-out (top-N-by-index-tier within a sector), so asking
+    # the model to write a story-specific section around it invites exactly
+    # the fabricated-specificity this pipeline avoids elsewhere -- and a
+    # generated section claims tickers before bucket assignment runs
+    # (app.market.ripple_layers.compute_ripple_layers), so it would also
+    # bypass the SECTOR_WIDE routing. Fan-out rows always fall through to
+    # the SECTOR_WIDE bucket at read time.
     layer_companies = []
     for ac in alert_companies:
+        if ac.basis == "sector_inference":
+            continue
         company = session.get(Company, ac.company_id)
         if company is None:
             continue

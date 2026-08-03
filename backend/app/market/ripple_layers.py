@@ -189,7 +189,16 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         .all()
     )
     if generated:
-        index_by_ticker = {rows_flat[i]["ticker"]: i for i in remaining_indices}
+        # Only analyzed rows are claimable by a generated (tier-1) layer.
+        # A sector-inference row is deterministic fan-out with no
+        # article-specific reasoning; letting a story-specific section claim
+        # it would bypass the SECTOR_WIDE routing above and reintroduce the
+        # exact misrepresentation that routing exists to prevent.
+        index_by_ticker = {
+            rows_flat[i]["ticker"]: i
+            for i in remaining_indices
+            if bucket_keys[i] != "SECTOR_WIDE"
+        }
         claimed: set[int] = set()
         for gen_layer in generated:
             row_indices = [
@@ -221,6 +230,26 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         template = template_layers_for(alert.event_type)
     if template is not None:
         assigned, unmatched = assign_to_template(template, contexts)
+        # RowContext carries no `basis`, so a template matcher keyed on
+        # sector or impact_level alone (MACRO_POLICY's "banks vs NBFCs",
+        # SUPPLY_CHAIN's "protected makers") will happily claim a
+        # deterministic fan-out row into a DIRECT-family layer -- the same
+        # misrepresentation the bucket routing above exists to prevent, one
+        # tier up. Rather than teach every matcher about basis (and reshape
+        # RowContext for it), pull fan-out rows back out of whatever they
+        # were assigned to and let them fall through to the generic buckets,
+        # where the routing already sends them to SECTOR_WIDE. Filtering
+        # `contexts` before the call is NOT an option: assigned/unmatched are
+        # indices into that list.
+        reclaimed = []
+        for layer_index, row_indices in list(assigned.items()):
+            kept = [i for i in row_indices if bucket_keys[i] != "SECTOR_WIDE"]
+            reclaimed.extend(i for i in row_indices if bucket_keys[i] == "SECTOR_WIDE")
+            if kept:
+                assigned[layer_index] = kept
+            else:
+                del assigned[layer_index]
+        unmatched = sorted(set(unmatched) | set(reclaimed))
         for layer_index, layer_def in enumerate(template):
             row_indices = assigned.get(layer_index)
             if not row_indices:

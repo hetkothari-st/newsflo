@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from app.analysis.refinement import generate_ripple_layers
 from app.market.ripple_layers import compute_ripple_layers
 from app.models import Alert, AlertCompany, AlertRippleLayer, Article, Company, MarketMove, utcnow
+from tests.test_ripple_layers import _alert_with_companies
 
 
 class _FakeToolClient:
@@ -99,3 +100,48 @@ def test_read_time_without_generated_rows_keeps_template_or_buckets(db_session):
     layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
     tickers = [r["ticker"] for layer in layers for r in layer["rows"]]
     assert sorted(tickers) == ["A.NS", "B.NS"]
+
+
+def test_template_layer_cannot_claim_a_sector_inference_row(db_session):
+    # event_type="repo_rate_change" activates the MACRO_POLICY template,
+    # whose "banks vs NBFCs" layer matches on sector alone -- so a banking
+    # fan-out row would be claimed into a DIRECT-family layer.
+    alert = _alert_with_companies(db_session, [
+        {"ticker": "HDFCBANK.NS", "sector": "banking", "basis": "direct_mention",
+         "impact_level": "direct", "direction": "bullish"},
+        {"ticker": "AXISBANK.NS", "sector": "banking", "basis": "sector_inference",
+         "impact_level": "direct", "direction": "bullish"},
+    ], event_type="repo_rate_change")
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+
+    by_ticker = {row["ticker"]: layer for layer in layers for row in layer["rows"]}
+    assert by_ticker["AXISBANK.NS"]["relationship"] == "SECTOR_WIDE"
+    # The analyzed row still gets its template layer -- this must not
+    # disable the template tier, only exclude fan-out from it.
+    assert by_ticker["HDFCBANK.NS"]["relationship"] != "SECTOR_WIDE"
+
+    tickers = [row["ticker"] for layer in layers for row in layer["rows"]]
+    assert sorted(tickers) == ["AXISBANK.NS", "HDFCBANK.NS"]
+
+
+def test_generated_layer_cannot_claim_a_sector_inference_row(db_session):
+    alert = _alert_with_companies(db_session, [
+        {"ticker": "HPCL.NS", "sector": "oil_gas", "basis": "direct_mention",
+         "impact_level": "direct", "direction": "bullish"},
+        {"ticker": "ETERNAL.NS", "sector": "fmcg", "basis": "sector_inference",
+         "impact_level": "direct", "direction": "bullish"},
+    ])
+    # A generated layer that (wrongly) tries to claim the fan-out row.
+    db_session.add(AlertRippleLayer(
+        alert_id=alert.id, position=0, title="Losers — consumer names",
+        relationship="EXPOSED", note="n",
+        tickers_json=json.dumps(["HPCL.NS", "ETERNAL.NS"]),
+    ))
+    db_session.commit()
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+
+    by_ticker = {row["ticker"]: layer for layer in layers for row in layer["rows"]}
+    assert by_ticker["HPCL.NS"]["title"] == "Losers — consumer names"
+    assert by_ticker["ETERNAL.NS"]["relationship"] == "SECTOR_WIDE"

@@ -2,17 +2,20 @@ from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, Market
 from app.market.ripple_layers import compute_ripple_layers
 
 
-def _alert_with_companies(db_session, companies):
+def _alert_with_companies(db_session, companies, event_type=None):
     """Build one Alert with one AlertCompany per dict in `companies`. Each
     dict must have at least `ticker` and `sector`; any other Company or
     AlertCompany field (e.g. `basis`, `impact_level`, `direction`) may be
-    overridden. Returns the flushed Alert. Local to this module -- kept
-    minimal on purpose, unlike `_alert_with_layers` which also wires up
+    overridden. `event_type` is optional and only needed to exercise the
+    static archetype template tier (`template_layers_for` returns None for
+    `event_type=None`, so the template tier is otherwise unreachable).
+    Returns the flushed Alert. Reused by test_generated_ripple_layers.py --
+    kept minimal on purpose, unlike `_alert_with_layers` which also wires up
     MarketMove/ImpactEdge for the layer-ordering tests above."""
     article = Article(source="test", url=f"https://example.com/{id(companies)}", title="News", content="c")
     db_session.add(article)
     db_session.commit()
-    alert = Alert(article_id=article.id, category="test")
+    alert = Alert(article_id=article.id, category="test", event_type=event_type)
     db_session.add(alert)
     db_session.flush()
     for spec in companies:
