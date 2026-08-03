@@ -1,4 +1,5 @@
 from app.analysis.schemas import CompanyMention
+from app.companies.matching import aliases
 from app.companies.resolution import resolve_companies
 from app.models import Company
 
@@ -365,3 +366,65 @@ def test_resolve_drops_indirect_entry_whose_parent_ticker_never_resolved(db_sess
     resolved = resolve_companies(db_session, [mention])
 
     assert resolved == []
+
+
+from app.companies.matching import aliases
+
+
+def test_matcher_resolves_a_name_without_a_ticker(db_session):
+    _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
+    aliases.rebuild_aliases(db_session)
+
+    resolved = resolve_companies(db_session, [_name_mention("Apollo Tyres Ltd")])
+    assert len(resolved) == 1
+
+
+def test_ambiguous_name_resolves_to_nothing(db_session):
+    _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
+    _make_company(db_session, "APOLLOHOSP.NS", "Apollo Hospitals Enterprise Limited", "pharma", None)
+    aliases.rebuild_aliases(db_session)
+
+    assert resolve_companies(db_session, [_name_mention("Apollo")]) == []
+
+
+def test_sector_fanout_ranks_by_market_cap(db_session):
+    # BIG is in the lowest index tier but is far larger. Under the old
+    # _TIER_RANK-first ordering SMALL won; market cap now leads.
+    _make_company(db_session, "BIG.NS", "Big Oil Limited", "oil_gas", 900000.0, index_tier="OTHER")
+    _make_company(db_session, "SMALL.NS", "Small Oil Limited", "oil_gas", 100.0, index_tier="NIFTY50")
+
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    assert db_session.get(Company, resolved[0]["company_id"]).ticker == "BIG.NS"
+
+
+def test_sector_fanout_still_falls_back_to_index_tier_without_caps(db_session):
+    # Guards the concurrent work in f39fd55: when no company has a market
+    # cap, nullslast() leaves every row tied and _TIER_RANK must still
+    # decide the order.
+    _make_company(db_session, "LOW.NS", "Low Tier Oil Limited", "oil_gas", None, index_tier="OTHER")
+    _make_company(db_session, "HIGH.NS", "High Tier Oil Limited", "oil_gas", None, index_tier="NIFTY50")
+
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    assert db_session.get(Company, resolved[0]["company_id"]).ticker == "HIGH.NS"
+
+
+def test_sector_fanout_excludes_non_tradeable_companies(db_session):
+    shell = _make_company(db_session, "SHELL.BO", "Dormant Shell Limited", "oil_gas", 5000000.0, index_tier="OTHER")
+    shell.tradeability = "SUSPENDED"
+    db_session.commit()
+    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
+
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
+    assert tickers == {"REAL.NS"}
+
+
+def test_sector_fanout_excludes_global_companies(db_session):
+    xom = _make_company(db_session, "XOM", "Exxon Mobil", "oil_gas", 9000000.0, index_tier="GLOBAL_LARGE_CAP")
+    xom.market = "GLOBAL"
+    db_session.commit()
+    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
+
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
+    assert tickers == {"REAL.NS"}

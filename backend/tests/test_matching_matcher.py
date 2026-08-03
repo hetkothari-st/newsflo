@@ -117,3 +117,40 @@ def test_bare_cards_mention_does_not_match_sbi_cards(universe):
     # A bare, generic word that happens to be one token of a curated trade
     # name ("SBI Cards") must not resolve on its own.
     assert matcher.resolve(universe, ticker=None, name="cards") is None
+
+
+# --- company_name fallback: covers a stale/empty/missing company_aliases
+# table (see matcher.py's module docstring for why this rung exists). Uses
+# bare db_session, not the `universe` fixture, specifically because these
+# tests must NOT call aliases.rebuild_aliases -- that's the whole point.
+
+def test_company_name_fallback_matches_when_aliases_were_never_built(db_session):
+    db_session.add(Company(
+        ticker="ZOMATO.NS", name="Zomato Limited", sector="other", index_tier="OTHER",
+    ))
+    db_session.commit()
+
+    result = matcher.resolve(db_session, ticker=None, name="Zomato Limited")
+
+    assert result is not None
+    assert result.company_id == _company_id(db_session, "ZOMATO.NS")
+    assert result.method == "company_name"
+
+
+def test_company_name_fallback_still_resolves_ambiguity_to_none(db_session):
+    db_session.add_all([
+        Company(ticker="DUP1.NS", name="Duplicate Name Limited", sector="other", index_tier="OTHER"),
+        Company(ticker="DUP2.NS", name="Duplicate Name Limited", sector="other", index_tier="OTHER"),
+    ])
+    db_session.commit()
+
+    assert matcher.resolve(db_session, ticker=None, name="Duplicate Name Limited") is None
+
+
+def test_alias_rung_wins_over_company_name_fallback_when_aliases_exist(universe):
+    # Aliases ARE built in this fixture -- the alias-exact rung must fire
+    # first, proving company_name is a genuine fallback and not a
+    # co-equal/competing rung.
+    result = matcher.resolve(universe, ticker=None, name="Apollo Tyres Limited")
+    assert result.company_id == _company_id(universe, "APOLLOTYRE.NS")
+    assert result.method == "alias"

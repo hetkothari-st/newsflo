@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     # a whole quota.
     refinement_batch_limit: int = int(os.environ.get("REFINEMENT_BATCH_LIMIT", "20"))
     refinement_interval_minutes: int = int(os.environ.get("REFINEMENT_INTERVAL_MINUTES", "5"))
+    # Gates app.companies.matching.matcher (spec §8). Set to "false" to
+    # restore the pre-rebuild substring resolver without a deploy.
+    use_alias_matcher: bool = os.environ.get("USE_ALIAS_MATCHER", "true").lower() == "true"
 
 
 settings = Settings()
