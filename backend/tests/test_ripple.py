@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.market.ripple import compute_ripple_companies, get_sector_peers_for_alert
 from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, MarketMove, utcnow
 
@@ -32,6 +34,80 @@ def test_ripple_rows_include_cap_tier_and_business_desc(db_session):
 
     assert result[0]["business_desc"] == "Makes beneficiary things."
     assert result[0]["cap_tier"] in ("LARGE", "MID", "SMALL", None)
+
+
+def test_ripple_row_cap_tier_reports_a_real_tier_when_fresh(db_session):
+    """Proves the resolve_cap_tier wire (Task 19): a fresh, ranked market
+    cap must produce a definite tier on the ripple row, not just "something
+    in this tuple or None". test_ripple_rows_include_cap_tier_and_business_
+    desc's tolerant assertion would stay green even if this wire were
+    ripped out and cap_tier hardcoded to None -- this test would not."""
+    peak = _company("PEAK.NS")
+    beneficiary = Company(
+        ticker="BEN2.NS", name="Beneficiary Co 2", sector="oil_gas", index_tier="NIFTY50",
+        market_cap=5000.0, market_cap_source="BSE", market_cap_as_of=date.today(),
+    )
+    db_session.add_all([peak, beneficiary])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id, impact_level="indirect_l1"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=beneficiary.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=2.0, sector_move_pct=0.3, excess_move_pct=1.7,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    # Peak has no market_cap of its own, so beneficiary is the only ranked
+    # company in the pool -- rank 1 -> LARGE.
+    assert result[0]["cap_tier"] == "LARGE"
+
+
+def test_ripple_row_cap_tier_withheld_when_market_cap_as_of_missing(db_session):
+    """Same setup, but the company's market_cap has no market_cap_as_of --
+    resolve_cap_tier's staleness rule (a missing as_of is stale) must
+    withhold the tier here too, proving ripple.py runs the real staleness
+    gate rather than the old compute_cap_tier_for_ticker, which never
+    checked staleness at all."""
+    peak = _company("PEAK.NS")
+    beneficiary = Company(
+        ticker="BEN3.NS", name="Beneficiary Co 3", sector="oil_gas", index_tier="NIFTY50",
+        market_cap=5000.0,  # no market_cap_as_of
+    )
+    db_session.add_all([peak, beneficiary])
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, peak.id))
+    db_session.add(_alert_company(alert.id, beneficiary.id, impact_level="indirect_l1"))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=peak.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.0, sector_move_pct=-0.5, excess_move_pct=-3.5,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=beneficiary.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=2.0, sector_move_pct=0.3, excess_move_pct=1.7,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
+
+    assert result[0]["cap_tier"] is None
 
 
 def _company(ticker, sector="oil_gas"):

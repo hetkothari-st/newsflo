@@ -29,7 +29,7 @@ from app.market.discovery import (
     compute_related_to_holdings,
     compute_unusual_activity,
 )
-from app.market.cap_tier import compute_cap_tiers
+from app.market.cap_tier import cap_tier_map
 from app.market.ripple_layers import compute_ripple_layers
 from app.market.timeline_entries import get_timeline_entries
 from app.models import Alert, AlertCompany, Company, Holding, User
@@ -143,8 +143,7 @@ def list_feed_v2_alerts(
     # feed (spec v2 §6: "Provide a cap-tier filter (All / Large / Mid /
     # Small / Micro)") without computing full layers per alert. One ranking
     # pass for the whole list, derived fresh (spec §3.2).
-    cap_rows = db.query(Company.ticker, Company.market_cap).filter(Company.market_cap.isnot(None)).all()
-    cap_tiers = compute_cap_tiers([(t, c) for t, c in cap_rows])
+    cap_tiers = cap_tier_map(db)
 
     repeated_images = repeated_image_urls(db, [a.article.image_url for a in alerts if a.article.image_url])
 

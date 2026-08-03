@@ -17,7 +17,7 @@ from app.companies.price_series import fetch_pe_ratio
 from app.i18n import get_lang
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
-from app.market.cap_tier import compute_cap_tier_for_ticker, compute_cap_tiers
+from app.market.cap_tier import cap_tier_map, resolve_cap_tier
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple import get_sector_peers_for_alert
 from app.market.ripple_layers import compute_ripple_layers
@@ -34,7 +34,7 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "ticker": company.ticker,
         "name": company.name,
         "sector": company.sector,
-        "cap_tier": compute_cap_tier_for_ticker(session, company.ticker),
+        "cap_tier": (resolved := resolve_cap_tier(session, company)) and resolved.tier,
         "business_desc": company.business_desc,
         "logo_url": logo_url(company),
         "market_cap": company.market_cap,
@@ -138,8 +138,7 @@ def get_directory(
     sector: str | None = None,
     db: Session = Depends(get_db),
 ):
-    rows = db.query(Company.ticker, Company.market_cap).filter(Company.market_cap.isnot(None)).all()
-    tiers = compute_cap_tiers([(t, c) for t, c in rows])
+    tiers = cap_tier_map(db)
 
     query = db.query(Company).filter(Company.market_cap.isnot(None))
     if sector is not None:

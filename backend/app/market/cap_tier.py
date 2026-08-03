@@ -20,8 +20,18 @@ def compute_cap_tiers(companies: list[tuple[str, float]]) -> dict[str, str]:
     cutoffs from app.config: rank 501+ (config.MICRO_CAP_RANK_CUTOFF) is
     MICRO -- NSE's published Nifty Microcap 250 index methodology (ranks
     501-750), not an invented rupee floor. Returns
-    {ticker: 'LARGE'|'MID'|'SMALL'|'MICRO'}."""
-    ranked = sorted(companies, key=lambda tc: tc[1], reverse=True)
+    {ticker: 'LARGE'|'MID'|'SMALL'|'MICRO'}.
+
+    Sort key is (cap descending, ticker ascending) -- a total order.
+    Neither caller queries its pool with an ORDER BY, so two exactly-tied
+    market caps would otherwise rank by whatever physical row order the DB
+    happens to return them in, which is stable-but-arbitrary on SQLite and
+    genuinely unstable across Postgres query plans. A tie straddling rank
+    100/250/500 could then flip a company's tier between calls (or between
+    compute_cap_tier_for_ticker and cap_tier_map, resurrecting the exact
+    disagreement the staleness-pool fix above was written to prevent).
+    Breaking ties by ticker makes the result independent of row order."""
+    ranked = sorted(companies, key=lambda tc: (-tc[1], tc[0]))
     tiers: dict[str, str] = {}
     for rank, (ticker, _cap) in enumerate(ranked, start=1):
         if rank <= config.AMFI_LARGE_CAP_RANK_CUTOFF:
