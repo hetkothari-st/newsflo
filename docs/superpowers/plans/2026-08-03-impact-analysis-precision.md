@@ -865,24 +865,60 @@ category, no layout change."
 
 ---
 
-## Task 5: Keep fan-out rows out of tier-1 generated layers
+## Task 5: Keep fan-out rows out of every claiming tier
 
-Spec Section 1, second half. `ripple_layers.py:180-200` lets LLM-generated layers claim tickers *before* bucket assignment runs, and `refinement.py:553` offers every company — fan-out included — to `generate_ripple_layers`. Without this, Task 4's routing is bypassed the moment tier 1 starts working (see Task 13).
+Spec Section 1, second half, and spec success criterion 3 ("no `sector_inference` row renders in a DIRECT-family bucket").
+
+`compute_ripple_layers` has three tiers that can claim a row, and Task 4 only fixed the third:
+
+1. **Tier 1, LLM-generated layers** (`ripple_layers.py:180-200`) claim tickers *before* bucket assignment runs, and `refinement.py:553` offers every company — fan-out included — to `generate_ripple_layers`. Task 4's routing is bypassed the moment tier 1 starts working (see Task 14).
+2. **Tier 2, the static archetype template** (`assign_to_template`) matches on `RowContext`, which carries no `basis` field at all. `_MACRO_POLICY_LAYERS`' "banks vs NBFCs" matches on `sector == "banking"` alone, and `_SUPPLY_CHAIN_LAYERS`' "protected makers" on `impact_level == "direct" and direction == "bullish"` — so a fan-out row on a `repo_rate_change`, `inflation`, `global_rates`, or `trade_policy` alert still lands in a DIRECT-family template layer. Found by the Task 4 review; the plan originally missed this tier.
+3. **Tier 3, the generic bucket loop** — fixed in Task 4.
+
+Both remaining tiers use the same predicate, and after Task 4 `bucket_keys[i] == "SECTOR_WIDE"` already identifies exactly the fan-out rows, so neither fix needs to re-derive `basis`.
+
+**Do not modify `ripple_templates.py`.** The tier-2 fix belongs in `ripple_layers.py`: `assign_to_template` returns indices into the `contexts` list, so filtering `contexts` before the call would misalign every index. Instead, call it unchanged and afterwards move any assigned index that is a fan-out row back into `unmatched`.
 
 **Files:**
 - Modify: `backend/app/analysis/refinement.py:550-568`
-- Modify: `backend/app/market/ripple_layers.py:180-200`
+- Modify: `backend/app/market/ripple_layers.py` (tier-1 claiming ~line 181, tier-2 assignment ~line 211)
 - Modify: `backend/tests/test_generated_ripple_layers.py`
+- **Do NOT modify:** `backend/app/market/ripple_templates.py`
 
 **Interfaces:**
-- Consumes: Task 4's `basis`-keyed bucket dispatch.
+- Consumes: Task 4's `basis`-keyed bucket dispatch, specifically the `bucket_keys` list it populates — `bucket_keys[i] == "SECTOR_WIDE"` is the fan-out predicate both fixes use.
 - Produces: no new symbols. Behavioural change only.
 
-- [ ] **Step 1: Write the failing test**
+**Invariant both fixes must preserve:** every affected company appears exactly once across all returned layers. Excluding a row from a claiming tier must route it onward, never drop it.
+
+- [ ] **Step 1: Write the failing tests**
 
 Append to `backend/tests/test_generated_ripple_layers.py`, reusing that file's existing fixture helpers:
 
 ```python
+def test_template_layer_cannot_claim_a_sector_inference_row(db_session):
+    # event_type="repo_rate_change" activates the MACRO_POLICY template,
+    # whose "banks vs NBFCs" layer matches on sector alone -- so a banking
+    # fan-out row would be claimed into a DIRECT-family layer.
+    alert = _alert_with_companies(db_session, [
+        {"ticker": "HDFCBANK.NS", "sector": "banking", "basis": "direct_mention",
+         "impact_level": "direct", "direction": "bullish"},
+        {"ticker": "AXISBANK.NS", "sector": "banking", "basis": "sector_inference",
+         "impact_level": "direct", "direction": "bullish"},
+    ], event_type="repo_rate_change")
+
+    layers = compute_ripple_layers(db_session, alert, held_company_ids=set())
+
+    by_ticker = {row["ticker"]: layer for layer in layers for row in layer["rows"]}
+    assert by_ticker["AXISBANK.NS"]["relationship"] == "SECTOR_WIDE"
+    # The analyzed row still gets its template layer -- this must not
+    # disable the template tier, only exclude fan-out from it.
+    assert by_ticker["HDFCBANK.NS"]["relationship"] != "SECTOR_WIDE"
+
+    tickers = [row["ticker"] for layer in layers for row in layer["rows"]]
+    assert sorted(tickers) == ["AXISBANK.NS", "HDFCBANK.NS"]
+
+
 def test_generated_layer_cannot_claim_a_sector_inference_row(db_session):
     alert = _alert_with_companies(db_session, [
         {"ticker": "HPCL.NS", "sector": "oil_gas", "basis": "direct_mention",
@@ -933,7 +969,43 @@ with:
         }
 ```
 
-- [ ] **Step 4: Stop offering fan-out rows to the generator**
+- [ ] **Step 4: Exclude fan-out rows from template claiming**
+
+In `backend/app/market/ripple_layers.py`, replace:
+
+```python
+    if template is not None:
+        assigned, unmatched = assign_to_template(template, contexts)
+```
+
+with:
+
+```python
+    if template is not None:
+        assigned, unmatched = assign_to_template(template, contexts)
+        # RowContext carries no `basis`, so a template matcher keyed on
+        # sector or impact_level alone (MACRO_POLICY's "banks vs NBFCs",
+        # SUPPLY_CHAIN's "protected makers") will happily claim a
+        # deterministic fan-out row into a DIRECT-family layer -- the same
+        # misrepresentation the bucket routing above exists to prevent, one
+        # tier up. Rather than teach every matcher about basis (and reshape
+        # RowContext for it), pull fan-out rows back out of whatever they
+        # were assigned to and let them fall through to the generic buckets,
+        # where the routing already sends them to SECTOR_WIDE. Filtering
+        # `contexts` before the call is NOT an option: assigned/unmatched are
+        # indices into that list.
+        reclaimed = []
+        for layer_index, row_indices in list(assigned.items()):
+            kept = [i for i in row_indices if bucket_keys[i] != "SECTOR_WIDE"]
+            reclaimed.extend(i for i in row_indices if bucket_keys[i] == "SECTOR_WIDE")
+            if kept:
+                assigned[layer_index] = kept
+            else:
+                del assigned[layer_index]
+        unmatched = sorted(set(unmatched) | set(reclaimed))
+```
+
+- [ ] **Step 5: Stop offering fan-out rows to the generator**
 
 In `backend/app/analysis/refinement.py`, replace lines 553-562:
 
@@ -975,24 +1047,33 @@ with:
         })
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `python -m pytest tests/test_generated_ripple_layers.py tests/test_ripple_layers.py tests/test_refinement.py -v`
+Run: `python -m pytest tests/test_generated_ripple_layers.py tests/test_ripple_layers.py tests/test_refinement.py tests/test_ripple_templates.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Run the full suite and commit**
+- [ ] **Step 7: Run the full suite and commit**
 
 Run: `python -m pytest`
 Expected: PASS
 
 ```bash
 git add backend/app/market/ripple_layers.py backend/app/analysis/refinement.py backend/tests/test_generated_ripple_layers.py
-git commit -m "fix: tier-1 generated layers can no longer claim fan-out rows
+git commit -m "fix: no claiming tier can take a fan-out row into a DIRECT-family layer
 
-Generated layers claim tickers before bucket assignment, and refine_alert
-offered every company to generate_ripple_layers -- so a story-specific
-section could sort a sector-inference row into itself and bypass the
-SECTOR_WIDE routing entirely. Both ends closed."
+compute_ripple_layers has three tiers that claim rows and the bucket routing
+only governed the third. Generated layers claim tickers before bucket
+assignment, and refine_alert offered every company to
+generate_ripple_layers. The static archetype template matches on RowContext,
+which carries no basis at all -- MACRO_POLICY's 'banks vs NBFCs' matches on
+sector alone, so a banking fan-out row landed in a DIRECT-family layer on any
+rate or inflation alert.
+
+Fan-out rows are now excluded from tier-1 claiming and pulled back out of
+tier-2 assignment, falling through to the generic buckets that already route
+them to SECTOR_WIDE. ripple_templates.py is deliberately untouched: assigned/
+unmatched are indices into contexts, so filtering before the call would
+misalign them."
 ```
 
 ---
