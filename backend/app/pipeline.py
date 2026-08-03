@@ -373,8 +373,19 @@ def _persist_alert(
     moves_by_company_id = {m.company_id: m for m in market_moves}
     for alert_company in alert_companies:
         move = moves_by_company_id.get(alert_company.company_id)
-        if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
-            alert_company.direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+        if move is None or move.measurement_status != "ok" or move.excess_move_pct is None:
+            continue
+        measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+        if measured_direction != alert_company.direction:
+            # The rationale and key_points argue for the direction the LLM
+            # predicted, which the measured reaction has just contradicted.
+            # Leaving them produces a bearish badge above bullish prose for
+            # the same company. Drop the text rather than keep an argument
+            # for a call that no longer stands -- refine_alert generates a
+            # fresh, measurement-aware `why` for this company below.
+            alert_company.rationale = None
+            alert_company.key_points_json = json.dumps([])
+        alert_company.direction = measured_direction
 
     if client is not None:
         try:

@@ -15,7 +15,7 @@ from app.models import (
     ImpactEdge,
     User,
 )
-from app.pipeline import _persist_alert, process_new_articles
+from app.pipeline import _persist_alert, decode_key_points, process_new_articles
 
 
 def _article(session):
@@ -1195,3 +1195,64 @@ def test_entries_at_the_confidence_floor_are_persisted(db_session, monkeypatch):
     }])
 
     assert len(alert.companies) == 1
+
+
+def _stub_measurement(monkeypatch, excess_move_pct):
+    """Monkeypatch app.pipeline.measure_company_move to return an "ok"
+    MarketMove with the given excess_move_pct, for any company passed in.
+    Mirrors the inline fake_measure pattern used by
+    test_process_new_articles_reconciles_direction_to_measured_move above
+    and by test_market_move_wiring.py."""
+    from app.models import MarketMove, utcnow
+
+    def fake_measure(session, company_obj):
+        return MarketMove(
+            company_id=company_obj.id, benchmark_ticker="^NSEI",
+            measurement_status="ok", excess_move_pct=excess_move_pct, measured_at=utcnow(),
+        )
+
+    monkeypatch.setattr(pipeline_module, "measure_company_move", fake_measure)
+
+
+def test_a_flipped_direction_clears_the_stale_rationale(db_session, monkeypatch):
+    # The LLM called bullish; the measured move came back negative. The
+    # rationale argues the bullish case and must not survive under a bearish
+    # badge.
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    _stub_measurement(monkeypatch, excess_move_pct=-3.1)
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "This is clearly good news for the company.",
+        "key_points": ["good news"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }])
+
+    ac = alert.companies[0]
+    assert ac.direction == "bearish"
+    assert ac.rationale is None
+    assert decode_key_points(ac) == []
+
+
+def test_a_confirmed_direction_keeps_its_rationale(db_session, monkeypatch):
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    _stub_measurement(monkeypatch, excess_move_pct=2.4)
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "This is clearly good news for the company.",
+        "key_points": ["good news"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }])
+
+    assert alert.companies[0].rationale == "This is clearly good news for the company."
