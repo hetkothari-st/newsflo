@@ -39,7 +39,7 @@ def test_full_pipeline_from_rss_entry_to_alert(db_session, monkeypatch):
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -104,7 +104,7 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -171,7 +171,7 @@ def test_full_pipeline_notifies_holder_end_to_end(db_session, monkeypatch):
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -241,7 +241,7 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1

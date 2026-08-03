@@ -50,7 +50,7 @@ def test_pipeline_broadcasts_new_alert_to_connected_client(db_session, monkeypat
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     # Entering the TestClient context runs startup (captures manager.loop);
     # the nested websocket_connect registers a live client.

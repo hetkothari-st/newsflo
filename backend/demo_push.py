@@ -34,7 +34,7 @@ def _seed_company() -> None:
         session.close()
 
 
-def _fake_analysis(client, title, content):
+def _fake_analysis(client, title, content, session=None):
     return AnalysisOutput(
         category="oil_energy",
         companies=[CompanyMention(

@@ -38,6 +38,7 @@ from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
+from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -421,13 +422,22 @@ _COMPANY_ITEM_REQUIRED = [
 ]
 
 
-def build_company_tool(parent_tickers: list[str] | None) -> dict:
+def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str] | None = None) -> dict:
     """parent_tickers=None builds the direct/primary-stage tool (stage 3, no
     parent_ticker field). A non-empty list builds a cascade-stage tool
     (stages 5/7), adding a parent_ticker field enum-constrained to
-    parent_tickers so the model cannot invent a nonexistent parent."""
+    parent_tickers so the model cannot invent a nonexistent parent.
+
+    valid_tickers, when given, enum-constrains `ticker` to companies that
+    actually exist in the database (see app.companies.candidates) -- the
+    model selects from real rows instead of recalling a symbol. Left
+    unconstrained (nullable string) when None, preserving the ungrounded
+    behavior for callers with no DB session.
+    """
     properties = dict(_COMPANY_ITEM_PROPERTIES)
     required = list(_COMPANY_ITEM_REQUIRED)
+    if valid_tickers:
+        properties["ticker"] = {"type": "string", "enum": valid_tickers}
     if parent_tickers:
         properties["parent_ticker"] = {"type": "string", "enum": parent_tickers}
         required.append("parent_ticker")
@@ -464,7 +474,7 @@ def build_company_tool(parent_tickers: list[str] | None) -> dict:
 
 def _identify_companies(
     client, facts: str, sectors: list[SectorFinding], impact_level: str,
-    parent_pool: list[CompanyMention] | None,
+    parent_pool: list[CompanyMention] | None, session=None,
 ) -> list[CompanyMention]:
     """sectors: the sector(s) to find companies within (from a prior
     _identify_sectors call). impact_level: stamped onto every returned
@@ -563,6 +573,24 @@ def _identify_companies(
         )
         parent_context = f"\n\nMust chain from one of these companies:\n{parent_lines}"
 
+    # Grounding (see app.companies.candidates): give the model the real
+    # companies in these sectors so it selects rather than recalls. session
+    # is None for callers with no DB (older tests) -- those stay ungrounded.
+    valid_tickers: list[str] | None = None
+    candidate_block = ""
+    if session is not None:
+        candidates = candidate_companies(session, [s.sector for s in sectors])
+        if candidates:
+            valid_tickers = candidate_tickers(candidates)
+            candidate_block = (
+                "\n\nCANDIDATE COMPANIES -- choose ONLY from this list. These are "
+                "the real, tradeable companies in the sectors above, with what "
+                "each actually does. A company not in this list cannot be "
+                "recorded, so do not name one. Selecting NONE of them for a "
+                "sector is a correct answer when none genuinely fits.\n"
+                + format_candidates(candidates)
+            )
+
     rationale_instructions = COMPANY_RATIONALE_INSTRUCTIONS if parent_pool is None else CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -572,12 +600,13 @@ def _identify_companies(
                 f"{framing}\n\n"
                 f"Facts: {facts}\n\n"
                 f"Sectors:\n{sector_lines}"
-                f"{parent_context}\n\n"
+                f"{parent_context}"
+                f"{candidate_block}\n\n"
                 f"{rationale_instructions}"
             ),
         },
     ]
-    tool = build_company_tool(parent_tickers if parent_tickers else None)
+    tool = build_company_tool(parent_tickers if parent_tickers else None, valid_tickers=valid_tickers)
 
     def _call(model: str):
         return client.chat.completions.create(
@@ -611,7 +640,8 @@ def _identify_companies(
             f"{framing}\n\n"
             f"Facts: {facts}\n\n"
             f"Sectors:\n{sector_lines}"
-            f"{parent_context}\n\n"
+            f"{parent_context}"
+            f"{candidate_block}\n\n"
             f"{CASCADE_COMPANY_RATIONALE_INSTRUCTIONS}"
         )
         try:
@@ -626,10 +656,23 @@ def _identify_companies(
         raise ValueError("No record_sector_companies tool_use block")
     arguments = json.loads(tool_call.function.arguments)
 
+    # Provider-side enum enforcement is not reliable for nested array items
+    # (see the SECTORS filter at the end of _identify_sectors for the same
+    # failure mode confirmed in production). When grounding is active, drop
+    # any ticker outside the candidate list rather than letting an invented
+    # symbol through to resolution.
+    allowed = set(valid_tickers) if valid_tickers else None
+
     mentions: list[CompanyMention] = []
     for group in arguments.get("sector_companies", []):
         sector = group.get("sector")
         for company in group.get("companies", []):
+            if allowed is not None and company.get("ticker") not in allowed:
+                logger.warning(
+                    "dropping off-candidate ticker %r (%r) from grounded company stage",
+                    company.get("ticker"), company.get("name"),
+                )
+                continue
             mentions.append(CompanyMention(
                 name=company["name"], ticker=company.get("ticker"), is_direct=True,
                 sector=sector, direction=company["direction"],
@@ -646,6 +689,7 @@ def _identify_companies(
 
 def _identify_cascade_companies_per_sector(
     client, facts: str, sectors: list[SectorFinding], impact_level: str, parent_pool: list[CompanyMention],
+    session=None,
 ) -> tuple[list[CompanyMention], list[dict]]:
     """Calls _identify_companies ONCE PER SECTOR rather than bundling every
     cascade sector into one call. Confirmed in production: bundling 5-7
@@ -673,7 +717,10 @@ def _identify_cascade_companies_per_sector(
         succeeded = False
         for attempt in range(2):  # try once, retry once
             try:
-                mentions.extend(_identify_companies(client, facts, [sector], impact_level=impact_level, parent_pool=parent_pool))
+                mentions.extend(_identify_companies(
+                    client, facts, [sector], impact_level=impact_level,
+                    parent_pool=parent_pool, session=session,
+                ))
                 succeeded = True
                 break
             except Exception as exc:
@@ -954,7 +1001,7 @@ def _sector_fanout_mentions(
     ]
 
 
-def analyze_article(client, title: str, content: str) -> AnalysisOutput:
+def analyze_article(client, title: str, content: str, session=None) -> AnalysisOutput:
     """Runs the sector-cascade chain (see module docstring for why the call
     count now scales with cascade sector count) and composes the result into the
     same AnalysisOutput shape app.pipeline.py already consumes. Failure
@@ -986,7 +1033,8 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
 
     try:
         primary_companies = _identify_companies(
-            client, facts_result.facts, primary_sectors, impact_level="direct", parent_pool=None,
+            client, facts_result.facts, primary_sectors, impact_level="direct",
+            parent_pool=None, session=session,
         )
     except Exception as exc:
         logger.warning("cascade stage 3 (primary companies) failed, truncating: %s", exc)
@@ -1006,7 +1054,7 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         if l1_sectors:
             l1_companies, l1_gaps = _identify_cascade_companies_per_sector(
                 client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
-                parent_pool=l1_parent_tickers_present,
+                parent_pool=l1_parent_tickers_present, session=session,
             )
         else:
             l1_companies, l1_gaps = [], []
@@ -1028,7 +1076,7 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             if l2_sectors:
                 l2_companies, l2_gaps = _identify_cascade_companies_per_sector(
                     client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
-                    parent_pool=l2_parent_tickers_present,
+                    parent_pool=l2_parent_tickers_present, session=session,
                 )
             else:
                 l2_companies, l2_gaps = [], []

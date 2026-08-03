@@ -40,7 +40,7 @@ def test_process_new_articles_populates_summary_and_why_when_measured(db_session
     db_session.add(company)
     db_session.commit()
     article = _article(db_session)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: _fake_analysis())
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: _fake_analysis())
 
     def fake_measure(session, company_obj):
         from app.models import utcnow

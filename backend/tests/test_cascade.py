@@ -9,6 +9,7 @@ from app.analysis.cascade import (
     build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
+from app.models import Company
 from app.reasoning.rulebook import CHAINS
 
 
@@ -949,3 +950,81 @@ def test_generate_edges_missing_verification_for_one_index_kept_unverified_not_d
     missing = [e for e in edges if "[UNVERIFIED" in e["note"]]
     assert len(missing) == 1
     assert missing[0]["from"] == proposed[1]["from"]
+
+
+def test_company_tool_enum_constrains_ticker_to_candidates():
+    tool = build_company_tool(None, valid_tickers=["HPCL.NS", "BPCL.NS"])
+    ticker_schema = (
+        tool["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert ticker_schema["enum"] == ["HPCL.NS", "BPCL.NS"]
+
+
+def test_company_tool_leaves_ticker_unconstrained_without_candidates():
+    tool = build_company_tool(None)
+    ticker_schema = (
+        tool["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert "enum" not in ticker_schema
+
+
+def test_identify_companies_injects_candidates_into_the_prompt(db_session):
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas",
+        index_tier="NIFTY50", business_desc="Refines crude oil.",
+    ))
+    db_session.commit()
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+    _identify_companies(
+        client, facts="facts", sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    prompt = client.last_messages[1]["content"]
+    assert "HPCL.NS" in prompt
+    assert "Refines crude oil." in prompt
+
+
+def test_identify_companies_drops_a_ticker_outside_the_candidate_list(db_session):
+    # Provider enums are not reliably enforced for nested array items
+    # (cascade.py:282) -- the defensive post-filter must catch this rather
+    # than let an invented ticker through to resolution.
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": [{
+        "sector": "oil_gas",
+        "companies": [
+            _full_company("Hindustan Petroleum", "HPCL.NS"),
+            _full_company("Invented Ltd.", "INVENTED.NS"),
+        ],
+    }]}})
+
+    mentions = _identify_companies(
+        client, facts="facts", sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    assert [m.ticker for m in mentions] == ["HPCL.NS"]
+
+
+def test_identify_companies_without_a_session_stays_ungrounded(db_session):
+    # db_session is seeded with nothing and passed nowhere here -- proves a
+    # caller that omits `session` entirely (the default) gets the exact old,
+    # unconstrained behavior even though a DB is available in-process.
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": [{
+        "sector": "oil_gas",
+        "companies": [_full_company("Anything Ltd.", "ANY.NS")],
+    }]}})
+
+    mentions = _identify_companies(
+        client, facts="facts", sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None,
+    )
+
+    assert [m.ticker for m in mentions] == ["ANY.NS"]

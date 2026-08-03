@@ -49,7 +49,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -102,7 +102,7 @@ def test_process_new_articles_reconciles_direction_to_measured_move(db_session, 
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     # The LLM guessed "bullish" before the market had reacted. The real,
     # measured move went the other way -- persisted direction must defer
@@ -143,7 +143,7 @@ def test_process_new_articles_keeps_llm_direction_when_unmeasured(db_session, mo
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     # measure_company_move stays on conftest's autouse "no_data" stub.
 
     created = process_new_articles(db_session, claude_client=object())
@@ -176,7 +176,7 @@ def test_process_new_articles_uses_full_content_over_summary_when_available(db_s
         )],
     )
     captured = {}
-    def fake_analyze(client, title, content):
+    def fake_analyze(client, title, content, session=None):
         captured["content"] = content
         return fake_output
     monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
@@ -231,7 +231,7 @@ def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_se
             time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -270,7 +270,7 @@ def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_s
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -308,7 +308,7 @@ def test_process_new_articles_sends_email_notification_for_holder(db_session, mo
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -325,7 +325,7 @@ def test_process_new_articles_marks_analysis_failed_after_retries(db_session, mo
     db_session.add(article)
     db_session.commit()
 
-    def boom(client, title, content):
+    def boom(client, title, content, session=None):
         raise RuntimeError("api down")
 
     monkeypatch.setattr(pipeline_module, "analyze_article", boom)
@@ -369,7 +369,7 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
     )
     call_count = {"n": 0}
 
-    def counting_analyze(client, title, content):
+    def counting_analyze(client, title, content, session=None):
         call_count["n"] += 1
         return fake_output
 
@@ -417,7 +417,7 @@ def test_process_new_articles_sets_image_url_from_og_image_fetch(db_session, mon
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "fetch_og_image", lambda url: "https://example.com/img.jpg")
 
     created = process_new_articles(db_session, claude_client=object())
@@ -439,7 +439,7 @@ def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch)
         session.commit()
 
     monkeypatch.setattr(pipeline_module, "filter_new_articles", fake_filter)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: (_ for _ in ()).throw(AssertionError("should not be called")))
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -541,7 +541,7 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
             key_points=[], confidence_score=55, time_horizon="Medium-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 
@@ -580,7 +580,7 @@ def test_process_new_articles_persists_evidence_discipline_fields(db_session, mo
             alternative_hypothesis="Already priced in.",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -618,7 +618,7 @@ def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, mon
             reasons=["Refining margins widen."], evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 2
@@ -657,7 +657,7 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
             evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(
         pipeline_module, "get_or_fetch_financial_snapshot",
         lambda session, ticker: {"price": 2500.0, "return_1m": -12.0, "return_3m": -20.0},
@@ -695,7 +695,7 @@ def test_process_new_articles_no_contradiction_when_snapshot_unavailable(db_sess
             time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
 
     created = process_new_articles(db_session, claude_client=object())
@@ -744,7 +744,7 @@ def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confid
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
 
     created = process_new_articles(db_session, claude_client=object())
@@ -794,7 +794,7 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
     assert process_new_articles(db_session, claude_client=object()) == 1
 
@@ -802,7 +802,7 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     newer_article = Article(source="test", url="https://example.com/indirect-b", title="Chip export ban announced")
     db_session.add(newer_article)
     db_session.commit()
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: (_ for _ in ()).throw(AssertionError("should not be called")))
     assert process_new_articles(db_session, claude_client=object()) == 1
 
     reused_indirect = (
@@ -845,7 +845,7 @@ def test_process_new_articles_cache_hit_skips_llm_call_and_throttle_sleep(db_ses
     pipeline_module.store_analysis_cache(db_session, article, cached_output)
     db_session.commit()
 
-    def fail_if_called(client, title, content):
+    def fail_if_called(client, title, content, session=None):
         raise AssertionError("analyze_article must not be called on a cache hit")
     monkeypatch.setattr(pipeline_module, "analyze_article", fail_if_called)
 
@@ -899,7 +899,7 @@ def test_process_new_articles_analysis_cache_deterministic(db_session, monkeypat
         AnalysisOutput(category="other", companies=[]),  # DIFFERENT output -- must never be reached
     ]
 
-    def fake_analyze(client, title, content):
+    def fake_analyze(client, title, content, session=None):
         result = outputs[call_count["n"]]
         call_count["n"] += 1
         return result
@@ -1075,7 +1075,7 @@ def test_process_new_articles_persists_edges_from_analysis(db_session, monkeypat
             "relation": "demand", "direction": "bullish", "note": "n", "source": "llm_only",
         }],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 

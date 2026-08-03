@@ -488,7 +488,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         if analysis is None:
             for attempt in range(2):  # try once, retry once
                 try:
-                    analysis = analyze_article(claude_client, article.title, article_text(article))
+                    analysis = analyze_article(claude_client, article.title, article_text(article), session=session)
                     break
                 except Exception:
                     # Logged, not swallowed silently -- a burst of
