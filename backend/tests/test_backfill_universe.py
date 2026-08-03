@@ -421,3 +421,40 @@ def test_merge_leaves_no_orphans_across_all_fk_columns(db_session):
     assert db_session.query(MarketMove).filter_by(company_id=phantom_id).count() == 0
     assert db_session.query(Holding).filter_by(company_id=phantom_id).count() == 0
     assert db_session.query(UserWatchlistCompany).filter_by(company_id=phantom_id).count() == 0
+
+
+def test_curated_global_companies_are_marked(db_session):
+    db_session.add(Company(
+        ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP",
+    ))
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance Industries Limited", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE002A01018",
+    ))
+    db_session.commit()
+
+    marked = backfill_universe.mark_global_companies(db_session)
+    assert marked == 1
+    assert db_session.query(Company).filter_by(ticker="AAPL").one().market == "GLOBAL"
+    assert db_session.query(Company).filter_by(ticker="RELIANCE.NS").one().market == "INDIA"
+
+
+def test_isin_invariant_reports_indian_companies_without_isin(db_session):
+    db_session.add(Company(
+        ticker="NOISIN.NS", name="No Isin Ltd", sector="other", index_tier="OTHER",
+    ))
+    db_session.add(Company(
+        ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market="GLOBAL",
+    ))
+    db_session.commit()
+
+    assert backfill_universe.validate_isin_invariant(db_session) == ["NOISIN.NS"]
+
+
+def test_isin_invariant_passes_on_a_clean_universe(db_session):
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance Industries Limited", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE002A01018",
+    ))
+    db_session.commit()
+    assert backfill_universe.validate_isin_invariant(db_session) == []

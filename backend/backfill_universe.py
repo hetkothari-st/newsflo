@@ -24,6 +24,7 @@ by folding the phantom into the canonical company and deleting it.
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from app.companies.global_seed import GLOBAL_COMPANIES
 from app.companies.matching import aliases
 from app.companies.universe import loader, normalize, snapshot
 from app.db import SessionLocal
@@ -276,6 +277,38 @@ def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[
     return report
 
 
+def mark_global_companies(session: Session) -> int:
+    """Set market='GLOBAL' on the curated non-Indian list. These rows have
+    no ISIN, no listings, and never receive a cap tier -- AMFI ranking is
+    India-only and inventing a global scale would be exactly the kind of
+    unsourced number this design rejects."""
+    global_tickers = {entry["ticker"] for entry in GLOBAL_COMPANIES}
+    marked = 0
+    for company in session.query(Company).filter(Company.ticker.in_(global_tickers)).all():
+        if company.market != "GLOBAL":
+            company.market = "GLOBAL"
+            marked += 1
+    session.commit()
+    return marked
+
+
+def validate_isin_invariant(session: Session) -> list[str]:
+    """Every market='INDIA' company must carry an ISIN.
+
+    Spec §5.1 called for a CHECK constraint. SQLite cannot add one via
+    ALTER TABLE (there is no Alembic in this project -- see app/db.py), so
+    the invariant is enforced here and asserted in the test suite instead.
+    Returns the offending tickers; an empty list means the universe is
+    clean.
+    """
+    return [
+        ticker for ticker, in session.query(Company.ticker)
+        .filter(Company.market == "INDIA")
+        .filter((Company.isin.is_(None)) | (Company.isin == ""))
+        .all()
+    ]
+
+
 def main() -> None:
     root = snapshot.DEFAULT_ROOT
     day = snapshot.latest_snapshot_day(root)
@@ -296,6 +329,7 @@ def main() -> None:
     session = SessionLocal()
     try:
         print("corrections:", apply_ticker_corrections(session))
+        print("globals marked:", mark_global_companies(session))
         # Runs AFTER corrections (which will skip both, since the canonical
         # tickers already exist) and BEFORE the upsert, so the phantom rows
         # are gone before aliases are rebuilt for them.
@@ -318,6 +352,10 @@ def main() -> None:
         }
         print("flagged missing:", flag_missing_tickers(session, known))
         print("aliases:", aliases.rebuild_aliases(session))
+
+        offenders = validate_isin_invariant(session)
+        if offenders:
+            print(f"WARNING: {len(offenders)} Indian companies still lack an ISIN: {offenders[:10]}")
     finally:
         session.close()
 
