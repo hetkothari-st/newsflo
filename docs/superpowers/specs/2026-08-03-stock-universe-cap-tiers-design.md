@@ -400,10 +400,14 @@ Each step is independently reversible. Steps 1-3 are safe to ship before 4-6 exi
 `app/outcomes/price_fetcher.py`, and all frontend references continue to work
 untouched.
 
-**Open verification item:** Yahoo Finance's symbol format for obscure BSE-only scrips
-is inconsistent (`RELIANCE.BO` versus numeric `539448.BO`). The plan includes a
-verification step. BSE-only companies with no resolvable Yahoo handle keep their BSE
-market cap and simply have no price series.
+**Verification item — RESOLVED 2026-08-03 against live Yahoo.** The question was whether
+BSE-only scrips take `scrip_id.BO` or the numeric `scrip_code.BO`. Probed five BSE-only
+companies both ways: `scrip_id.BO` returned a full 5-day series for all five, while the
+numeric form returned **zero** bars for the two most recently listed (NSDL 544467,
+SELECTRIC 544786) and only 4 of 5 bars for the rest. `scrip_id.BO` is correct and is what
+the loader derives. Note this contradicts the numeric form used in
+`app/companies/kite_instruments.py` and `tests/test_companies_api.py`, which happens to
+work for those particular older scrips but is not the general rule.
 
 ## 10. Error handling
 
@@ -437,7 +441,7 @@ No test contacts NSE, BSE, or AMFI. That is the purpose of the two-stage split.
 |---|---|
 | AMFI file location unknown | Timeboxed spike; derived-only fallback already designed in |
 | BSE endpoints are undocumented and may change or rate-limit | Two-stage split fails loudly at stage 1; resumable fetch; daily masters are only 2 requests |
-| Yahoo symbol format for BSE-only scrips | Verification step in the plan; degrades to no price series |
+| ~~Yahoo symbol format for BSE-only scrips~~ | **Resolved 2026-08-03**: `scrip_id.BO` verified against live Yahoo on five BSE-only companies; the numeric form fails on recent listings. See §9.1 |
 | ~5,000 per-scrip detail calls | Monthly cadence, throttled, resumable, on-demand for new ISINs only |
 | Displayed cap tiers will change for existing companies | Intended; called out in §7.1 so it is not mistaken for a regression |
 
