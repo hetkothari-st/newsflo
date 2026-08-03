@@ -3417,11 +3417,17 @@ Run: `python score_golden.py`
 
 Write the numbers down. This is the "before" figure for alert 9020 — with the migration applied but no reanalysis yet, forbidden companies should still be present because the fan-out rows are still persisted (they moved buckets, they did not disappear).
 
-- [ ] **Step 3: Check the reanalysis script's window support**
+- [ ] **Step 3: Fix and check the reanalysis script**
 
 Run: `cat reanalyze_cascade.py`
 
-Confirm it can be limited to a date window and that it clears the analysis cache (`clear_analysis_cache`) — otherwise `get_cached_analysis` returns the old, pre-fix result and nothing changes. If either is missing, add a `--days N` argument and force cache clearing.
+Three things must hold, and at least one is known broken:
+
+1. **It must pass a session to `analyze_article`.** Task 8 made grounding conditional on a `session` argument, and deliberately left this script alone — so as written it reanalyzes **ungrounded**, with no candidate list and no ticker enum. That defeats the entire point of this step: the reanalysis would reproduce the old behavior and Step 5 would still show forbidden companies. Add `session=session` at its `analyze_article` call site. Verify the same for `reanalyze_recent.py` if you use it.
+2. It must build the same `anchor_sub_sectors` map that `pipeline.py::process_new_articles` builds before calling `resolve_companies`, or the fan-out will not be sub-sector anchored. Reuse that logic rather than duplicating it — if it is not already extractable, lift it into a small helper in `app/pipeline.py` and call it from both.
+3. It must be limitable to a date window and must clear the analysis cache (`clear_analysis_cache`) — otherwise `get_cached_analysis` returns the old, pre-fix result and nothing changes. If either is missing, add a `--days N` argument and force cache clearing.
+
+This is a code change with a test, not just a check. Add a test asserting the script's reanalysis path passes a non-None session through to `analyze_article`.
 
 - [ ] **Step 4: Reanalyze the last 7 days**
 
