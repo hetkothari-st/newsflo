@@ -131,6 +131,26 @@ Contributing but lower-impact: `filtering/relevance.py::classify_relevance`
 fails open (`except: return True`), and its prompt admits any "nameable
 mechanism, even indirect."
 
+### Adjacent problems found while diagnosing
+
+Not causes of the Eternal bug, but confirmed live and worth recording.
+
+**61% of alerts show zero companies.** 376 of 607 alerts have no
+`alert_companies` row at all. The recall problem is larger than the precision
+problem. Section 2's grounding addresses both: a model given a real candidate
+list names companies where it currently returns nothing.
+
+**Tier 1 of the card-back sectioning has never fired.** `alert_ripple_layers`
+contains zero rows across all 607 alerts, so `generate_ripple_layers` has
+never persisted a result. The locked three-tier sectioning (LLM-adaptive →
+archetype template → per-sector split) is running on tiers 2 and 3 only, and
+the story-adaptive sections are silently absent from every card. Root cause
+not yet diagnosed.
+
+**Demo/seed data is live in the `companies` table.** `SOMETEXTILE.NS`
+("Demo Textiles Ltd") is resolvable and was injected into real alerts by the
+sector fan-out.
+
 ## Decisions
 
 Three decisions were made before this design, and they constrain everything
@@ -175,6 +195,15 @@ No API calls. Immediate.
 
 1. `ripple_layers.py:127` — dispatch the bucket on `basis`, not
    `impact_level`. `sector_inference` routes to `SECTOR_WIDE`.
+
+   This is not sufficient on its own. `ripple_layers.py:180-200` lets
+   LLM-generated layers (tier 1) claim tickers *before* bucket assignment
+   runs, and `refinement.py:553` offers every company — fan-out included — to
+   `generate_ripple_layers`. A generated section can therefore sort a fan-out
+   company into a story-specific section and bypass this routing entirely.
+   Fix both ends: offer only `direct_mention` rows to `generate_ripple_layers`,
+   and exclude `sector_inference` rows from generated-layer claiming so they
+   always fall through to `SECTOR_WIDE`.
 2. Sector-inference rows persist `rationale = None` rather than the template
    string. `is_exposure_only` already renders such rows without a number or
    score.
@@ -292,10 +321,49 @@ false positives.
 
 ## Known consequences
 
-Section 4's narrowing (and, to a much smaller degree, Section 1's floor) will
-visibly thin some alerts, including within the `SECTOR_WIDE` band. This is the
-accepted trade of the chosen output shape. The thinning will be felt before
+Measured against production data, the narrowing does not thin the typical
+alert — it deflates a bloated minority.
+
+```
+companies per alert now:   median 1   mean 3.8   p90 10   max 35
+alerts with zero fan-out:  182 of 231 non-empty alerts
+projected after Section 4: median 1   mean 2.8   p90  6   max 21
+```
+
+Fan-out is concentrated, not spread: 182 of the 231 non-empty alerts have none
+at all, so the median alert is unchanged and the reduction lands on exactly
+the alerts carrying the errors.
+
+Worked example — alert 9020 (29 companies today):
+
+- **Remain DIRECT (analyzed):** HPCL, BPCL, IndiGo, Asian Paints, HUL — each
+  defensible on a crude shock (jet fuel, crude-derived paint inputs,
+  packaging).
+- **Move to SECTOR_WIDE:** Coal India, ONGC, Reliance, GAIL, ITC, Nestlé —
+  genuine sector exposure, now labelled as exposure rather than analysis.
+- **Dropped:** Eternal (sub-sector targeting selects `staples_food`, not
+  `personal_care`), plus the whole L1/L2 fan-out — Bajaj Auto, Maruti, Eicher,
+  M&M, Tata Motors, HDFC Bank, Axis, Bajaj Finance, NTPC, PowerGrid,
+  UltraTech.
+
+29 → roughly 12, each defensible.
+
+The `SECTOR_WIDE` band will still visibly thin on some alerts. That is the
+accepted trade of the chosen output shape, and it will be felt before
 Section 2 lands and begins adding *correct* companies back.
+
+## Category and layout preservation
+
+No category is added, removed, or renamed. Explicitly preserved:
+
+- The three-tier card-back sectioning: LLM-adaptive generated layers →
+  static archetype template → per-sector split. All three tiers retained.
+- All seven `_LAYER_ORDER` relationships, in existing order.
+- The multi-sector DIRECT split into per-sector sections.
+- `impact_level` values `direct` / `indirect_l1` / `indirect_l2`.
+
+The only display change is which existing bucket a fan-out row lands in:
+`SECTOR_WIDE` rather than `DIRECT`.
 
 `indirect_l1` (25 rows) and `indirect_l2` (10 rows) across 607 alerts are
 already almost entirely fan-out padding rather than real ripple reasoning.
