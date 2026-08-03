@@ -105,3 +105,44 @@ def test_listing_carries_source_and_as_of():
     for listing in record["listings"]:
         assert listing["as_of"] == AS_OF
         assert listing["source"] in ("NSE", "BSE")
+
+
+def test_numeric_scrip_cd_and_mktcap_still_produce_cap_and_classification():
+    """BSE's JSON does not guarantee SCRIP_CD/Mktcap come back as strings.
+    Built inline (not in the fixture files) to isolate this from the fixed
+    dataset the other assertions rely on."""
+    bse_json = json.dumps([{
+        "SCRIP_CD": 590002, "Scrip_Name": "Numeric Co Ltd", "Status": "Active",
+        "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE555Z01015",
+        "INDUSTRY": None, "scrip_id": "NUMCO", "Segment": "Equity",
+        "Issuer_Name": "Numeric Co Limited", "Mktcap": 999.5,
+    }])
+    detail_json = json.dumps({
+        "SecurityId": "NUMCO", "SecurityCode": "590002", "ISIN": "INE555Z01015",
+        "Industry": "Some Industry", "Group": "A", "Sector": "Information Technology",
+        "IndustryNew": "IT - Software", "IGroup": "IT Services", "ISubGroup": "IT Consulting",
+    })
+    bse_rows = normalize.parse_bse_rows(bse_json)
+    details = {"590002": normalize.parse_bse_detail(detail_json)}
+    record = normalize.build_records([], bse_rows, details, AS_OF)[0]
+
+    assert record["market_cap"] == 999.5
+    assert record["market_cap_source"] == "BSE"
+    assert record["market_cap_as_of"] == AS_OF
+    assert record["official_sector"] == "Information Technology"
+    assert record["classification_source"] == "BSE"
+    assert record["sector"] == "it"
+
+
+def test_comma_grouped_market_cap_string_parses_correctly():
+    bse_json = json.dumps([{
+        "SCRIP_CD": "590003", "Scrip_Name": "Comma Cap Ltd", "Status": "Active",
+        "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE555Z01016",
+        "INDUSTRY": None, "scrip_id": "COMMACO", "Segment": "Equity",
+        "Issuer_Name": "Comma Cap Limited", "Mktcap": "1,32,904.62",
+    }])
+    bse_rows = normalize.parse_bse_rows(bse_json)
+    record = normalize.build_records([], bse_rows, {}, AS_OF)[0]
+
+    assert record["market_cap"] == 132904.62
+    assert record["market_cap_source"] == "BSE"
