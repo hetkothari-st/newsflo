@@ -4230,42 +4230,155 @@ git commit -m "feat: schedule daily universe master refresh and monthly detail p
 
 ## Rollout Runbook
 
-After all tasks are complete, in order, on a database backup first:
+**AMENDED 2026-08-03 (final whole-branch review fix wave).** The version of
+this runbook below the "on a database backup first" prose line was not
+actually safe to run: there was no verified restore, no dry run of the
+irreversible merge in step 3 (old numbering), no instruction to stop the
+scheduler (which fires `_run_market_cap_refresh` 2 minutes after boot and
+every 12 hours and WILL race the ingest), no ordering requirement for the
+`market_cap` unit fix (CRITICAL 1 -- see `app/companies/universe/normalize.py`),
+and step 6's "Verify" block only printed counts for a human to eyeball
+rather than asserting on them. Read this whole section, in order, before
+running anything.
 
 ```bash
 cd backend
 
-# 1. Apply schema
+# 0. BACKUP FIRST, WITH A VERIFIED RESTORE. A backup that has never been
+#    restored is not a backup -- confirm the dump is actually loadable
+#    before you touch production data, using a throwaway target so the
+#    restore test itself cannot corrupt anything.
+pg_dump "$DATABASE_URL" -Fc -f /path/to/backup/newsflo-pre-cap-tiers.dump
+createdb newsflo_restore_check
+pg_restore -d newsflo_restore_check /path/to/backup/newsflo-pre-cap-tiers.dump
+psql newsflo_restore_check -c "select count(*) from companies;"   # sanity: nonzero, matches prod
+dropdb newsflo_restore_check
+# (Local/dev SQLite: substitute a plain file copy of newsflo.db, then open
+# the COPY with `sqlite3 copy.db "select count(*) from companies;"` as the
+# equivalent restore-verification step -- never run this against the live
+# newsflo.db file.)
+
+# 1. STOP THE SCHEDULER for the entire migration window (steps 3-9 below).
+#    _run_market_cap_refresh fires ~2 minutes after process boot and every
+#    12 hours; if the app stays up while the backfill/ingest run, it can
+#    interleave a yfinance-sourced market_cap write with the ingest's
+#    BSE-sourced write for the same company mid-migration. Stop the app
+#    process (or comment out the start_scheduler() call in app/main.py and
+#    redeploy) now. Do not restart it until step 10 passes.
+
+# 2. DEPLOY THE market_cap UNIT FIX BEFORE RUNNING ANYTHING BELOW.
+#    CRITICAL 1 (this fix wave): BSE's Mktcap is Rs CRORE, yfinance's
+#    fast_info["marketCap"] is ABSOLUTE RUPEES, and the two were being
+#    written to the same Company.market_cap column unconverted. Every
+#    cap-tier rank computed from a mixed-unit pool is wrong -- there is no
+#    partial-credit ordering here. If this fix isn't already deployed,
+#    deploy it now, before step 3.
+
+# 3. Apply schema
 python -c "from app.db import init_db; init_db(); print('schema ok')"
 
-# 2. Fetch masters only (2 requests)
+# 4. Fetch masters only (2 requests)
 python -c "from datetime import date; from app.companies.universe import fetchers; \
   fetchers.fetch_nse_equity_list('data/universe', date.today()); \
   fetchers.fetch_bse_scrip_list('data/universe', date.today()); print('masters ok')"
 
-# 3. Adopt the existing 509 — does NOT grow the universe
+# 5. DRY RUN the backfill FIRST. --dry-run runs the real pipeline
+#    (corrections, the phantom-company merge with its per-table FK row
+#    counts, globals marked, companies flagged SUSPENDED) far enough to
+#    print exactly what it would do, and writes nothing (verified by
+#    tests/test_backfill_universe.py::test_dry_run_leaves_the_database_byte_identical,
+#    which hashes the on-disk file before/after). Read this output in full
+#    before proceeding -- it is the last checkpoint before step 6's
+#    irreversible delete.
+python backfill_universe.py --dry-run
+
+# 6. Adopt the existing 509 for real — does NOT grow the universe.
+#    THIS STEP CONTAINS AN IRREVERSIBLE COMPANY MERGE
+#    (merge_duplicate_companies deletes the phantom HPCL.NS/OILINDIA.NS
+#    rows after reassigning their alert history to the canonical company).
+#    This is why step 0's verified backup happens first, not "at some
+#    point during rollout".
 python backfill_universe.py
 
-# 4. Regenerate the regression corpus against the corrected data, then gate
+# 7. Regenerate the regression corpus against the corrected data, then gate
 python export_match_corpus.py
 python -m pytest tests/test_matching_gate.py -v
 
-# 5. Full detail pass + ingest (30-40 min, resumable)
+# 8. Full detail pass + ingest (30-40 min, resumable). DO NOT run this (or
+#    any step in this runbook) with the matcher gate active across IST
+#    midnight: tests/test_api.py::test_list_alerts_limits_to_the_most_recent_alerts
+#    is a KNOWN PRE-EXISTING flake (unrelated to this branch -- the
+#    /api/alerts endpoint windows to today's-IST alerts while the test
+#    seeds 205 staggered backwards from `now`; crossing IST midnight drops
+#    the oldest) that will look exactly like branch damage if it fires
+#    mid-rollout and cost real time chasing a ghost.
 python ingest_universe.py
 
-# 6. Verify
+# 9. AMFI categorisation (optional, additive -- IMPORTANT 2 in this fix
+#    wave, Task 17 in this plan). AMFI publishes ONLY .xlsx and this
+#    project deliberately has no openpyxl/pandas-excel dependency (see
+#    load_amfi.py's module docstring for why). Manual step:
+#      a. Download the current file from
+#         https://portal.amfiindia.com/spages/AverageMarketCapitalization30Jun2026.xlsx
+#         (re-check https://www.amfiindia.com/otherdata/categorisation-of-stocks
+#         if that exact filename has rolled to a new half-year).
+#      b. Open it in Excel/LibreOffice/Google Sheets and "Save As"/"Export"
+#         CSV, keeping the header row exactly as published.
+#      c. Save it under the current snapshot day, e.g.
+#         data/universe/<day>/amfi_categorisation.csv, then:
+python load_amfi.py data/universe/<day>/amfi_categorisation.csv
+
+# 10. Verify — these are ASSERTIONS, not prints. The script aborts
+#     (non-zero exit, AssertionError) if any actual count deviates from
+#     its expected value by more than 5%, instead of leaving a human to
+#     eyeball five printed numbers and miss a regression.
 python -c "
 from app.db import SessionLocal
 from app.models import Company, Listing
 s = SessionLocal()
-print('companies:', s.query(Company).count())
-print('india:', s.query(Company).filter_by(market='INDIA').count())
-print('listings:', s.query(Listing).count())
-print('with cap:', s.query(Company).filter(Company.market_cap.isnot(None)).count())
-print('classified:', s.query(Company).filter(Company.official_sector.isnot(None)).count())
+counts = {
+    'companies': s.query(Company).count(),
+    'india': s.query(Company).filter_by(market='INDIA').count(),
+    'listings': s.query(Listing).count(),
+    'with cap': s.query(Company).filter(Company.market_cap.isnot(None)).count(),
+    'classified': s.query(Company).filter(Company.official_sector.isnot(None)).count(),
+}
+expected = {'companies': 5470, 'india': 4967, 'listings': 7200, 'with cap': 4800, 'classified': 4835}
+TOLERANCE = 0.05
+failures = []
+for key, actual in counts.items():
+    exp = expected[key]
+    deviation = abs(actual - exp) / exp
+    status = 'OK' if deviation <= TOLERANCE else 'FAIL'
+    print(f'{key}: {actual} (expected ~{exp}, deviation {deviation:.1%}) [{status}]')
+    if deviation > TOLERANCE:
+        failures.append(key)
+assert not failures, f'counts deviated beyond {TOLERANCE:.0%} tolerance: {failures} -- ABORT, do not restart the scheduler, investigate against the step 0 backup'
+print('all counts within tolerance')
 "
+
+# 11. Only once step 10's assertions pass: restart the scheduler (redeploy
+#     the app / restore the start_scheduler() call from step 1).
 ```
 
-Expected after step 6: ~5,470 companies (~4,967 Indian + 507 global), ~7,200 listings, ~4,800 with a market cap, ~4,835 classified.
+Expected after step 10: ~5,470 companies (~4,967 Indian + 507 global), ~7,200 listings, ~4,800 with a market cap, ~4,835 classified.
+
+### Rollback notes
+
+- **`USE_ALIAS_MATCHER=false` rolls back the matcher ONLY** (Task 12's swap
+  of resolution onto the new name-matching ladder). It does NOT undo the
+  ingest (Tasks 6-16), does NOT restore the phantom HPCL.NS/OILINDIA.NS
+  rows deleted by step 6's merge, and does NOT reverse the fan-out
+  reordering from Task 12. If something goes wrong after step 3, the only
+  way back is the verified backup from step 0 -- the flag is a matcher
+  kill switch, not a migration undo button.
+- **Re-running `seed_nifty_indices.py` after this rollout silently
+  overwrites `sector` and `name`** for roughly 500 companies, via the old
+  keyword-based `SECTOR_MAP` in `app/companies/loader.py` -- clobbering the
+  official BSE/AMFI-sourced classification this rollout just landed for
+  those companies. Do not run it as routine maintenance after this
+  rollout. If it must run for a genuinely new reason (e.g. picking up a new
+  Nifty index membership), re-run `ingest_universe.py` immediately
+  afterwards to restore official classification over its keyword guesses.
 
 **Rollback:** set `USE_ALIAS_MATCHER=false` to restore the previous resolver without a deploy. The ingested rows are additive and harmless with the legacy matcher, though sector fan-out will already be using market-cap ordering (that change is not behind the flag — revert Task 12's query change if it must be undone).
