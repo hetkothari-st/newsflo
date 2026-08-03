@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.analysis.claude_client import build_client
+from app.analysis.refinement import run_pending_refinements
 from app.companies.market_caps import alert_referenced_tickers, refresh_market_caps
 from app.config import settings
 from app.db import SessionLocal
@@ -174,6 +175,32 @@ def _run_translation() -> None:
         session.close()
 
 
+def _run_deferred_refinement() -> None:
+    """Fill in the LLM refinement fields (event summary, per-company whys,
+    ripple sections, timeline) for alerts persisted with refinement
+    deferred -- a no-op unless settings.refinement_mode is "deferred".
+
+    Kept on its own interval for the same reason as _run_translation:
+    refinement is latency-tolerant work that nothing user-facing waits on,
+    so it must never compete with the analysis pipeline for the provider's
+    rate-limit headroom. Any failure is logged, never raised, same as every
+    other scheduler job."""
+    if settings.refinement_mode != "deferred":
+        return
+    session = SessionLocal()
+    try:
+        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+        refined = run_pending_refinements(
+            client, session, throttle_seconds=2.5,
+        )
+        if refined:
+            logger.info("Deferred refinement cycle: %s alerts refined", refined)
+    except Exception:
+        logger.exception("Deferred refinement cycle failed")
+    finally:
+        session.close()
+
+
 def _run_analysis_retry() -> None:
     """Give today's ANALYSIS_FAILED articles another chance, once per hour
     -- analysis failures are overwhelmingly transient provider rate-limit
@@ -308,6 +335,12 @@ def start_scheduler() -> None:
         trigger="interval",
         minutes=settings.translation_interval_minutes,
         id="translation_job",
+    )
+    scheduler.add_job(
+        _run_deferred_refinement,
+        trigger="interval",
+        minutes=settings.refinement_interval_minutes,
+        id="deferred_refinement",
     )
     scheduler.add_job(
         _run_analysis_retry,

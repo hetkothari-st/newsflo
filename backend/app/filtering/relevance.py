@@ -3,7 +3,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from app.analysis.claude_client import FALLBACK_MODEL
+from app.analysis.claude_client import FALLBACK_MODEL, tier_kwargs
 from app.models import Article
 
 _PROMPT_TEMPLATE = (
@@ -84,6 +84,7 @@ def classify_relevance(client, title: str, content: str) -> bool:
             tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_relevance"}},
             messages=[{"role": "user", "content": _PROMPT_TEMPLATE.format(title=title, content=content)}],
+            **tier_kwargs("classify_relevance"),
         )
         message = response.choices[0].message
         tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_relevance"), None)
@@ -104,12 +105,24 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
     release, see app.filtering.language_gate) are FILTERED before the LLM
     call -- the feed is English-only by default; other languages come from
     the user's translation picker, never from the source mix.
+
+    A second deterministic gate (app.filtering.prefilter) runs after the
+    language one: it short-circuits articles that are unambiguously not
+    market news, so they never cost a classification call. It defaults to
+    shadow mode, where it only reports what it would have rejected and
+    every article still reaches the LLM -- see that module for why the
+    rules are built to err only toward admitting.
     """
     from app.filtering.language_gate import is_english_text
+    from app.filtering.prefilter import PrefilterCounters, apply_prefilter
     from app.pipeline import article_text
 
+    counters = PrefilterCounters()
     for article in session.query(Article).filter_by(status="NEW").all():
         if not is_english_text(article.title, article_text(article)):
+            article.status = "FILTERED"
+            continue  # deterministic gate -- no LLM call, no throttle needed
+        if apply_prefilter(article.title, article_text(article), counters):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed
         if classify_relevance(client, article.title, article_text(article)):
@@ -117,4 +130,5 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
         else:
             article.status = "FILTERED"
         time.sleep(throttle_seconds)
+    counters.log_summary()
     session.commit()

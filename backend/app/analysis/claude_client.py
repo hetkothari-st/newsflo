@@ -6,6 +6,13 @@ from anthropic import Anthropic
 from anthropic import APIError as AnthropicAPIError
 from openai import OpenAI, RateLimitError
 
+from app.analysis.usage_log import (
+    record_usage, usage_from_anthropic, usage_from_gemini, usage_from_openai,
+)
+from app.config import (
+    LLM_TIER_CHEAP, LLM_TIER_MODELS, PROMPT_CACHE_CONTROL, resolve_tier, settings,
+)
+
 # Anthropic is the primary provider when a real (funded) key is configured --
 # best quality, native forced tool-use. Groq is the fallback so a real,
 # funded key is never wasted on calls that a free provider could have
@@ -53,6 +60,27 @@ MODEL = "llama-3.3-70b-versatile"
 # generic small Llama model.
 FALLBACK_MODEL = "openai/gpt-oss-20b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# How each provider this client layer can talk to handles a repeated,
+# cacheable prompt prefix (cost-optimization phase 2). "explicit" = the
+# request carries a per-block cache_control marker (Anthropic).
+# "implicit" = the provider caches a repeated prefix on its own with
+# nothing to mark, so the only thing the caller controls is putting stable
+# content first (Gemini). "none" = the provider has no prompt-cache API,
+# and caching degrades to a no-op rather than an error (Groq's
+# OpenAI-compatible endpoint). Prompt caching never changes what the model
+# is sent or what it returns -- only what the call is billed -- so a
+# provider landing in "none" costs more but behaves identically.
+PROMPT_CACHE_SUPPORT = {"anthropic": "explicit", "gemini": "implicit", "groq": "none"}
+
+
+def tier_kwargs(call_name: str) -> dict:
+    """The two kwargs every LLM call site in this app passes, spelled once:
+    which logical call this is (for token accounting) and which model tier
+    should serve it (app.config.resolve_tier, which refuses to downgrade a
+    protected call). Usage: ``client.chat.completions.create(...,
+    **tier_kwargs("extract_facts"))``."""
+    return {"tier": resolve_tier(call_name), "call_name": call_name}
 
 SYSTEM_PROMPT = (
     "You are an elite equity research analyst at a global hedge fund, with "
@@ -197,7 +225,13 @@ class _GeminiCompletions:
         self._api_key = api_key
         self._model = model
 
-    def create(self, *, max_tokens, tools, messages, **_ignored):
+    def create(self, *, max_tokens, tools, messages, tier=None, call_name=None, **_ignored):
+        # Model tiering (cost-optimization phase 4): only a CHEAP tier
+        # changes anything. A reasoning-tier call (the default for every
+        # call site, and the only thing a protected call can ever be) is
+        # sent on this adapter's own configured model, exactly as it was
+        # before tiering existed.
+        model = LLM_TIER_MODELS["gemini"][LLM_TIER_CHEAP] if tier == LLM_TIER_CHEAP else self._model
         system_content = None
         contents = []
         for m in messages:
@@ -213,6 +247,17 @@ class _GeminiCompletions:
             "parameters": _uppercase_schema_types(function_spec["parameters"]),
         }
 
+        # Prompt caching (cost-optimization phase 2) needs no marker here.
+        # Gemini caches a repeated request prefix implicitly and bills the
+        # hit automatically -- there is no cache_control field to set, and
+        # its EXPLICIT cache (cachedContents) is the wrong tool for this
+        # traffic: it has a minimum-token floor this system prompt is well
+        # under, and it charges storage per cache entry. What implicit
+        # caching does require is that the repeated content actually leads
+        # the request, which the shape below gives it: the stable system
+        # prompt rides `systemInstruction` and the stable tool schema rides
+        # `tools`, both separate from `contents`, whose own text is built
+        # stable-part-first by every call site (see app.analysis.cascade).
         body = {
             "contents": contents,
             "tools": [{"function_declarations": [function_declaration]}],
@@ -222,7 +267,7 @@ class _GeminiCompletions:
         if system_content is not None:
             body["systemInstruction"] = {"parts": [{"text": system_content}]}
 
-        url = f"{GEMINI_BASE_URL}/models/{self._model}:generateContent?key={self._api_key}"
+        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={self._api_key}"
         try:
             response = httpx.post(url, json=body, timeout=60.0)
         except httpx.HTTPError as exc:
@@ -241,6 +286,7 @@ class _GeminiCompletions:
             raise GeminiAPIError(f"Gemini API returned {response.status_code}: {response.text}")
 
         data = response.json()
+        record_usage(usage_from_gemini(data, call_name=call_name, model=model, tier=tier))
         candidates = data.get("candidates") or []
         # A safety block or MAX_TOKENS truncation omits "content" entirely
         # (finishReason: "SAFETY"/"MAX_TOKENS" with no content key) -- .get(...)
@@ -287,7 +333,10 @@ class _AnthropicCompletions:
         self._client = anthropic_client
         self._model = model
 
-    def create(self, *, max_tokens, tools, messages, **_ignored):
+    def create(self, *, max_tokens, tools, messages, tier=None, call_name=None, **_ignored):
+        # See _GeminiCompletions.create -- only a CHEAP tier overrides the
+        # adapter's configured model.
+        model = LLM_TIER_MODELS["anthropic"][LLM_TIER_CHEAP] if tier == LLM_TIER_CHEAP else self._model
         system_content = None
         chat_messages = []
         for m in messages:
@@ -303,14 +352,35 @@ class _AnthropicCompletions:
             "input_schema": function_spec["parameters"],
         }
 
+        # Prompt caching (cost-optimization phase 2). Anthropic assembles a
+        # request's cacheable prefix in a fixed order -- tools, then system,
+        # then messages -- so a breakpoint on the tool schema caches the
+        # tools block and a breakpoint on the system block caches
+        # tools+system. Both are byte-identical across this pipeline's
+        # calls (SYSTEM_PROMPT is one constant; each stage reuses one tool
+        # builder), while only the trailing user message varies, so the
+        # cached prefix is as long as it can be. This affects billing only:
+        # a cache hit and a cache miss send the model the same tokens and
+        # produce the same output.
+        system_param = system_content
+        if settings.prompt_cache_enabled:
+            anthropic_tool["cache_control"] = dict(PROMPT_CACHE_CONTROL)
+            if system_content is not None:
+                system_param = [{
+                    "type": "text",
+                    "text": system_content,
+                    "cache_control": dict(PROMPT_CACHE_CONTROL),
+                }]
+
         response = self._client.messages.create(
-            model=self._model,
+            model=model,
             max_tokens=max_tokens,
-            system=system_content,
+            system=system_param,
             tools=[anthropic_tool],
             tool_choice={"type": "tool", "name": anthropic_tool["name"]},
             messages=chat_messages,
         )
+        record_usage(usage_from_anthropic(response, call_name=call_name, model=model, tier=tier))
         tool_use = next((block for block in response.content if block.type == "tool_use"), None)
         if tool_use is None:
             fake_tool_calls = []
@@ -335,6 +405,49 @@ class AnthropicAdapter:
 
     def __init__(self, api_key: str, model: str = ANTHROPIC_MODEL):
         self.chat = _AnthropicChat(Anthropic(api_key=api_key), model)
+
+
+class _GroqCompletions:
+    """Adds the two kwargs the provider-native adapters above understand
+    (`tier`, `call_name`) to the Groq path, which is a real OpenAI client
+    and would reject them outright.
+
+    `tier` only ever downgrades: LLM_TIER_CHEAP swaps in the cheap Groq
+    model, and anything else leaves the caller's own `model` kwarg alone.
+    That asymmetry is deliberate -- the cascade already picks its Groq model
+    per stage for reasons that predate tiering (MODEL and FALLBACK_MODEL sit
+    in separate daily quota buckets, and the direct-company stage
+    deliberately falls from one to the other), and a reasoning-tier default
+    that "promoted" those calls would quietly rewrite that routing.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def create(self, *, tier=None, call_name=None, **kwargs):
+        if tier == LLM_TIER_CHEAP:
+            kwargs["model"] = LLM_TIER_MODELS["groq"][LLM_TIER_CHEAP]
+        response = self._inner.chat.completions.create(**kwargs)
+        record_usage(usage_from_openai(
+            response, call_name=call_name, model=kwargs.get("model"), tier=tier,
+        ))
+        return response
+
+
+class _GroqChat:
+    def __init__(self, inner):
+        self.completions = _GroqCompletions(inner)
+
+
+class GroqAdapter:
+    """Thin wrapper over a Groq-backed OpenAI/RotatingClient so the Groq
+    path speaks the same create(tier=..., call_name=...) contract as the
+    Gemini and Anthropic adapters. `inner` stays reachable so callers (and
+    tests) can still see which client is underneath."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.chat = _GroqChat(inner)
 
 
 class _FallbackCompletions:
@@ -381,11 +494,16 @@ class FallbackClient:
 
 def build_client(
     groq_api_key: str | list[str], gemini_api_key: str | None = None,
-) -> OpenAI | RotatingClient | FallbackClient:
+) -> GroqAdapter | FallbackClient:
+    """The Groq client is always wrapped in a GroqAdapter, whether it ends
+    up as the primary or as FallbackClient's secondary: every client this
+    returns must accept the same create(tier=..., call_name=...) contract,
+    or a degrade-to-Groq would blow up on kwargs a raw OpenAI client has
+    never heard of. GroqAdapter.inner is the client it wraps."""
     if isinstance(groq_api_key, list):
-        groq_client = RotatingClient(groq_api_key, base_url=GROQ_BASE_URL)
+        groq_client = GroqAdapter(RotatingClient(groq_api_key, base_url=GROQ_BASE_URL))
     else:
-        groq_client = OpenAI(api_key=groq_api_key, base_url=GROQ_BASE_URL)
+        groq_client = GroqAdapter(OpenAI(api_key=groq_api_key, base_url=GROQ_BASE_URL))
 
     if gemini_api_key:
         return FallbackClient(GeminiAdapter(gemini_api_key), groq_client)

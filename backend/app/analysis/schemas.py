@@ -169,3 +169,12 @@ class AnalysisOutput(BaseModel):
     # to [] so every existing caller (older tests, the dedup-reuse path in
     # pipeline.py) still validates without change.
     edges: list[dict] = []
+    # The stage-1 distilled article (app.analysis.cascade._extract_facts's
+    # `facts` string) that every later cascade stage already reasons from.
+    # Carried out of the cascade so the refinement layer
+    # (app.analysis.refinement.refine_alert) can reason from the SAME
+    # evidence base instead of re-reading -- and re-paying for -- the raw
+    # article. Optional/None so an AnalysisCache row written before this
+    # shipped still validates; refine_alert falls back to the article text
+    # when it is missing.
+    facts: Optional[str] = None
