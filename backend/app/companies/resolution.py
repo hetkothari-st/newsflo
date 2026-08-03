@@ -2,6 +2,7 @@ from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.analysis.schemas import CompanyMention
+from app.companies.integrity import DEMO_TICKERS, is_demo_company
 from app.models import Company
 
 TOP_N_SECTOR_COMPANIES = 5
@@ -67,14 +68,14 @@ def _find_direct_company(session: Session, mention: CompanyMention) -> Company |
     """
     if mention.ticker:
         company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
-        if company is not None:
+        if company is not None and not is_demo_company(company.ticker):
             return company
     if not mention.name:
         return None
     name_lower = mention.name.strip().lower()
     if not name_lower:
         return None
-    all_companies = session.query(Company).all()
+    all_companies = [c for c in session.query(Company).all() if not is_demo_company(c.ticker)]
     exact = [c for c in all_companies if c.name.strip().lower() == name_lower]
     if len(exact) == 1:
         return exact[0]
@@ -152,6 +153,7 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
             companies = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
+                .filter(Company.ticker.notin_(DEMO_TICKERS))
                 .order_by(_TIER_RANK.asc(), Company.ticker.asc())
                 .limit(TOP_N_SECTOR_COMPANIES)
                 .all()
