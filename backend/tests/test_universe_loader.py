@@ -142,3 +142,99 @@ def test_ticker_collision_with_a_different_isin_is_skipped(db_session):
     result = loader.upsert_records(db_session, [_record("INE222Z01011", "CLASH.NS", "New Ltd")])
     assert result["skipped"] == ["CLASH.NS"]
     assert db_session.query(Company).count() == 1
+
+
+# --- Fix round 1: three Important findings from the SPEC review ------------
+
+
+def test_reverse_ticker_collision_when_matched_by_isin_is_skipped(db_session):
+    """[Important 1] The record is matched by ISIN (to `reliance`), but its
+    ticker already belongs to a DIFFERENT company (`other`). Force-writing
+    company.ticker would raise the companies.ticker unique constraint; it
+    must be skipped and reported instead, and neither row corrupted."""
+    reliance = Company(
+        ticker="RELIANCE.NS", name="Reliance Industries Ltd.", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE002A01018",
+    )
+    other = Company(
+        ticker="CLASH2.NS", name="Other Ltd", sector="other",
+        index_tier="OTHER", isin="INE444Z01013",
+    )
+    db_session.add_all([reliance, other])
+    db_session.commit()
+    reliance_id, other_id = reliance.id, other.id
+
+    result = loader.upsert_records(db_session, [_record(
+        "INE002A01018", "CLASH2.NS", "Reliance Industries Limited",
+    )])
+
+    assert result["skipped"] == ["CLASH2.NS"]
+    assert db_session.query(Company).count() == 2
+    assert db_session.get(Company, reliance_id).ticker == "RELIANCE.NS"
+    assert db_session.get(Company, reliance_id).isin == "INE002A01018"
+    assert db_session.get(Company, other_id).ticker == "CLASH2.NS"
+    assert db_session.get(Company, other_id).isin == "INE444Z01013"
+
+
+def test_listing_symbol_collision_with_another_company_is_skipped(db_session):
+    """[Important 2] A stale Listing already holds (NSE, RELIANCE) under a
+    different company. The incoming record's own listing for that same
+    (exchange, symbol) must be skipped and reported, while the rest of the
+    record -- the company row itself -- still loads."""
+    other = Company(
+        ticker="OTHER.NS", name="Other Ltd", sector="other",
+        index_tier="OTHER", isin="INE444Z01013",
+    )
+    db_session.add(other)
+    db_session.commit()
+    db_session.add(Listing(
+        company_id=other.id, exchange="NSE", symbol="RELIANCE", series="EQ",
+        status="ACTIVE", is_sme=False, is_primary=True, face_value=10.0,
+        source="NSE", as_of=AS_OF,
+    ))
+    db_session.commit()
+
+    result = loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited",
+    )])
+
+    assert result["created"] == 1
+    assert result["skipped"] == ["NSE:RELIANCE"]
+    assert db_session.query(Company).count() == 2
+    company = db_session.query(Company).filter_by(isin="INE002A01018").one()
+    assert company.ticker == "RELIANCE.NS"
+    # Only `other`'s original listing exists; the new company got none.
+    assert db_session.query(Listing).count() == 1
+    assert db_session.query(Listing).filter_by(company_id=company.id).count() == 0
+
+
+def test_batch_continues_past_a_mid_batch_collision(db_session):
+    """[Important 3] A 3-record batch where the middle record collides
+    (same shape as Important 1). The batch must run to completion: records
+    1 and 3 committed, the middle one in `skipped`, and upsert_records
+    returns its report normally instead of raising and leaving the session
+    needing a rollback."""
+    reliance = Company(
+        ticker="RELIANCE.NS", name="Reliance Industries Ltd.", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE002A01018",
+    )
+    clash_owner = Company(
+        ticker="CLASHX.NS", name="Clash Owner Ltd", sector="other",
+        index_tier="OTHER", isin="INE555Z01014",
+    )
+    db_session.add_all([reliance, clash_owner])
+    db_session.commit()
+
+    records = [
+        _record("INE111A01011", "FIRST.NS", "First Ltd"),
+        _record("INE002A01018", "CLASHX.NS", "Reliance Industries Limited"),
+        _record("INE333A01013", "THIRD.NS", "Third Ltd"),
+    ]
+
+    result = loader.upsert_records(db_session, records)
+
+    assert result["created"] == 2
+    assert result["skipped"] == ["CLASHX.NS"]
+    tickers = {c.ticker for c in db_session.query(Company).all()}
+    assert tickers == {"RELIANCE.NS", "CLASHX.NS", "FIRST.NS", "THIRD.NS"}
+    assert db_session.query(Company).count() == 4
