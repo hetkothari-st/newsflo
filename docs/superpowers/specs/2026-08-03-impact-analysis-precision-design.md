@@ -87,7 +87,9 @@ but is populated for only **13 of 1017** rows, and is never used during
 analysis.
 
 Retrieval-free entity extraction is the standard hallucination setup; no
-amount of prompt wording corrects it.
+amount of prompt wording corrects it. It is also why 61% of alerts come back
+empty: with nothing to select from, the model returns nothing rather than
+something wrong.
 
 ### 5. No verification pass over the company list
 
@@ -144,8 +146,16 @@ list names companies where it currently returns nothing.
 contains zero rows across all 607 alerts, so `generate_ripple_layers` has
 never persisted a result. The locked three-tier sectioning (LLM-adaptive →
 archetype template → per-sector split) is running on tiers 2 and 3 only, and
-the story-adaptive sections are silently absent from every card. Root cause
-not yet diagnosed.
+the story-adaptive sections are silently absent from every card.
+
+Narrowed: `refine_alert`'s other three outputs *did* populate on the same
+alerts — 12 summaries, 13 `TimelineEffect` rows, 14 company `why` values
+(low counts because the feature shipped late; most alerts predate it). The
+client and call path therefore work, and the failure is inside
+`generate_ripple_layers` specifically — its nested tool schema, its
+`max_tokens=1536` budget, or its validation gauntlet (`relationship` enum,
+`validate_or_none` on title and note, ticker membership). Exact cause requires
+a live run.
 
 **Demo/seed data is live in the `companies` table.** `SOMETEXTILE.NS`
 ("Demo Textiles Ltd") is resolvable and was injected into real alerts by the
@@ -300,7 +310,35 @@ When `_persist_alert` overwrites `direction` from the measured move, the stale
 `rationale` must be suppressed or regenerated rather than left contradicting
 the badge.
 
-### Section 8 — Migration
+### Section 8 — Tier-1 ripple-layer repair
+
+The story-adaptive sections are the top tier of the locked three-tier card-back
+sectioning and have never produced a row. Restoring them matters here and not
+only cosmetically: tier 1 claims tickers before bucket assignment, so it is
+also the layer that must be taught to leave `sector_inference` rows alone
+(see Section 1).
+
+1. Reproduce live against a known alert with several companies, logging the
+   raw provider response before validation.
+2. Identify which of the three candidate causes fires — empty/degenerate tool
+   response (the `max_tokens` failure mode documented in `cascade.py`'s
+   `_identify_cascade_companies_per_sector`), a rejected `relationship` enum,
+   or `validate_or_none` rejecting titles/notes.
+3. Fix, and add a regression test asserting a populated
+   `alert_ripple_layers` for a representative alert.
+
+The current silent degradation to `[]` is itself part of the problem: a total
+tier-1 failure is indistinguishable from "no sections applied." Add a log line
+so this cannot recur unnoticed.
+
+### Section 9 — Purge demo data from `companies`
+
+`SOMETEXTILE.NS` ("Demo Textiles Ltd") is a live, resolvable row and was
+injected into real alerts by the sector fan-out. Remove it and audit for other
+seed rows from `seed_feed_v2_demo.py` / `seed_car_review_demo.py`. Add a guard
+so demo seeds cannot resolve into production alerts.
+
+### Section 10 — Migration
 
 - SQL/Python migration across all 607 alerts: re-bucket `sector_inference`
   rows, strip template rationales, drop sub-floor rows. Minutes, zero API
@@ -310,14 +348,27 @@ the badge.
   while staying inside free-tier quota; the window is a script argument, so a
   wider pass is a re-run, not a code change.
 
+## Success criteria
+
+Measured on the Section 0 harness, before and after:
+
+1. **Zero** must-exclude companies (Eternal-class false positives) on the
+   golden set.
+2. Alerts with zero companies falls well below the current 61%. Section 2's
+   grounding is the lever; the exact target is set once the harness gives a
+   baseline.
+3. No `sector_inference` row renders in a DIRECT-family bucket.
+4. `alert_ripple_layers` is populated for alerts that warrant sections.
+
 ## Build order
 
-`0 → 1 → 2 → 3 → 8` delivers the majority of the improvement.
-`4 → 5 → 6 → 7` follow.
+`0 → 1 → 2 → 3 → 10` delivers the majority of the improvement.
+`4 → 5 → 6 → 7 → 8 → 9` follow.
 
 Section 5 is slow but is the one that prevents the whole class of bug; it may
 be pulled earlier if the Section 0 harness shows taxonomy driving residual
-false positives.
+false positives. Section 9 is a few minutes' work and can be done at any
+point.
 
 ## Known consequences
 
