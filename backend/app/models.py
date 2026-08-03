@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -32,6 +32,35 @@ class Company(Base):
     supply_chain_suppliers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
     supply_chain_customers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
 
+    # --- Universe/provenance (docs/superpowers/specs/2026-08-03-stock-
+    # universe-cap-tiers-design.md §5.1). market='GLOBAL' rows are the
+    # curated non-Indian list in app.companies.global_seed: they have no
+    # ISIN, no listings, and never receive a cap tier.
+    market = Column(String, nullable=False, default="INDIA", server_default="INDIA")
+    # BSE's official 4-level classification, stored verbatim as sourced
+    # truth. Company.sector is DERIVED from official_sector via
+    # app.companies.universe.sector_map -- never keyword-guessed.
+    official_sector = Column(String, nullable=True)
+    official_industry = Column(String, nullable=True)
+    official_igroup = Column(String, nullable=True)
+    official_isubgroup = Column(String, nullable=True)
+    classification_source = Column(String, nullable=True)
+    classification_as_of = Column(Date, nullable=True)
+    market_cap_source = Column(String, nullable=True)  # 'BSE' | 'yfinance'
+    market_cap_as_of = Column(Date, nullable=True)
+    # AMFI's PUBLISHED categorisation, when the list is available. Distinct
+    # from the derived tier in app.market.cap_tier, which is computed on
+    # read and never stored. NULL is normal and expected.
+    amfi_tier = Column(String, nullable=True)  # LARGE | MID | SMALL
+    amfi_rank = Column(Integer, nullable=True)
+    amfi_as_of = Column(Date, nullable=True)
+    tradeability = Column(
+        String, nullable=False, default="NORMAL", server_default="NORMAL",
+    )  # NORMAL | RESTRICTED | SME | SUSPENDED
+
+    listings = relationship("Listing", back_populates="company")
+    aliases = relationship("CompanyAlias", back_populates="company")
+
 
 class CompanyIndexMembership(Base):
     __tablename__ = "company_index_memberships"
@@ -43,6 +72,53 @@ class CompanyIndexMembership(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     company = relationship("Company")
+
+
+class Listing(Base):
+    """One row per company per exchange. A dual-listed company (2,278 of
+    them as of 2026-08-03) is ONE Company with TWO Listings -- flattening
+    this into the company row would force a lie, because a company can be
+    series EQ on NSE and group Z on BSE simultaneously."""
+    __tablename__ = "listings"
+    __table_args__ = (
+        UniqueConstraint("exchange", "symbol", name="uq_listing_exchange_symbol"),
+        UniqueConstraint("company_id", "exchange", name="uq_listing_company_exchange"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    exchange = Column(String, nullable=False)  # NSE | BSE
+    symbol = Column(String, nullable=False)  # NSE SYMBOL or BSE scrip_id
+    scrip_code = Column(String, nullable=True)  # BSE numeric code; NULL for NSE
+    series = Column(String, nullable=True)  # NSE EQ/BE/BZ; NULL for BSE
+    group_code = Column(String, nullable=True)  # BSE A/B/T/X/XT/Z/M/MT/MS/P/ZP; NULL for NSE
+    status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE | SUSPENDED
+    is_sme = Column(Boolean, nullable=False, default=False)
+    is_primary = Column(Boolean, nullable=False, default=False)
+    face_value = Column(Float, nullable=True)
+    listed_on = Column(Date, nullable=True)  # NSE only
+    source = Column(String, nullable=False)
+    as_of = Column(Date, nullable=False)
+
+    company = relationship("Company", back_populates="listings")
+
+
+class CompanyAlias(Base):
+    """Indexed alias set backing app.companies.matching.matcher. Every rung
+    of the match ladder is an EXACT lookup on ``normalized`` -- substring
+    matching is what produced silent mismatches in the old resolver."""
+    __tablename__ = "company_aliases"
+    __table_args__ = (
+        UniqueConstraint("normalized", "company_id", name="uq_alias_normalized_company"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    alias = Column(String, nullable=False)
+    alias_type = Column(String, nullable=False)  # LEGAL|SHORT|NSE_SYMBOL|BSE_ID|TRADE_NAME
+    normalized = Column(String, nullable=False, index=True)
+
+    company = relationship("Company", back_populates="aliases")
 
 
 class AnalysisCache(Base):

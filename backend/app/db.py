@@ -67,6 +67,19 @@ _ADDED_COLUMNS = [
     ("alerts", "facts", "TEXT"),
     ("alerts", "refinement_status", "VARCHAR"),
     ("alerts", "refinement_attempts", "INTEGER DEFAULT 0"),
+    ("companies", "market", "VARCHAR NOT NULL DEFAULT 'INDIA'"),
+    ("companies", "official_sector", "VARCHAR"),
+    ("companies", "official_industry", "VARCHAR"),
+    ("companies", "official_igroup", "VARCHAR"),
+    ("companies", "official_isubgroup", "VARCHAR"),
+    ("companies", "classification_source", "VARCHAR"),
+    ("companies", "classification_as_of", "DATE"),
+    ("companies", "market_cap_source", "VARCHAR"),
+    ("companies", "market_cap_as_of", "DATE"),
+    ("companies", "amfi_tier", "VARCHAR"),
+    ("companies", "amfi_rank", "INTEGER"),
+    ("companies", "amfi_as_of", "DATE"),
+    ("companies", "tradeability", "VARCHAR NOT NULL DEFAULT 'NORMAL'"),
 ]
 
 
