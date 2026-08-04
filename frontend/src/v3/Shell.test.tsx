@@ -85,6 +85,22 @@ const ALERT_DETAIL = {
           why: 'Cheaper crude lifts refining margins.',
           logo_url: null,
         },
+        {
+          ticker: 'BA',
+          name: 'Boeing',
+          sector: 'defense',
+          cap_tier: null,
+          liquidity_tier: 'HIGH',
+          delivery_pct: null,
+          business_desc: 'Builds commercial and military aircraft.',
+          direction: 'bearish',
+          excess_move_pct: -2.6,
+          intensity: { score: 64, band: 'Moderate', components: [] },
+          is_exposure_only: false,
+          in_my_holdings: false,
+          why: 'Directly named in the story.',
+          logo_url: null,
+        },
       ],
     },
   ],
@@ -161,13 +177,15 @@ function renderShell() {
 }
 
 describe('Shell card feed', () => {
-  it('renders the card front skim layer: excess move, verdict, headline, gist, held dot', async () => {
+  it('renders the card front skim layer: excess move, headline, gist, held dot', async () => {
     renderShell();
     // The headline renders on both card faces (front + condensed back head).
     expect((await screen.findAllByText(/crude oil slips below \$70/i)).length).toBe(2);
     expect(screen.getByText('▼ 2.4%')).toBeInTheDocument();
     expect(screen.getByText('excess vs sector')).toBeInTheDocument();
-    expect(screen.getByText('Sector-wide')).toBeInTheDocument();
+    // The verdict chip (Company-specific / Sector-wide) was removed -- it
+    // mislabeled most stories and duplicated what the ripple shows.
+    expect(screen.queryByText('Sector-wide')).not.toBeInTheDocument();
     expect(screen.getByText('Cheaper crude helps users, hurts producers.')).toBeInTheDocument();
     expect(screen.getByText('held')).toBeInTheDocument();
     expect(screen.getByText("See who's affected")).toBeInTheDocument();
@@ -205,6 +223,9 @@ describe('Shell card feed', () => {
     // Scoped to the micro cap's own row -- the always-mounted Directory
     // legend also contains a MICRO tag.
     expect(within(screen.getByTestId('srow-CHENNPETRO.NS')).getByText('MICRO')).toBeInTheDocument();
+    // A company with no honest India cap tier (foreign listing) gets NO
+    // cap chip at all -- never a "—" placeholder.
+    expect(within(screen.getByTestId('srow-BA')).queryByText('—')).not.toBeInTheDocument();
     // Low-delivery warning fires for the 38% delivery micro cap.
     expect(screen.getByText(/38% delivery — much of this move was intraday/i)).toBeInTheDocument();
     // Company logo (initials fallback -- no logo art in the fixture) on
@@ -287,6 +308,20 @@ describe('Shell card feed', () => {
     await screen.findAllByText(/crude oil slips below \$70/i);
     fireEvent.click(screen.getByLabelText('Cap filter MICRO'));
     expect(screen.getAllByText(/crude oil slips below \$70/i).length).toBeGreaterThan(0);
+  });
+
+  it('filters the card-back company rows by the chosen cap tier', async () => {
+    // The back lists ONGC (LARGE) and CHENNPETRO (MICRO). Under the µ
+    // filter only the MICRO row may remain -- "show me small caps" means
+    // the company rows too, not just which stories survive.
+    renderShell();
+    fireEvent.click(await screen.findByTestId('front-7'));
+    await screen.findByTestId('srow-ONGC.NS');
+    fireEvent.click(screen.getByLabelText('Cap filter MICRO'));
+    expect(screen.queryByTestId('srow-ONGC.NS')).not.toBeInTheDocument();
+    expect(screen.getByTestId('srow-CHENNPETRO.NS')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Cap filter ALL'));
+    expect(screen.getByTestId('srow-ONGC.NS')).toBeInTheDocument();
   });
 
   it('switches between bottom-nav views', async () => {

@@ -27,27 +27,29 @@ import {
   moveColor,
   moveDir,
   TIMELINE_COLORS,
-  verdictClass,
 } from './format';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
-import type { TranslationKey } from '../lib/i18n';
-
-const VERDICT_KEYS: Record<FeedAlert['verdict'], TranslationKey> = {
-  COMPANY_SPECIFIC: 'v3.verdictCompany',
-  SECTOR_WIDE: 'v3.verdictSector',
-  UNCONFIRMED: 'v3.verdictUnconfirmed',
-};
 
 function LayerBlock({
   layer,
+  capFilter,
   onOpenDeepDive,
   onOpenInfo,
 }: {
   layer: RippleLayer;
+  capFilter: CapTier | 'ALL';
   onOpenDeepDive: (ticker: string) => void;
   onOpenInfo: (row: LayerRow) => void;
 }) {
+  // The top-bar cap filter narrows the company rows too, not just which
+  // stories survive. Rows without an honest tier (foreign listings, stale
+  // caps) match only "All". A section left with no rows hides entirely --
+  // the 3-tier sectioning mechanism itself is untouched, this is pure
+  // presentation-time narrowing.
+  const rows =
+    capFilter === 'ALL' ? layer.rows : layer.rows.filter((row) => row.cap_tier === capFilter);
+  if (rows.length === 0) return null;
   return (
     <div className="layer">
       <div className="lh">
@@ -55,10 +57,9 @@ function LayerBlock({
           {layer.icon === 'win' ? '▲' : layer.icon === 'lose' ? '▼' : '◆'}
         </span>
         <span className="lt">{layer.title}</span>
-        <span className="lrel">{layer.relationship.replace(/_/g, ' ')}</span>
       </div>
       {layer.note !== null && <p className="lnote">{layer.note}</p>}
-      {layer.rows.map((row) => (
+      {rows.map((row) => (
         <StockRow key={row.ticker} row={row} onOpenDeepDive={onOpenDeepDive} onOpenInfo={onOpenInfo} />
       ))}
     </div>
@@ -102,6 +103,7 @@ function Card({
   alert,
   flipped,
   detail,
+  capFilter,
   onFlip,
   onUnflip,
   onOpenDeepDive,
@@ -110,6 +112,7 @@ function Card({
   alert: FeedAlert;
   flipped: boolean;
   detail: AlertDetail | null;
+  capFilter: CapTier | 'ALL';
   onFlip: () => void;
   onUnflip: () => void;
   onOpenDeepDive: (ticker: string) => void;
@@ -165,9 +168,6 @@ function Card({
               </div>
               <div className="xlabel">{t('v3.excessVsSector')}</div>
             </div>
-            <span className={`verdict ${verdictClass(alert.verdict)}`}>
-              {t(VERDICT_KEYS[alert.verdict])}
-            </span>
           </div>
           <div className="headline">{alert.article.title}</div>
           <div className="gist">{alert.summary_short ?? alert.summary_long ?? ''}</div>
@@ -271,14 +271,21 @@ function Card({
             {detail === null ? (
               <p className="empty">Loading analysis…</p>
             ) : backTab === 'ripple' ? (
-              detail.layers.map((layer) => (
-                <LayerBlock
-                  key={layer.relationship}
-                  layer={layer}
-                  onOpenDeepDive={onOpenDeepDive}
-                  onOpenInfo={onOpenInfo}
-                />
-              ))
+              <>
+                {capFilter !== 'ALL' &&
+                  !detail.layers.some((layer) =>
+                    layer.rows.some((row) => row.cap_tier === capFilter),
+                  ) && <p className="empty">{t('v3.noCapCompanies')}</p>}
+                {detail.layers.map((layer) => (
+                  <LayerBlock
+                    key={layer.relationship}
+                    layer={layer}
+                    capFilter={capFilter}
+                    onOpenDeepDive={onOpenDeepDive}
+                    onOpenInfo={onOpenInfo}
+                  />
+                ))}
+              </>
             ) : (
               <TimelineBlock timeline={detail.timeline} />
             )}
@@ -468,6 +475,7 @@ export default function FeedView({
               alert={alert}
               flipped={flippedIds.has(alert.id)}
               detail={details[alert.id] ?? null}
+              capFilter={capFilter}
               onFlip={() => flip(alert.id)}
               onUnflip={() => unflip(alert.id)}
               onOpenDeepDive={(ticker) => onOpenDeepDive(ticker, alert.id)}
