@@ -158,6 +158,13 @@ def list_feed_v2_alerts(
         if measurement is not None:
             row = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
             row["peak_cap_tier"] = cap_tiers.get(measurement["peak_ticker"])
+            # Distinct tiers across ALL tagged companies -- the top-bar cap
+            # filter shows a story when any affected company sits in the
+            # chosen tier, not only the peak mover. Companies without an
+            # honest tier (stale/absent cap) contribute nothing.
+            row["cap_tiers"] = sorted(
+                {tier for ac in alert.companies if (tier := cap_tiers.get(ac.company.ticker))}
+            )
             results.append(row)
     return results
 

@@ -21,12 +21,12 @@ import { useTheme } from '../lib/theme';
 
 type View = 'feed' | 'disc' | 'dir' | 'pf' | 'car';
 
-const CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string }> = [
-  { cap: 'ALL', label: 'All' },
-  { cap: 'LARGE', label: 'L' },
-  { cap: 'MID', label: 'M' },
-  { cap: 'SMALL', label: 'S' },
-  { cap: 'MICRO', label: 'µ' },
+const CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string; title: string }> = [
+  { cap: 'ALL', label: 'All', title: 'All companies' },
+  { cap: 'LARGE', label: 'L', title: 'Large cap (top 100 by market cap)' },
+  { cap: 'MID', label: 'M', title: 'Mid cap (rank 101–250)' },
+  { cap: 'SMALL', label: 'S', title: 'Small cap (rank 251–500)' },
+  { cap: 'MICRO', label: 'µ', title: 'Micro cap (rank 501+)' },
 ];
 
 export default function Shell() {
@@ -76,12 +76,13 @@ export default function Shell() {
           </div>
           <div className="tr">
             <div className="capf">
-              {CAP_FILTERS.map(({ cap, label }) => (
+              {CAP_FILTERS.map(({ cap, label, title }) => (
                 <button
                   key={cap}
                   className={capFilter === cap ? 'on' : ''}
                   onClick={() => setCapFilter(cap)}
                   aria-label={`Cap filter ${cap}`}
+                  title={title}
                 >
                   {label}
                 </button>
