@@ -162,12 +162,14 @@ def resolve_companies(
     entry does.
 
     anchor_sub_sectors: {sector: {sub_sector, ...}} built from the companies
-    the model NAMED for each sector. When present, a sector's fan-out is
-    restricted to companies sharing one of those sub-sectors, so a crude-oil
-    story reaching "fmcg" pulls staples_food (where the named companies are)
-    rather than every prominent fmcg name regardless of what it sells. Falls
-    back to the whole sector when a sector has no anchor -- an unanchored
-    sector still deserves its exposure tier, just a less targeted one.
+    the model NAMED for each sector. REQUIRED for a sector-wide fan-out
+    mention to produce any rows at all: a sector's fan-out is restricted to
+    companies sharing one of those sub-sectors, so a crude-oil story
+    reaching "fmcg" pulls staples_food (where the named companies are)
+    rather than every prominent fmcg name regardless of what it sells. When
+    a sector has NO anchor here, the fan-out for that mention resolves to
+    nothing -- see the "no anchor -> no rows" comment at the call site
+    below for why this is not a fallback bug.
     """
     resolved = []
     seen_company_ids: set[int] = set()
@@ -205,6 +207,25 @@ def resolve_companies(
         else:
             if not mention.sector:
                 continue
+            anchors = (anchor_sub_sectors or {}).get(mention.sector)
+            if not anchors:
+                # No anchor -> no rows. This is deliberate, not a missing
+                # fallback: the fan-out's ONLY justification is "the named
+                # company's mechanism reaches structurally similar
+                # companies" -- an anchor is what establishes WHICH part of
+                # the sector the mechanism reaches. Without one, picking the
+                # TOP_N_SECTOR_COMPANIES largest names by market cap asserts
+                # an exposure nobody established; it's blind top-N-by-size
+                # selection, exactly what this resolver exists to remove.
+                # Measured on the real DB: only ~19% of fmcg rows carry a
+                # sub_sector, so an anchor cannot form 81% of the time --
+                # and an earlier version of this fallback let ETERNAL.NS (a
+                # legitimately large, but sector-wide-irrelevant, fmcg
+                # company) win an unanchored top-3 slot regardless of what
+                # the article was actually about. Zero rows for this
+                # mention is the honest answer; the fan-out tier was never
+                # required to be populated on every alert.
+                continue
             parent_company_id, ok = _resolve_parent(mention)
             if not ok:
                 continue
@@ -217,10 +238,8 @@ def resolve_companies(
                 # ~4,967 (spec §8.4).
                 .filter(Company.market == "INDIA")
                 .filter(Company.tradeability == "NORMAL")
+                .filter(Company.sub_sector.in_(anchors))
             )
-            anchors = (anchor_sub_sectors or {}).get(mention.sector)
-            if anchors:
-                query = query.filter(Company.sub_sector.in_(anchors))
             companies = (
                 # Rank by real size, not Nifty membership: after the full
                 # universe ingest ~4,200 of ~4,967 companies sit in

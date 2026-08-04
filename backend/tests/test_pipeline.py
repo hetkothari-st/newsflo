@@ -525,8 +525,24 @@ def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_com
 
 
 def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_session, monkeypatch):
+    # A sector-wide fan-out mention now requires an anchor to return any
+    # rows at all (resolve_companies no longer falls back to the whole
+    # sector -- see app.companies.resolution's "no anchor -> no rows"
+    # comment). ANCHOR.NS's own direct mention is what establishes the
+    # "refining_marketing" anchor for the "oil_gas" fan-out below; A.NS and
+    # B.NS share that sub_sector so they're what the fan-out actually
+    # reaches. This keeps testing the original point of this test --
+    # confidence_score/time_horizon get copied onto every fanned-out row --
+    # without relying on the removed whole-sector fallback.
+    db_session.add(Company(
+        ticker="ANCHOR.NS", name="Anchor Oil Ltd.", sector="oil_gas", index_tier="NIFTY50",
+        sub_sector="refining_marketing", market_cap=1.0,
+    ))
     for ticker, tier in [("A.NS", "NIFTY50"), ("B.NS", "NIFTYNEXT50")]:
-        db_session.add(Company(ticker=ticker, name=ticker, sector="oil_gas", index_tier=tier, market_cap=1.0))
+        db_session.add(Company(
+            ticker=ticker, name=ticker, sector="oil_gas", index_tier=tier, market_cap=1.0,
+            sub_sector="refining_marketing",
+        ))
     db_session.commit()
 
     article = Article(source="test", url="https://example.com/b", title="Oil sector news", content="x")
@@ -535,11 +551,18 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
 
     fake_output = AnalysisOutput(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
-            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="sector-wide tailwind",
-            key_points=[], confidence_score=55, time_horizon="Medium-Term",
-        )],
+        companies=[
+            CompanyMention(
+                name="Anchor Oil Ltd.", ticker="ANCHOR.NS", is_direct=True, sector="oil_gas",
+                direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="direct exposure",
+                key_points=[], confidence_score=55, time_horizon="Medium-Term", impact_level="direct",
+            ),
+            CompanyMention(
+                name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
+                direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="sector-wide tailwind",
+                key_points=[], confidence_score=55, time_horizon="Medium-Term",
+            ),
+        ],
     )
     monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
@@ -547,7 +570,10 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
 
     alert = db_session.query(Alert).one()
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
-    assert len(rows) == 2
+    # ANCHOR.NS (direct_mention) + A.NS/B.NS (sector_inference fan-out).
+    assert len(rows) == 3
+    fanout_tickers = {r.company.ticker for r in rows if r.basis == "sector_inference"}
+    assert fanout_tickers == {"A.NS", "B.NS"}
     # Same reasoning as above -- the Confidence Engine, not the LLM,
     # produces confidence_score now.
     assert all(0 <= r.confidence_score <= 100 for r in rows)
