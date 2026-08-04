@@ -22,6 +22,13 @@ _CLASSIFICATION_FIELDS = (
     "sector", "official_sector", "official_industry", "official_igroup",
     "official_isubgroup", "classification_source", "classification_as_of",
 )
+# Written only when the payload actually carried ratios, so the daily master
+# refresh (which runs with an empty bse_detail/) cannot blank them.
+_FINANCIAL_FIELDS = (
+    "eps", "ceps", "pe", "pb", "opm", "npm", "roe",
+    "con_eps", "con_ceps", "con_pe", "con_pb", "con_opm", "con_npm", "con_roe",
+    "financials_source", "financials_as_of",
+)
 
 
 def _find_existing(session: Session, record: dict) -> Company | None:
@@ -149,6 +156,10 @@ def upsert_records(session: Session, records: list[dict]) -> dict:
             # their ISubGroup is unmapped.
             if record["sub_sector"] is not None:
                 company.sub_sector = record["sub_sector"]
+
+            if record["financials_source"]:
+                for field in _FINANCIAL_FIELDS:
+                    setattr(company, field, record[field])
 
             # A missing cap must never blank an exchange-published one (spec
             # §6.2) -- a stale real cap beats a nulled-out tier, same rule as

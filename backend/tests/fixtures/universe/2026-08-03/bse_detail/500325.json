@@ -1,4 +1,8 @@
 {"SecurityId": "RELIANCE", "SecurityCode": "500325", "ISIN": "INE002A01018",
  "Industry": "Refineries & Marketing", "Group": "A", "Sector": "Energy",
  "IndustryNew": "Oil, Gas & Consumable Fuels", "IGroup": "Petroleum Products",
- "ISubGroup": "Refineries & Marketing"}
+ "ISubGroup": "Refineries & Marketing",
+ "EPS": "28.98", "CEPS": "41.67", "PE": "44.95", "PB": "3.36",
+ "OPM": "14.24", "NPM": "7.99", "ROE": "7.48",
+ "ConEPS": "65.15", "ConCEPS": "108.71", "ConPE": "19.99",
+ "ConOPM": "0.00", "ConNPM": "0.00", "ConPB": null, "ConROE": null}

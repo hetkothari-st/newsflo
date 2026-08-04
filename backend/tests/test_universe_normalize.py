@@ -230,3 +230,56 @@ def test_sub_sector_is_derived_from_isubgroup():
 def test_sub_sector_is_none_without_a_detail_payload():
     record = next(r for r in _load() if r["isin"] == "INE999Z01011")
     assert record["sub_sector"] is None
+
+
+def test_ratios_are_extracted_from_the_detail_payload():
+    record = next(r for r in _load() if r["isin"] == "INE002A01018")
+    assert record["eps"] == 28.98
+    assert record["opm"] == 14.24
+    assert record["financials_source"] == "BSE"
+    assert record["financials_as_of"] == AS_OF
+
+
+def test_absent_ratio_is_none_never_zero():
+    record = next(r for r in _load() if r["isin"] == "INE002A01018")
+    # The real BSE payload returns None for ConPB. Zero would render as a
+    # real price-to-book of 0.00.
+    assert record["con_pb"] is None
+
+
+def test_no_detail_payload_means_no_ratios_and_no_provenance():
+    record = next(r for r in _load() if r["isin"] == "INE999Z01011")
+    assert record["eps"] is None
+    assert record["financials_source"] is None
+
+
+def test_published_zero_ratio_survives_as_real_zero_not_none():
+    # ConOPM/ConNPM are "0.00" (a STRING) on Reliance's real payload -- a
+    # genuine published zero margin, distinct from ConPB/ConROE's None
+    # (BSE published nothing). _parse_float's default non-positive-rejects
+    # rule (correct for market cap) must not eat this.
+    record = next(r for r in _load() if r["isin"] == "INE002A01018")
+    assert record["con_opm"] == 0.0
+    assert record["con_npm"] == 0.0
+
+
+def test_negative_ratio_is_preserved_for_loss_making_companies():
+    detail_json = json.dumps({
+        "SecurityId": "LOSSCO", "SecurityCode": "590005", "ISIN": "INE555Z01018",
+        "Industry": "Some Industry", "Group": "A", "Sector": "Information Technology",
+        "IndustryNew": "IT - Software", "IGroup": "IT Services", "ISubGroup": "IT Consulting",
+        "EPS": "-12.50", "ROE": "-3.20",
+    })
+    bse_json = json.dumps([{
+        "SCRIP_CD": "590005", "Scrip_Name": "Loss Co Ltd", "Status": "Active",
+        "GROUP": "A", "FACE_VALUE": "10.00", "ISIN_NUMBER": "INE555Z01018",
+        "INDUSTRY": None, "scrip_id": "LOSSCO", "Segment": "Equity",
+        "Issuer_Name": "Loss Co Limited", "Mktcap": "500.00",
+    }])
+    bse_rows = normalize.parse_bse_rows(bse_json)
+    details = {"590005": normalize.parse_bse_detail(detail_json)}
+    record = normalize.build_records([], bse_rows, details, AS_OF)[0]
+
+    assert record["eps"] == -12.5
+    assert record["roe"] == -3.2
+    assert record["financials_source"] == "BSE"

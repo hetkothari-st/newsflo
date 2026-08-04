@@ -14,6 +14,11 @@ def _record(isin, ticker, name, **kw):
         "official_igroup": "Petroleum Products", "official_isubgroup": "Refineries & Marketing",
         "classification_source": "BSE", "classification_as_of": AS_OF,
         "market_cap": 1750000.0, "market_cap_source": "BSE", "market_cap_as_of": AS_OF,
+        "eps": None, "ceps": None, "pe": None, "pb": None,
+        "opm": None, "npm": None, "roe": None,
+        "con_eps": None, "con_ceps": None, "con_pe": None,
+        "con_pb": None, "con_opm": None, "con_npm": None, "con_roe": None,
+        "financials_source": None, "financials_as_of": None,
         "tradeability": "NORMAL",
         "listings": [{
             "exchange": "NSE", "symbol": ticker.split(".")[0], "scrip_code": None,
@@ -253,6 +258,38 @@ def test_absent_sub_sector_never_clobbers_a_stored_one(db_session):
         sub_sector=None, official_sector=None, classification_source=None,
     )])
     assert db_session.query(Company).one().sub_sector == "refining_marketing"
+
+
+def test_financial_ratios_are_written_with_financials_source(db_session):
+    loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited",
+        eps=28.98, opm=14.24, con_opm=0.0, con_pb=None,
+        financials_source="BSE", financials_as_of=AS_OF,
+    )])
+    company = db_session.query(Company).one()
+    assert company.eps == 28.98
+    assert company.opm == 14.24
+    assert company.con_opm == 0.0
+    assert company.con_pb is None
+    assert company.financials_source == "BSE"
+    assert company.financials_as_of == AS_OF
+
+
+def test_absent_financials_never_clobbers_stored_ratios(db_session):
+    # The daily master refresh runs with an empty bse_detail/ dir. It must
+    # not null out ratios written by the monthly detail pass.
+    loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited",
+        eps=28.98, opm=14.24, financials_source="BSE", financials_as_of=AS_OF,
+    )])
+    loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited",
+        eps=None, opm=None, financials_source=None, financials_as_of=None,
+    )])
+    company = db_session.query(Company).one()
+    assert company.eps == 28.98
+    assert company.opm == 14.24
+    assert company.financials_source == "BSE"
 
 
 def test_unmapped_sub_sector_leaves_a_legacy_value_intact(db_session):
