@@ -289,6 +289,20 @@ describe('Shell card feed', () => {
     expect(screen.getAllByText(/crude oil slips below \$70/i).length).toBeGreaterThan(0);
   });
 
+  it('filters the card-back company rows by the chosen cap tier', async () => {
+    // The back lists ONGC (LARGE) and CHENNPETRO (MICRO). Under the µ
+    // filter only the MICRO row may remain -- "show me small caps" means
+    // the company rows too, not just which stories survive.
+    renderShell();
+    fireEvent.click(await screen.findByTestId('front-7'));
+    await screen.findByTestId('srow-ONGC.NS');
+    fireEvent.click(screen.getByLabelText('Cap filter MICRO'));
+    expect(screen.queryByTestId('srow-ONGC.NS')).not.toBeInTheDocument();
+    expect(screen.getByTestId('srow-CHENNPETRO.NS')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Cap filter ALL'));
+    expect(screen.getByTestId('srow-ONGC.NS')).toBeInTheDocument();
+  });
+
   it('switches between bottom-nav views', async () => {
     renderShell();
     fireEvent.click(screen.getByRole('button', { name: /discover/i }));
