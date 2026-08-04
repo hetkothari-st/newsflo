@@ -2,7 +2,6 @@ from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.analysis.schemas import CompanyMention
-from app.companies.integrity import DEMO_TICKERS, is_demo_company
 from app.companies.matching import matcher
 from app.config import settings
 from app.models import Company
@@ -72,7 +71,7 @@ def _find_direct_company(session: Session, mention: CompanyMention) -> Company |
     if result is None:
         return None
     company = session.get(Company, result.company_id)
-    if company is None or is_demo_company(company.ticker):
+    if company is None:
         return None
     return company
 
@@ -177,7 +176,6 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
             companies = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
-                .filter(Company.ticker.notin_(DEMO_TICKERS))
                 # Dormant shells and non-Indian rows must never surface as
                 # affected companies once the universe grows from 509 to
                 # ~4,967 (spec 8.4).

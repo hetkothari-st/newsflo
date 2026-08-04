@@ -371,6 +371,22 @@ def test_resolve_drops_indirect_entry_whose_parent_ticker_never_resolved(db_sess
 from app.companies.matching import aliases
 
 
+def _sector_mention(sector):
+    return CompanyMention(
+        name=f"{sector} sector", ticker=None, is_direct=False, sector=sector,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", key_points=[], confidence_score=50, time_horizon="Short-Term",
+    )
+
+
+def _name_mention(name):
+    return CompanyMention(
+        name=name, ticker=None, is_direct=True, sector=None,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", key_points=[], confidence_score=50, time_horizon="Short-Term",
+    )
+
+
 def test_matcher_resolves_a_name_without_a_ticker(db_session):
     _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
     aliases.rebuild_aliases(db_session)
