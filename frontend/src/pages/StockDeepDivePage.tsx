@@ -5,6 +5,7 @@ import PeerRow from '../components/feed-v2/PeerRow';
 import BusinessPopup from '../components/feed-v2/BusinessPopup';
 import AlertDetail from '../components/AlertDetail';
 import CompanyLogo from '../components/CompanyLogo';
+import Fundamentals from '../components/Fundamentals';
 import { capTierColorClass, formatExcess } from '../lib/feedV2Format';
 import { getStockDeepDive, type StockDeepDive } from '../lib/feedV2Api';
 import { useAuth } from '../lib/auth';
@@ -112,9 +113,10 @@ export default function StockDeepDivePage() {
 
       <div className="rounded-lg bg-surface p-5">
         <div className="font-sans text-[11px] uppercase tracking-widest text-muted">What they do</div>
-        <p className="mt-2 font-sans text-sm text-ink">
-          {deepDive.business_desc ?? 'Business description not available.'}
-        </p>
+        {/* No fallback text: business_desc was LLM-invented and the backend
+            now always sends null. An unclassified company renders nothing
+            here -- Fundamentals itself returns null. */}
+        <Fundamentals data={deepDive.fundamentals} />
         <div className="mt-4 flex gap-6">
           <div>
             <div className="font-sans text-[11px] uppercase tracking-widest text-muted">Market cap</div>
@@ -159,7 +161,7 @@ export default function StockDeepDivePage() {
             ticker={popupPeer.ticker}
             sector={popupPeer.sector}
             capTier={popupPeer.cap_tier}
-            businessDesc={popupPeer.business_desc}
+            fundamentals={popupPeer.fundamentals}
           />
         )}
       </AlertDetail>

@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { capTierColorClass, relationshipLabel } from '../../lib/feedV2Format';
+import { relationshipLabel } from '../../lib/feedV2Format';
 import type { RippleCompany, RippleRelationship } from '../../lib/feedV2Api';
 import AlertDetail from '../AlertDetail';
-import Fundamentals from '../Fundamentals';
+import BusinessPopup from './BusinessPopup';
 import PeerRow from './PeerRow';
 
 interface RippleSectionProps {
@@ -73,31 +73,12 @@ export default function RippleSection({ companies, alertId }: RippleSectionProps
       </div>
       <AlertDetail open={popupCompany !== null} onClose={() => setBusinessPopupTicker(null)}>
         {popupCompany && (
-          <div className="flex flex-col gap-3">
-            <div className="rounded-lg bg-surface p-5">
-              <div className="flex items-center gap-2">
-                <span className="font-data text-sm text-ink">{popupCompany.ticker}</span>
-                <span className="font-sans text-xs uppercase tracking-widest text-muted">
-                  {popupCompany.sector}
-                </span>
-                {popupCompany.cap_tier && (
-                  <span
-                    className={`rounded-full px-2 py-0.5 font-sans text-[11px] uppercase tracking-widest ${capTierColorClass(popupCompany.cap_tier)}`}
-                  >
-                    {popupCompany.cap_tier}
-                  </span>
-                )}
-              </div>
-            </div>
-            {/* No fallback text here: an unclassified company (~645 of them)
-                renders no second panel at all rather than an empty shell or
-                "data unavailable" -- Fundamentals itself returns null. */}
-            {popupCompany.fundamentals && (
-              <div className="rounded-lg bg-surface p-5">
-                <Fundamentals data={popupCompany.fundamentals} />
-              </div>
-            )}
-          </div>
+          <BusinessPopup
+            ticker={popupCompany.ticker}
+            sector={popupCompany.sector}
+            capTier={popupCompany.cap_tier}
+            fundamentals={popupCompany.fundamentals}
+          />
         )}
       </AlertDetail>
     </>

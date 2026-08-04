@@ -12,7 +12,20 @@ function makeDeepDive(overrides: Partial<StockDeepDive> = {}): StockDeepDive {
     name: 'Reliance Industries',
     sector: 'oil_gas',
     cap_tier: 'LARGE',
-    business_desc: 'Refines crude oil and runs retail fuel outlets.',
+    // business_desc was LLM-invented and the backend now always sends null;
+    // fundamentals (BSE-sourced) replaces it.
+    business_desc: null,
+    fundamentals: {
+      classification: {
+        sector: 'Energy',
+        industry: 'Oil, Gas & Consumable Fuels',
+        group: 'Petroleum Products',
+        sub_group: 'Refineries & Marketing',
+      },
+      ratios: { opm: 14.24 },
+      source: 'BSE',
+      as_of: '2026-08-04',
+    },
     logo_url: null,
     market_cap: 1500000.0,
     pe: 24.7,
@@ -60,13 +73,26 @@ describe('StockDeepDivePage', () => {
     expect(screen.getByText(/3\.1/)).toBeInTheDocument();
   });
 
-  it('renders business description and market facts', async () => {
+  it('renders the sourced classification, ratios, and as-of date alongside market facts', async () => {
     vi.spyOn(feedV2Api, 'getStockDeepDive').mockResolvedValue(makeDeepDive());
     renderPage();
 
-    await waitFor(() =>
-      expect(screen.getByText('Refines crude oil and runs retail fuel outlets.')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/Refineries & Marketing/)).toBeInTheDocument());
+    expect(screen.getByText('14.24')).toBeInTheDocument();
+    // The date is load-bearing, not decoration: PE is price-derived and this
+    // data refreshes monthly (spec 5.1).
+    expect(screen.getByText(/2026-08-04/)).toBeInTheDocument();
+    expect(screen.getByText(/24\.7/)).toBeInTheDocument();
+  });
+
+  it('renders no placeholder text and no fundamentals panel when the company has no classification', async () => {
+    vi.spyOn(feedV2Api, 'getStockDeepDive').mockResolvedValue(makeDeepDive({ fundamentals: null }));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Reliance Industries')).toBeInTheDocument());
+    expect(screen.queryByText(/not available/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fundamentals')).not.toBeInTheDocument();
+    // Market cap / P/E are independent, live-fetched facts -- they still render.
     expect(screen.getByText(/24\.7/)).toBeInTheDocument();
   });
 
@@ -115,7 +141,14 @@ describe('StockDeepDivePage', () => {
         peers: [
           {
             ticker: 'ONGC.NS', name: 'ONGC', sector: 'oil_gas', cap_tier: 'MID',
-            business_desc: 'Explores and produces crude oil and natural gas.',
+            business_desc: null,
+            fundamentals: {
+              classification: {
+                sector: 'Energy', industry: 'Oil, Gas & Consumable Fuels',
+                group: 'Exploration', sub_group: 'Oil Exploration & Production',
+              },
+              ratios: { pe: 11.2 }, source: 'BSE', as_of: '2026-08-04',
+            },
             direction: 'bearish', excess_move_pct: -0.3,
             intensity: { score: 20, band: 'Low', components: [] }, is_exposure_only: false,
             in_my_holdings: false, why: null, logo_url: null,
@@ -128,13 +161,13 @@ describe('StockDeepDivePage', () => {
     await waitFor(() => expect(screen.getByText('ONGC.NS')).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText('View business details'));
 
-    // RELIANCE's own business_desc ("Refines crude oil...") always renders
+    // RELIANCE's own fundamentals ("Refineries & Marketing") always render
     // inline in the page's own "What they do" section regardless of popup
     // state -- the real assertion is that the POPUP shows ONGC's distinct
-    // text, proving it's peer-specific, not the parent company's.
+    // sub_group, proving it's peer-specific, not the parent company's.
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText('Explores and produces crude oil and natural gas.')).toBeInTheDocument();
-    expect(within(dialog).queryByText('Refines crude oil and runs retail fuel outlets.')).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/Oil Exploration & Production/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Refineries & Marketing/)).not.toBeInTheDocument();
   });
 
   it('renders a not-found message when the ticker does not exist', async () => {

@@ -60,7 +60,12 @@ export interface StockDeepDive {
   name: string;
   sector: string;
   cap_tier: CapTier | null;
+  // Superseded by `fundamentals` below -- backend now always sends null
+  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
   business_desc: string | null;
+  // Null when this company has no official BSE classification. See
+  // frontend/src/lib/api.ts for the omit-vs-zero ratio contract.
+  fundamentals?: Fundamentals | null;
   logo_url: string | null;
   market_cap: number | null;
   pe: number | null;
