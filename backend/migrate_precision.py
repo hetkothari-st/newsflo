@@ -41,6 +41,17 @@ mode this task fixed three times over.
 
 Idempotent: re-running changes nothing further. Pass --dry-run to see counts
 without writing.
+
+IMPORTANT -- confidence_score is NOT directly comparable to CONFIDENCE_FLOOR.
+AlertCompany.confidence_score is persisted AFTER app.pipeline._build_alert_company
+multiplies it by LEVEL_CONFIDENCE_MULTIPLIER (direct x1.0, indirect_l1 x0.7,
+indirect_l2 x0.45), but CONFIDENCE_FLOOR is defined against the PRE-multiplier
+score (see CONFIDENCE_FLOOR's own comment in app.pipeline, and _persist_alert's
+floor check there). Comparing the floor directly to confidence_score double-
+applies the discount and would delete the large majority of indirect_l1/l2
+rows for having a "low" score that is actually just discounted, not
+poorly-reasoned -- do NOT simplify _below_floor() back into a bare
+`AlertCompany.confidence_score < CONFIDENCE_FLOOR` filter.
 """
 import argparse
 
@@ -50,7 +61,31 @@ from sqlalchemy.orm import Session
 from app.companies.integrity import ALERT_COMPANY_DEPENDENTS, DEMO_TICKERS
 from app.db import SessionLocal
 from app.models import AlertCompany, Company
-from app.pipeline import CONFIDENCE_FLOOR
+from app.pipeline import CONFIDENCE_FLOOR, LEVEL_CONFIDENCE_MULTIPLIER
+
+
+def _below_floor(row: AlertCompany) -> bool:
+    """True if `row`'s PRE-multiplier confidence score is reconstructed to
+    be below CONFIDENCE_FLOOR.
+
+    Only the post-multiplier value survives to disk (confidence_score =
+    round(pre_score * multiplier), in app.pipeline._build_alert_company), so
+    the original pre_score is not directly recoverable -- round() is lossy.
+    Reconstruct the MOST GENEROUS pre_score consistent with the persisted
+    value: (confidence_score + 0.5) / multiplier, i.e. assume round() could
+    have rounded down from just under the next integer. Flag the row as
+    below-floor only if even that generous reconstruction misses.
+
+    Chosen deliberately over the midpoint or a strict inverse (confidence_score
+    / multiplier): this direction can only UNDER-delete (keep a row whose true
+    pre_score really was < floor) and never OVER-deletes (never drops a row
+    that would have cleared the floor under the real, unrounded score).
+    Deletion here is irreversible; retention is not -- so every rounding
+    boundary is resolved in favour of keeping the row.
+    """
+    multiplier = LEVEL_CONFIDENCE_MULTIPLIER.get(row.impact_level, 1.0)
+    reconstructed_pre_score = (row.confidence_score + 0.5) / multiplier
+    return reconstructed_pre_score < CONFIDENCE_FLOOR
 
 
 def run_migration(session: Session, dry_run: bool = False) -> None:
@@ -60,11 +95,9 @@ def run_migration(session: Session, dry_run: bool = False) -> None:
         .filter(AlertCompany.rationale.isnot(None))
         .all()
     )
-    low_rows = (
-        session.query(AlertCompany)
-        .filter(AlertCompany.confidence_score < CONFIDENCE_FLOOR)
-        .all()
-    )
+    # Can't push the floor comparison into SQL: the reconstruction needs
+    # each row's own impact_level-keyed multiplier (see _below_floor).
+    low_rows = [row for row in session.query(AlertCompany).all() if _below_floor(row)]
     demo_company_ids = [
         c.id for c in session.query(Company).filter(Company.ticker.in_(DEMO_TICKERS)).all()
     ]

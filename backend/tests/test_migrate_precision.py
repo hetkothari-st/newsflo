@@ -21,7 +21,7 @@ from app.models import (
     EmailNotification,
     User,
 )
-from app.pipeline import CONFIDENCE_FLOOR
+from app.pipeline import CONFIDENCE_FLOOR, LEVEL_CONFIDENCE_MULTIPLIER
 from migrate_precision import run_migration
 
 
@@ -96,3 +96,90 @@ def test_dry_run_deletes_nothing(db_session):
     run_migration(db_session, dry_run=True)
 
     assert db_session.query(AlertCompany).filter_by(id=below_floor.id).count() == 1
+
+
+def _make_alert_company(db_session, ticker, url, impact_level, confidence_score):
+    """Shared scaffolding for the floor-reconstruction tests below: one
+    Company/Article/Alert plus a single AlertCompany row with the given
+    already-persisted (post-multiplier) confidence_score and impact_level."""
+    company = Company(ticker=ticker, name=ticker, sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(source="test", url=url, title="t")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="test")
+    db_session.add(alert)
+    db_session.commit()
+
+    row = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+        confidence_score=confidence_score, impact_level=impact_level,
+    )
+    db_session.add(row)
+    db_session.commit()
+    return row.id
+
+
+def test_indirect_l2_row_kept_when_pre_multiplier_score_clears_floor(db_session):
+    """A pre-multiplier score of 69 clears CONFIDENCE_FLOOR (40) on its own,
+    but indirect_l2's 0.45x multiplier persists round(69 * 0.45) = 31 --
+    below 40. The migration must reconstruct the pre-multiplier score and
+    keep this row, not delete it for a "low" score that's really just the
+    intended distance discount."""
+    multiplier = LEVEL_CONFIDENCE_MULTIPLIER["indirect_l2"]
+    pre_score = 69
+    assert pre_score >= CONFIDENCE_FLOOR  # would have been kept under the real (unrounded) rule
+    persisted = round(pre_score * multiplier)
+    assert persisted < CONFIDENCE_FLOOR  # and yet the persisted value reads as sub-floor
+
+    row_id = _make_alert_company(
+        db_session, "IOC.NS", "https://example.com/l2-clears",
+        impact_level="indirect_l2", confidence_score=persisted,
+    )
+
+    run_migration(db_session, dry_run=False)
+
+    assert db_session.query(AlertCompany).filter_by(id=row_id).count() == 1
+
+
+def test_direct_row_genuinely_below_floor_still_deleted(db_session):
+    """A direct row (multiplier 1.0, so persisted == pre-multiplier score)
+    that is actually below the floor must still be dropped -- the fix only
+    corrects the multiplier compounding, it doesn't stop enforcing the
+    floor."""
+    row_id = _make_alert_company(
+        db_session, "BPCL.NS", "https://example.com/direct-low",
+        impact_level="direct", confidence_score=CONFIDENCE_FLOOR - 10,
+    )
+
+    run_migration(db_session, dry_run=False)
+
+    assert db_session.query(AlertCompany).filter_by(id=row_id).count() == 0
+
+
+def test_borderline_rounding_favours_retention(db_session):
+    """Documents the chosen rounding direction (see migrate_precision._below_floor):
+    an indirect_l2 row with a true pre-multiplier score of 39 -- one point
+    below the floor, so it WOULD have been dropped under the real, unrounded
+    rule -- persists as round(39 * 0.45) = 18. Reconstructing generously,
+    (18 + 0.5) / 0.45 = 41.1, which reads as >= floor. The migration keeps
+    this row: an occasional false keep on a rounding boundary is the
+    accepted tradeoff against ever falsely deleting a row that should have
+    survived, since deletion is irreversible and retention is not."""
+    multiplier = LEVEL_CONFIDENCE_MULTIPLIER["indirect_l2"]
+    pre_score = CONFIDENCE_FLOOR - 1  # 39: genuinely below floor under the real rule
+    persisted = round(pre_score * multiplier)
+    assert persisted == 18
+
+    row_id = _make_alert_company(
+        db_session, "GAIL.NS", "https://example.com/l2-borderline",
+        impact_level="indirect_l2", confidence_score=persisted,
+    )
+
+    run_migration(db_session, dry_run=False)
+
+    assert db_session.query(AlertCompany).filter_by(id=row_id).count() == 1
