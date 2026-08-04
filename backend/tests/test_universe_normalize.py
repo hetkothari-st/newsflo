@@ -220,3 +220,13 @@ def test_mixed_bse_and_yfinance_unit_population_ranks_correctly():
     # The genuine largest BSE company (rank 1 by crore value) must still be
     # LARGE. BSE-only listings get a ".BO" ticker (no NSE row was fed in).
     assert tiers["BSECO0.BO"] == "LARGE"
+
+
+def test_sub_sector_is_derived_from_isubgroup():
+    record = next(r for r in _load() if r["isin"] == "INE002A01018")
+    assert record["sub_sector"] == "refining_marketing"
+
+
+def test_sub_sector_is_none_without_a_detail_payload():
+    record = next(r for r in _load() if r["isin"] == "INE999Z01011")
+    assert record["sub_sector"] is None

@@ -143,6 +143,13 @@ def upsert_records(session: Session, records: list[dict]) -> dict:
                 for field in _CLASSIFICATION_FIELDS:
                     setattr(company, field, record[field])
 
+            # Spec 6.1: overwrite where we derived something, leave the legacy LLM
+            # value alone where we did not. Folding this into
+            # _CLASSIFICATION_FIELDS would null out 824 existing values the moment
+            # their ISubGroup is unmapped.
+            if record["sub_sector"] is not None:
+                company.sub_sector = record["sub_sector"]
+
             # A missing cap must never blank an exchange-published one (spec
             # §6.2) -- a stale real cap beats a nulled-out tier, same rule as
             # app.companies.market_caps.refresh_market_caps.

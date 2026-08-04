@@ -9,6 +9,7 @@ AS_OF = date(2026, 8, 3)
 def _record(isin, ticker, name, **kw):
     record = {
         "isin": isin, "ticker": ticker, "name": name, "sector": "oil_gas",
+        "sub_sector": None,
         "official_sector": "Energy", "official_industry": "Oil, Gas & Consumable Fuels",
         "official_igroup": "Petroleum Products", "official_isubgroup": "Refineries & Marketing",
         "classification_source": "BSE", "classification_as_of": AS_OF,
@@ -238,3 +239,32 @@ def test_batch_continues_past_a_mid_batch_collision(db_session):
     tickers = {c.ticker for c in db_session.query(Company).all()}
     assert tickers == {"RELIANCE.NS", "CLASHX.NS", "FIRST.NS", "THIRD.NS"}
     assert db_session.query(Company).count() == 4
+
+
+def test_sub_sector_is_written_with_the_classification(db_session):
+    loader.upsert_records(db_session, [_record("INE002A01018", "RELIANCE.NS", "Reliance Industries Limited", sub_sector="refining_marketing")])
+    assert db_session.query(Company).one().sub_sector == "refining_marketing"
+
+
+def test_absent_sub_sector_never_clobbers_a_stored_one(db_session):
+    loader.upsert_records(db_session, [_record("INE002A01018", "RELIANCE.NS", "Reliance Industries Limited", sub_sector="refining_marketing")])
+    loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited",
+        sub_sector=None, official_sector=None, classification_source=None,
+    )])
+    assert db_session.query(Company).one().sub_sector == "refining_marketing"
+
+
+def test_unmapped_sub_sector_leaves_a_legacy_value_intact(db_session):
+    # Spec 6.1: an unmapped ISubGroup must not null out one of the 824 legacy
+    # LLM values. This differs from the test above -- here the classification
+    # IS present and being written, only sub_sector is None.
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance", sector="oil_gas",
+        index_tier="OTHER", isin="INE002A01018", sub_sector="legacy_value",
+    ))
+    db_session.commit()
+    loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited", sub_sector=None,
+    )])
+    assert db_session.query(Company).one().sub_sector == "legacy_value"

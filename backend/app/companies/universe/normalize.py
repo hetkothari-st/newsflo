@@ -13,7 +13,7 @@ import json
 import math
 from datetime import date
 
-from app.companies.universe import sector_map
+from app.companies.universe import sector_map, sub_sector_map
 
 # Equity ISIN prefixes. INF* are mutual-fund/ETF units (253 on BSE) and are
 # not companies; BSE also publishes one row whose ISIN is the literal "NA".
@@ -217,6 +217,13 @@ def build_records(
         record["sector"] = sector_map.map_sector(
             record["official_sector"], record["official_industry"],
         )
+        # Cap tier is unknown at ingest time (it's a rank over the whole
+        # population, computed later) -- called with two args, so IT
+        # services always resolve to it_other here; a later pass with the
+        # tier can refine it.
+        record["sub_sector"] = sub_sector_map.map_sub_sector(
+            record["official_isubgroup"], record["sector"],
+        )
         record["tradeability"] = sector_map.derive_tradeability(record["listings"])
         records.append(record)
     return records
@@ -227,6 +234,7 @@ def _blank_record(isin: str, as_of: date) -> dict:
         "isin": isin,
         "name": "",
         "sector": "other",
+        "sub_sector": None,
         "official_sector": None,
         "official_industry": None,
         "official_igroup": None,
