@@ -475,3 +475,42 @@ Measured on the Section 0 evaluation harness:
 - `reanalyze_cascade.py` does not apply `CONFIDENCE_FLOOR`, unlike the live
   pipeline. Pre-existing divergence between the one-off script and
   `_persist_alert`, not introduced by this work.
+
+## Stock-universe merge (post-merge update)
+
+A concurrent "stock universe" feature merged into this branch after the
+"Status at merge" and "Known limitations at merge" sections above were
+written (commit `e4b39bf`, "fix broken tickers", among others in that
+merge). Two facts from that merge directly affect this feature:
+
+- **`HPCL.NS` was renamed to `HINDPETRO.NS`.** `HINDPETRO` is the correct
+  NSE ticker for Hindustan Petroleum; `HPCL.NS` never was. The company is
+  unaffected on alert 9020 otherwise. `tests/golden/cases.py` was updated
+  to the new ticker so `score_golden.py` continues to report alert 9020 at
+  precision 1.00 / recall 1.00 / 0 forbidden.
+
+- **The company universe grew from 1,016 to 5,321 rows, and sector
+  assignment was reset at scale.** `sector='other'` is now 3,161 of 5,321
+  rows (59%), and only 826 of 5,321 carry any `sub_sector` at all. Of the
+  companies that do carry a `sub_sector`, 126 ended up with a `sector` that
+  doesn't own that `sub_sector` in `SUB_SECTOR_TAXONOMY` (e.g.
+  `BAJAJ-AUTO.NS` / `two_wheeler`, `GRASIM.NS` / `cement`, `ADANIENT.NS` /
+  `metals_other`) — `apply_taxonomy_repairs.py` was generalised with a
+  second, derived repair pass (in addition to its existing explicit
+  three-row table) that fixes every one of these 126 automatically,
+  because each sub_sector present is owned by exactly one sector; none are
+  ambiguous or unknown.
+
+  **Consequence for this feature:** Section 2 (Grounding) and Section 4
+  (Fan-out repair) both select candidate companies by querying `sector`
+  (grounding) and `sub_sector` within a sector (fan-out anchoring). With
+  59% of the universe sitting in `sector='other'` and only ~15.5% of rows
+  carrying a `sub_sector`, both candidate grounding and sub-sector
+  anchoring now have materially less of the universe to draw on than when
+  this spec's design and "Status at merge" section were written against
+  the 1,016-row universe. This does not change any success-criteria
+  measurement above (those numbers predate the merge and are unaffected by
+  it), but it does mean the effective reach of both mechanisms is weaker
+  than designed until the taxonomy is enriched for the newly-added
+  companies — i.e. until more of the 3,161 `sector='other'` rows are
+  classified and more of the 4,495 rows without a `sub_sector` receive one.

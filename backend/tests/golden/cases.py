@@ -20,7 +20,13 @@ GOLDEN_CASES: list[GoldenCase] = [
     GoldenCase(
         alert_id=9020,
         title="Crude oil supply shock hits refiners",
-        must_include={"HPCL.NS", "BPCL.NS", "INDIGO.NS", "ASIANPAINT.NS"},
+        # HPCL.NS -> HINDPETRO.NS: the stock-universe merge (commit
+        # e4b39bf, "fix broken tickers") renamed this company's ticker.
+        # HINDPETRO is the correct NSE symbol for Hindustan Petroleum --
+        # HPCL.NS never was a real NSE ticker. Same company, same row on
+        # alert 9020; this is not a re-labelling of what belongs on the
+        # alert, just a stale ticker string.
+        must_include={"HINDPETRO.NS", "BPCL.NS", "INDIGO.NS", "ASIANPAINT.NS"},
         must_exclude={
             # Food delivery / quick commerce -- no crude mechanism. The
             # original reported bug.

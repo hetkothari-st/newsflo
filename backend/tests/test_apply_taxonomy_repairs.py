@@ -75,3 +75,85 @@ def test_repair_table_only_contains_supported_fields():
         assert field in ("sector", "sub_sector")
         assert isinstance(ticker, str) and ticker
         assert isinstance(expected, str) and expected
+
+
+# --- derived pass (Job 2): fixes sector/sub_sector coherence violations not
+# covered by the explicit TAXONOMY_REPAIRS table, whenever the sub_sector's
+# owning sector is unambiguous. ---
+
+def test_derivable_violation_gets_its_sector_fixed(db_session):
+    # two_wheeler is owned by exactly one sector (auto) in
+    # SUB_SECTOR_TAXONOMY, so a company sitting under sector="other" with
+    # sub_sector="two_wheeler" is exactly the shape the stock-universe
+    # merge produced at scale (126 rows): a real sub_sector surviving a
+    # sector reset to "other". The derived pass should fix it without any
+    # entry in TAXONOMY_REPAIRS naming this ticker.
+    db_session.add(Company(
+        ticker="TESTBIKE.NS", name="Test Bike Ltd.", sector="other", sub_sector="two_wheeler",
+        index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    derived = next(r for r in results if r.ticker == "TESTBIKE.NS")
+    assert derived.status == "applied"
+    assert derived.field == "sector"
+    assert derived.previous == "other"
+    assert derived.expected == "auto"
+    assert db_session.query(Company).filter_by(ticker="TESTBIKE.NS").one().sector == "auto"
+    # sub_sector itself is never touched by the derived pass.
+    assert db_session.query(Company).filter_by(ticker="TESTBIKE.NS").one().sub_sector == "two_wheeler"
+
+
+def test_ambiguous_or_unknown_sub_sector_is_reported_not_guessed(db_session):
+    # No branch of SUB_SECTOR_TAXONOMY contains this made-up value, so
+    # _sector_owning (via check_sub_sectors's correct_sector) returns None
+    # -- the derived pass must report it and leave the row untouched rather
+    # than guess a sector.
+    db_session.add(Company(
+        ticker="TESTMYSTERY.NS", name="Test Mystery Ltd.", sector="other",
+        sub_sector="not_a_real_sub_sector", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    reported = next(r for r in results if r.ticker == "TESTMYSTERY.NS")
+    assert reported.status == "ambiguous"
+    company = db_session.query(Company).filter_by(ticker="TESTMYSTERY.NS").one()
+    assert company.sector == "other"
+    assert company.sub_sector == "not_a_real_sub_sector"
+
+
+def test_derived_pass_dry_run_writes_nothing(db_session):
+    db_session.add(Company(
+        ticker="TESTBIKE.NS", name="Test Bike Ltd.", sector="other", sub_sector="two_wheeler",
+        index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=True)
+
+    derived = next(r for r in results if r.ticker == "TESTBIKE.NS")
+    assert derived.status == "applied"
+    assert derived.expected == "auto"
+    # Nothing was actually written.
+    assert db_session.query(Company).filter_by(ticker="TESTBIKE.NS").one().sector == "other"
+
+
+def test_second_run_reports_nothing_left_to_do_for_derived_violations(db_session):
+    db_session.add(Company(
+        ticker="TESTBIKE.NS", name="Test Bike Ltd.", sector="other", sub_sector="two_wheeler",
+        index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    apply_taxonomy_repairs(db_session, dry_run=False)
+    second_pass = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    # The row is coherent now (auto/two_wheeler), so it no longer shows up
+    # as a check_sub_sectors violation at all -- the derived pass has
+    # nothing to report or fix on the second run.
+    assert not any(r.ticker == "TESTBIKE.NS" for r in second_pass)
+    assert db_session.query(Company).filter_by(ticker="TESTBIKE.NS").one().sector == "auto"
