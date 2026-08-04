@@ -120,3 +120,49 @@ would catch them automatically was proven unsafe: a token-subset matching rung p
 confident wrong attributions (`Air India` → Tenneco Clean Air India, `Vodafone` → IDEA,
 `Suzuki` → Maruti) for 488 of 718 alias tokens. Any future attempt needs a fundamentally
 different approach, not a looser threshold.
+
+---
+
+# Addendum 2026-08-04 — Subsystem B (sourced fundamentals)
+
+## Unresolved: the sector column is contested between two workstreams
+
+`master` carries `apply_taxonomy_repairs.py` from the impact-analysis-precision effort. It
+hardcodes per-company fixes — `ASIANPAINT.NS` to `sector=chemicals` / `sub_sector=paints`,
+`INDIGO.NS` to `sector=railways_transport` — and derives sector FROM sub_sector for ~126
+more companies.
+
+The universe pipeline derives the opposite direction: sector from BSE's official
+classification, then sub_sector from `ISubGroup` validated against it. BSE files paint
+makers under Consumer Durables, and `railways_transport` is currently unreachable from any
+BSE value. So **the monthly `universe_detail_refresh` will revert both repairs** — Asian
+Paints to `consumer_durables`, IndiGo to `other` — within 30 days of each hand-repair.
+
+This is a product decision, not a bug in either workstream:
+
+- **BSE is the source of truth** → drop the hardcoded repairs and accept that Asian Paints
+  is classified as Consumer Durables, because that is what the exchange says.
+- **The hand-repairs are the truth** → the universe refresh must not overwrite a
+  hand-repaired company, which needs a `sector_source` column or an exclusion list.
+- **Both, layered** → BSE derives the default, an explicit override table wins, and the
+  refresh respects it.
+
+Until it is decided, `backfill_reclassify.py` must run BEFORE any hand-authored repair
+pass, never after. Its docstring says so.
+
+## Deferred minors from the subsystem-B build
+
+- Task 3 report says 33 mapping changes; the diff has 32 (29 sector fixes, 2 same-sector
+  re-buckets, 1 addition). Detail table is correct; only the summary is off.
+- 21 of the 72 sub-sector values are now unreachable (`paints`, `mining_coal`,
+  `commercial_vehicle`, `textiles_other` among them) because no BSE `ISubGroup` maps to
+  them under a sector that can reach them. Worth a docstring note so a later reader does
+  not "fix" the taxonomy blind.
+- The sub-sector vocabulary test walks the mapping dict only; the three IT-services
+  literals bypass it. All three verified valid; a one-line union would close the hole.
+- `app/companies/business_profile.py` is orphaned from the runtime after the scheduler job
+  was removed. It can still write a `business_desc` that all four serializers now hardcode
+  to `None`. Harmless, but dead.
+- `defense`, `agriculture` and `railways_transport` resolve for **zero** of 4,684
+  companies. BSE files defence makers under Capital Goods and fertiliser makers under
+  Chemicals. Fixing it means adding `IGroup`-level rules to `sector_map`.
