@@ -27,17 +27,9 @@ import {
   moveColor,
   moveDir,
   TIMELINE_COLORS,
-  verdictClass,
 } from './format';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
-import type { TranslationKey } from '../lib/i18n';
-
-const VERDICT_KEYS: Record<FeedAlert['verdict'], TranslationKey> = {
-  COMPANY_SPECIFIC: 'v3.verdictCompany',
-  SECTOR_WIDE: 'v3.verdictSector',
-  UNCONFIRMED: 'v3.verdictUnconfirmed',
-};
 
 function LayerBlock({
   layer,
@@ -65,7 +57,6 @@ function LayerBlock({
           {layer.icon === 'win' ? '▲' : layer.icon === 'lose' ? '▼' : '◆'}
         </span>
         <span className="lt">{layer.title}</span>
-        <span className="lrel">{layer.relationship.replace(/_/g, ' ')}</span>
       </div>
       {layer.note !== null && <p className="lnote">{layer.note}</p>}
       {rows.map((row) => (
@@ -177,9 +168,6 @@ function Card({
               </div>
               <div className="xlabel">{t('v3.excessVsSector')}</div>
             </div>
-            <span className={`verdict ${verdictClass(alert.verdict)}`}>
-              {t(VERDICT_KEYS[alert.verdict])}
-            </span>
           </div>
           <div className="headline">{alert.article.title}</div>
           <div className="gist">{alert.summary_short ?? alert.summary_long ?? ''}</div>

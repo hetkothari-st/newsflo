@@ -98,15 +98,27 @@ class SPAStaticFiles(StaticFiles):
     Confirmed in production: any deep link, bookmark, or browser refresh on
     a non-root route returned a raw 404. Fall back to index.html for any
     404 whose path has no file extension (a real missing asset like
-    /nonexistent.js still 404s normally)."""
+    /nonexistent.js still 404s normally).
+
+    index.html (and every SPA-fallback response) is served with
+    Cache-Control: no-cache. Without it, browsers heuristically cache the
+    shell HTML, which pins users to a stale hashed JS bundle across
+    deploys -- confirmed in production: new deploys were invisible until a
+    hard refresh. no-cache still allows ETag revalidation (304s), so the
+    cost is one conditional request per load. Hashed /assets/* files stay
+    heuristically cacheable -- their names change on every content change."""
 
     async def get_response(self, path: str, scope):
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
-                return await super().get_response("index.html", scope)
-            raise
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 app.mount("/", SPAStaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
