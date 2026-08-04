@@ -1,0 +1,34 @@
+{
+  "companies": [
+    {"ticker": "APOLLOTYRE.NS", "name": "Apollo Tyres Limited", "sector": "auto"},
+    {"ticker": "APOLLOHOSP.NS", "name": "Apollo Hospitals Enterprise Limited", "sector": "pharma"},
+    {"ticker": "BHARATGEAR.NS", "name": "Bharat Gears Limited", "sector": "auto"},
+    {"ticker": "BHARATSEAT.NS", "name": "Bharat Seats Limited", "sector": "auto"},
+    {"ticker": "BBL.NS", "name": "Bharat Bijlee Limited", "sector": "infra"},
+    {"ticker": "SBIN.NS", "name": "State Bank of India", "sector": "banking"},
+    {"ticker": "SBICARD.NS", "name": "SBI Cards and Payment Services Limited", "sector": "banking"},
+    {"ticker": "SBILIFE.NS", "name": "SBI Life Insurance Company Limited", "sector": "banking"},
+    {"ticker": "HDFCBANK.NS", "name": "HDFC Bank Limited", "sector": "banking"},
+    {"ticker": "HDFCAMC.NS", "name": "HDFC Asset Management Company Limited", "sector": "banking"},
+    {"ticker": "COALINDIA.NS", "name": "Coal India Limited", "sector": "metals"},
+    {"ticker": "OIL.NS", "name": "Oil India Limited", "sector": "oil_gas"}
+  ],
+  "cases": [
+    {"mention": "Apollo Tyres", "expect": "APOLLOTYRE.NS"},
+    {"mention": "Apollo Hospitals", "expect": "APOLLOHOSP.NS"},
+    {"mention": "Apollo", "expect": null},
+    {"mention": "Bharat Gears Ltd", "expect": "BHARATGEAR.NS"},
+    {"mention": "Bharat Seats", "expect": "BHARATSEAT.NS"},
+    {"mention": "Bharat Bijlee", "expect": "BBL.NS"},
+    {"mention": "Bharat", "expect": null},
+    {"mention": "SBI Cards", "expect": "SBICARD.NS"},
+    {"mention": "SBI Life", "expect": "SBILIFE.NS"},
+    {"mention": "State Bank of India", "expect": "SBIN.NS"},
+    {"mention": "HDFC Bank", "expect": "HDFCBANK.NS"},
+    {"mention": "HDFC Asset Management", "expect": "HDFCAMC.NS"},
+    {"mention": "Coal India", "expect": "COALINDIA.NS"},
+    {"mention": "Oil India", "expect": "OIL.NS"},
+    {"mention": "India", "expect": null},
+    {"mention": "Some Company That Does Not Exist", "expect": null}
+  ]
+}

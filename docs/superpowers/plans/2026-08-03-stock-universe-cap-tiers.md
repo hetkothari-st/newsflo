@@ -1751,7 +1751,14 @@ LEGAL_SUFFIXES = (
     "company", "co", "incorporated", "inc", "plc",
 )
 
-_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
+# AMENDED 2026-08-03. The original single-regex version here contradicted this
+# task's own test: sub(" ") turns "J.B. Chemicals" into "j b chemicals", not
+# "jb chemicals". Checked against all 7,500 real NSE+BSE names — 98 carry an
+# embedded dot, 114 an embedded hyphen — so one rule cannot serve both. Dots
+# abbreviate a single word and must JOIN; every other mark separates two words
+# and must SPLIT. Order matters: dots first.
+_DOTS = re.compile(r"\.")
+_OTHER_PUNCTUATION = re.compile(r"[^a-z0-9\s]")
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -1759,7 +1766,8 @@ def normalize_name(raw: str | None) -> str:
     if not raw:
         return ""
     text = raw.strip().lower().replace("&", " and ")
-    text = _PUNCTUATION.sub(" ", text)
+    text = _DOTS.sub("", text)
+    text = _OTHER_PUNCTUATION.sub(" ", text)
     text = _WHITESPACE.sub(" ", text).strip()
     if not text:
         return ""
@@ -2440,9 +2448,19 @@ git commit -m "test: adversarial and production-derived regression gate for the 
 ### Task 12: Swap resolution to the matcher
 
 **Files:**
-- Modify: `app/companies/resolution.py:13-19` (`_TIER_RANK`), `:64-93` (`_find_direct_company`), `:161-168` (fan-out query)
+- Modify: `app/companies/resolution.py` — `_find_direct_company` (~line 64), fan-out query (~lines 175-187)
 - Modify: `app/config.py`
 - Test: `tests/test_resolution.py`
+
+**AMENDED 2026-08-03 — concurrent work already changed this file.** Commit
+`f39fd55` ("constrain sector fan-out to broad events, primary level, anchored
+sub-sectors") landed on this branch from parallel work and rewrote the fan-out.
+**Preserve all of it.** Specifically: `TOP_N_SECTOR_COMPANIES = 3` (do NOT restore
+5), the `anchor_sub_sectors` parameter on `resolve_companies`, the
+`Company.sub_sector.in_(anchors)` filter, and the `DEMO_TICKERS` filter. `_TIER_RANK`
+is **kept**, demoted to a tiebreak behind market cap — the spec (§8.4) says "with
+`index_tier` as tiebreak", so keeping it is correct. This task adds exactly two
+filters and one ordering key. Nothing else in the fan-out changes.
 
 **Interfaces:**
 - Consumes: `matcher.resolve`.
@@ -2455,101 +2473,86 @@ git commit -m "test: adversarial and production-derived regression gate for the 
 Append to `tests/test_resolution.py`:
 
 ```python
-from app.companies import resolution
+Reuse the file's existing `_make_company` helper and construct `CompanyMention`
+the way the existing tests in this file already do — do NOT add a duplicate
+mention factory. `resolve_companies`' second parameter (`anchor_sub_sectors`)
+has a default, so two-argument calls remain valid.
+
+```python
 from app.companies.matching import aliases
-from app.models import Company
 
 
-def _mention(**kw):
-    from app.analysis.schemas import CompanyMention
-    defaults = dict(
-        ticker=None, name=None, sector=None, is_direct=True, direction="POSITIVE",
-        magnitude_low=1.0, magnitude_high=2.0, rationale="r", key_points=[],
-        confidence_score=50, time_horizon="Short-Term", reasons=[], evidence_refs=[],
-        risks=[], assumptions=[], unknowns=[], alternative_hypothesis=None,
-        impact_level="direct", parent_ticker=None,
+def _sector_mention(sector):
+    return CompanyMention(
+        name=None, ticker=None, is_direct=False, sector=sector,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", key_points=[], confidence_score=50, time_horizon="Short-Term",
     )
-    defaults.update(kw)
-    return CompanyMention(**defaults)
+
+
+def _name_mention(name):
+    return CompanyMention(
+        name=name, ticker=None, is_direct=True, sector=None,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", key_points=[], confidence_score=50, time_horizon="Short-Term",
+    )
 
 
 def test_matcher_resolves_a_name_without_a_ticker(db_session):
-    db_session.add(Company(
-        ticker="APOLLOTYRE.NS", name="Apollo Tyres Limited", sector="auto",
-        index_tier="OTHER", tradeability="NORMAL",
-    ))
-    db_session.commit()
+    _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
     aliases.rebuild_aliases(db_session)
 
-    resolved = resolution.resolve_companies(db_session, [_mention(name="Apollo Tyres Ltd")])
+    resolved = resolve_companies(db_session, [_name_mention("Apollo Tyres Ltd")])
     assert len(resolved) == 1
 
 
 def test_ambiguous_name_resolves_to_nothing(db_session):
-    for ticker, name in [
-        ("APOLLOTYRE.NS", "Apollo Tyres Limited"),
-        ("APOLLOHOSP.NS", "Apollo Hospitals Enterprise Limited"),
-    ]:
-        db_session.add(Company(
-            ticker=ticker, name=name, sector="auto", index_tier="OTHER",
-            tradeability="NORMAL",
-        ))
-    db_session.commit()
+    _make_company(db_session, "APOLLOTYRE.NS", "Apollo Tyres Limited", "auto", None)
+    _make_company(db_session, "APOLLOHOSP.NS", "Apollo Hospitals Enterprise Limited", "pharma", None)
     aliases.rebuild_aliases(db_session)
 
-    assert resolution.resolve_companies(db_session, [_mention(name="Apollo")]) == []
+    assert resolve_companies(db_session, [_name_mention("Apollo")]) == []
 
 
 def test_sector_fanout_ranks_by_market_cap(db_session):
-    db_session.add(Company(
-        ticker="BIG.NS", name="Big Oil Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=900000.0, tradeability="NORMAL",
-    ))
-    db_session.add(Company(
-        ticker="SMALL.NS", name="Small Oil Limited", sector="oil_gas",
-        index_tier="NIFTY50", market_cap=100.0, tradeability="NORMAL",
-    ))
-    db_session.commit()
+    # BIG is in the lowest index tier but is far larger. Under the old
+    # _TIER_RANK-first ordering SMALL won; market cap now leads.
+    _make_company(db_session, "BIG.NS", "Big Oil Limited", "oil_gas", 900000.0, index_tier="OTHER")
+    _make_company(db_session, "SMALL.NS", "Small Oil Limited", "oil_gas", 100.0, index_tier="NIFTY50")
 
-    resolved = resolution.resolve_companies(
-        db_session, [_mention(is_direct=False, sector="oil_gas")]
-    )
-    first = db_session.get(Company, resolved[0]["company_id"])
-    assert first.ticker == "BIG.NS"
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    assert db_session.get(Company, resolved[0]["company_id"]).ticker == "BIG.NS"
+
+
+def test_sector_fanout_still_falls_back_to_index_tier_without_caps(db_session):
+    # Guards the concurrent work in f39fd55: when no company has a market
+    # cap, nullslast() leaves every row tied and _TIER_RANK must still
+    # decide the order.
+    _make_company(db_session, "LOW.NS", "Low Tier Oil Limited", "oil_gas", None, index_tier="OTHER")
+    _make_company(db_session, "HIGH.NS", "High Tier Oil Limited", "oil_gas", None, index_tier="NIFTY50")
+
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    assert db_session.get(Company, resolved[0]["company_id"]).ticker == "HIGH.NS"
 
 
 def test_sector_fanout_excludes_non_tradeable_companies(db_session):
-    db_session.add(Company(
-        ticker="SHELL.BO", name="Dormant Shell Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=5000000.0, tradeability="SUSPENDED",
-    ))
-    db_session.add(Company(
-        ticker="REAL.NS", name="Real Oil Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=100.0, tradeability="NORMAL",
-    ))
+    shell = _make_company(db_session, "SHELL.BO", "Dormant Shell Limited", "oil_gas", 5000000.0, index_tier="OTHER")
+    shell.tradeability = "SUSPENDED"
     db_session.commit()
+    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
 
-    resolved = resolution.resolve_companies(
-        db_session, [_mention(is_direct=False, sector="oil_gas")]
-    )
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
 
 
 def test_sector_fanout_excludes_global_companies(db_session):
-    db_session.add(Company(
-        ticker="XOM", name="Exxon Mobil", sector="oil_gas", index_tier="GLOBAL_LARGE_CAP",
-        market_cap=9000000.0, market="GLOBAL", tradeability="NORMAL",
-    ))
-    db_session.add(Company(
-        ticker="REAL.NS", name="Real Oil Limited", sector="oil_gas",
-        index_tier="OTHER", market_cap=100.0, tradeability="NORMAL",
-    ))
+    xom = _make_company(db_session, "XOM", "Exxon Mobil", "oil_gas", 9000000.0, index_tier="GLOBAL_LARGE_CAP")
+    xom.market = "GLOBAL"
     db_session.commit()
+    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
 
-    resolved = resolution.resolve_companies(
-        db_session, [_mention(is_direct=False, sector="oil_gas")]
-    )
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
 ```
@@ -2557,7 +2560,7 @@ def test_sector_fanout_excludes_global_companies(db_session):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_resolution.py -k "matcher or fanout or ambiguous" -v`
-Expected: FAIL — `test_sector_fanout_ranks_by_market_cap` returns `SMALL.NS` first (index-tier ordering still wins).
+Expected: FAIL — `test_sector_fanout_ranks_by_market_cap` returns `SMALL.NS` first (index-tier ordering still wins), and the global/non-tradeable tests fail because no filter excludes those rows yet.
 
 - [ ] **Step 3: Add the config flag**
 
@@ -2605,22 +2608,41 @@ from app.config import settings
 
 - [ ] **Step 5: Replace the fan-out ordering**
 
-In `app/companies/resolution.py`, delete the `_TIER_RANK` definition (lines 13-19) and replace the fan-out query (lines 161-168) with:
+**Keep `_TIER_RANK`** — it becomes the tiebreak, per spec §8.4. Keep
+`TOP_N_SECTOR_COMPANIES = 3`, the `anchor_sub_sectors` parameter, and the
+`anchors` filter exactly as `f39fd55` left them.
+
+In `app/companies/resolution.py`, make two changes inside the existing fan-out
+block. Add the two filters to the base query:
 
 ```python
-            companies = (
+            query = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
                 .filter(Company.ticker.notin_(DEMO_TICKERS))
-                # Rank by real size, not Nifty membership: after the full
-                # universe ingest ~4,200 of ~4,967 companies sit in
-                # index_tier='OTHER', which collapses the old tier ranking
-                # into alphabetical order. Non-tradeable and global rows are
-                # excluded so dormant shells never surface as affected
-                # companies (spec §8.4).
+                # Dormant shells and non-Indian rows must never surface as
+                # affected companies once the universe grows from 509 to
+                # ~4,967 (spec §8.4).
                 .filter(Company.market == "INDIA")
                 .filter(Company.tradeability == "NORMAL")
-                .order_by(Company.market_cap.desc().nullslast(), Company.ticker.asc())
+            )
+```
+
+and change only the `order_by` in the block below it:
+
+```python
+            companies = (
+                # Rank by real size, not Nifty membership: after the full
+                # universe ingest ~4,200 of ~4,967 companies sit in
+                # index_tier='OTHER', which collapses the tier ranking into
+                # alphabetical order. _TIER_RANK stays as the tiebreak, which
+                # is also what keeps the pre-existing fan-out tests (whose
+                # companies have no market cap) ordering as before.
+                query.order_by(
+                    Company.market_cap.desc().nullslast(),
+                    _TIER_RANK.asc(),
+                    Company.ticker.asc(),
+                )
                 .limit(TOP_N_SECTOR_COMPANIES)
                 .all()
             )
@@ -2634,7 +2656,7 @@ Expected: all pass, including the pre-existing tests in that file.
 - [ ] **Step 7: Run the full suite**
 
 Run: `python -m pytest -q`
-Expected: no new failures. `tests/test_cascade.py` and `tests/test_end_to_end.py` exercise fan-out — if they assert a specific company order, update those assertions to the market-cap ordering and note it in the commit body.
+Expected: no new failures against the 814-test baseline. `tests/test_cascade.py` and `tests/test_end_to_end.py` exercise fan-out. The pre-existing fan-out tests in `tests/test_resolution.py` pass `market_cap=None`, so `nullslast()` plus the retained `_TIER_RANK` tiebreak must leave their ordering unchanged — **if any of them break, the fix is in your change, not in their assertions.** Do not edit tests written by the concurrent `f39fd55` work to make your change pass; report it as a concern instead.
 
 - [ ] **Step 8: Commit**
 
@@ -2882,9 +2904,35 @@ git commit -m "feat: rank-based MICRO tier and cap-tier resolution with provenan
 
 **Interfaces:**
 - Consumes: `normalize.build_records`, `loader.upsert_records`, `aliases.rebuild_aliases`.
-- Produces: `TICKER_CORRECTIONS: dict[str, str]`, `apply_ticker_corrections(session) -> list[tuple[str, str]]`, `flag_missing_tickers(session, known_symbols: set[str]) -> list[str]`.
+- Produces: `TICKER_CORRECTIONS: dict[str, str]`, `apply_ticker_corrections(session) -> list[tuple[str, str]]`, `flag_missing_tickers(session, known_symbols: set[str]) -> list[str]`, `merge_duplicate_companies(session, pairs) -> list[dict]`.
 
 Verified against the live NSE master on 2026-08-03: `HPCL` and `OILINDIA` are not NSE symbols; the real ones are `HINDPETRO` and `OIL`. `JBCHEPHARM` is absent from the master entirely.
+
+**AMENDED 2026-08-03 — the real data is not the shape this task assumed.** Task 11's
+regression corpus surfaced the actual rows. `HPCL.NS` and `OILINDIA.NS` are not
+mis-typed tickers on the real companies; they are **spurious duplicate rows sitting
+alongside the correct ones**:
+
+| id | ticker | ISIN | alert_companies rows |
+|---|---|---|---|
+| 271 | `HINDPETRO.NS` | INE094A01015 | 5 |
+| 1016 | `HPCL.NS` | *none* | 2 |
+| 385 | `OIL.NS` | INE274J01014 | 2 |
+| 1017 | `OILINDIA.NS` | *none* | 1 |
+| 305 | `JBCHEPHARM.NS` | INE572A01036 | 0 |
+
+Consequences for this task:
+
+1. `apply_ticker_corrections` will correctly SKIP both renames (the target ticker
+   already exists) — but that leaves **3 alert rows attached to phantom companies
+   that have no ISIN and will never appear in the exchange masters**. Skipping is
+   necessary but not sufficient, so this task now also implements
+   `merge_duplicate_companies` (below).
+2. The claim that `JBCHEPHARM.NS` must not be deleted because "it has alert history"
+   is **factually wrong** — it has 0 alerts. It carries a valid ISIN and is a real
+   company simply absent from the current NSE master (delisted or merged). Flagging
+   it `SUSPENDED` remains correct, but for that reason, not the stated one. Fix the
+   docstring accordingly.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2892,7 +2940,8 @@ Create `tests/test_backfill_universe.py`:
 
 ```python
 import backfill_universe
-from app.models import Alert, AlertCompany, Article, Company
+from app.companies.matching import aliases
+from app.models import Alert, AlertCompany, Article, Company, CompanyAlias
 
 
 def _alert(session):
@@ -2966,6 +3015,89 @@ def test_unknown_ticker_is_flagged_suspended_not_deleted(db_session):
     assert refreshed.tradeability == "SUSPENDED"
 
 
+def test_merge_moves_alert_history_and_deletes_the_phantom(db_session):
+    canonical = Company(
+        ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+        sector="oil_gas", index_tier="NIFTY50", isin="INE094A01015",
+    )
+    phantom = Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas",
+        index_tier="OTHER",
+    )
+    db_session.add_all([canonical, phantom])
+    db_session.commit()
+    canonical_id, phantom_id = canonical.id, phantom.id
+
+    alert = _alert(db_session)
+    db_session.add(AlertCompany(alert_id=alert.id, company_id=phantom_id, direction="POSITIVE"))
+    db_session.commit()
+
+    report = backfill_universe.merge_duplicate_companies(
+        db_session, [("HPCL.NS", "HINDPETRO.NS")],
+    )
+
+    assert db_session.get(Company, phantom_id) is None
+    assert db_session.get(Company, canonical_id) is not None
+    assert db_session.query(AlertCompany).one().company_id == canonical_id
+    assert report[0]["moved"]["alert_companies.company_id"] == 1
+
+
+def test_merge_refuses_when_the_phantom_has_an_isin(db_session):
+    # The safety rule: never delete a company that carries an ISIN.
+    db_session.add(Company(
+        ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+        sector="oil_gas", index_tier="NIFTY50", isin="INE094A01015",
+    ))
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas",
+        index_tier="OTHER", isin="INE999Z01099",
+    ))
+    db_session.commit()
+
+    report = backfill_universe.merge_duplicate_companies(
+        db_session, [("HPCL.NS", "HINDPETRO.NS")],
+    )
+    assert "skipped" in report[0]
+    assert db_session.query(Company).filter_by(ticker="HPCL.NS").count() == 1
+
+
+def test_merge_refuses_when_the_canonical_has_no_isin(db_session):
+    db_session.add(Company(
+        ticker="HINDPETRO.NS", name="Hindustan Petroleum Corporation Ltd.",
+        sector="oil_gas", index_tier="NIFTY50",
+    ))
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas", index_tier="OTHER",
+    ))
+    db_session.commit()
+
+    report = backfill_universe.merge_duplicate_companies(
+        db_session, [("HPCL.NS", "HINDPETRO.NS")],
+    )
+    assert "skipped" in report[0]
+    assert db_session.query(Company).count() == 2
+
+
+def test_merge_deletes_derivable_rows_rather_than_reassigning_them(db_session):
+    canonical = Company(
+        ticker="OIL.NS", name="Oil India Ltd.", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE274J01014",
+    )
+    phantom = Company(
+        ticker="OILINDIA.NS", name="Oil India", sector="oil_gas", index_tier="OTHER",
+    )
+    db_session.add_all([canonical, phantom])
+    db_session.commit()
+    # Both companies normalize to aliases that would collide on reassignment.
+    aliases.rebuild_aliases(db_session)
+    assert db_session.query(CompanyAlias).filter_by(company_id=phantom.id).count() > 0
+
+    backfill_universe.merge_duplicate_companies(db_session, [("OILINDIA.NS", "OIL.NS")])
+
+    assert db_session.query(CompanyAlias).filter_by(company_id=phantom.id).count() == 0
+    assert db_session.query(CompanyAlias).filter_by(company_id=canonical.id).count() > 0
+
+
 def test_global_companies_are_never_flagged(db_session):
     db_session.add(Company(
         ticker="AAPL", name="Apple", sector="it", index_tier="GLOBAL_LARGE_CAP", market="GLOBAL",
@@ -3001,6 +3133,7 @@ absent from the master entirely.
 import json
 from datetime import date
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.companies.matching import aliases
@@ -3020,7 +3153,8 @@ def apply_ticker_corrections(session: Session) -> list[tuple[str, str]]:
 
     A correction whose target ticker already exists is SKIPPED rather than
     merged -- merging two companies means reassigning FK rows, which is a
-    separate, deliberate operation, not a side effect of a backfill.
+    separate, deliberate operation. In this database BOTH corrections hit
+    that path (see merge_duplicate_companies, which handles them).
     """
     changed = []
     for wrong, right in TICKER_CORRECTIONS.items():
@@ -3038,8 +3172,11 @@ def apply_ticker_corrections(session: Session) -> list[tuple[str, str]]:
 
 def flag_missing_tickers(session: Session, known_symbols: set[str]) -> list[str]:
     """Mark Indian companies whose symbol is absent from the exchange master
-    as SUSPENDED. Never deletes: these rows carry alert history, and a
-    delisting is a fact to record, not a reason to erase the past."""
+    as SUSPENDED. Never deletes: a company that has left the exchange is
+    still a real company with a real ISIN (JBCHEPHARM.NS, INE572A01036, is
+    the live example), and a delisting is a fact to record, not a reason to
+    erase the past. Deleting is reserved for the phantom no-ISIN duplicates
+    that merge_duplicate_companies handles."""
     flagged = []
     for company in session.query(Company).filter(Company.market == "INDIA").all():
         symbol = company.ticker.rsplit(".", 1)[0]
@@ -3049,6 +3186,93 @@ def flag_missing_tickers(session: Session, known_symbols: set[str]) -> list[str]
         flagged.append(company.ticker)
     session.commit()
     return flagged
+
+
+DUPLICATE_MERGES = [
+    # (phantom ticker, canonical ticker). Both phantoms were created without
+    # an ISIN and duplicate a real company that has one.
+    ("HPCL.NS", "HINDPETRO.NS"),
+    ("OILINDIA.NS", "OIL.NS"),
+]
+
+# Derivable rows: regenerated by rebuild_aliases / the ingest, so the
+# phantom's copies are deleted rather than reassigned (reassigning would
+# collide with the canonical company's own rows on their unique keys).
+_DERIVABLE_TABLES = ("company_aliases", "listings", "company_index_memberships")
+
+# History rows: irreplaceable, so these are REASSIGNED to the canonical id.
+# (table, column) for every remaining FK onto companies.id.
+_HISTORY_FKS = (
+    ("alert_companies", "company_id"),
+    ("alert_companies", "parent_company_id"),
+    ("impact_edges", "from_company_id"),
+    ("impact_edges", "to_company_id"),
+    ("calibration_samples", "company_id"),
+    ("car_outcomes", "company_id"),
+    ("market_moves", "company_id"),
+    ("holdings", "company_id"),
+    ("user_watchlist_companies", "company_id"),
+)
+
+
+def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[dict]:
+    """Fold a phantom duplicate company into the real one and delete it.
+
+    Task 11's regression corpus proved these exist: HPCL.NS (no ISIN, 2
+    alerts) shadowing HINDPETRO.NS (INE094A01015, 5 alerts), and
+    OILINDIA.NS (no ISIN, 1 alert) shadowing OIL.NS (INE274J01014). The
+    phantoms will never appear in an exchange master, so without a merge
+    their alert history is stranded on rows that can never be enriched,
+    ranked, or priced.
+
+    SAFETY RULE, enforced not assumed: a merge only proceeds when the
+    phantom has NO ISIN and the canonical HAS one. Anything else is
+    reported and skipped -- this function must never be able to delete a
+    real company.
+
+    Derivable rows (aliases, listings, index memberships) are deleted
+    because the canonical company already has its own and they regenerate.
+    History rows are reassigned. A history row that would violate a unique
+    constraint after reassignment is deleted instead, and counted, so the
+    merge cannot fail partway and strand the rest.
+    """
+    report = []
+    for phantom_ticker, canonical_ticker in pairs:
+        phantom = session.query(Company).filter_by(ticker=phantom_ticker).one_or_none()
+        canonical = session.query(Company).filter_by(ticker=canonical_ticker).one_or_none()
+        if phantom is None or canonical is None:
+            report.append({"phantom": phantom_ticker, "skipped": "not found"})
+            continue
+        if phantom.isin:
+            report.append({"phantom": phantom_ticker, "skipped": "phantom has an ISIN -- not a phantom"})
+            continue
+        if not canonical.isin:
+            report.append({"phantom": phantom_ticker, "skipped": "canonical has no ISIN -- cannot confirm identity"})
+            continue
+
+        moved: dict[str, int] = {}
+        for table in _DERIVABLE_TABLES:
+            result = session.execute(
+                text(f"DELETE FROM {table} WHERE company_id = :pid"), {"pid": phantom.id},
+            )
+            if result.rowcount:
+                moved[f"{table} (deleted)"] = result.rowcount
+
+        for table, column in _HISTORY_FKS:
+            result = session.execute(
+                text(f"UPDATE {table} SET {column} = :cid WHERE {column} = :pid"),
+                {"cid": canonical.id, "pid": phantom.id},
+            )
+            if result.rowcount:
+                moved[f"{table}.{column}"] = result.rowcount
+
+        session.delete(phantom)
+        session.commit()
+        report.append({
+            "phantom": phantom_ticker, "canonical": canonical_ticker,
+            "phantom_id": phantom.id, "canonical_id": canonical.id, "moved": moved,
+        })
+    return report
 
 
 def main() -> None:
@@ -3071,6 +3295,11 @@ def main() -> None:
     session = SessionLocal()
     try:
         print("corrections:", apply_ticker_corrections(session))
+        # Runs AFTER corrections (which will skip both, since the canonical
+        # tickers already exist) and BEFORE the upsert, so the phantom rows
+        # are gone before aliases are rebuilt for them.
+        for entry in merge_duplicate_companies(session):
+            print("merge:", entry)
 
         records = normalize.build_records(nse_rows, bse_rows, details, day)
         existing_tickers = {
@@ -4001,42 +4230,155 @@ git commit -m "feat: schedule daily universe master refresh and monthly detail p
 
 ## Rollout Runbook
 
-After all tasks are complete, in order, on a database backup first:
+**AMENDED 2026-08-03 (final whole-branch review fix wave).** The version of
+this runbook below the "on a database backup first" prose line was not
+actually safe to run: there was no verified restore, no dry run of the
+irreversible merge in step 3 (old numbering), no instruction to stop the
+scheduler (which fires `_run_market_cap_refresh` 2 minutes after boot and
+every 12 hours and WILL race the ingest), no ordering requirement for the
+`market_cap` unit fix (CRITICAL 1 -- see `app/companies/universe/normalize.py`),
+and step 6's "Verify" block only printed counts for a human to eyeball
+rather than asserting on them. Read this whole section, in order, before
+running anything.
 
 ```bash
 cd backend
 
-# 1. Apply schema
+# 0. BACKUP FIRST, WITH A VERIFIED RESTORE. A backup that has never been
+#    restored is not a backup -- confirm the dump is actually loadable
+#    before you touch production data, using a throwaway target so the
+#    restore test itself cannot corrupt anything.
+pg_dump "$DATABASE_URL" -Fc -f /path/to/backup/newsflo-pre-cap-tiers.dump
+createdb newsflo_restore_check
+pg_restore -d newsflo_restore_check /path/to/backup/newsflo-pre-cap-tiers.dump
+psql newsflo_restore_check -c "select count(*) from companies;"   # sanity: nonzero, matches prod
+dropdb newsflo_restore_check
+# (Local/dev SQLite: substitute a plain file copy of newsflo.db, then open
+# the COPY with `sqlite3 copy.db "select count(*) from companies;"` as the
+# equivalent restore-verification step -- never run this against the live
+# newsflo.db file.)
+
+# 1. STOP THE SCHEDULER for the entire migration window (steps 3-9 below).
+#    _run_market_cap_refresh fires ~2 minutes after process boot and every
+#    12 hours; if the app stays up while the backfill/ingest run, it can
+#    interleave a yfinance-sourced market_cap write with the ingest's
+#    BSE-sourced write for the same company mid-migration. Stop the app
+#    process (or comment out the start_scheduler() call in app/main.py and
+#    redeploy) now. Do not restart it until step 10 passes.
+
+# 2. DEPLOY THE market_cap UNIT FIX BEFORE RUNNING ANYTHING BELOW.
+#    CRITICAL 1 (this fix wave): BSE's Mktcap is Rs CRORE, yfinance's
+#    fast_info["marketCap"] is ABSOLUTE RUPEES, and the two were being
+#    written to the same Company.market_cap column unconverted. Every
+#    cap-tier rank computed from a mixed-unit pool is wrong -- there is no
+#    partial-credit ordering here. If this fix isn't already deployed,
+#    deploy it now, before step 3.
+
+# 3. Apply schema
 python -c "from app.db import init_db; init_db(); print('schema ok')"
 
-# 2. Fetch masters only (2 requests)
+# 4. Fetch masters only (2 requests)
 python -c "from datetime import date; from app.companies.universe import fetchers; \
   fetchers.fetch_nse_equity_list('data/universe', date.today()); \
   fetchers.fetch_bse_scrip_list('data/universe', date.today()); print('masters ok')"
 
-# 3. Adopt the existing 509 — does NOT grow the universe
+# 5. DRY RUN the backfill FIRST. --dry-run runs the real pipeline
+#    (corrections, the phantom-company merge with its per-table FK row
+#    counts, globals marked, companies flagged SUSPENDED) far enough to
+#    print exactly what it would do, and writes nothing (verified by
+#    tests/test_backfill_universe.py::test_dry_run_leaves_the_database_byte_identical,
+#    which hashes the on-disk file before/after). Read this output in full
+#    before proceeding -- it is the last checkpoint before step 6's
+#    irreversible delete.
+python backfill_universe.py --dry-run
+
+# 6. Adopt the existing 509 for real — does NOT grow the universe.
+#    THIS STEP CONTAINS AN IRREVERSIBLE COMPANY MERGE
+#    (merge_duplicate_companies deletes the phantom HPCL.NS/OILINDIA.NS
+#    rows after reassigning their alert history to the canonical company).
+#    This is why step 0's verified backup happens first, not "at some
+#    point during rollout".
 python backfill_universe.py
 
-# 4. Regenerate the regression corpus against the corrected data, then gate
+# 7. Regenerate the regression corpus against the corrected data, then gate
 python export_match_corpus.py
 python -m pytest tests/test_matching_gate.py -v
 
-# 5. Full detail pass + ingest (30-40 min, resumable)
+# 8. Full detail pass + ingest (30-40 min, resumable). DO NOT run this (or
+#    any step in this runbook) with the matcher gate active across IST
+#    midnight: tests/test_api.py::test_list_alerts_limits_to_the_most_recent_alerts
+#    is a KNOWN PRE-EXISTING flake (unrelated to this branch -- the
+#    /api/alerts endpoint windows to today's-IST alerts while the test
+#    seeds 205 staggered backwards from `now`; crossing IST midnight drops
+#    the oldest) that will look exactly like branch damage if it fires
+#    mid-rollout and cost real time chasing a ghost.
 python ingest_universe.py
 
-# 6. Verify
+# 9. AMFI categorisation (optional, additive -- IMPORTANT 2 in this fix
+#    wave, Task 17 in this plan). AMFI publishes ONLY .xlsx and this
+#    project deliberately has no openpyxl/pandas-excel dependency (see
+#    load_amfi.py's module docstring for why). Manual step:
+#      a. Download the current file from
+#         https://portal.amfiindia.com/spages/AverageMarketCapitalization30Jun2026.xlsx
+#         (re-check https://www.amfiindia.com/otherdata/categorisation-of-stocks
+#         if that exact filename has rolled to a new half-year).
+#      b. Open it in Excel/LibreOffice/Google Sheets and "Save As"/"Export"
+#         CSV, keeping the header row exactly as published.
+#      c. Save it under the current snapshot day, e.g.
+#         data/universe/<day>/amfi_categorisation.csv, then:
+python load_amfi.py data/universe/<day>/amfi_categorisation.csv
+
+# 10. Verify — these are ASSERTIONS, not prints. The script aborts
+#     (non-zero exit, AssertionError) if any actual count deviates from
+#     its expected value by more than 5%, instead of leaving a human to
+#     eyeball five printed numbers and miss a regression.
 python -c "
 from app.db import SessionLocal
 from app.models import Company, Listing
 s = SessionLocal()
-print('companies:', s.query(Company).count())
-print('india:', s.query(Company).filter_by(market='INDIA').count())
-print('listings:', s.query(Listing).count())
-print('with cap:', s.query(Company).filter(Company.market_cap.isnot(None)).count())
-print('classified:', s.query(Company).filter(Company.official_sector.isnot(None)).count())
+counts = {
+    'companies': s.query(Company).count(),
+    'india': s.query(Company).filter_by(market='INDIA').count(),
+    'listings': s.query(Listing).count(),
+    'with cap': s.query(Company).filter(Company.market_cap.isnot(None)).count(),
+    'classified': s.query(Company).filter(Company.official_sector.isnot(None)).count(),
+}
+expected = {'companies': 5470, 'india': 4967, 'listings': 7200, 'with cap': 4800, 'classified': 4835}
+TOLERANCE = 0.05
+failures = []
+for key, actual in counts.items():
+    exp = expected[key]
+    deviation = abs(actual - exp) / exp
+    status = 'OK' if deviation <= TOLERANCE else 'FAIL'
+    print(f'{key}: {actual} (expected ~{exp}, deviation {deviation:.1%}) [{status}]')
+    if deviation > TOLERANCE:
+        failures.append(key)
+assert not failures, f'counts deviated beyond {TOLERANCE:.0%} tolerance: {failures} -- ABORT, do not restart the scheduler, investigate against the step 0 backup'
+print('all counts within tolerance')
 "
+
+# 11. Only once step 10's assertions pass: restart the scheduler (redeploy
+#     the app / restore the start_scheduler() call from step 1).
 ```
 
-Expected after step 6: ~5,470 companies (~4,967 Indian + 507 global), ~7,200 listings, ~4,800 with a market cap, ~4,835 classified.
+Expected after step 10: ~5,470 companies (~4,967 Indian + 507 global), ~7,200 listings, ~4,800 with a market cap, ~4,835 classified.
+
+### Rollback notes
+
+- **`USE_ALIAS_MATCHER=false` rolls back the matcher ONLY** (Task 12's swap
+  of resolution onto the new name-matching ladder). It does NOT undo the
+  ingest (Tasks 6-16), does NOT restore the phantom HPCL.NS/OILINDIA.NS
+  rows deleted by step 6's merge, and does NOT reverse the fan-out
+  reordering from Task 12. If something goes wrong after step 3, the only
+  way back is the verified backup from step 0 -- the flag is a matcher
+  kill switch, not a migration undo button.
+- **Re-running `seed_nifty_indices.py` after this rollout silently
+  overwrites `sector` and `name`** for roughly 500 companies, via the old
+  keyword-based `SECTOR_MAP` in `app/companies/loader.py` -- clobbering the
+  official BSE/AMFI-sourced classification this rollout just landed for
+  those companies. Do not run it as routine maintenance after this
+  rollout. If it must run for a genuinely new reason (e.g. picking up a new
+  Nifty index membership), re-run `ingest_universe.py` immediately
+  afterwards to restore official classification over its keyword guesses.
 
 **Rollback:** set `USE_ALIAS_MATCHER=false` to restore the previous resolver without a deploy. The ingested rows are additive and harmless with the legacy matcher, though sector fan-out will already be using market-cap ordering (that change is not behind the flag — revert Task 12's query change if it must be undone).

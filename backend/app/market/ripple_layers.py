@@ -16,10 +16,10 @@ from sqlalchemy.orm import Session
 from app.companies.branding import logo_url
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
-from app.market.cap_tier import compute_cap_tiers
+from app.market.cap_tier import cap_tier_map
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
-from app.models import Alert, AlertRippleLayer, Company, ImpactEdge, MarketMove
+from app.models import Alert, AlertRippleLayer, ImpactEdge, MarketMove
 from app.reasoning.ripple_relationship import is_exposure_only, relation_to_ripple_relationship
 
 # Layer-title label per relationship bucket (sentence case, jargon-free --
@@ -102,10 +102,7 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     ]
     breadth_score = compute_breadth_score(ok_excess_values)
 
-    cap_rows = (
-        session.query(Company.ticker, Company.market_cap).filter(Company.market_cap.isnot(None)).all()
-    )
-    cap_tiers = compute_cap_tiers([(t, c) for t, c in cap_rows])
+    cap_tiers = cap_tier_map(session)
 
     edges = session.query(ImpactEdge).filter_by(alert_id=alert.id).all()
     relation_by_company_id: dict[int, str] = {}

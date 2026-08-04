@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.analysis.schemas import CompanyMention
 from app.companies.integrity import DEMO_TICKERS, is_demo_company
+from app.companies.matching import matcher
+from app.config import settings
 from app.models import Company
 
 # Lowered from 5. Fan-out is an exposure tier, not an analysis tier -- three
@@ -65,6 +67,28 @@ def _to_resolved(
 
 
 def _find_direct_company(session: Session, mention: CompanyMention) -> Company | None:
+    """Resolve a direct mention via the alias match ladder
+    (app.companies.matching.matcher).
+
+    The previous implementation loaded every company into Python and
+    substring-matched both directions. At 509 companies that was merely
+    slow; at ~4,967 it silently mismatches (many companies share leading
+    tokens) so it was replaced. Ambiguity still resolves to None -- the
+    "omit rather than mismatch" contract is unchanged.
+    """
+    if not settings.use_alias_matcher:
+        return _find_direct_company_legacy(session, mention)
+
+    result = matcher.resolve(session, ticker=mention.ticker, name=mention.name)
+    if result is None:
+        return None
+    company = session.get(Company, result.company_id)
+    if company is None or is_demo_company(company.ticker):
+        return None
+    return company
+
+
+def _find_direct_company_legacy(session: Session, mention: CompanyMention) -> Company | None:
     """Resolve a direct mention to a Company, trying ticker first, then name.
 
     The analysis model sometimes names a real company it is confident about
@@ -176,12 +200,27 @@ def resolve_companies(
                 session.query(Company)
                 .filter_by(sector=mention.sector)
                 .filter(Company.ticker.notin_(DEMO_TICKERS))
+                # Dormant shells and non-Indian rows must never surface as
+                # affected companies once the universe grows from 509 to
+                # ~4,967 (spec §8.4).
+                .filter(Company.market == "INDIA")
+                .filter(Company.tradeability == "NORMAL")
             )
             anchors = (anchor_sub_sectors or {}).get(mention.sector)
             if anchors:
                 query = query.filter(Company.sub_sector.in_(anchors))
             companies = (
-                query.order_by(_TIER_RANK.asc(), Company.ticker.asc())
+                # Rank by real size, not Nifty membership: after the full
+                # universe ingest ~4,200 of ~4,967 companies sit in
+                # index_tier='OTHER', which collapses the tier ranking into
+                # alphabetical order. _TIER_RANK stays as the tiebreak, which
+                # is also what keeps the pre-existing fan-out tests (whose
+                # companies have no market cap) ordering as before.
+                query.order_by(
+                    Company.market_cap.desc().nullslast(),
+                    _TIER_RANK.asc(),
+                    Company.ticker.asc(),
+                )
                 .limit(TOP_N_SECTOR_COMPANIES)
                 .all()
             )
