@@ -48,3 +48,28 @@ def test_jobs_are_registered(monkeypatch):
         assert jobs["universe_detail_refresh"].trigger.interval == timedelta(days=30)
     finally:
         scheduler._scheduler = None
+
+
+def test_business_profile_refresh_is_no_longer_scheduled():
+    # It fabricated a business description for every company with a NULL one,
+    # every 6 hours. After the universe ingest that is ~5,140 companies.
+    assert not hasattr(scheduler, "_run_business_profile_refresh")
+
+
+def test_registered_job_ids_do_not_include_the_profile_refresh(monkeypatch):
+    # Assert on the scheduler's own registry, not on source text -- a prior
+    # review found a getsource-based assertion hid a real defect for 20 tasks.
+    #
+    # start_scheduler() builds its own BackgroundScheduler internally and
+    # publishes it via the module-level app.scheduler._scheduler global --
+    # it does not read a scheduler pre-assigned onto the module by the
+    # caller. So, same pattern as test_jobs_are_registered above: patch
+    # BackgroundScheduler.start to a no-op (no real thread, no job bodies
+    # executed) and inspect the live registry after the call.
+    monkeypatch.setattr(scheduler.BackgroundScheduler, "start", lambda self: None)
+    try:
+        scheduler.start_scheduler()
+        job_ids = {job.id for job in scheduler._scheduler.get_jobs()}
+        assert "business_profile_refresh" not in job_ids
+    finally:
+        scheduler._scheduler = None

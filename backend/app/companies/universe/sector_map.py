@@ -10,34 +10,44 @@ a free-text industry string removes that entire class of bug.
 Pure data + pure functions: no I/O, no DB, no app.models import.
 """
 
-# Keys are BSE's `Sector` field (the SEBI macro-economic sector set),
-# lowercased. Values are the app's closed vocabulary -- the same 12 used by
-# app.market.sector_indices, app.companies.sub_sectors and
-# app.market.ripple_templates. Unmapped -> "other", never a guess.
+# Keyed on BSE's IndustryNew level FIRST, with the coarser Sector level as a
+# fallback. The original table was built from the ddlIndustry master, which
+# returns IndustryNew names, but was applied to Sector -- so "Consumer
+# Discretionary", "Industrials", "Commodities", "Services" and "Diversified"
+# all fell through to "other", which was 2,971 production companies. Both
+# levels live in one table because their vocabularies do not overlap except
+# where they agree (e.g. "Energy").
 OFFICIAL_SECTOR_TO_BUCKET = {
+    # --- Sector level (coarse) ---
     "energy": "oil_gas",
-    "oil gas & consumable fuels": "oil_gas",
     "financial services": "banking",
     "information technology": "it",
     "healthcare": "pharma",
     "fast moving consumer goods": "fmcg",
-    "consumer durables": "fmcg",
-    "consumer services": "fmcg",
-    "metals & mining": "metals",
     "telecommunication": "telecom",
+    "utilities": "infra",
+    "diversified": "other",
+    # --- IndustryNew level (finer; takes precedence) ---
+    "oil, gas & consumable fuels": "oil_gas",
     "automobile and auto components": "auto",
-    "chemicals": "chemicals",
+    "capital goods": "infra",
     "construction": "infra",
     "construction materials": "infra",
-    "capital goods": "infra",
     "power": "infra",
-    "utilities": "infra",
-    "realty": "infra",
-    "services": "other",
-    "textiles": "other",
-    "media entertainment & publication": "other",
+    "realty": "construction_realestate",
+    "chemicals": "chemicals",
+    "metals & mining": "metals",
+    "consumer durables": "consumer_durables",
+    "consumer services": "fmcg",
+    "textiles": "textiles",
+    "media, entertainment & publication": "media_entertainment",
+    "media entertainment & publication": "media_entertainment",
+    "transport services": "railways_transport",
+    "transport infrastructure": "railways_transport",
+    "agricultural food & other products": "agriculture",
+    "fertilizers & agrochemicals": "agriculture",
     "forest materials": "other",
-    "diversified": "other",
+    "services": "other",
 }
 
 _NSE_NORMAL_SERIES = {"EQ"}
@@ -51,10 +61,27 @@ _BSE_SUSPENDED_GROUPS = {"Z", "ZP"}
 _PERMISSIVENESS = ["NORMAL", "RESTRICTED", "SME", "SUSPENDED"]
 
 
-def map_sector(official_sector: str | None) -> str:
-    if not official_sector:
-        return "other"
-    return OFFICIAL_SECTOR_TO_BUCKET.get(official_sector.strip().lower(), "other")
+def map_sector(official_sector: str | None, official_industry: str | None = None) -> str:
+    """BSE publishes four classification levels. IndustryNew is the finest one
+    whose vocabulary matches this table, so it is tried first; Sector is the
+    fallback for rows where IndustryNew is absent or unrecognised.
+
+    Order matters and is the whole point of this function: keying on Sector
+    alone left 65% of Indian companies as "other" in production.
+    """
+    for value in (official_industry, official_sector):
+        if not value:
+            continue
+        bucket = OFFICIAL_SECTOR_TO_BUCKET.get(value.strip().lower())
+        if bucket and bucket != "other":
+            return bucket
+    # Nothing matched to a real sector. Fall back to an explicit "other"
+    # mapping if either level has one, else "other" by default -- same result,
+    # but it distinguishes "we know this is other" from "we do not know".
+    for value in (official_industry, official_sector):
+        if value and OFFICIAL_SECTOR_TO_BUCKET.get(value.strip().lower()) == "other":
+            return "other"
+    return "other"
 
 
 def listing_tradeability(
