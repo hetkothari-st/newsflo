@@ -28,6 +28,7 @@ from sqlalchemy import bindparam, event, text
 from sqlalchemy.orm import Session
 
 from app.companies.global_seed import GLOBAL_COMPANIES
+from app.companies.market import infer_market
 from app.companies.matching import aliases
 from app.companies.universe import loader, normalize, snapshot
 from app.db import SessionLocal, engine as _default_engine
@@ -281,14 +282,32 @@ def merge_duplicate_companies(session: Session, pairs=DUPLICATE_MERGES) -> list[
 
 
 def mark_global_companies(session: Session) -> int:
-    """Set market='GLOBAL' on the curated non-Indian list. These rows have
-    no ISIN, no listings, and never receive a cap tier -- AMFI ranking is
+    """Set market='GLOBAL' on every non-Indian company. These rows have no
+    ISIN, no listings, and never receive a cap tier -- AMFI ranking is
     India-only and inventing a global scale would be exactly the kind of
-    unsourced number this design rejects."""
-    global_tickers = {entry["ticker"] for entry in GLOBAL_COMPANIES}
+    unsourced number this design rejects.
+
+    Two sources, unioned. The curated app.companies.global_seed list is the
+    intended set, but it is not the only way a global company reaches this
+    table: the first real run found seven (ASML, TSM, 005930.KS, AMAT, LRCX,
+    KLAC, SNPS) that arrived by some other path, each carrying a placeholder
+    market_cap of 1000.0 and a bogus index_tier of NIFTY50. Left as
+    market='INDIA' they would sit in the cap-tier ranking pool with a fake
+    cap and displace real Indian companies -- the same defect that scoping
+    the pool to INDIA was meant to close.
+
+    So membership of the curated list is not required: app.companies.market.
+    infer_market treats any ticker without a .NS/.BO suffix as GLOBAL, and
+    every Indian company in this table gets one of those suffixes from
+    app.companies.universe.normalize. A bare symbol therefore cannot be an
+    Indian listing.
+    """
+    curated = {entry["ticker"] for entry in GLOBAL_COMPANIES}
     marked = 0
-    for company in session.query(Company).filter(Company.ticker.in_(global_tickers)).all():
-        if company.market != "GLOBAL":
+    for company in session.query(Company).all():
+        if company.market == "GLOBAL":
+            continue
+        if company.ticker in curated or infer_market(company.ticker) == "GLOBAL":
             company.market = "GLOBAL"
             marked += 1
     session.commit()

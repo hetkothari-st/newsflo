@@ -543,3 +543,34 @@ def test_dry_run_leaves_the_database_byte_identical(tmp_path):
         assert verify.query(Company).filter_by(ticker="HPCL.NS").count() == 1
         assert verify.query(Company).filter_by(ticker="HINDPETRO.NS").count() == 1
         assert verify.query(AlertCompany).count() == 1
+
+
+def test_uncurated_global_company_is_still_marked_global(db_session):
+    # The first real run found seven of these (ASML, TSM, 005930.KS, AMAT,
+    # LRCX, KLAC, SNPS): global companies absent from the curated seed, each
+    # carrying a placeholder market_cap of 1000.0 and a bogus NIFTY50 tier.
+    # Left as market='INDIA' they enter the cap-tier ranking pool with a fake
+    # cap and displace real Indian companies.
+    db_session.add(Company(
+        ticker="ASML", name="ASML", sector="it", index_tier="NIFTY50", market_cap=1000.0,
+    ))
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance Industries Limited", sector="oil_gas",
+        index_tier="NIFTY50", isin="INE002A01018",
+    ))
+    db_session.commit()
+
+    marked = backfill_universe.mark_global_companies(db_session)
+
+    assert marked == 1
+    assert db_session.query(Company).filter_by(ticker="ASML").one().market == "GLOBAL"
+    assert db_session.query(Company).filter_by(ticker="RELIANCE.NS").one().market == "INDIA"
+
+
+def test_uncurated_global_company_no_longer_trips_the_isin_invariant(db_session):
+    db_session.add(Company(ticker="TSM", name="TSMC", sector="it", index_tier="NIFTY50"))
+    db_session.commit()
+
+    backfill_universe.mark_global_companies(db_session)
+
+    assert backfill_universe.validate_isin_invariant(db_session) == []
