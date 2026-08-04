@@ -4,7 +4,7 @@ incoherent -- app.companies.integrity.check_sub_sectors flags a company
 whenever its sub_sector isn't in its own sector's branch of
 app.companies.sub_sectors.SUB_SECTOR_TAXONOMY.
 
-Two repair passes, run in sequence:
+Two repair passes, run in sequence, followed by a validation pass:
 
 1. TAXONOMY_REPAIRS below -- an explicit, auditable (ticker, field,
    expected_value) table. These are confirmed, reviewed judgment calls, not
@@ -50,7 +50,24 @@ Two repair passes, run in sequence:
    possible, but not assumed) claimed by more than one sector, the row is
    left untouched and reported, never guessed.
 
-Both passes are idempotent and safe to re-run: a row already carrying the
+3. A validation pass (_assert_no_new_violations) that re-runs
+   check_sub_sectors() after both repair passes above and compares its
+   result against a snapshot taken before either pass ran. Confirmed live:
+   an earlier version of the ASIANPAINT.NS explicit entry set only `sector`
+   (fmcg -> chemicals) and was correct against the dev database, where the
+   row started other/paints -- but production's row started
+   other/personal_care, so that same entry would have landed
+   chemicals/personal_care, which is ITSELF a fresh check_sub_sectors
+   violation ("personal_care" is fmcg's, not chemicals'). A repair script
+   that can create the exact defect it exists to remove must not exit
+   successfully -- so this pass raises TaxonomyRepairIntegrityError (and the
+   session is rolled back, dry-run or not) whenever the post-repair state
+   contains a violation signature -- (ticker, sector, sub_sector) -- that
+   wasn't already present before this run. See TAXONOMY_REPAIRS above,
+   which now sets both fields for ASIANPAINT.NS so the repair is correct
+   regardless of which environment it runs against.
+
+Both repair passes are idempotent and safe to re-run: a row already carrying the
 expected value is reported "already correct" (explicit pass) or simply
 stops appearing as a violation (derived pass) and is left untouched, so
 running this against a database where the fixes already landed changes
@@ -90,27 +107,56 @@ from app.models import Company
 # - ETERNAL.NS: sub_sector personal_care -> retail. Food delivery, not
 #   personal care -- this is the exact mis-tagging that let ETERNAL.NS
 #   anchor the fmcg/personal_care sub-sector fan-out alongside HUL.
-# - ASIANPAINT.NS: sector fmcg -> chemicals. Paints is a chemicals
-#   sub-sector (SUB_SECTOR_TAXONOMY["chemicals"] includes "paints"; fmcg's
-#   branch does not), confirmed by check_sub_sectors as an unambiguous
-#   single-owner violation.
+# - ASIANPAINT.NS: BOTH sector -> chemicals AND sub_sector -> paints.
+#   Asian Paints is a paints manufacturer; "paints" is a chemicals
+#   sub-sector (SUB_SECTOR_TAXONOMY["chemicals"] includes "paints" and no
+#   other branch does -- confirmed unambiguous). Both fields are repaired
+#   explicitly, regardless of the row's starting sub_sector, because that
+#   starting value differs by environment: dev had other/paints (only
+#   sector was wrong), production has other/personal_care (both fields are
+#   wrong). A sector-only fix is correct against dev and silently WRONG
+#   against production -- it would land chemicals/personal_care, which is
+#   itself a fresh taxonomy violation ("personal_care" belongs to fmcg, not
+#   chemicals) and exactly the class of bug this script exists to remove.
+#   Setting both fields makes the repair correct regardless of which
+#   environment it runs against, and the post-repair validation pass below
+#   (see _assert_no_new_violations) fails loudly if a future edit to this
+#   table reintroduces a mismatched pair like that.
 # - INDIGO.NS: sector -> railways_transport. An airline, not a generic
 #   "other" company -- railways_transport's branch is where aviation
-#   belongs (see SUB_SECTOR_TAXONOMY["railways_transport"]).
+#   belongs (see SUB_SECTOR_TAXONOMY["railways_transport"]). Its sub_sector
+#   is NULL in both dev and production, so there is nothing for a second
+#   field-entry to fix here -- NULL sub_sector is never a violation.
 #
-# These three stay hardcoded even though the derived pass below (Job 2's
-# generalisation) could reproduce ASIANPAINT.NS and INDIGO.NS's fixes on
-# its own -- ETERNAL.NS's cannot be derived (it's a sub_sector rewrite,
-# not a sector lookup), and keeping all three together in one reviewed
-# table is clearer than splitting judgment calls from lookups that happen
-# to agree with them.
+# These four stay hardcoded even though the derived pass below (Job 2's
+# generalisation) could reproduce ASIANPAINT.NS's sector and INDIGO.NS's
+# fix on its own -- ETERNAL.NS's and ASIANPAINT.NS's sub_sector rewrites
+# cannot be derived (they're judgment calls about which specific sub_sector
+# a company belongs to, not a sector lookup), and keeping all four together
+# in one reviewed table is clearer than splitting judgment calls from
+# lookups that happen to agree with them.
 TAXONOMY_REPAIRS: tuple[tuple[str, str, str], ...] = (
     ("ETERNAL.NS", "sub_sector", "retail"),
     ("ASIANPAINT.NS", "sector", "chemicals"),
+    ("ASIANPAINT.NS", "sub_sector", "paints"),
     ("INDIGO.NS", "sector", "railways_transport"),
 )
 
 _VALID_FIELDS = frozenset({"sector", "sub_sector"})
+
+
+class TaxonomyRepairIntegrityError(RuntimeError):
+    """Raised when, after both repair passes, check_sub_sectors() reports a
+    sector/sub_sector violation that did NOT exist before this run started
+    -- i.e. the repairs themselves manufactured a fresh instance of the
+    exact defect this script exists to remove (see _assert_no_new_violations
+    and the ASIANPAINT.NS incident documented on TAXONOMY_REPAIRS above:
+    a sector-only fix that was correct against dev's other/paints but wrong
+    against production's other/personal_care, landing chemicals/personal_care
+    -- a brand new violation). apply_taxonomy_repairs rolls the session back
+    before raising this, in both dry-run and real runs, so a run that would
+    create such a violation never commits it -- refusing to write a bad
+    state is strictly better than reporting success on one."""
 
 
 @dataclass(frozen=True)
@@ -202,25 +248,86 @@ def _apply_derived_repairs(session) -> list[RepairResult]:
     return results
 
 
+def _violation_signature(violation) -> tuple[str, str, str]:
+    """A violation's identity for before/after comparison: which row, and
+    exactly which (sector, sub_sector) pairing is the problem. Comparing on
+    the full triple -- not just the ticker -- is what lets a pre-existing,
+    correctly-left-alone violation (ambiguous or catch-all, unchanged by
+    either pass) be told apart from a violation the repairs themselves
+    produced: a ticker that was ALREADY violating before this run (e.g.
+    production's ASIANPAINT.NS starting as other/personal_care) and is
+    STILL violating after with a DIFFERENT pairing (chemicals/personal_care)
+    is exactly as new-and-bad as a ticker that wasn't violating at all
+    before. Same ticker, same problem-shape, different specific pairing =
+    a new violation the guard must catch."""
+    return (violation.ticker, violation.sector, violation.sub_sector)
+
+
+def _assert_no_new_violations(session, baseline_signatures: set[tuple[str, str, str]], dry_run: bool) -> None:
+    """Guard of last resort: re-runs check_sub_sectors() after both repair
+    passes and compares against the violations present before this run
+    started. A repair script whose own repairs can create the thing it
+    repairs must not exit successfully -- so any violation signature that
+    is new (not present in the baseline) raises TaxonomyRepairIntegrityError
+    with every offending row named, instead of silently reporting success.
+
+    Runs identically under --dry-run: the comparison is made against the
+    session's current (staged, not-yet-committed) state, so it reports
+    exactly what the post-repair state WOULD be without requiring a write.
+    The caller is responsible for rolling back before or after this raises;
+    this function only reads."""
+    final_signatures = {_violation_signature(v) for v in check_sub_sectors(session)}
+    new_signatures = final_signatures - baseline_signatures
+    if not new_signatures:
+        return
+
+    offenders = ", ".join(
+        f"{ticker} ({sector}/{sub_sector})" for ticker, sector, sub_sector in sorted(new_signatures)
+    )
+    verb = "would create" if dry_run else "created"
+    raise TaxonomyRepairIntegrityError(
+        f"apply_taxonomy_repairs {verb} {len(new_signatures)} new sector/sub_sector "
+        f"violation(s) that did not exist before this run: {offenders}. Refusing to "
+        f"{'report success' if dry_run else 'commit'} -- fix the offending TAXONOMY_REPAIRS "
+        "entry (or SUB_SECTOR_TAXONOMY) before rerunning."
+    )
+
+
 def apply_taxonomy_repairs(session, dry_run: bool = False) -> list[RepairResult]:
-    """Runs the explicit pass, then the derived pass, against `session`.
-    Never raises on a missing ticker in the explicit table (reports
-    "not_found" instead) -- a repair table entry surviving after its target
-    row was independently deleted must not crash the whole run. Commits
-    once at the end when dry_run is False; rolls the whole session back
-    (undoing every staged change from both passes) when dry_run is True, so
-    no write survives."""
+    """Runs the explicit pass, then the derived pass, against `session`,
+    then validates the result before ever committing (see
+    _assert_no_new_violations). Never raises on a missing ticker in the
+    explicit table (reports "not_found" instead) -- a repair table entry
+    surviving after its target row was independently deleted must not
+    crash the whole run. Commits once at the end when dry_run is False and
+    validation passes; rolls the whole session back (undoing every staged
+    change from both passes) when dry_run is True, or when validation finds
+    the repairs produced a fresh violation -- so a bad state is never
+    committed, dry-run or not."""
+    # Captured before any repair mutates the session, so it reflects the
+    # true starting state -- this is what "new" is measured against.
+    baseline_signatures = {_violation_signature(v) for v in check_sub_sectors(session)}
+
     explicit_results = _apply_explicit_repairs(session, dry_run)
     # SessionLocal is autoflush=False (see module docstring). This flush
     # matters for check_sub_sectors()'s SQL-level `sub_sector.isnot(None)`
     # predicate -- a future explicit repair setting sub_sector FROM NULL
-    # needs it to be seen at all. Today's three TAXONOMY_REPAIRS entries
+    # needs it to be seen at all. Today's TAXONOMY_REPAIRS entries mostly
     # change already-non-null attributes in place, which the derived pass
     # would see via the identity map with or without this flush; kept
     # anyway since it costs nothing and protects the next repair shaped
-    # differently from today's three.
+    # differently from today's.
     session.flush()
     derived_results = _apply_derived_repairs(session)
+    # Flushed again for the same reason, ahead of the post-repair
+    # validation query below -- it must see the derived pass's writes too.
+    session.flush()
+
+    try:
+        _assert_no_new_violations(session, baseline_signatures, dry_run)
+    except TaxonomyRepairIntegrityError:
+        session.rollback()
+        raise
 
     if dry_run:
         session.rollback()
@@ -252,7 +359,11 @@ def main() -> None:
 
     session = SessionLocal()
     try:
-        results = apply_taxonomy_repairs(session, dry_run=args.dry_run)
+        try:
+            results = apply_taxonomy_repairs(session, dry_run=args.dry_run)
+        except TaxonomyRepairIntegrityError as exc:
+            print(f"\nFAILED: {exc}")
+            raise SystemExit(1) from exc
         _print_report(results, args.dry_run)
         applied = sum(1 for r in results if r.status == "applied")
         ambiguous = sum(1 for r in results if r.status == "ambiguous")

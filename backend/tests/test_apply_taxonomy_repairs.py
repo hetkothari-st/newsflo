@@ -1,11 +1,23 @@
-from apply_taxonomy_repairs import TAXONOMY_REPAIRS, apply_taxonomy_repairs
+from apply_taxonomy_repairs import (
+    TAXONOMY_REPAIRS,
+    TaxonomyRepairIntegrityError,
+    apply_taxonomy_repairs,
+)
+from app.companies.integrity import check_sub_sectors
 from app.models import Company
+
+import pytest
 
 
 def _seed_target_companies(db_session):
+    # ASIANPAINT.NS seeded exactly as production carries it -- other/
+    # personal_care -- not dev's other/paints, so these tests exercise the
+    # real shape of the bug this file guards against: a repair that only
+    # touches one of the two fields would leave (or create) an incoherent
+    # pairing here, not fix it.
     db_session.add_all([
         Company(ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg", sub_sector="personal_care", index_tier="NIFTY50"),
-        Company(ticker="ASIANPAINT.NS", name="Asian Paints Ltd.", sector="fmcg", sub_sector="paints", index_tier="NIFTY50"),
+        Company(ticker="ASIANPAINT.NS", name="Asian Paints Ltd.", sector="other", sub_sector="personal_care", index_tier="NIFTY50"),
         Company(ticker="INDIGO.NS", name="InterGlobe Aviation Ltd.", sector="other", index_tier="NIFTY50"),
     ])
     db_session.commit()
@@ -18,8 +30,12 @@ def test_applies_every_repair_in_the_table(db_session):
 
     assert all(r.status == "applied" for r in results)
     assert db_session.query(Company).filter_by(ticker="ETERNAL.NS").one().sub_sector == "retail"
-    assert db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one().sector == "chemicals"
+    asianpaint = db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one()
+    assert asianpaint.sector == "chemicals"
+    assert asianpaint.sub_sector == "paints"
     assert db_session.query(Company).filter_by(ticker="INDIGO.NS").one().sector == "railways_transport"
+    # The repaired state itself must be coherent -- no leftover violation.
+    assert check_sub_sectors(db_session) == []
 
 
 def test_dry_run_reports_without_writing(db_session):
@@ -30,7 +46,9 @@ def test_dry_run_reports_without_writing(db_session):
     assert all(r.status == "applied" for r in results)
     # Nothing was actually written.
     assert db_session.query(Company).filter_by(ticker="ETERNAL.NS").one().sub_sector == "personal_care"
-    assert db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one().sector == "fmcg"
+    asianpaint = db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one()
+    assert asianpaint.sector == "other"
+    assert asianpaint.sub_sector == "personal_care"
     assert db_session.query(Company).filter_by(ticker="INDIGO.NS").one().sector == "other"
 
 
@@ -42,7 +60,9 @@ def test_idempotent_second_run_reports_already_correct_and_changes_nothing(db_se
 
     assert all(r.status == "already_correct" for r in second_pass)
     assert db_session.query(Company).filter_by(ticker="ETERNAL.NS").one().sub_sector == "retail"
-    assert db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one().sector == "chemicals"
+    asianpaint = db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one()
+    assert asianpaint.sector == "chemicals"
+    assert asianpaint.sub_sector == "paints"
     assert db_session.query(Company).filter_by(ticker="INDIGO.NS").one().sector == "railways_transport"
 
 
@@ -254,3 +274,83 @@ def test_catchall_skip_dry_run_writes_nothing(db_session):
     reported = next(r for r in results if r.ticker == "TESTFMCGOTHER.NS")
     assert reported.status == "catchall_skipped"
     assert db_session.query(Company).filter_by(ticker="TESTFMCGOTHER.NS").one().sector == "other"
+
+
+# --- post-repair validation guard: apply_taxonomy_repairs must refuse to
+# commit (or, under --dry-run, report success on) a run whose own repairs
+# leave check_sub_sectors() with a violation that wasn't already there
+# before this run started. This is the guard against the ASIANPAINT.NS
+# class of bug: an explicit entry that's correct against one environment's
+# starting data and silently wrong against another's. ---
+
+def test_asianpaint_two_field_repair_lands_both_fields_with_no_leftover_violation(db_session):
+    # The regression case itself: production's real starting state
+    # (other/personal_care), repaired via the two ASIANPAINT.NS entries in
+    # TAXONOMY_REPAIRS. Both fields must land, and the result must not trip
+    # the post-repair validation guard.
+    db_session.add(Company(
+        ticker="ASIANPAINT.NS", name="Asian Paints Ltd.", sector="other",
+        sub_sector="personal_care", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    asianpaint_results = [r for r in results if r.ticker == "ASIANPAINT.NS"]
+    assert {r.field for r in asianpaint_results} == {"sector", "sub_sector"}
+    assert all(r.status == "applied" for r in asianpaint_results)
+    company = db_session.query(Company).filter_by(ticker="ASIANPAINT.NS").one()
+    assert company.sector == "chemicals"
+    assert company.sub_sector == "paints"
+    assert check_sub_sectors(db_session) == []
+
+
+def test_post_repair_validation_catches_a_deliberately_inconsistent_repair_entry(db_session, monkeypatch):
+    # Simulates exactly the class of bug the guard exists to catch: an
+    # explicit TAXONOMY_REPAIRS entry that repairs `sector` but leaves the
+    # row's sub_sector pointing somewhere incompatible, and that mismatch
+    # isn't mechanically resolvable by the derived pass (sub_sector unknown
+    # to the taxonomy), so it survives as a genuinely fresh violation. The
+    # entry table is monkeypatched rather than edited in place -- this test
+    # must exercise the guard itself, not the real (already-correct) table.
+    monkeypatch.setattr(
+        "apply_taxonomy_repairs.TAXONOMY_REPAIRS",
+        (("TESTBADENTRY.NS", "sector", "chemicals"),),
+    )
+    db_session.add(Company(
+        ticker="TESTBADENTRY.NS", name="Test Bad Entry Ltd.", sector="fmcg",
+        sub_sector="not_a_real_sub_sector", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    with pytest.raises(TaxonomyRepairIntegrityError, match="TESTBADENTRY.NS"):
+        apply_taxonomy_repairs(db_session, dry_run=False)
+
+    # The bad repair must never have been committed -- the row is exactly
+    # as it started.
+    db_session.rollback()
+    company = db_session.query(Company).filter_by(ticker="TESTBADENTRY.NS").one()
+    assert company.sector == "fmcg"
+    assert company.sub_sector == "not_a_real_sub_sector"
+
+
+def test_post_repair_validation_guard_also_fires_under_dry_run(db_session, monkeypatch):
+    # The guard must work identically under --dry-run: it reports what the
+    # post-repair state WOULD be, without requiring a write, and still
+    # raises rather than letting --dry-run report a clean, empty diff.
+    monkeypatch.setattr(
+        "apply_taxonomy_repairs.TAXONOMY_REPAIRS",
+        (("TESTBADENTRY.NS", "sector", "chemicals"),),
+    )
+    db_session.add(Company(
+        ticker="TESTBADENTRY.NS", name="Test Bad Entry Ltd.", sector="fmcg",
+        sub_sector="not_a_real_sub_sector", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    with pytest.raises(TaxonomyRepairIntegrityError, match="TESTBADENTRY.NS"):
+        apply_taxonomy_repairs(db_session, dry_run=True)
+
+    db_session.rollback()
+    company = db_session.query(Company).filter_by(ticker="TESTBADENTRY.NS").one()
+    assert company.sector == "fmcg"
