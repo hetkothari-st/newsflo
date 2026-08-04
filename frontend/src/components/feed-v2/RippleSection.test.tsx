@@ -16,7 +16,20 @@ function makeCompany(overrides: Partial<RippleCompany> = {}): RippleCompany {
     name: 'Bharat Petroleum',
     sector: 'oil_gas',
     cap_tier: 'LARGE',
-    business_desc: 'Refines and markets petroleum products.',
+    // business_desc was LLM-invented; the backend now always sends null.
+    // fundamentals (BSE-sourced) is what the business popup renders instead.
+    business_desc: null,
+    fundamentals: {
+      classification: {
+        sector: 'Energy',
+        industry: 'Oil, Gas & Consumable Fuels',
+        group: 'Petroleum Products',
+        sub_group: 'Refineries & Marketing',
+      },
+      ratios: { pe: 12.5 },
+      source: 'BSE',
+      as_of: '2026-08-04',
+    },
     relationship: 'BENEFICIARY',
     direction: 'bullish',
     excess_move_pct: 3.0,
@@ -111,6 +124,19 @@ describe('RippleSection', () => {
     renderSection([makeCompany({ ticker: 'BPCL.NS' })], 42);
     fireEvent.click(screen.getByLabelText('View business details'));
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(screen.getByText('Refines and markets petroleum products.')).toBeInTheDocument();
+    // The sourced classification and ratio replace the old business_desc
+    // paragraph -- see docs/superpowers/specs/2026-08-04-sourced-company-
+    // fundamentals-design.md.
+    expect(screen.getByText(/Refineries & Marketing/)).toBeInTheDocument();
+    expect(screen.getByText('12.50')).toBeInTheDocument();
+    expect(screen.getByText(/2026-08-04/)).toBeInTheDocument();
+  });
+
+  it('shows the header only, with no empty panel, when the company has no fundamentals', () => {
+    renderSection([makeCompany({ ticker: 'BPCL.NS', sector: 'oil_gas', fundamentals: null })], 42);
+    fireEvent.click(screen.getByLabelText('View business details'));
+    // "oil_gas" only appears in the popup header, not in the row itself.
+    expect(screen.getByText('oil_gas')).toBeInTheDocument();
+    expect(screen.queryByTestId('fundamentals')).not.toBeInTheDocument();
   });
 });

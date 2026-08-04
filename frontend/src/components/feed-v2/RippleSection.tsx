@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { relationshipLabel } from '../../lib/feedV2Format';
+import { capTierColorClass, relationshipLabel } from '../../lib/feedV2Format';
 import type { RippleCompany, RippleRelationship } from '../../lib/feedV2Api';
 import AlertDetail from '../AlertDetail';
-import BusinessPopup from './BusinessPopup';
+import Fundamentals from '../Fundamentals';
 import PeerRow from './PeerRow';
 
 interface RippleSectionProps {
@@ -73,12 +73,31 @@ export default function RippleSection({ companies, alertId }: RippleSectionProps
       </div>
       <AlertDetail open={popupCompany !== null} onClose={() => setBusinessPopupTicker(null)}>
         {popupCompany && (
-          <BusinessPopup
-            ticker={popupCompany.ticker}
-            sector={popupCompany.sector}
-            capTier={popupCompany.cap_tier}
-            businessDesc={popupCompany.business_desc}
-          />
+          <div className="flex flex-col gap-3">
+            <div className="rounded-lg bg-surface p-5">
+              <div className="flex items-center gap-2">
+                <span className="font-data text-sm text-ink">{popupCompany.ticker}</span>
+                <span className="font-sans text-xs uppercase tracking-widest text-muted">
+                  {popupCompany.sector}
+                </span>
+                {popupCompany.cap_tier && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 font-sans text-[11px] uppercase tracking-widest ${capTierColorClass(popupCompany.cap_tier)}`}
+                  >
+                    {popupCompany.cap_tier}
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* No fallback text here: an unclassified company (~645 of them)
+                renders no second panel at all rather than an empty shell or
+                "data unavailable" -- Fundamentals itself returns null. */}
+            {popupCompany.fundamentals && (
+              <div className="rounded-lg bg-surface p-5">
+                <Fundamentals data={popupCompany.fundamentals} />
+              </div>
+            )}
+          </div>
         )}
       </AlertDetail>
     </>

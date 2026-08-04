@@ -19,6 +19,28 @@ export interface PastMention {
   category: string;
 }
 
+// Exchange-published company facts (see backend app.companies.fundamentals),
+// replacing the LLM-invented business_desc below. `classification` fields are
+// individually nullable -- BSE's four levels (Sector/IndustryNew/IGroup/
+// ISubGroup) are not always all populated. `ratios`/`consolidated` only carry
+// the keys BSE actually published for this company -- an absent ratio is
+// omitted, never zeroed, so a real 0.0 (e.g. NPM) stays distinguishable from
+// "not reported". `source`/`as_of` are required: P/E and P/B are
+// price-derived while this data refreshes monthly, so the date is what keeps
+// a stale ratio honest (spec 5.1) -- never render this data without it.
+export interface Fundamentals {
+  classification: {
+    sector: string | null;
+    industry: string | null;
+    group: string | null;
+    sub_group: string | null;
+  };
+  ratios?: Partial<Record<'eps' | 'ceps' | 'pe' | 'pb' | 'opm' | 'npm' | 'roe', number>>;
+  consolidated?: Partial<Record<'eps' | 'ceps' | 'pe' | 'pb' | 'opm' | 'npm' | 'roe', number>>;
+  source: string | null;
+  as_of: string | null;
+}
+
 export interface AlertCompany {
   company_id: number;
   ticker: string;
@@ -88,7 +110,14 @@ export interface AlertCompany {
   // (see backend app.companies.business_profile) -- used to build the "how
   // this company belongs to its sector" line. Null until the one-time
   // enrichment backfill covers it.
+  // As of 2026-08, this was LLM-invented and the backend now always sends
+  // null -- the key stays only so older clients don't break. Superseded by
+  // `fundamentals` below, sourced from BSE rather than an LLM guess.
   business_desc?: string | null;
+  // Null when this company has no official BSE classification (~645
+  // companies, mostly curated GLOBAL rows and NSE-only names). See the
+  // Fundamentals type doc comment for the omit-vs-zero contract.
+  fundamentals?: Fundamentals | null;
 }
 
 export interface GraphNode {

@@ -9,25 +9,12 @@ import { sectorLabel } from '../features/visualize/transforms';
 import CompanyLogo from './CompanyLogo';
 import InsightSparkline from './InsightSparkline';
 import InsightGauges from './InsightGauges';
+import Fundamentals from './Fundamentals';
 
 function truncatedRationale(rationale: string): string {
   const firstSentence = rationale.split(/(?<=[.!?])\s+/)[0];
   if (firstSentence.length <= 160) return firstSentence;
   return `${firstSentence.slice(0, 157)}…`;
-}
-
-// Deterministic, LLM-free 1-liner explaining how this company belongs to
-// its sector -- built from business_desc (already a one-sentence, factual
-// description -- see backend app.companies.business_profile) rather than
-// asking the LLM to justify sector membership, since that's a factual claim
-// (what the company does), not a prediction.
-function sectorMembershipNote(company: AlertCompany, sectorText: string): string | null {
-  if (!sectorText) return null;
-  if (company.business_desc) {
-    const firstSentence = company.business_desc.split(/(?<=[.!?])\s+/)[0];
-    return `${firstSentence} — ${sectorText} sector.`;
-  }
-  return `${company.name} operates in the ${sectorText} sector.`;
 }
 
 export default function InsightCard({
@@ -99,7 +86,6 @@ export default function InsightCard({
     ) : null;
 
   const sectorText = company.sector ? sectorLabel(company.sector) : '';
-  const membershipNote = sectorMembershipNote(company, sectorText);
 
   return (
     <div className="border-b border-hairline py-4 font-editorial">
@@ -127,7 +113,7 @@ export default function InsightCard({
           it still needs a home here. */}
       {hideHeader && priceLine && <div className="mt-2 text-base">{priceLine}</div>}
 
-      {membershipNote && <p className="mt-2 text-xs italic text-muted">{membershipNote}</p>}
+      <Fundamentals data={company.fundamentals} />
       {parentCompany && (
         <p className="mt-1 font-data text-[11px] uppercase tracking-widest text-muted">
           Linked via {parentCompany.ticker} · {parentCompany.name}
