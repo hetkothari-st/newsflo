@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user_optional
 from app.companies.branding import logo_url
+from app.companies.fundamentals import fundamentals_payload
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.i18n import get_lang
@@ -185,7 +186,10 @@ def _serialize_alert(
             "company_id": ac.company_id, "ticker": ac.company.ticker, "name": ac.company.name,
             "index_tier": ac.company.index_tier, "sector": ac.company.sector,
             "sub_sector": ac.company.sub_sector, "logo_url": logo_url(ac.company),
-            "business_desc": ac.company.business_desc,
+            # business_desc was LLM-invented and is no longer populated; the
+            # key stays so the frontend can migrate without a lockstep deploy.
+            "business_desc": None,
+            "fundamentals": fundamentals_payload(ac.company),
             "direction": ac.direction,
             # The post-measurement, company-specific explanation (see
             # app.analysis.refinement.refine_alert) -- more accurate than

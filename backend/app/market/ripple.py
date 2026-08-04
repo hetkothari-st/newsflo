@@ -18,6 +18,7 @@ this alert's companies.
 from sqlalchemy.orm import Session
 
 from app.companies.branding import logo_url
+from app.companies.fundamentals import fundamentals_payload
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import resolve_cap_tier
@@ -62,7 +63,10 @@ def _alert_company_rows(
             "name": company.name,
             "sector": company.sector,
             "cap_tier": (resolved := resolve_cap_tier(session, company)) and resolved.tier,
-            "business_desc": company.business_desc,
+            # business_desc was LLM-invented and is no longer populated; the
+            # key stays so the frontend can migrate without a lockstep deploy.
+            "business_desc": None,
+            "fundamentals": fundamentals_payload(company),
             "direction": alert_company.direction,
             "excess_move_pct": None,
             "intensity": None,
