@@ -31,7 +31,7 @@ const RATIO_LABELS: Array<[RatioKey, string]> = [
 export default function Fundamentals({ data }: { data: FundamentalsData | null | undefined }) {
   if (!data) return null; // no invented filler -- ~645 companies have no classification
 
-  const { classification: c, ratios, as_of, source } = data;
+  const { classification: c, ratios, consolidated, as_of, source, financials_as_of, financials_source } = data;
   const path = [c.sector, c.industry, c.group, c.sub_group].filter(
     (value): value is string => Boolean(value),
   );
@@ -42,8 +42,30 @@ export default function Fundamentals({ data }: { data: FundamentalsData | null |
   const shown = RATIO_LABELS.map(([key, label]) => ({ key, label, value: ratios?.[key] })).filter(
     (entry): entry is { key: RatioKey; label: string; value: number } => entry.value !== undefined,
   );
+  // Same omit-vs-zero contract as `shown` above, for the consolidated
+  // (group-level) figures BSE publishes alongside the standalone ones.
+  const shownConsolidated = RATIO_LABELS.map(([key, label]) => ({
+    key,
+    label,
+    value: consolidated?.[key],
+  })).filter(
+    (entry): entry is { key: RatioKey; label: string; value: number } => entry.value !== undefined,
+  );
 
-  if (path.length === 0 && shown.length === 0) return null;
+  if (path.length === 0 && shown.length === 0 && shownConsolidated.length === 0) return null;
+
+  // The trailing date/source note is about whatever is actually shown above
+  // it: when ratios (standalone or consolidated) are on screen, that note
+  // must describe THEIR provenance (financials_source/financials_as_of),
+  // not the classification's -- the two are sourced on their own cadences
+  // (backend app.companies.fundamentals keeps them as separate keys for
+  // exactly this reason) and P/E and P/B are price-derived, so the ratio
+  // date is what keeps a stale figure honest (spec 5.1). Classification-only
+  // payloads (no ratios shown) fall back to the classification's own
+  // source/as_of, same as before this distinction existed.
+  const hasRatios = shown.length > 0 || shownConsolidated.length > 0;
+  const noteAsOf = hasRatios && financials_as_of ? financials_as_of : as_of;
+  const noteSource = hasRatios && financials_as_of ? financials_source : source;
 
   return (
     <div data-testid="fundamentals" className="mt-2 border-t border-hairline pt-2">
@@ -62,12 +84,26 @@ export default function Fundamentals({ data }: { data: FundamentalsData | null |
           ))}
         </dl>
       )}
+      {shownConsolidated.length > 0 && (
+        <div className="mt-1">
+          <p className="text-[10px] uppercase tracking-widest text-muted">consolidated</p>
+          <dl className="mt-0.5 flex flex-wrap gap-x-4 gap-y-1">
+            {shownConsolidated.map(({ key, label, value }) => (
+              <div key={key} className="flex items-baseline gap-1 font-data text-[11px]">
+                <dt className="uppercase tracking-widest text-muted">{label}</dt>
+                <dd className="font-semibold text-ink">{value.toFixed(2)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
       {/* The date is load-bearing, not decoration: P/E and P/B are
           price-derived and this data refreshes monthly (spec 5.1) -- it is
-          the only thing that keeps a stale ratio honest. */}
-      {as_of && (
+          the only thing that keeps a stale ratio honest. See noteAsOf/
+          noteSource above for which provenance this describes. */}
+      {noteAsOf && (
         <p className="mt-1 text-[11px] text-muted">
-          {source ?? 'source unknown'} · as of {as_of}
+          {noteSource ?? 'source unknown'} · as of {noteAsOf}
         </p>
       )}
     </div>

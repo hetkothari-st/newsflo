@@ -41,8 +41,15 @@ def fundamentals_payload(company: Company) -> dict | None:
         payload["ratios"] = ratios
     if consolidated:
         payload["consolidated"] = consolidated
+    # Own key, not a clobber of `source`/`as_of` above: those two describe
+    # WHEN the classification was sourced, financials_source/financials_as_of
+    # describe WHEN the ratios were sourced, and the two dates can legitimately
+    # differ (classification is a monthly detail pass, ratios refresh on their
+    # own cadence). Overwriting `source`/`as_of` here made it impossible for a
+    # client to tell which half of the payload a given date applied to.
     if company.financials_source:
-        payload["source"] = company.financials_source
-        if company.financials_as_of:
-            payload["as_of"] = company.financials_as_of.isoformat()
+        payload["financials_source"] = company.financials_source
+        payload["financials_as_of"] = (
+            company.financials_as_of.isoformat() if company.financials_as_of else None
+        )
     return payload

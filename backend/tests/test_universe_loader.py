@@ -295,13 +295,78 @@ def test_absent_financials_never_clobbers_stored_ratios(db_session):
 def test_unmapped_sub_sector_leaves_a_legacy_value_intact(db_session):
     # Spec 6.1: an unmapped ISubGroup must not null out one of the 824 legacy
     # LLM values. This differs from the test above -- here the classification
-    # IS present and being written, only sub_sector is None.
+    # IS present and being written, only sub_sector is None. The legacy value
+    # here ("gas_distribution") is a genuine member of oil_gas's taxonomy
+    # list -- distinct from the "refining_marketing" the default record's
+    # ISubGroup would derive -- so it is a legacy value that still coheres
+    # with the (unchanged) sector, not one the [Important 2] coherence guard
+    # should clear.
     db_session.add(Company(
         ticker="RELIANCE.NS", name="Reliance", sector="oil_gas",
-        index_tier="OTHER", isin="INE002A01018", sub_sector="legacy_value",
+        index_tier="OTHER", isin="INE002A01018", sub_sector="gas_distribution",
     ))
     db_session.commit()
     loader.upsert_records(db_session, [_record(
         "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited", sub_sector=None,
     )])
-    assert db_session.query(Company).one().sub_sector == "legacy_value"
+    assert db_session.query(Company).one().sub_sector == "gas_distribution"
+
+
+# --- Fix round 2: final whole-branch review -------------------------------
+
+
+def test_sub_sector_not_written_without_classification_source(db_session):
+    """[Important 1] A BSE payload can carry ISubGroup/IndustryNew but an
+    empty Sector -- classification_source is then falsy and NONE of
+    _CLASSIFICATION_FIELDS gets written, but sub_sector was still derivable
+    from ISubGroup alone. Writing it anyway half-writes the company.
+
+    The existing company's sector is pre-set to "chemicals" (unchanged by
+    this call, since classification_source is falsy) and the incoming
+    sub_sector ("specialty_chemicals") IS a valid chemicals sub-sector --
+    deliberately chosen so the [Important 2] sector/sub_sector coherence
+    guard would NOT catch this on its own, isolating this test to the
+    classification_source gate specifically. Probe-confirmed shape (sector
+    stuck at "other" with a derived sub_sector) is covered too, just less
+    precisely, since "other" has no valid sub-sectors at all and would be
+    caught by either guard.
+    """
+    db_session.add(Company(
+        ticker="HALFCO.NS", name="Half Co Ltd", sector="chemicals",
+        index_tier="OTHER", isin="INE666Z01015",
+    ))
+    db_session.commit()
+
+    record = _record(
+        "INE666Z01015", "HALFCO.NS", "Half Co Ltd",
+        sector="chemicals", official_sector=None, official_industry="Chemicals",
+        official_igroup=None, official_isubgroup="Specialty Chemicals",
+        classification_source=None, classification_as_of=None,
+        sub_sector="specialty_chemicals",
+    )
+    loader.upsert_records(db_session, [record])
+    company = db_session.query(Company).one()
+    assert company.sub_sector is None
+    assert company.sector == "chemicals"
+    assert company.official_isubgroup is None
+
+
+def test_stale_sub_sector_cleared_when_sector_changes(db_session):
+    """[Important 2] A company's BSE sector moves and its new ISubGroup is
+    one of the unmapped ones (sub_sector=None in the incoming record) --
+    the OLD sub_sector, which belongs to the OLD sector, must not survive
+    under the new one. Probe-confirmed shape: sector='infra' with a stale
+    auto sub_sector still attached. app.companies.integrity.check_sub_sectors
+    (master) flags exactly this incoherence."""
+    db_session.add(Company(
+        ticker="RELIANCE.NS", name="Reliance", sector="auto",
+        index_tier="OTHER", isin="INE002A01018", sub_sector="auto_component",
+    ))
+    db_session.commit()
+    loader.upsert_records(db_session, [_record(
+        "INE002A01018", "RELIANCE.NS", "Reliance Industries Limited",
+        sector="infra", sub_sector=None,
+    )])
+    company = db_session.query(Company).one()
+    assert company.sector == "infra"
+    assert company.sub_sector is None

@@ -25,9 +25,15 @@ export interface PastMention {
 // ISubGroup) are not always all populated. `ratios`/`consolidated` only carry
 // the keys BSE actually published for this company -- an absent ratio is
 // omitted, never zeroed, so a real 0.0 (e.g. NPM) stays distinguishable from
-// "not reported". `source`/`as_of` are required: P/E and P/B are
-// price-derived while this data refreshes monthly, so the date is what keeps
-// a stale ratio honest (spec 5.1) -- never render this data without it.
+// "not reported". `source`/`as_of` are required and describe the
+// CLASSIFICATION's provenance; P/E and P/B are price-derived while this data
+// refreshes monthly, so the date is what keeps a stale ratio honest (spec
+// 5.1) -- never render this data without it. `financials_source`/
+// `financials_as_of` are the separate, optional provenance for `ratios`/
+// `consolidated` -- classification and financials are sourced on their own
+// cadences and can legitimately carry different dates, so they are never
+// folded into `source`/`as_of` (backend app.companies.fundamentals keeps
+// them distinct for exactly this reason).
 export interface Fundamentals {
   classification: {
     sector: string | null;
@@ -39,6 +45,8 @@ export interface Fundamentals {
   consolidated?: Partial<Record<'eps' | 'ceps' | 'pe' | 'pb' | 'opm' | 'npm' | 'roe', number>>;
   source: string | null;
   as_of: string | null;
+  financials_source?: string | null;
+  financials_as_of?: string | null;
 }
 
 export interface AlertCompany {

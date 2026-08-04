@@ -62,6 +62,39 @@ describe('Fundamentals', () => {
     expect(container.querySelector('dl')).toBeNull();
   });
 
+  it('renders consolidated ratios beneath standalone ones, labelled "consolidated"', () => {
+    render(
+      <Fundamentals
+        data={{
+          classification: { sector: 'Energy', industry: null, group: null, sub_group: null },
+          ratios: { pe: 44.95 },
+          consolidated: { pe: 40.12, opm: 18.5 },
+          source: 'BSE',
+          as_of: '2026-08-04',
+        }}
+      />,
+    );
+    expect(screen.getByText('consolidated')).toBeInTheDocument();
+    expect(screen.getByText('44.95')).toBeInTheDocument();
+    expect(screen.getByText('40.12')).toBeInTheDocument();
+    expect(screen.getByText('18.50')).toBeInTheDocument();
+  });
+
+  it('renders consolidated ratios even when no standalone ratio is present', () => {
+    render(
+      <Fundamentals
+        data={{
+          classification: { sector: 'Energy', industry: null, group: null, sub_group: null },
+          consolidated: { npm: 0.0 },
+          source: 'BSE',
+          as_of: '2026-08-04',
+        }}
+      />,
+    );
+    expect(screen.getByText('consolidated')).toBeInTheDocument();
+    expect(screen.getByText('0.00')).toBeInTheDocument();
+  });
+
   it('falls back to "source unknown" when source is null', () => {
     render(
       <Fundamentals

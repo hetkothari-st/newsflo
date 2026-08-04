@@ -18,7 +18,25 @@ def test_full_payload():
     ))
     assert p["classification"]["sub_group"] == "Refineries & Marketing"
     assert p["ratios"]["eps"] == 28.98
-    assert p["as_of"] == "2026-08-04"
+    assert p["financials_source"] == "BSE"
+    assert p["financials_as_of"] == "2026-08-04"
+
+
+def test_classification_and_financial_provenance_are_kept_separate():
+    """[Minor] financials_source/financials_as_of must not clobber the
+    classification's own source/as_of -- the two halves of the payload can
+    legitimately be sourced on different dates (classification is a monthly
+    detail pass, ratios refresh on their own cadence), and a client must be
+    able to tell which date applies to which half."""
+    p = fundamentals_payload(_co(
+        official_sector="Energy", classification_source="BSE",
+        classification_as_of=date(2026, 7, 1),
+        eps=28.98, financials_source="BSE", financials_as_of=date(2026, 8, 4),
+    ))
+    assert p["source"] == "BSE"
+    assert p["as_of"] == "2026-07-01"
+    assert p["financials_source"] == "BSE"
+    assert p["financials_as_of"] == "2026-08-04"
 
 
 def test_null_ratios_are_omitted_not_zeroed():
