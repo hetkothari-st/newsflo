@@ -436,17 +436,21 @@ export default function FeedView({
     };
   }, [flip, unflip]);
 
+  // A story matches the cap filter when ANY tagged company sits in the
+  // chosen tier (cap_tiers, from the backend), not only the peak mover.
+  // peak_cap_tier is the fallback for stale cached responses that predate
+  // the cap_tiers field. Deliberately independent of loaded card-back
+  // details -- the visible card set must not change when a card is flipped.
   const isVisible = useCallback(
     (alert: FeedAlert): boolean => {
       if (capFilter === 'ALL') return true;
-      const detail = details[alert.id];
-      if (detail) {
-        return detail.layers.some((layer) => layer.rows.some((row) => row.cap_tier === capFilter));
-      }
+      if (alert.cap_tiers) return alert.cap_tiers.includes(capFilter);
       return alert.peak_cap_tier === capFilter;
     },
-    [capFilter, details],
+    [capFilter],
   );
+
+  const visibleAlerts = (alerts ?? []).filter(isVisible);
 
   return (
     <div className={`view ${active ? 'on' : ''}`}>
@@ -455,22 +459,22 @@ export default function FeedView({
       <div className={`feed ${flippedIds.size > 0 ? 'locked' : ''}`} ref={feedRef} data-testid="feed">
         {error !== null && <p className="empty">{error}</p>}
         {alerts !== null && alerts.length === 0 && <p className="empty">{t('v3.noStories')}</p>}
-        {alerts?.map(
-          (alert) =>
-            isVisible(alert) && (
-              <div className="slot" key={alert.id}>
-                <Card
-                  alert={alert}
-                  flipped={flippedIds.has(alert.id)}
-                  detail={details[alert.id] ?? null}
-                  onFlip={() => flip(alert.id)}
-                  onUnflip={() => unflip(alert.id)}
-                  onOpenDeepDive={(ticker) => onOpenDeepDive(ticker, alert.id)}
-                  onOpenInfo={onOpenInfo}
-                />
-              </div>
-            ),
+        {alerts !== null && alerts.length > 0 && visibleAlerts.length === 0 && (
+          <p className="empty">{t('v3.noCapMatch')}</p>
         )}
+        {visibleAlerts.map((alert) => (
+          <div className="slot" key={alert.id}>
+            <Card
+              alert={alert}
+              flipped={flippedIds.has(alert.id)}
+              detail={details[alert.id] ?? null}
+              onFlip={() => flip(alert.id)}
+              onUnflip={() => unflip(alert.id)}
+              onOpenDeepDive={(ticker) => onOpenDeepDive(ticker, alert.id)}
+              onOpenInfo={onOpenInfo}
+            />
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -174,6 +174,58 @@ def test_peak_cap_tier_excludes_global_companies_from_the_ranking_pool(db_sessio
     app.dependency_overrides.clear()
 
 
+def test_list_feed_v2_cap_tiers_covers_every_tagged_company(db_session):
+    """The top-bar cap filter must match a story when ANY tagged company
+    sits in the chosen tier -- not only the peak. A crude-oil story whose
+    peak mover is a LARGE producer but which also tags a MID refiner must
+    surface under both the L and M filters, so the list rows carry
+    ``cap_tiers``: the distinct tiers across the alert's tagged companies."""
+    _override_db(db_session)
+    big = Company(
+        ticker="BIG.NS", name="Big Co", sector="oil_gas", index_tier="NIFTY50",
+        market_cap=200000.0, market_cap_as_of=TODAY,
+    )
+    small = Company(
+        ticker="SMALLCO.NS", name="Small Co", sector="oil_gas", index_tier="OTHER",
+        market_cap=1.0, market_cap_as_of=TODAY,
+    )
+    # 100 fillers ranked between them push SMALLCO.NS to rank 102 -- MID.
+    fillers = [
+        Company(
+            ticker=f"F{i}.NS", name=f"Filler {i}", sector="other", index_tier="OTHER",
+            market_cap=100000.0 - i, market_cap_as_of=TODAY,
+        )
+        for i in range(100)
+    ]
+    db_session.add_all([big, small, *fillers])
+    db_session.commit()
+    article = Article(source="test", url="https://example.com/tiers", title="Oil news", content="c")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    for company, direction in ((big, "bearish"), (small, "bullish")):
+        db_session.add(AlertCompany(
+            alert_id=alert.id, company_id=company.id, direction=direction,
+            magnitude_low=1.0, magnitude_high=2.0, rationale="r", basis="direct_mention",
+        ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=big.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.8, sector_move_pct=-0.6, excess_move_pct=-4.2,
+        volume=300.0, avg_volume_20d=100.0, volume_multiple=3.0,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get("/api/feed-v2").json()
+
+    assert body[0]["peak_cap_tier"] == "LARGE"
+    assert body[0]["cap_tiers"] == ["LARGE", "MID"]
+    app.dependency_overrides.clear()
+
+
 def test_get_feed_v2_alert_by_id(db_session):
     _override_db(db_session)
     alert = _measured_alert(db_session)

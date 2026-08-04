@@ -31,6 +31,7 @@ const FEED_ALERT = {
   peak_ticker: 'ONGC.NS',
   peak_company_name: 'ONGC',
   peak_cap_tier: 'LARGE',
+  cap_tiers: ['LARGE', 'MICRO'],
   verdict: 'SECTOR_WIDE',
   intensity: { score: 71, band: 'Moderate', components: [] },
   breadth_score: 40,
@@ -272,7 +273,19 @@ describe('Shell card feed', () => {
     await screen.findAllByText(/crude oil slips below \$70/i);
     fireEvent.click(screen.getByLabelText('Cap filter MID'));
     expect(screen.queryByText(/crude oil slips below \$70/i)).not.toBeInTheDocument();
+    // A filter that matches nothing must say so -- never a silent blank feed.
+    expect(screen.getByText(/no stories in this cap tier/i)).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Cap filter LARGE'));
+    expect(screen.getAllByText(/crude oil slips below \$70/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/no stories in this cap tier/i)).not.toBeInTheDocument();
+  });
+
+  it('matches a story when ANY tagged company sits in the chosen tier, not only the peak', async () => {
+    // Peak is LARGE (ONGC) but the story also tags a MICRO refiner
+    // (cap_tiers: ['LARGE', 'MICRO']) -- the µ filter must keep it visible.
+    renderShell();
+    await screen.findAllByText(/crude oil slips below \$70/i);
+    fireEvent.click(screen.getByLabelText('Cap filter MICRO'));
     expect(screen.getAllByText(/crude oil slips below \$70/i).length).toBeGreaterThan(0);
   });
 
