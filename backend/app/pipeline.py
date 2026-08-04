@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
 from app.analysis.cascade import analyze_article
-from app.analysis.refinement import refine_alert
+from app.analysis.refinement import REFINEMENT_PENDING, refine_alert
 from app.analysis.schemas import AnalysisOutput, CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
+from app.config import settings
 from app.filtering.relevance import filter_new_articles
 from app.market.measure import measure_company_move
 from app.ingestion.full_text import fetch_pending_full_text
@@ -330,7 +331,7 @@ def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: s
 
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
-    gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None,
+    gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -350,6 +351,12 @@ def _persist_alert(
     alert = Alert(
         article_id=article.id, category=category, event_type=event_type,
         prompt_version=PROMPT_VERSION, knowledge_version=KNOWLEDGE_VERSION,
+        # Stored BEFORE refine_alert runs below -- that is the evidence base
+        # it reasons from (see app.analysis.refinement.refine_alert). None
+        # for a caller with no cascade output to hand over (a direct
+        # _persist_alert call in a test or one-off script), which simply
+        # falls refinement back to the article text.
+        facts=facts,
     )
     session.add(alert)
     session.flush()
@@ -413,12 +420,22 @@ def _persist_alert(
         alert_company.direction = measured_direction
 
     if client is not None:
-        try:
-            refine_alert(client, session, alert, article, alert_companies, market_moves)
-        except Exception:
-            logger.exception(
-                "refine_alert failed for alert_id=%s; persisting without LLM refinement fields", alert.id,
-            )
+        if settings.refinement_mode == "deferred":
+            # Deferred refinement (cost-optimization phase 5): nothing below
+            # this point, and nothing user-facing, reads the fields
+            # refine_alert writes -- the alert is broadcast, matched to
+            # holdings and served with them null already, which is exactly
+            # what a failed inline refinement has always produced. So the
+            # four calls move off this run's critical path and a later
+            # batch pass (refinement.run_pending_refinements) fills them in.
+            alert.refinement_status = REFINEMENT_PENDING
+        else:
+            try:
+                refine_alert(client, session, alert, article, alert_companies, market_moves)
+            except Exception:
+                logger.exception(
+                    "refine_alert failed for alert_id=%s; persisting without LLM refinement fields", alert.id,
+                )
 
     for gap in (gaps or []):
         session.add(CascadeGap(
@@ -536,7 +553,16 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "impact_level": ac.impact_level,
                 "parent_company_id": ac.parent_company_id,
             } for ac in reusable_alert.companies]
-            _persist_alert(session, article, reusable_alert.category, entries, event_type=reusable_alert.event_type, client=claude_client)
+            # The reused alert's own distilled facts carry over too: this
+            # is the SAME underlying story, so its facts are exactly what a
+            # fresh _extract_facts call would have produced -- and without
+            # them this alert's refinement would silently fall back to
+            # re-reading the raw article, the very cost this removes.
+            _persist_alert(
+                session, article, reusable_alert.category, entries,
+                event_type=reusable_alert.event_type, client=claude_client,
+                facts=reusable_alert.facts,
+            )
             alerts_created += 1
             continue
 
@@ -571,6 +597,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         _persist_alert(
             session, article, analysis.category, resolved,
             event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges, client=claude_client,
+            facts=analysis.facts,
         )
         alerts_created += 1
 

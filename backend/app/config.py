@@ -82,12 +82,195 @@ class Settings(BaseSettings):
     # brandfetch_client_id) -- local dev/CI never opens an outbound
     # WebSocket connection unless this is explicitly set.
     zerodha_hub_url: str = os.environ.get("ZERODHA_HUB_URL", "")
+    # Mark the stable prefix of every analysis prompt (the system prompt and
+    # the tool schema, identical across calls) with the active provider's
+    # prompt-caching mechanism -- see app.analysis.claude_client. Caching
+    # changes billing only: the model receives byte-identical input and
+    # returns the same output either way, so this defaults ON. Set
+    # PROMPT_CACHE_ENABLED=false to turn it off without a code change if a
+    # provider ever starts rejecting the markers.
+    prompt_cache_enabled: bool = os.environ.get("PROMPT_CACHE_ENABLED", "true").lower() == "true"
+    # Deterministic rule pass in front of the per-article relevance LLM call
+    # (app.filtering.prefilter). "shadow" (the default) runs the rules and
+    # logs what they WOULD reject without acting on it -- the only safe way
+    # to start, since the cost of a wrong reject is a real market story
+    # silently never reaching the feed. "enforce" acts on the verdict.
+    # "off" skips the rules entirely.
+    relevance_prefilter_mode: str = os.environ.get("RELEVANCE_PREFILTER_MODE", "shadow")
+    # Comma-separated LLM call names to route to the CHEAP model tier (see
+    # LLM_TIERABLE_CALLS below and app.analysis.claude_client). Empty by
+    # default, and that default is the point: a call only belongs here once
+    # a strong-vs-cheap output diff on real articles has shown the cheap
+    # model is equivalent for it. Names in LLM_PROTECTED_CALLS are ignored
+    # even if listed -- those calls ARE the product's output quality.
+    llm_cheap_tier_calls: str = os.environ.get("LLM_CHEAP_TIER_CALLS", "")
+    # Persist one llm_call_usage row per LLM call (tokens, model, tier,
+    # cache hits). Off by default so ordinary runs and the test suite don't
+    # write rows nobody reads; the measurement harness turns it on. The
+    # structured log line is emitted either way.
+    llm_usage_db_logging: bool = os.environ.get("LLM_USAGE_DB_LOGGING", "false").lower() == "true"
+    # "inline" (default) runs the four refinement calls inside the analysis
+    # run that created the alert, as they always have. "deferred" persists
+    # the alert without them and leaves a later batch pass
+    # (app.analysis.refinement.run_pending_refinements) to fill them in, so
+    # refinement stops competing with the analysis pipeline for rate-limit
+    # headroom and can be batched. Nothing user-facing blocks on refinement
+    # either way -- the fields it writes are already nullable everywhere
+    # they are read.
+    refinement_mode: str = os.environ.get("REFINEMENT_MODE", "inline")
+    # How many pending alerts one deferred pass refines. Bounded so a
+    # backlog is worked off over several ticks instead of one pass burning
+    # a whole quota.
+    refinement_batch_limit: int = int(os.environ.get("REFINEMENT_BATCH_LIMIT", "20"))
+    refinement_interval_minutes: int = int(os.environ.get("REFINEMENT_INTERVAL_MINUTES", "5"))
     # Gates app.companies.matching.matcher (spec §8). Set to "false" to
     # restore the pre-rebuild substring resolver without a deploy.
     use_alias_matcher: bool = os.environ.get("USE_ALIAS_MATCHER", "true").lower() == "true"
 
 
 settings = Settings()
+
+# --- LLM prompt caching (docs: cost-optimization phase 2) ---
+# Anthropic's cache-control type. "ephemeral" is their 5-minute TTL, which
+# is the right fit here: a single article's cascade stages fire seconds
+# apart, so every stage after the first hits a warm cache, and nothing is
+# held past the run. Kept here (not hardcoded in the client) so a longer
+# TTL can be adopted without touching the adapter.
+PROMPT_CACHE_CONTROL = {"type": "ephemeral"}
+
+# --- LLM model tiering (docs: cost-optimization phase 4) ---
+LLM_TIER_REASONING = "reasoning"
+LLM_TIER_CHEAP = "cheap"
+
+# Which concrete model each provider serves a tier with. The client layer
+# only ever acts on LLM_TIER_CHEAP: a reasoning-tier call is sent exactly as
+# its call site built it, so with the default configuration below nothing
+# about any request changes. Names live here rather than in the adapters so
+# swapping a tier's model is a config edit.
+LLM_TIER_MODELS = {
+    "gemini": {LLM_TIER_REASONING: "gemini-flash-latest", LLM_TIER_CHEAP: "gemini-flash-lite-latest"},
+    "groq": {LLM_TIER_REASONING: "llama-3.3-70b-versatile", LLM_TIER_CHEAP: "openai/gpt-oss-20b"},
+    "anthropic": {LLM_TIER_REASONING: "claude-sonnet-4-5", LLM_TIER_CHEAP: "claude-haiku-4-5-20251001"},
+}
+
+# Calls that stay on the strongest model no matter what the configuration
+# says. "extract_facts" is the one full-article read and everything
+# downstream reasons from its output; "identify_companies" decides which
+# companies are affected and why, which IS the thing this product sells.
+# Saving money on either is not a trade worth making, so resolve_tier
+# refuses to make it.
+LLM_PROTECTED_CALLS = frozenset({"extract_facts", "identify_companies"})
+
+# Calls that MAY move to the cheap tier -- structured extraction and
+# formatting of already-decided facts, plus a binary classification.
+# Eligible is not the same as approved: each one needs a strong-vs-cheap
+# diff on real articles before its name goes in LLM_CHEAP_TIER_CALLS.
+LLM_TIERABLE_CALLS = frozenset({
+    "identify_sectors", "generate_edges", "classify_relevance",
+    "event_summary", "impact_whys", "ripple_layers", "timeline_effects",
+})
+
+
+def resolve_tier(call_name: str) -> str:
+    """The model tier a given LLM call should run on. Defaults to the
+    reasoning tier for everything -- a call is downgraded only when it is
+    both eligible and explicitly listed in LLM_CHEAP_TIER_CALLS, and never
+    when it is protected."""
+    if call_name in LLM_PROTECTED_CALLS:
+        return LLM_TIER_REASONING
+    requested = {name.strip() for name in settings.llm_cheap_tier_calls.split(",") if name.strip()}
+    if call_name in requested and call_name in LLM_TIERABLE_CALLS:
+        return LLM_TIER_CHEAP
+    return LLM_TIER_REASONING
+
+
+# --- LLM cost accounting (docs: cost-optimization phase 6) ---
+# USD per million tokens, keyed by model name then "input"/"output"/
+# "cache_read". Intentionally EMPTY by default: provider list prices change,
+# and a stale number baked in here would produce a confident, wrong cost
+# report. Fill it from the provider's current pricing page for the models
+# actually configured above, e.g.
+#
+#   LLM_MODEL_PRICING_USD_PER_MTOK = {
+#       "gemini-flash-latest": {"input": 0.30, "output": 2.50, "cache_read": 0.075},
+#   }
+#
+# The measurement harness always reports real token counts; it reports cost
+# only for models priced here, and names the ones it had no price for.
+LLM_MODEL_PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {}
+
+# --- Relevance pre-filter rules (docs: cost-optimization phase 3) ---
+# The pre-filter's whole job is to skip the relevance LLM call on articles
+# that are UNAMBIGUOUSLY not market news. It is deliberately lopsided: a
+# wrongly-admitted article costs one cheap classification call, while a
+# wrongly-rejected one loses a real story from the feed forever. So the
+# rules below only ever fire together with the veto above them, and
+# anything they are not certain about goes to the LLM.
+
+# If ANY of these appears anywhere in an article (headline or body), the
+# pre-filter admits it no matter what else matched -- this is the veto that
+# keeps the rules honest. Deliberately over-broad: "price", "deal" and
+# "crore" catch enormous amounts of ordinary prose, and that is the point.
+# A market story that reads as noise by its headline alone (a promoter
+# arrest, a plant fire, a stampede at a listing) almost always carries one
+# of these somewhere in its body.
+RELEVANCE_PREFILTER_MARKET_SIGNALS = [
+    # money and magnitude
+    "₹", "$", "€", "%", "crore", "lakh", "billion", "million", "trillion",
+    "bps", "basis point", "per cent", "percent",
+    # markets and instruments
+    "stock", "share", "equity", "equities", "bourse", "sensex", "nifty", "bse", "nse",
+    "index", "ipo", "listing", "listed", "delisting", "dividend", "buyback", "bond",
+    "yield", "derivative", "futures", "commodity", "commodities", "currency", "rupee",
+    "dollar", "forex", "exchange rate",
+    # company financials and corporate actions
+    "earnings", "revenue", "profit", "margin", "ebitda", "guidance", "quarterly",
+    "results", "valuation", "turnover", "order book", "contract", "deal", "merger",
+    "acquisition", "acquire", "stake", "promoter", "shareholder", "investor",
+    "funding", "fundraise", "capex", "expansion", "layoff", "hiring", "restructuring",
+    "insolvency", "bankruptcy", "default", "downgrade", "upgrade", "rating",
+    # people whose news moves a company
+    "ceo", "chairman", "chief executive", "managing director", "cfo", "board of directors",
+    # policy, regulators and macro
+    "rbi", "sebi", "irdai", "trai", "fed", "ecb", "imf", "gst", "tax", "tariff", "duty",
+    "export", "import", "trade", "gdp", "inflation", "cpi", "wpi", "deficit", "subsidy",
+    "policy", "regulation", "regulator", "licence", "license", "sanction", "budget",
+    "repo rate", "interest rate", "lending rate", "monetary",
+    # real-economy inputs a story can move
+    "price", "pricing", "supply", "demand", "output", "production", "plant", "factory",
+    "crude", "oil", "gas", "petrol", "diesel", "gold", "silver", "steel", "cement",
+    "coal", "metal", "power", "electricity", "semiconductor", "chip",
+    "bank", "loan", "credit", "npa", "insurance", "premium",
+    "monsoon", "rainfall", "crop", "harvest", "sowing", "fertiliser", "fertilizer",
+    "economy", "economic", "industry", "sector", "business", "company", "firm",
+    # Inflections the matcher's own optional-plural rule cannot reach (it
+    # appends "s"/"es" to the forms above, so anything with a stem change
+    # or a different suffix has to be spelled out).
+    "companies", "industries", "economies", "trading", "banking", "lending",
+    "borrowing", "manufacturing", "investment", "financial", "finance",
+]
+
+# Regexes matched against the HEADLINE only. A body mention is never enough
+# to reject -- a story about a sponsorship deal legitimately says "cricket"
+# in its body, and a plant-closure story legitimately says "accident".
+# These describe article FORMATS that are never market news, not topics
+# that merely tend not to be. Anything arguable (weather, which this system
+# treats as a first-class event type via monsoon_weather; box-office, which
+# is media-company revenue; an executive's death, which moves a stock) is
+# deliberately absent.
+RELEVANCE_PREFILTER_NOISE_PATTERNS = [
+    r"\b(horoscope|rashifal|zodiac|astrolog\w*|numerolog\w*|tarot|panchang)\b",
+    r"\b(recipe|recipes)\b",
+    r"\b(lottery result|lucky draw|sudoku|crossword|word\s?le|quiz answer)\b",
+    r"\b(viral video|goes viral|caught on camera|watch video|netizens|trolled|meme)\b",
+    r"\b(weight loss|skin\s?care|beauty tips|home remed\w*|diet plan|yoga (poses|asanas))\b",
+    r"\b(wedding|haldi|sangeet|honeymoon|dating rumou?rs|girlfriend|boyfriend|red carpet)\b",
+    r"\b(wicket|wickets|innings|batting|bowler|century stand|man of the match|"
+    r"grand slam|wimbledon|goalkeeper|penalty shootout|half.century)\b",
+    r"\b(murder|rape|molest\w*|kidnap\w*|stabb(ed|ing)|assaulted|"
+    r"road accident|bus (crash|collision|accident)|hit.and.run)\b",
+    r"\b(obituary|death anniversary|condolence\w*|funeral)\b",
+]
 
 # --- Market-impact measurement constants (docs/NEWS_IMPACT_APP_SPEC.md §4) ---
 # Not environment-backed: these are product/algorithm constants tuned via

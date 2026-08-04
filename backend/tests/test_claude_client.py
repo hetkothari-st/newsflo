@@ -12,6 +12,7 @@ from app.analysis.claude_client import (
     MODEL,
     AnthropicAdapter,
     FallbackClient,
+    GroqAdapter,
     RotatingClient,
     build_client,
 )
@@ -29,15 +30,22 @@ def _anthropic_rate_limit_error() -> AnthropicRateLimitError:
     return AnthropicRateLimitError("rate limited", response=response, body=None)
 
 
+# The Groq client is now wrapped in a GroqAdapter so it speaks the same
+# create(tier=..., call_name=...) contract as the Gemini/Anthropic adapters
+# (cost-optimization phase 4) -- what these two assert is unchanged, one
+# indirection deeper: a list of keys still gets key rotation, a single key
+# still doesn't.
 def test_build_client_returns_rotating_client_for_a_list():
     client = build_client(["key-one", "key-two"])
-    assert isinstance(client, RotatingClient)
+    assert isinstance(client, GroqAdapter)
+    assert isinstance(client.inner, RotatingClient)
 
 
 def test_build_client_returns_plain_client_for_a_single_key():
     from openai import OpenAI
     client = build_client("key-one")
-    assert isinstance(client, OpenAI)
+    assert isinstance(client, GroqAdapter)
+    assert isinstance(client.inner, OpenAI)
 
 
 class _FailingUnderlyingClient:
@@ -250,8 +258,13 @@ def test_anthropic_adapter_translates_request_and_response_to_openai_shape():
         ],
     )
 
-    # Request was translated to Anthropic's shape correctly.
-    assert fake_messages.last_kwargs["system"] == SYSTEM_PROMPT
+    # Request was translated to Anthropic's shape correctly. The system
+    # prompt now rides a text block rather than a bare string -- that is
+    # what carrying a cache_control marker requires (cost-optimization
+    # phase 2, see tests/test_prompt_cache.py) -- but the prompt the model
+    # receives is still byte-for-byte SYSTEM_PROMPT.
+    system_blocks = fake_messages.last_kwargs["system"]
+    assert [block["text"] for block in system_blocks] == [SYSTEM_PROMPT]
     assert fake_messages.last_kwargs["tools"][0]["name"] == "record_analysis"
     assert "input_schema" in fake_messages.last_kwargs["tools"][0]
     assert fake_messages.last_kwargs["messages"] == [{"role": "user", "content": "Title: test\n\nContent: test"}]

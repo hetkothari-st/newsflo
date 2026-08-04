@@ -33,7 +33,7 @@ from app.reasoning.rulebook import (
     RULEBOOK_TEXT, get_chain,
 )
 
-from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT
+from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
 from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
@@ -46,9 +46,21 @@ logger = logging.getLogger(__name__)
 FACTS_INSTRUCTIONS = (
     "Read this news article closely and extract its core facts and economic "
     "mechanism -- what actually happened, the key entities/numbers/geography "
-    "involved, and WHY it matters economically. Do not name any companies or "
-    "sectors yet -- that happens in a later step. Just establish the ground "
-    "truth this analysis will reason from.\n\n"
+    "involved, and WHY it matters economically.\n\n"
+    "Write down the concrete specifics the article states: the real-world "
+    "entities it NAMES (companies, institutions, regulators, governments, "
+    "countries, products), the figures and dates, the stated cause, and "
+    "whether the event is officially confirmed or is an unverified report, "
+    "rumor, or denied claim. Every later step of this analysis -- including "
+    "the plain-language reader summary, the per-company explanations, and "
+    "the timeline -- reads ONLY what you write here and never the article "
+    "again, so a specific the article states and you omit is lost for the "
+    "whole analysis.\n\n"
+    "What you must NOT do is infer: do not name companies or sectors the "
+    "article does not itself name, and do not judge which of them are "
+    "affected or in which direction -- naming the affected universe is a "
+    "later step's job. Report the article's ground truth; leave the "
+    "reasoning about consequences to the steps that follow.\n\n"
     "Also classify this article's overall category (topical bucket, shown as "
     "a badge on the feed card) as exactly one of the values below -- "
     "lowercase-with-underscores, exact spelling, NEVER a sentence. If "
@@ -74,7 +86,10 @@ def build_facts_tool() -> dict:
                         "description": (
                             "What actually happened, the key entities/numbers/geography "
                             "involved, and the economic mechanism at play -- plain "
-                            "prose, no company or sector names yet."
+                            "prose. Name the entities the article itself names and keep "
+                            "its figures, dates and confirmed/unconfirmed status; do NOT "
+                            "add companies or sectors it doesn't name, and do not judge "
+                            "which are affected."
                         ),
                     },
                     "category": {"type": "string", "enum": CATEGORIES},
@@ -104,6 +119,7 @@ def _extract_facts(client, title: str, content: str) -> FactsResult:
         tools=[build_facts_tool()],
         tool_choice={"type": "function", "function": {"name": "record_facts"}},
         messages=messages,
+        **tier_kwargs("extract_facts"),
     )
     message = response.choices[0].message
     tool_calls = message.tool_calls or []
@@ -273,6 +289,7 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
         tools=[tool],
         tool_choice={"type": "function", "function": {"name": "record_sectors"}},
         messages=messages,
+        **tier_kwargs("identify_sectors"),
     )
     message = response.choices[0].message
     tool_calls = message.tool_calls or []
@@ -593,19 +610,43 @@ def _identify_companies(
             )
 
     rationale_instructions = COMPANY_RATIONALE_INSTRUCTIONS if parent_pool is None else CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
+
+    def _compose(instructions: str) -> str:
+        """Stable prefix first, variable content last (cost-optimization
+        phase 2). `framing` and `instructions` are per-stage constants --
+        the direct stage's instructions alone carry the whole rulebook and
+        playbook block, ~6k tokens -- while only the facts/sectors/parents
+        block changes between calls. Leading with the constants makes the
+        cacheable prefix as long as it can be, which matters most exactly
+        where this call is repeated: the cascade stages run it once per
+        sector, re-sending identical instructions every time.
+
+        The closing line is not filler. The old ordering put the field
+        instructions immediately before the answer, and that adjacency is
+        worth keeping; a one-line pointer buys it back for ~20 tokens
+        without splitting the cacheable prefix. Nothing about the
+        instructions themselves changes here -- only where they sit
+        relative to the data they apply to.
+
+        `candidate_block` (the real DB companies this call must choose from)
+        rides the variable tail, not the prefix: it is derived from THIS
+        call's sectors, so it is not cacheable, and it must stay adjacent to
+        the sector lines it enumerates.
+        """
+        return (
+            f"{framing}\n\n"
+            f"{instructions}\n\n"
+            f"Facts: {facts}\n\n"
+            f"Sectors:\n{sector_lines}"
+            f"{parent_context}"
+            f"{candidate_block}\n\n"
+            "Now apply the instructions above to these facts and sectors, "
+            "filling in every field exactly as they specify."
+        )
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"{framing}\n\n"
-                f"Facts: {facts}\n\n"
-                f"Sectors:\n{sector_lines}"
-                f"{parent_context}"
-                f"{candidate_block}\n\n"
-                f"{rationale_instructions}"
-            ),
-        },
+        {"role": "user", "content": _compose(rationale_instructions)},
     ]
     tool = build_company_tool(parent_tickers if parent_tickers else None, valid_tickers=valid_tickers)
 
@@ -616,6 +657,7 @@ def _identify_companies(
             tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_sector_companies"}},
             messages=messages,
+            **tier_kwargs("identify_companies"),
         )
 
     try:
@@ -637,14 +679,7 @@ def _identify_companies(
         logger.warning(
             "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
         )
-        messages[1]["content"] = (
-            f"{framing}\n\n"
-            f"Facts: {facts}\n\n"
-            f"Sectors:\n{sector_lines}"
-            f"{parent_context}"
-            f"{candidate_block}\n\n"
-            f"{CASCADE_COMPANY_RATIONALE_INSTRUCTIONS}"
-        )
+        messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
         try:
             response = _call(MODEL)
         except RateLimitError:
@@ -906,6 +941,7 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
                 model=FALLBACK_MODEL, max_tokens=2048, tools=[tool],
                 tool_choice={"type": "function", "function": {"name": "record_edge_verification"}},
                 messages=messages,
+                **tier_kwargs("generate_edges"),
             )
             message = response.choices[0].message
             tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_edge_verification"), None)
@@ -1042,7 +1078,7 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
     if not primary_sectors:
         return AnalysisOutput(
             category=facts_result.category, event_type=facts_result.event_type,
-            companies=all_companies, gaps=all_gaps,
+            companies=all_companies, gaps=all_gaps, facts=facts_result.facts,
         )
 
     try:
@@ -1115,5 +1151,5 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
 
     return AnalysisOutput(
         category=facts_result.category, event_type=facts_result.event_type,
-        companies=all_companies, gaps=all_gaps, edges=edges,
+        companies=all_companies, gaps=all_gaps, edges=edges, facts=facts_result.facts,
     )
