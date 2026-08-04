@@ -33,9 +33,20 @@ def test_mapping_is_case_and_whitespace_insensitive():
 
 
 def test_every_mapped_bucket_is_in_the_closed_vocabulary():
+    # CORRECTION (2026-08-04 IndustryNew fix): this "allowed" set was a
+    # manually-maintained duplicate of the closed vocabulary, frozen at the
+    # 13 buckets the old Sector-only table could reach. Widening the table
+    # to key on IndustryNew deliberately makes 5 more buckets reachable
+    # (agriculture, construction_realestate, consumer_durables,
+    # media_entertainment, textiles) -- that expansion is the fix, not a
+    # defect. See test_every_emitted_value_is_a_valid_sector below for the
+    # authoritative version of this check, sourced from SECTORS directly
+    # instead of a second hand-maintained copy.
     allowed = {
         "banking", "fmcg", "pharma", "it", "oil_gas", "metals", "infra",
         "auto", "telecom", "chemicals", "defense", "railways_transport", "other",
+        "agriculture", "construction_realestate", "consumer_durables",
+        "media_entertainment", "textiles",
     }
     assert set(sector_map.OFFICIAL_SECTOR_TO_BUCKET.values()) <= allowed
 
@@ -76,3 +87,55 @@ def test_company_with_only_a_suspended_listing_is_suspended():
 
 def test_no_listings_defaults_to_normal():
     assert sector_map.derive_tradeability([]) == "NORMAL"
+
+
+from app.analysis.schemas import SECTORS
+
+
+@pytest.mark.parametrize("sector,industry,expected", [
+    # The five Sector values that fall through today, each recovered via
+    # IndustryNew. These five accounted for 2,971 production companies.
+    ("Consumer Discretionary", "Automobile and Auto Components", "auto"),
+    ("Consumer Discretionary", "Realty", "construction_realestate"),
+    ("Consumer Discretionary", "Consumer Durables", "consumer_durables"),
+    ("Consumer Discretionary", "Textiles", "textiles"),
+    ("Industrials", "Capital Goods", "infra"),
+    ("Industrials", "Construction", "infra"),
+    ("Commodities", "Chemicals", "chemicals"),
+    ("Commodities", "Metals & Mining", "metals"),
+    ("Commodities", "Construction Materials", "infra"),
+    ("Services", "Transport Services", "railways_transport"),
+    # Sector still works when IndustryNew is absent or unknown.
+    ("Energy", None, "oil_gas"),
+    ("Financial Services", None, "banking"),
+    ("Healthcare", "Something Unheard Of", "pharma"),
+])
+def test_industry_takes_precedence_then_sector_falls_back(sector, industry, expected):
+    assert sector_map.map_sector(sector, industry) == expected
+
+
+def test_previously_unreachable_sectors_are_now_reachable():
+    # Six of the 18 valid sectors could never be produced. A sector no
+    # company can be assigned is a dead branch in fan-out and filtering.
+    #
+    # NOTE: "defense" is deliberately excluded from this list. Neither BSE's
+    # Sector nor IndustryNew vocabulary has a value that means "defense" --
+    # defense manufacturers (BEL, HAL, Mazagon Dock, ...) are classified
+    # under IndustryNew "Capital Goods", which this table already maps to
+    # "infra". Adding a fabricated key to reach "defense" would be exactly
+    # the kind of guess the mapping is designed to avoid (see map_sector's
+    # "omit rather than guess" contract) -- so it stays unreachable from this
+    # table pending a real BSE-sourced signal for it.
+    reachable = set(sector_map.OFFICIAL_SECTOR_TO_BUCKET.values())
+    for missing in ("agriculture", "construction_realestate", "consumer_durables",
+                    "media_entertainment", "railways_transport", "textiles"):
+        assert missing in reachable
+
+
+def test_every_emitted_value_is_a_valid_sector():
+    assert set(sector_map.OFFICIAL_SECTOR_TO_BUCKET.values()) <= set(SECTORS)
+
+
+def test_unknown_both_levels_is_other():
+    assert sector_map.map_sector("Nonsense", "Also Nonsense") == "other"
+    assert sector_map.map_sector(None, None) == "other"

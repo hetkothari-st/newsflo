@@ -214,7 +214,9 @@ def build_records(
         # listing for this ISIN.
         record["name"] = record.pop("bse_name", "") or record.pop("nse_name", "") or primary["symbol"]
         record.pop("nse_name", None)
-        record["sector"] = sector_map.map_sector(record["official_sector"])
+        record["sector"] = sector_map.map_sector(
+            record["official_sector"], record["official_industry"],
+        )
         record["tradeability"] = sector_map.derive_tradeability(record["listings"])
         records.append(record)
     return records
