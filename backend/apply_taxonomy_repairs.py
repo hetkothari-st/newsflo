@@ -24,15 +24,31 @@ Two repair passes, run in sequence:
    fixed isn't double-reported). For each one, if the sub_sector's owning
    sector is unambiguous (SubSectorViolation.correct_sector is not None --
    i.e. the sub_sector name appears in exactly one branch of
-   SUB_SECTOR_TAXONOMY), this sets the company's `sector` to that owning
-   sector. This is the case a 2026-08 merge that grew the company universe
-   from 1,016 to 5,321 rows and reset most sectors to "other" created at
-   scale: 126 companies kept a real sub_sector (e.g. BAJAJ-AUTO.NS /
-   two_wheeler, GRASIM.NS / cement) while their sector was reset to
-   "other" -- an unambiguous, mechanically-derivable mismatch, not a
-   judgment call. Where the sub_sector is unknown to the taxonomy or (not
-   currently possible, but not assumed) claimed by more than one sector,
-   the row is left untouched and reported, never guessed.
+   SUB_SECTOR_TAXONOMY) AND that sub_sector is a real, specific value (not
+   a "*_other" catch-all bucket), this sets the company's `sector` to that
+   owning sector. This is the case a 2026-08 merge that grew the company
+   universe from 1,016 to 5,321 rows and reset most sectors to "other"
+   created at scale: 126 companies kept a real sub_sector (e.g.
+   BAJAJ-AUTO.NS / two_wheeler, GRASIM.NS / cement) while their sector was
+   reset to "other" -- an unambiguous, mechanically-derivable mismatch, not
+   a judgment call.
+
+   A "*_other" sub_sector (e.g. "fmcg_other", "metals_other") is
+   deliberately excluded from this derivation even though _sector_owning()
+   still resolves it to exactly one sector: every sector's taxonomy branch
+   has its own catch-all bucket, so "*_other" carries no signal about
+   which sector the company actually belongs to -- only that whoever set
+   it didn't know. Confirmed live: repairing "fmcg_other" -> fmcg swept in
+   six hotel chains, IRCTC (railway ticketing), Naukri/IndiaMART/CarTrade
+   (internet plays), and eight consumer-durables makers (Voltas,
+   Whirlpool, Havells, Dixon...); "metals_other" -> metals promoted
+   ADANIENT.NS -- a ports-and-airports conglomerate -- to the #1 spot in
+   the metals fan-out. These rows are reported (status="catchall_skipped")
+   and left completely untouched, same as an unknown/ambiguous sub_sector.
+
+   Where the sub_sector is unknown to the taxonomy or (not currently
+   possible, but not assumed) claimed by more than one sector, the row is
+   left untouched and reported, never guessed.
 
 Both passes are idempotent and safe to re-run: a row already carrying the
 expected value is reported "already correct" (explicit pass) or simply
@@ -43,9 +59,17 @@ no dialect-specific SQL -- so it runs unmodified against SQLite (local dev)
 and PostgreSQL (production) alike.
 
 Note: app.db.SessionLocal is created with autoflush=False, so the derived
-pass explicitly flushes after the explicit pass before it queries -- without
-that, the derived pass's check_sub_sectors() query would run against
-pre-explicit-repair data even within the same still-uncommitted session.
+pass explicitly flushes after the explicit pass before it queries. This
+matters specifically for check_sub_sectors()'s SQL-level
+`Company.sub_sector.isnot(None)` predicate: a future explicit repair that
+sets sub_sector on a row FROM NULL needs that flush for the predicate to
+even see the row. It is not needed for the current TAXONOMY_REPAIRS
+entries' in-place attribute changes (personal_care -> retail, etc.) --
+those rows are already non-null in the DB, so the WHERE clause matches
+them regardless of flush, and the derived pass's query returns the SAME
+still-dirty Python objects via SQLAlchemy's identity map either way. Kept
+anyway because it costs nothing and protects the next repair-table entry
+that isn't shaped like today's three.
 
 Usage (from the backend/ directory):
     .venv/Scripts/python apply_taxonomy_repairs.py --dry-run
@@ -95,10 +119,10 @@ class RepairResult:
     field: str
     expected: str | None
     previous: str | None
-    status: str  # "applied" | "already_correct" | "not_found" | "ambiguous"
+    status: str  # "applied" | "already_correct" | "not_found" | "ambiguous" | "catchall_skipped"
     # Extra context for the derived pass only (which sub_sector drove the
-    # fix, or why an ambiguous/unknown one was left alone). None for every
-    # explicit-table result.
+    # fix, or why an ambiguous/unknown/catch-all one was left alone). None
+    # for every explicit-table result.
     note: str | None = None
 
 
@@ -139,9 +163,27 @@ def _apply_derived_repairs(session) -> list[RepairResult]:
 
     Ambiguous or taxonomy-unknown sub_sectors (correct_sector is None) are
     reported with status="ambiguous" and left completely untouched -- this
-    function never guesses."""
+    function never guesses. Nor does it repair a "*_other" catch-all
+    sub_sector, even when _sector_owning() resolves it to exactly one
+    sector: every sector has its own catch-all bucket, so owning it
+    unambiguously still carries no real signal about where the company
+    belongs (see the module docstring for the fmcg_other/metals_other
+    incidents this guards against). Those rows get status="catchall_skipped"
+    and are reported separately from "ambiguous", also left untouched."""
     results = []
     for violation in check_sub_sectors(session):
+        if violation.sub_sector.endswith("_other"):
+            results.append(RepairResult(
+                violation.ticker, "sector", expected=None, previous=violation.sector,
+                status="catchall_skipped",
+                note=(
+                    f"sub_sector {violation.sub_sector!r} is a catch-all bucket -- its unambiguous "
+                    f"owning sector ({violation.correct_sector!r}) carries no real signal about this "
+                    "company, so it was left unchanged rather than repaired"
+                ),
+            ))
+            continue
+
         if violation.correct_sector is None:
             results.append(RepairResult(
                 violation.ticker, "sector", expected=None, previous=violation.sector,
@@ -169,10 +211,14 @@ def apply_taxonomy_repairs(session, dry_run: bool = False) -> list[RepairResult]
     (undoing every staged change from both passes) when dry_run is True, so
     no write survives."""
     explicit_results = _apply_explicit_repairs(session, dry_run)
-    # SessionLocal is autoflush=False (see module docstring) -- without an
-    # explicit flush here, the derived pass's check_sub_sectors() query
-    # would not see the explicit pass's still-pending changes, even within
-    # the same uncommitted transaction.
+    # SessionLocal is autoflush=False (see module docstring). This flush
+    # matters for check_sub_sectors()'s SQL-level `sub_sector.isnot(None)`
+    # predicate -- a future explicit repair setting sub_sector FROM NULL
+    # needs it to be seen at all. Today's three TAXONOMY_REPAIRS entries
+    # change already-non-null attributes in place, which the derived pass
+    # would see via the identity map with or without this flush; kept
+    # anyway since it costs nothing and protects the next repair shaped
+    # differently from today's three.
     session.flush()
     derived_results = _apply_derived_repairs(session)
 
@@ -192,6 +238,8 @@ def _print_report(results: list[RepairResult], dry_run: bool) -> None:
             print(f"  {r.ticker:18} {r.field:12} already {r.expected!r} -- nothing to do")
         elif r.status == "ambiguous":
             print(f"  {r.ticker:18} {r.field:12} REPORTED, not fixed: {r.note}")
+        elif r.status == "catchall_skipped":
+            print(f"  {r.ticker:18} {r.field:12} SKIPPED (catch-all), not fixed: {r.note}")
         else:
             suffix = f"  ({r.note})" if r.note else ""
             print(f"  {r.ticker:18} {r.field:12} {verb} {r.previous!r} -> {r.expected!r}{suffix}")
@@ -208,8 +256,10 @@ def main() -> None:
         _print_report(results, args.dry_run)
         applied = sum(1 for r in results if r.status == "applied")
         ambiguous = sum(1 for r in results if r.status == "ambiguous")
+        catchall_skipped = sum(1 for r in results if r.status == "catchall_skipped")
         print(f"\n{applied} {'would be fixed' if args.dry_run else 'fixed'}, "
-              f"{ambiguous} reported (ambiguous/unknown, left alone).")
+              f"{ambiguous} reported (ambiguous/unknown, left alone), "
+              f"{catchall_skipped} reported (catch-all sub_sector, left alone).")
         print("\n--dry-run: nothing written." if args.dry_run else "\nDone.")
     finally:
         session.close()

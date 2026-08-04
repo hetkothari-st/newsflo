@@ -529,3 +529,65 @@ def test_sector_fanout_excludes_global_companies(db_session):
     resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
+
+
+# --- I2: the direct-mention path must apply the same market/tradeability
+# filter as the sector fan-out branch above -- confirmed live, a direct
+# mention of "BP" resolved to a real Company row with basis='direct_mention'
+# because nothing restricted the ticker/alias lookup to tradeable Indian
+# rows. ---
+
+def test_direct_mention_to_a_global_company_does_not_resolve(db_session):
+    bp = _make_company(db_session, "BP", "BP plc", "oil_gas", 900000.0, index_tier="GLOBAL_LARGE_CAP")
+    bp.market = "GLOBAL"
+    db_session.commit()
+    mention = CompanyMention(
+        name="BP plc", ticker="BP", is_direct=True, sector=None,
+        direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="refining margins",
+        confidence_score=70, time_horizon="Short-Term",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved == []
+
+
+def test_direct_mention_to_a_restricted_company_does_not_resolve(db_session):
+    company = _make_company(db_session, "RESTRICTED.NS", "Restricted Co Ltd.", "oil_gas", 900000.0)
+    company.tradeability = "RESTRICTED"
+    db_session.commit()
+    mention = CompanyMention(
+        name="Restricted Co Ltd.", ticker="RESTRICTED.NS", is_direct=True, sector=None,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="n/a",
+        confidence_score=70, time_horizon="Short-Term",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved == []
+
+
+# --- I3: a resolution-level regression guard for the actual fan-out
+# behaviour, since score_golden.py only scores already-persisted rows and
+# is blind to a company like ETERNAL.NS moving in and out of a sector's
+# fan-out. Mirrors the real incident: ETERNAL.NS is a legitimate fmcg
+# company post-repair (sub_sector "retail"), carries a genuinely high
+# market cap, and still must not win a top-3 slot in an UNANCHORED fmcg
+# fan-out over a realistic set of fmcg majors that are each larger still.
+# Asserts on the actual returned company set (not a count), so it breaks if
+# TOP_N_SECTOR_COMPANIES grows to include a 4th company. Every company here
+# shares index_tier="OTHER" so a regression back to _TIER_RANK-first
+# ordering (I4) would also break this test: that ordering collapses to
+# alphabetical, and "ETERNAL.NS" sorts before "HINDUNILVR.NS"/"ITC.NS". ---
+
+def test_unanchored_fmcg_fanout_excludes_eternal_from_a_realistic_top_3(db_session):
+    _make_company(db_session, "HINDUNILVR.NS", "Hindustan Unilever Ltd.", "fmcg", 5_000_000.0, index_tier="OTHER")
+    _make_company(db_session, "ITC.NS", "ITC Ltd.", "fmcg", 4_000_000.0, index_tier="OTHER")
+    _make_company(db_session, "NESTLEIND.NS", "Nestle India Ltd.", "fmcg", 3_000_000.0, index_tier="OTHER")
+    _make_company(db_session, "ETERNAL.NS", "Eternal Ltd.", "fmcg", 2_500_000.0, index_tier="OTHER")
+
+    resolved = resolve_companies(db_session, [_sector_mention("fmcg")])
+
+    tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
+    assert tickers == {"HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS"}
+    assert "ETERNAL.NS" not in tickers

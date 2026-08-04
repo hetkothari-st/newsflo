@@ -66,6 +66,15 @@ def _to_resolved(
     }
 
 
+def _is_tradeable_indian(company: Company) -> bool:
+    """Same market/tradeability restriction as this module's own fan-out
+    branch (below) -- without it, a direct mention resolving to a
+    RESTRICTED/SME/SUSPENDED row, or a curated GLOBAL row, persists as a
+    real alert_companies row with basis='direct_mention'. Confirmed live: a
+    direct mention of "BP" resolved to a real Company row this way."""
+    return company.market == "INDIA" and company.tradeability == "NORMAL"
+
+
 def _find_direct_company(session: Session, mention: CompanyMention) -> Company | None:
     """Resolve a direct mention via the alias match ladder
     (app.companies.matching.matcher).
@@ -83,7 +92,7 @@ def _find_direct_company(session: Session, mention: CompanyMention) -> Company |
     if result is None:
         return None
     company = session.get(Company, result.company_id)
-    if company is None or is_demo_company(company.ticker):
+    if company is None or is_demo_company(company.ticker) or not _is_tradeable_indian(company):
         return None
     return company
 
@@ -103,14 +112,17 @@ def _find_direct_company_legacy(session: Session, mention: CompanyMention) -> Co
     """
     if mention.ticker:
         company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
-        if company is not None and not is_demo_company(company.ticker):
+        if company is not None and not is_demo_company(company.ticker) and _is_tradeable_indian(company):
             return company
     if not mention.name:
         return None
     name_lower = mention.name.strip().lower()
     if not name_lower:
         return None
-    all_companies = [c for c in session.query(Company).all() if not is_demo_company(c.ticker)]
+    all_companies = [
+        c for c in session.query(Company).all()
+        if not is_demo_company(c.ticker) and _is_tradeable_indian(c)
+    ]
     exact = [c for c in all_companies if c.name.strip().lower() == name_lower]
     if len(exact) == 1:
         return exact[0]

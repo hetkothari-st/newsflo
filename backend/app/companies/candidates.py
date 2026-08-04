@@ -8,11 +8,12 @@ name, sub-sector, and one-line business description -- converts the task from
 recall to selection, and lets the tool schema enum-constrain `ticker` to
 tickers that provably resolve.
 
-Ordering is by index tier so that, when a sector has more companies than the
-limit, the ones that survive are the prominent, liquid names an analyst would
-actually consider -- same _TIER_RANK discipline as app.companies.resolution.
+Ordering is by real size (market cap), same as app.companies.resolution's
+fan-out branch, so that when a sector has more companies than the limit, the
+ones that survive are the prominent, liquid names an analyst would actually
+consider -- and so the candidate list an analyst sees agrees with which
+companies the fan-out could actually pick.
 """
-from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.companies.integrity import DEMO_TICKERS
@@ -23,23 +24,16 @@ from app.models import Company
 # rationale instructions.
 MAX_CANDIDATES_PER_SECTOR = 40
 
-_TIER_RANK = case(
-    (Company.index_tier == "NIFTY50", 0),
-    (Company.index_tier == "NIFTYNEXT50", 1),
-    (Company.index_tier == "NIFTYMIDCAP150", 2),
-    (Company.index_tier == "NIFTYSMALLCAP250", 3),
-    else_=4,
-)
-
 
 def candidate_companies(
     session: Session, sectors: list[str], limit_per_sector: int = MAX_CANDIDATES_PER_SECTOR,
 ) -> list[Company]:
     """Every plausible company for the given sectors, most prominent first,
-    deduplicated by ticker across sectors and with demo/seed rows excluded.
-    Order is stable (tier, then ticker) so the same inputs always produce the
-    same prompt -- a prompt that reshuffles between runs makes a regression
-    impossible to attribute."""
+    deduplicated by ticker across sectors and with demo/seed and non-
+    tradeable-Indian rows excluded. Order is stable (market cap, then
+    ticker) so the same inputs always produce the same prompt -- a prompt
+    that reshuffles between runs makes a regression impossible to
+    attribute."""
     seen: set[str] = set()
     result: list[Company] = []
     for sector in sectors:
@@ -47,7 +41,15 @@ def candidate_companies(
             session.query(Company)
             .filter_by(sector=sector)
             .filter(Company.ticker.notin_(DEMO_TICKERS))
-            .order_by(_TIER_RANK.asc(), Company.ticker.asc())
+            # Same market/tradeability restriction as
+            # app.companies.resolution.resolve_companies' fan-out branch --
+            # without it, RESTRICTED/SME/SUSPENDED/GLOBAL rows are eligible
+            # both for the prompt text and for the tool schema's ticker
+            # enum, so the model can be enum-constrained into a set with no
+            # real Indian companies in it at all.
+            .filter(Company.market == "INDIA")
+            .filter(Company.tradeability == "NORMAL")
+            .order_by(Company.market_cap.desc().nullslast(), Company.ticker.asc())
             .limit(limit_per_sector)
             .all()
         )

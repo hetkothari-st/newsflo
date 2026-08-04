@@ -157,3 +157,100 @@ def test_second_run_reports_nothing_left_to_do_for_derived_violations(db_session
     # nothing to report or fix on the second run.
     assert not any(r.ticker == "TESTBIKE.NS" for r in second_pass)
     assert db_session.query(Company).filter_by(ticker="TESTBIKE.NS").one().sector == "auto"
+
+
+# --- C1: a "*_other" catch-all sub_sector must be reported, never repaired
+# -- _sector_owning() still resolves it to exactly one sector (every sector
+# has its own catch-all bucket), but that ownership carries no real signal
+# about which sector the company actually belongs to. ---
+
+def test_catchall_other_violation_is_reported_and_not_written(db_session):
+    # metals_other resolves unambiguously to "metals" in SUB_SECTOR_TAXONOMY,
+    # but a company carrying it could be almost anything -- confirmed live,
+    # this exact shape promoted ADANIENT.NS (a ports/airports conglomerate)
+    # to #1 in the metals fan-out. The derived pass must leave sector alone.
+    db_session.add(Company(
+        ticker="TESTCONGLOMERATE.NS", name="Test Conglomerate Ltd.", sector="other",
+        sub_sector="metals_other", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    reported = next(r for r in results if r.ticker == "TESTCONGLOMERATE.NS")
+    assert reported.status == "catchall_skipped"
+    assert reported.field == "sector"
+    company = db_session.query(Company).filter_by(ticker="TESTCONGLOMERATE.NS").one()
+    assert company.sector == "other"
+    assert company.sub_sector == "metals_other"
+
+
+def test_genuine_violation_alongside_a_catchall_one_is_still_repaired(db_session):
+    # A real, specific sub_sector (two_wheeler) must still be derived and
+    # fixed even in the same run as a *_other row that must not be --
+    # the catch-all skip must not leak into the handling of other rows.
+    db_session.add_all([
+        Company(
+            ticker="TESTBIKE.NS", name="Test Bike Ltd.", sector="other", sub_sector="two_wheeler",
+            index_tier="NIFTY50",
+        ),
+        Company(
+            ticker="TESTFMCGOTHER.NS", name="Test FMCG Other Ltd.", sector="other",
+            sub_sector="fmcg_other", index_tier="NIFTY50",
+        ),
+    ])
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    bike_result = next(r for r in results if r.ticker == "TESTBIKE.NS")
+    fmcg_other_result = next(r for r in results if r.ticker == "TESTFMCGOTHER.NS")
+    assert bike_result.status == "applied"
+    assert fmcg_other_result.status == "catchall_skipped"
+    assert db_session.query(Company).filter_by(ticker="TESTBIKE.NS").one().sector == "auto"
+    assert db_session.query(Company).filter_by(ticker="TESTFMCGOTHER.NS").one().sector == "other"
+
+
+def test_catchall_skip_reported_separately_from_ambiguous_and_applied_counts(db_session):
+    db_session.add_all([
+        Company(
+            ticker="TESTBIKE.NS", name="Test Bike Ltd.", sector="other", sub_sector="two_wheeler",
+            index_tier="NIFTY50",
+        ),
+        Company(
+            ticker="TESTFMCGOTHER.NS", name="Test FMCG Other Ltd.", sector="other",
+            sub_sector="fmcg_other", index_tier="NIFTY50",
+        ),
+        Company(
+            ticker="TESTMYSTERY.NS", name="Test Mystery Ltd.", sector="other",
+            sub_sector="not_a_real_sub_sector", index_tier="NIFTY50",
+        ),
+    ])
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    statuses = {r.ticker: r.status for r in results}
+    assert statuses["TESTBIKE.NS"] == "applied"
+    assert statuses["TESTFMCGOTHER.NS"] == "catchall_skipped"
+    assert statuses["TESTMYSTERY.NS"] == "ambiguous"
+    # The two report buckets are distinct statuses, so a caller counting
+    # each separately (as main() does) never conflates a catch-all skip
+    # with a genuinely ambiguous/unknown sub_sector.
+    assert sum(1 for r in results if r.status == "catchall_skipped") == 1
+    assert sum(1 for r in results if r.status == "ambiguous") == 1
+    assert sum(1 for r in results if r.status == "applied") == 1
+
+
+def test_catchall_skip_dry_run_writes_nothing(db_session):
+    db_session.add(Company(
+        ticker="TESTFMCGOTHER.NS", name="Test FMCG Other Ltd.", sector="other",
+        sub_sector="fmcg_other", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=True)
+
+    reported = next(r for r in results if r.ticker == "TESTFMCGOTHER.NS")
+    assert reported.status == "catchall_skipped"
+    assert db_session.query(Company).filter_by(ticker="TESTFMCGOTHER.NS").one().sector == "other"

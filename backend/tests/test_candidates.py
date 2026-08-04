@@ -23,26 +23,65 @@ def test_returns_companies_only_for_the_named_sectors(db_session):
     assert [c.ticker for c in result] == ["HPCL.NS"]
 
 
-def test_orders_by_index_tier_so_prominent_names_survive_the_limit(db_session):
+def test_orders_by_market_cap_so_prominent_names_survive_the_limit(db_session):
+    # Ordering follows app.companies.resolution's fan-out branch (I4): real
+    # size (market cap), not index_tier -- most of the post-universe-merge
+    # rows sit in index_tier="OTHER", which would otherwise collapse the
+    # ordering to alphabetical.
     _seed(db_session, [
-        ("SMALL.NS", "Small Oil Ltd.", "oil_gas", "NIFTYSMALLCAP250", "A small refiner."),
-        ("BIG.NS", "Big Oil Ltd.", "oil_gas", "NIFTY50", "A large refiner."),
+        ("SMALL.NS", "Small Oil Ltd.", "oil_gas", "OTHER", "A small refiner."),
+        ("BIG.NS", "Big Oil Ltd.", "oil_gas", "OTHER", "A large refiner."),
     ])
+    db_session.query(Company).filter_by(ticker="SMALL.NS").one().market_cap = 100.0
+    db_session.query(Company).filter_by(ticker="BIG.NS").one().market_cap = 900_000.0
+    db_session.commit()
 
     result = candidate_companies(db_session, ["oil_gas"], limit_per_sector=1)
 
     assert [c.ticker for c in result] == ["BIG.NS"]
 
 
-def test_unknown_tier_sorts_last_not_by_ticker(db_session):
+def test_null_market_cap_sorts_last_and_ties_break_by_ticker(db_session):
+    # nullslast(): a company with no market cap at all must not outrank one
+    # that has a real, positive cap, however small. Among rows tied on
+    # market cap (including both-null), the ticker-ascending tiebreak keeps
+    # the prompt's company order reproducible across runs.
     _seed(db_session, [
-        ("AAA.NS", "AAA Ltd.", "oil_gas", "NIFTY100", "desc"),
         ("ZZZ.NS", "ZZZ Ltd.", "oil_gas", "NIFTY50", "desc"),
+        ("AAA.NS", "AAA Ltd.", "oil_gas", "NIFTY100", "desc"),
+        ("NOCAP.NS", "No Cap Ltd.", "oil_gas", "NIFTY50", "desc"),
     ])
+    db_session.query(Company).filter_by(ticker="ZZZ.NS").one().market_cap = 100.0
+    db_session.query(Company).filter_by(ticker="AAA.NS").one().market_cap = 100.0
+    db_session.commit()
 
     result = candidate_companies(db_session, ["oil_gas"])
 
-    assert [c.ticker for c in result] == ["ZZZ.NS", "AAA.NS"]
+    assert [c.ticker for c in result] == ["AAA.NS", "ZZZ.NS", "NOCAP.NS"]
+
+
+def test_excludes_non_tradeable_or_non_indian_companies(db_session):
+    # I1: without this filter, RESTRICTED/SME/SUSPENDED/GLOBAL rows are
+    # eligible for both the prompt text and the tool schema's ticker enum --
+    # confirmed live, an "auto" candidate call returned 40 candidates of
+    # which 0 were Indian. Same predicate as
+    # app.companies.resolution.resolve_companies' fan-out branch.
+    _seed(db_session, [
+        ("REAL.NS", "Real Auto Ltd.", "auto", "NIFTY50", "desc"),
+        ("RESTRICTED.NS", "Restricted Auto Ltd.", "auto", "NIFTY50", "desc"),
+        ("SME.NS", "SME Auto Ltd.", "auto", "OTHER", "desc"),
+        ("SUSPENDED.NS", "Suspended Auto Ltd.", "auto", "OTHER", "desc"),
+        ("GLOBAL", "Global Auto Inc.", "auto", "OTHER", "desc"),
+    ])
+    db_session.query(Company).filter_by(ticker="RESTRICTED.NS").one().tradeability = "RESTRICTED"
+    db_session.query(Company).filter_by(ticker="SME.NS").one().tradeability = "SME"
+    db_session.query(Company).filter_by(ticker="SUSPENDED.NS").one().tradeability = "SUSPENDED"
+    db_session.query(Company).filter_by(ticker="GLOBAL").one().market = "GLOBAL"
+    db_session.commit()
+
+    result = candidate_companies(db_session, ["auto"])
+
+    assert [c.ticker for c in result] == ["REAL.NS"]
 
 
 def test_excludes_demo_companies(db_session):
