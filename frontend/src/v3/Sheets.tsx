@@ -19,6 +19,8 @@ import {
   isThinTrading,
   moveColor,
 } from './format';
+import Fundamentals from '../components/Fundamentals';
+import type { Fundamentals as FundamentalsData } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
 
@@ -26,7 +28,10 @@ export interface InfoSheetData {
   name: string;
   ticker: string;
   sector: string;
-  businessDesc: string | null;
+  // BSE-sourced classification + ratios, replacing the old LLM-invented
+  // business_desc paragraph. Null when this company has no official BSE
+  // classification -- renders no "What they do" section at all.
+  fundamentals?: FundamentalsData | null;
   logoUrl: string | null;
 }
 
@@ -48,8 +53,14 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
           </div>
         </div>
       </div>
-      <p className="seclab">What they do</p>
-      <p className="desc">{info.businessDesc ?? 'No business description available yet.'}</p>
+      {/* No fallback text: an unclassified company renders no section here
+          at all -- Fundamentals itself returns null when data is null. */}
+      {info.fundamentals && (
+        <>
+          <p className="seclab">What they do</p>
+          <Fundamentals data={info.fundamentals} />
+        </>
+      )}
       <p className="disc">Glance view. Tap the row for the full impact breakdown.</p>
     </>
   );
@@ -219,8 +230,15 @@ export function DeepDiveSheetContent({
           ))}
         </>
       )}
-      <p className="seclab">What they do</p>
-      <p className="desc">{data.business_desc ?? 'No business description available yet.'}</p>
+      {/* No fallback text: business_desc was LLM-invented and the backend
+          now always sends null. An unclassified company renders nothing
+          here -- Fundamentals itself returns null. */}
+      {data.fundamentals && (
+        <>
+          <p className="seclab">What they do</p>
+          <Fundamentals data={data.fundamentals} />
+        </>
+      )}
       {(data.why !== null || data.rationale !== null) && (
         <>
           <p className="seclab">

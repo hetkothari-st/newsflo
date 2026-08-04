@@ -16,7 +16,18 @@ const RATIO_LABELS: Array<[RatioKey, string]> = [
 // ratios it actually published, each traceable to a source and an as-of
 // date. Replaces the LLM-invented business_desc paragraph (see
 // docs/superpowers/specs/2026-08-04-sourced-company-fundamentals-design.md).
-// Shared by InsightCard and RippleSection so the two panels cannot drift.
+// Shared across three call sites in two different design systems --
+// InsightCard/BusinessPopup (the Tailwind editorial tree) AND v3/Sheets.tsx
+// (its own `.nf3`-scoped stylesheet, no Tailwind classes anywhere else in
+// that tree) -- so this deliberately never forces a font-family utility:
+// classification/ratio/date text inherits whichever ambient body font its
+// host already sets (Newsreader serif in InsightCard, system sans in
+// BusinessPopup and v3). `border-hairline`/`text-ink`/`text-muted` are safe
+// everywhere -- both trees' CSS variables for page/ink/muted/hairline
+// resolve to near-identical dark-theme colors (compared directly:
+// index.css's --color-page/ink/muted/hairline vs v3.css's --bg/ink/ink2/
+// border), and v3 already uses this exact "hairline rule above a trailing
+// note" pattern for its own `.disc` block.
 export default function Fundamentals({ data }: { data: FundamentalsData | null | undefined }) {
   if (!data) return null; // no invented filler -- ~645 companies have no classification
 
@@ -36,10 +47,12 @@ export default function Fundamentals({ data }: { data: FundamentalsData | null |
 
   return (
     <div data-testid="fundamentals" className="mt-2 border-t border-hairline pt-2">
-      {path.length > 0 && (
-        <p className="font-editorial text-xs italic text-muted">{path.join(' › ')}</p>
-      )}
+      {path.length > 0 && <p className="text-xs text-muted">{path.join(' › ')}</p>}
       {shown.length > 0 && (
+        // Numeric ratios still opt into a monospace treatment -- the one
+        // typographic idiom InsightCard (font-data), BusinessPopup
+        // (font-data), and v3 (--mono, e.g. .tag/.tkr/.tile .v) already
+        // share for tabular/data values.
         <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
           {shown.map(({ key, label, value }) => (
             <div key={key} className="flex items-baseline gap-1 font-data text-[11px]">
@@ -53,7 +66,7 @@ export default function Fundamentals({ data }: { data: FundamentalsData | null |
           price-derived and this data refreshes monthly (spec 5.1) -- it is
           the only thing that keeps a stale ratio honest. */}
       {as_of && (
-        <p className="mt-1 font-data text-[10px] uppercase tracking-widest text-muted">
+        <p className="mt-1 text-[11px] text-muted">
           {source ?? 'source unknown'} · as of {as_of}
         </p>
       )}

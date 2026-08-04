@@ -53,7 +53,20 @@ const ALERT_DETAIL = {
           cap_tier: 'LARGE',
           liquidity_tier: 'HIGH',
           delivery_pct: 68,
-          business_desc: 'Explores and produces crude oil.',
+          // business_desc was LLM-invented and the backend now always sends
+          // null; fundamentals (BSE-sourced) replaces it.
+          business_desc: null,
+          fundamentals: {
+            classification: {
+              sector: 'Energy',
+              industry: 'Oil, Gas & Consumable Fuels',
+              group: 'Exploration',
+              sub_group: 'Oil Exploration & Production',
+            },
+            ratios: { pe: 9.5 },
+            source: 'BSE',
+            as_of: '2026-08-04',
+          },
           direction: 'bearish',
           excess_move_pct: -2.4,
           intensity: {
@@ -75,7 +88,10 @@ const ALERT_DETAIL = {
           cap_tier: 'MICRO',
           liquidity_tier: 'LOW',
           delivery_pct: 38,
-          business_desc: 'A standalone refiner.',
+          // No official BSE classification for this fixture -- exercises the
+          // render-nothing path (see 'shows no "What they do" section...' below).
+          business_desc: null,
+          fundamentals: null,
           direction: 'bullish',
           excess_move_pct: 4.7,
           intensity: { score: 83, band: 'High', components: [] },
@@ -95,7 +111,20 @@ const DEEP_DIVE = {
   name: 'Chennai Petroleum',
   sector: 'oil_gas',
   cap_tier: 'MICRO',
-  business_desc: 'A standalone refiner turning crude into fuels.',
+  // business_desc was LLM-invented and the backend now always sends null;
+  // fundamentals (BSE-sourced) replaces it.
+  business_desc: null,
+  fundamentals: {
+    classification: {
+      sector: 'Energy',
+      industry: 'Oil, Gas & Consumable Fuels',
+      group: 'Petroleum Products',
+      sub_group: 'Refineries & Marketing',
+    },
+    ratios: { pe: 6.4 },
+    source: 'BSE',
+    as_of: '2026-08-04',
+  },
   logo_url: null,
   market_cap: 400,
   pe: 6.4,
@@ -241,6 +270,11 @@ describe('Shell card feed', () => {
     fireEvent.click(await screen.findByTestId('srow-CHENNPETRO.NS'));
     const sheet = within(screen.getByTestId('sheet'));
     expect(await sheet.findByText('High intensity')).toBeInTheDocument();
+    // Sourced classification/ratio/date replace the old business_desc
+    // paragraph in the deep-dive's own "What they do" section too.
+    expect(sheet.getByText(/Refineries & Marketing/)).toBeInTheDocument();
+    expect(sheet.getByText('6.40')).toBeInTheDocument();
+    expect(sheet.getByText(/2026-08-04/)).toBeInTheDocument();
     expect(sheet.getByText(/how this score is built/i)).toBeInTheDocument();
     expect(sheet.getByText('Materiality')).toBeInTheDocument();
     expect(sheet.getByText(/only 38% of volume went to delivery/i)).toBeInTheDocument();
@@ -261,10 +295,25 @@ describe('Shell card feed', () => {
     fireEvent.click(await screen.findByTestId('front-7'));
     fireEvent.click(await screen.findByLabelText('About ONGC.NS'));
     expect(await screen.findByText('What they do')).toBeInTheDocument();
-    expect(screen.getByText('Explores and produces crude oil.')).toBeInTheDocument();
+    // The sourced classification and ratio replace the old business_desc
+    // paragraph -- see docs/superpowers/specs/2026-08-04-sourced-company-
+    // fundamentals-design.md. The date is load-bearing (spec 5.1), not
+    // decoration: PE is price-derived and this data refreshes monthly.
+    expect(screen.getByText(/Oil Exploration & Production/)).toBeInTheDocument();
+    expect(screen.getByText('9.50')).toBeInTheDocument();
+    expect(screen.getByText(/2026-08-04/)).toBeInTheDocument();
     expect(screen.getByText(/glance view/i)).toBeInTheDocument();
     // Deep-dive-only content must NOT be present -- (i) = glance and stay.
     expect(screen.queryByText(/how this score is built/i)).not.toBeInTheDocument();
+  });
+
+  it('shows no "What they do" section at all for a company with no BSE classification', async () => {
+    renderShell();
+    fireEvent.click(await screen.findByTestId('front-7'));
+    fireEvent.click(await screen.findByLabelText('About CHENNPETRO.NS'));
+    expect(await screen.findByText(/glance view/i)).toBeInTheDocument();
+    expect(screen.queryByText('What they do')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fundamentals')).not.toBeInTheDocument();
   });
 
   it('filters the feed by cap tier from the top bar', async () => {
