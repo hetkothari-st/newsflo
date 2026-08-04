@@ -58,6 +58,30 @@ class Company(Base):
         String, nullable=False, default="NORMAL", server_default="NORMAL",
     )  # NORMAL | RESTRICTED | SME | SUSPENDED
 
+    # BSE-published fundamentals, from the same ComHeadernew payload the
+    # classification comes from -- already fetched monthly, previously
+    # discarded. NULL means BSE did not publish it, never zero: a displayed
+    # 0.00 ROE reads as a real and alarming number. ConPB and ConROE come back
+    # None even for Reliance, so consolidated coverage is genuinely patchy.
+    eps = Column(Float, nullable=True)
+    ceps = Column(Float, nullable=True)
+    pe = Column(Float, nullable=True)
+    pb = Column(Float, nullable=True)
+    opm = Column(Float, nullable=True)
+    npm = Column(Float, nullable=True)
+    roe = Column(Float, nullable=True)
+    con_eps = Column(Float, nullable=True)
+    con_ceps = Column(Float, nullable=True)
+    con_pe = Column(Float, nullable=True)
+    con_pb = Column(Float, nullable=True)
+    con_opm = Column(Float, nullable=True)
+    con_npm = Column(Float, nullable=True)
+    con_roe = Column(Float, nullable=True)
+    financials_source = Column(String, nullable=True)   # 'BSE'
+    # PE and PB are price-derived and this payload refreshes monthly, so this
+    # date is what keeps them honest -- see spec 5.1.
+    financials_as_of = Column(Date, nullable=True)
+
     listings = relationship("Listing", back_populates="company")
     aliases = relationship("CompanyAlias", back_populates="company")
 
