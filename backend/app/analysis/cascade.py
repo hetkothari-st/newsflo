@@ -25,7 +25,7 @@ behavior described in the design spec.
 import json
 import logging
 
-from openai import RateLimitError
+from openai import BadRequestError, RateLimitError
 
 from app.reasoning.playbooks import PLAYBOOKS_TEXT
 from app.reasoning.rulebook import (
@@ -490,6 +490,53 @@ def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str
     }
 
 
+def _is_tool_use_failed(exc: Exception) -> bool:
+    """True only for Groq's 400 `code: "tool_use_failed"` -- the model
+    emitted a malformed tool-call blob (confirmed live: a llama-style
+    `<function=record_sector_companies>{...}` string with unbalanced
+    brackets) that Groq's parser could not turn into a tool call at all.
+
+    Matches structurally on BadRequestError.code, never on the exception's
+    message text: that message embeds the model's entire failed generation
+    verbatim, which is long and unstable content to substring-match against.
+    A BadRequestError with any OTHER code (e.g. a genuinely malformed schema
+    on our side) must NOT match here -- see _call_with_model_fallback's own
+    docstring for why that distinction matters."""
+    return isinstance(exc, BadRequestError) and exc.code == "tool_use_failed"
+
+
+def _call_with_model_fallback(call_fn, model: str, call_name: str):
+    """Try `model`; retry once on FALLBACK_MODEL, with the identical prompt,
+    on either a RateLimitError (quota/rate-limited) or a tool_use_failed 400
+    (the model's tool-call structure was unparseable -- see FALLBACK_MODEL's
+    own docstring in claude_client.py for why the fallback model, from the
+    gpt-oss family, is specifically a better fit for this app's schemas than
+    another Llama model would be).
+
+    Any other exception -- and a second failure on FALLBACK_MODEL, of any
+    kind -- propagates untouched. This is deliberate: a malformed schema on
+    OUR side also raises a 400, and silently swallowing it here would let
+    the caller return an empty company list indistinguishable from "no
+    companies found", which is worse than a loud failure.
+    """
+    try:
+        return call_fn(model)
+    except RateLimitError:
+        logger.warning(
+            "%s: rate-limited on model=%s, retrying once on FALLBACK_MODEL=%s",
+            call_name, model, FALLBACK_MODEL,
+        )
+        return call_fn(FALLBACK_MODEL)
+    except BadRequestError as exc:
+        if not _is_tool_use_failed(exc):
+            raise
+        logger.warning(
+            "%s: tool_use_failed on model=%s, retrying once on FALLBACK_MODEL=%s",
+            call_name, model, FALLBACK_MODEL,
+        )
+        return call_fn(FALLBACK_MODEL)
+
+
 def _identify_companies(
     client, facts: str, sectors: list[SectorFinding], impact_level: str,
     parent_pool: list[CompanyMention] | None, session=None,
@@ -661,10 +708,7 @@ def _identify_companies(
         )
 
     try:
-        try:
-            response = _call(MODEL)
-        except RateLimitError:
-            response = _call(FALLBACK_MODEL)
+        response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies")
     except Exception as exc:
         if parent_pool is not None:
             raise
@@ -675,15 +719,16 @@ def _identify_companies(
         # large", losing the entire direct-company stage). Retry once with
         # the slim cascade-style instructions (no rulebook/playbooks): a
         # less-informed answer beats losing every direct company -- the
-        # alert simply gets no rule citations that run.
+        # alert simply gets no rule citations that run. The retry itself
+        # still gets the RateLimitError/tool_use_failed -> FALLBACK_MODEL
+        # ladder: a real production failure was full+primary 413'd, then
+        # slim+primary 400'd with tool_use_failed, and only slim+FALLBACK_MODEL
+        # actually succeeded.
         logger.warning(
             "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
         )
         messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
-        try:
-            response = _call(MODEL)
-        except RateLimitError:
-            response = _call(FALLBACK_MODEL)
+        response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies (slim retry)")
 
     message = response.choices[0].message
     tool_calls = message.tool_calls or []

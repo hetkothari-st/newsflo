@@ -18,6 +18,30 @@ class FakeToolCall:
         self.function = SimpleNamespace(name=name, arguments=json.dumps(arguments_dict))
 
 
+def _tool_use_failed_error():
+    """Builds a real openai.BadRequestError shaped like Groq's actual 400
+    when the model emits a malformed tool-call blob -- `code` set to
+    "tool_use_failed", same as what `_make_status_error` constructs from a
+    real HTTP response (see openai._client.OpenAI._make_status_error: body
+    passed to the exception is already `body["error"]`, so `code` lives at
+    the top level of the dict passed here, not nested under "error")."""
+    import httpx
+    from openai import BadRequestError
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(status_code=400, request=request)
+    return BadRequestError(
+        "Failed to call a function. Please adjust your prompt.",
+        response=response,
+        body={
+            "code": "tool_use_failed",
+            "message": "Failed to call a function. Please adjust your prompt. "
+                        "See 'failed_generation' for more details.",
+            "failed_generation": "<function=record_sector_companies>{unbalanced...",
+        },
+    )
+
+
 class ScriptedClient:
     """Returns a canned tool-call response keyed by the requested tool name
     (kwargs["tool_choice"]["function"]["name"]) -- order-independent, so a
@@ -303,6 +327,173 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
         {"name": "record_sector_companies", "model": MODEL},
         {"name": "record_sector_companies", "model": FALLBACK_MODEL},
     ]
+
+
+def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
+    # Live production failure: the slim retry stayed on the primary model
+    # and Groq returned 400 tool_use_failed (a malformed llama-style
+    # function-call blob it couldn't parse) -- distinct from a rate limit,
+    # this must ALSO trigger the FALLBACK_MODEL retry rather than losing
+    # the whole stage.
+    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+
+    class ToolUseFailedOnceThenScripted(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                if kwargs["model"] == MODEL:
+                    self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
+                    raise _tool_use_failed_error()
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    company_fields = dict(_FULL_COMPANY_FIELDS, name="HDFC Bank", ticker="HDFCBANK.NS")
+    client = ToolUseFailedOnceThenScripted({
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [company_fields]},
+        ]},
+    })
+
+    result = _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+
+    assert len(result) == 1
+    assert result[0].ticker == "HDFCBANK.NS"
+    assert client.calls == [
+        {"name": "record_sector_companies", "model": MODEL},
+        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+    ]
+
+
+def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_use_failed():
+    # Same tool_use_failed -> FALLBACK_MODEL ladder must apply to a cascade
+    # stage (parent_pool set), not just the direct stage.
+    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+
+    class ToolUseFailedOnceThenScripted(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                if kwargs["model"] == MODEL:
+                    self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
+                    raise _tool_use_failed_error()
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    cascade_fields = dict(_FULL_COMPANY_FIELDS, name="IRCTC", ticker="IRCTC.NS", parent_ticker="HDFCBANK.NS")
+    client = ToolUseFailedOnceThenScripted({
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "railways_transport", "companies": [cascade_fields]},
+        ]},
+    })
+
+    result = _identify_companies(
+        client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+
+    assert result[0].ticker == "IRCTC.NS"
+    assert client.calls == [
+        {"name": "record_sector_companies", "model": MODEL},
+        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+    ]
+
+
+def test_identify_companies_raises_when_both_models_fail_tool_use_failed():
+    # Must NOT silently degrade to an empty company list -- that would be
+    # indistinguishable from "genuinely no companies found". A failure on
+    # BOTH models is a real failure and must propagate.
+    class AlwaysToolUseFailedClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
+                raise _tool_use_failed_error()
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    from openai import BadRequestError
+
+    client = AlwaysToolUseFailedClient({})
+
+    with pytest.raises(BadRequestError):
+        _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+
+
+def test_identify_companies_cascade_stage_raises_when_both_models_fail_tool_use_failed():
+    class AlwaysToolUseFailedClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
+                raise _tool_use_failed_error()
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    from openai import BadRequestError
+
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = AlwaysToolUseFailedClient({})
+
+    with pytest.raises(BadRequestError):
+        _identify_companies(
+            client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+        )
+
+    # Cascade stage never gets the slim retry -- exactly two calls (primary
+    # then FALLBACK_MODEL), not four.
+    assert len(client.calls) == 2
+
+
+def test_identify_companies_does_not_retry_on_a_different_bad_request_error():
+    # A genuinely malformed schema on our side would also 400 -- must NOT be
+    # mistaken for tool_use_failed and must NOT trigger the FALLBACK_MODEL
+    # retry, so a real bug surfaces immediately instead of being masked.
+    import httpx
+    from openai import BadRequestError
+
+    class OtherBadRequestClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
+                request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+                response = httpx.Response(status_code=400, request=request)
+                raise BadRequestError(
+                    "bad schema", response=response,
+                    body={"code": "invalid_request_error", "message": "schema mismatch"},
+                )
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = OtherBadRequestClient({})
+
+    with pytest.raises(BadRequestError):
+        _identify_companies(
+            client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+        )
+
+    # Only ONE call -- no FALLBACK_MODEL retry for a non-tool_use_failed 400.
+    assert len(client.calls) == 1
 
 
 def test_identify_companies_direct_stage_retries_slim_on_oversize_rejection():
