@@ -22,7 +22,40 @@ from app.models import Company
 # Per sector. Large enough that a real answer is almost always present,
 # small enough that several sectors still fit one prompt alongside the
 # rationale instructions.
-MAX_CANDIDATES_PER_SECTOR = 40
+#
+# Raised 40 -> 60 for breadth: the model can only name companies that appear
+# here, so a genuine aerospace-component or forgings supplier sitting at rank
+# 45 of its sector was unreachable no matter how thorough the framing asked
+# the model to be. Ordering is still market cap (see module docstring) --
+# that decides which companies are VISIBLE, never which are SELECTED; the
+# size-ranked fan-out that actually picked companies by size is a separate,
+# deliberately constrained mechanism in cascade.py.
+MAX_CANDIDATES_PER_SECTOR = 60
+
+# Above this many candidates in one prompt, format_candidates drops
+# business_desc and emits ticker + name + sub_sector only. See its docstring
+# for the measured token budget this defends.
+LONG_LIST_THRESHOLD = 80
+
+# Ceiling on the WHOLE prompt's candidate list, across every sector in one
+# call. The direct-company stage bundles all primary sectors into a single
+# call, so the per-sector limit alone does not bound the prompt: broadened
+# sector discovery finding 6 primary sectors means 6 x 60 = 360 candidates,
+# which measures at ~15.6k tokens on the slim path even with business_desc
+# already dropped -- past llama-3.3-70b-versatile's 12k tokens/minute. A 413
+# there is not a degraded answer, it is ZERO direct companies for the article
+# (analyze_article catches the stage-3 failure and continues with an empty
+# list), which is far worse than a shorter list.
+#
+# Trimming the per-candidate line is done FIRST and does most of the work
+# (dropping business_desc cuts a 360-candidate block from 60.8k to 25.1k
+# chars). This is the residual backstop for the many-sector case only: at 1-3
+# sectors it never binds at all.
+MAX_CANDIDATES_PER_PROMPT = 200
+
+# Never starve a sector below this, even when many sectors share the prompt
+# budget -- a sector represented by 3 companies may as well not be there.
+MIN_CANDIDATES_PER_SECTOR = 20
 
 
 def candidate_companies(
@@ -33,7 +66,19 @@ def candidate_companies(
     tradeable-Indian rows excluded. Order is stable (market cap, then
     ticker) so the same inputs always produce the same prompt -- a prompt
     that reshuffles between runs makes a regression impossible to
-    attribute."""
+    attribute.
+
+    With enough sectors to threaten MAX_CANDIDATES_PER_PROMPT, the per-sector
+    limit is reduced so the shortfall is shared evenly rather than letting
+    the first sectors spend the whole budget and the last ones arrive empty.
+    An explicit `limit_per_sector` from the caller is honoured as-is -- the
+    caller has said what it wants.
+    """
+    if limit_per_sector == MAX_CANDIDATES_PER_SECTOR and len(sectors) > 1:
+        limit_per_sector = max(
+            MIN_CANDIDATES_PER_SECTOR,
+            min(limit_per_sector, MAX_CANDIDATES_PER_PROMPT // len(sectors)),
+        )
     seen: set[str] = set()
     result: list[Company] = []
     for sector in sectors:
@@ -61,10 +106,35 @@ def candidate_companies(
     return result
 
 
-def format_candidates(companies: list[Company]) -> str:
+def format_candidates(companies: list[Company], include_desc: bool | None = None) -> str:
     """One line per company for prompt injection. A missing sub_sector or
     business_desc is omitted rather than rendered as "None" -- a literal
-    "None" in the prompt reads as a real value to the model."""
+    "None" in the prompt reads as a real value to the model.
+
+    business_desc is the expensive part of the line (~100 chars against ~68
+    for ticker + name + sub_sector), and the direct-company stage puts EVERY
+    primary sector's candidates in one prompt -- so 6 sectors at the raised
+    60-per-sector limit is 360 lines, not 60. Measured (chars/2.76, the ratio
+    calibrated from the production 413 where a 45.2k-char request billed
+    16,358 tokens):
+
+        60 candidates,  desc kept    -> slim prompt ~7.6k tokens
+        360 candidates, desc kept    -> slim prompt ~26k tokens  (413s)
+        360 candidates, desc dropped -> slim prompt ~9.0k tokens
+
+    llama-3.3-70b-versatile allows 12,000 tokens/minute, and the direct stage
+    already falls back to the slim prompt, so the slim path is the one that
+    has to fit. Above LONG_LIST_THRESHOLD the description goes rather than
+    the company: a candidate the model never sees cannot be selected at all,
+    whereas one listed as ticker + name + sub_sector is still selectable --
+    the model knows what these companies do, the list is there to tell it
+    which ones exist and resolve.
+
+    include_desc forces the choice either way (tests, and any caller that has
+    already sized its own prompt); None auto-decides on list length.
+    """
+    if include_desc is None:
+        include_desc = len(companies) <= LONG_LIST_THRESHOLD
     lines = []
     for company in companies:
         parts = [f"- {company.ticker} ({company.name}"]
@@ -72,7 +142,7 @@ def format_candidates(companies: list[Company]) -> str:
             parts.append(f", {company.sub_sector}")
         parts.append(")")
         line = "".join(parts)
-        if company.business_desc:
+        if include_desc and company.business_desc:
             line += f": {company.business_desc}"
         lines.append(line)
     return "\n".join(lines)

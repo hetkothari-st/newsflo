@@ -1,5 +1,6 @@
 from app.companies.candidates import (
-    candidate_companies, candidate_tickers, format_candidates,
+    LONG_LIST_THRESHOLD, MAX_CANDIDATES_PER_PROMPT, MAX_CANDIDATES_PER_SECTOR,
+    MIN_CANDIDATES_PER_SECTOR, candidate_companies, candidate_tickers, format_candidates,
 )
 from app.models import Company
 
@@ -131,3 +132,109 @@ def test_candidate_tickers_returns_plain_strings(db_session):
 
 def test_empty_sector_list_returns_nothing(db_session):
     assert candidate_companies(db_session, []) == []
+
+
+# -- breadth: more genuine material to select from ------------------------
+
+def test_per_sector_limit_is_sixty(db_session):
+    # Raised 40 -> 60. The model can only name companies that appear in this
+    # list, so a genuine supplier ranked 45th in its sector was unreachable
+    # however thorough the prompt asked the model to be.
+    assert MAX_CANDIDATES_PER_SECTOR == 60
+
+
+def test_returns_up_to_sixty_companies_for_one_sector(db_session):
+    _seed(db_session, [
+        (f"C{i:03d}.NS", f"Company {i}", "infra", "OTHER", "desc") for i in range(70)
+    ])
+
+    assert len(candidate_companies(db_session, ["infra"])) == 60
+
+
+# -- prompt-size guards ---------------------------------------------------
+
+def test_a_short_list_keeps_business_desc(db_session):
+    _seed(db_session, [("HPCL.NS", "Hindustan Petroleum", "oil_gas", "NIFTY50", "Refines crude oil.")])
+
+    text = format_candidates(candidate_companies(db_session, ["oil_gas"]))
+
+    assert "Refines crude oil." in text
+
+
+def test_a_long_list_drops_business_desc_but_keeps_ticker_name_and_sub_sector(db_session):
+    # Trimming the LINE, never the company: a candidate the model never sees
+    # cannot be selected at all, while one listed as ticker + name +
+    # sub_sector is still fully selectable and still resolves.
+    _seed(db_session, [
+        (f"C{i:03d}.NS", f"Company {i}", "infra", "OTHER", "A long business description here.")
+        for i in range(LONG_LIST_THRESHOLD + 1)
+    ])
+    companies = candidate_companies(db_session, ["infra"], limit_per_sector=LONG_LIST_THRESHOLD + 1)
+    for company in companies:
+        company.sub_sector = "roads"
+
+    text = format_candidates(companies)
+
+    assert "A long business description here." not in text
+    assert "C000.NS" in text
+    assert "Company 0" in text
+    assert "roads" in text
+
+
+def test_include_desc_overrides_the_length_heuristic_both_ways(db_session):
+    _seed(db_session, [
+        (f"C{i:03d}.NS", f"Company {i}", "infra", "OTHER", "A description.")
+        for i in range(LONG_LIST_THRESHOLD + 1)
+    ])
+    companies = candidate_companies(db_session, ["infra"], limit_per_sector=LONG_LIST_THRESHOLD + 1)
+
+    assert "A description." in format_candidates(companies, include_desc=True)
+    assert "A description." not in format_candidates(companies[:1], include_desc=False)
+
+
+def test_many_sectors_share_one_prompt_budget_instead_of_overflowing_it(db_session):
+    # The direct-company stage bundles EVERY primary sector into one call, so
+    # the per-sector limit alone does not bound the prompt. 6 x 60 = 360
+    # candidates measures past llama-3.3-70b-versatile's 12k tokens/minute
+    # even with business_desc already dropped, and a 413 there costs the
+    # article every direct company, not just a few.
+    sectors = ["infra", "oil_gas", "banking", "pharma", "fmcg", "it"]
+    for sector in sectors:
+        _seed(db_session, [
+            (f"{sector.upper()}{i:03d}.NS", f"{sector} co {i}", sector, "OTHER", "desc")
+            for i in range(MAX_CANDIDATES_PER_SECTOR)
+        ])
+
+    result = candidate_companies(db_session, sectors)
+
+    assert len(result) <= MAX_CANDIDATES_PER_PROMPT
+    # Evenly shared, not first-come-first-served: every sector is represented.
+    per_sector = {s: sum(1 for c in result if c.sector == s) for s in sectors}
+    assert min(per_sector.values()) >= MIN_CANDIDATES_PER_SECTOR
+    assert max(per_sector.values()) - min(per_sector.values()) <= 1
+
+
+def test_the_prompt_budget_does_not_bind_at_a_small_sector_count(db_session):
+    for sector in ["infra", "oil_gas"]:
+        _seed(db_session, [
+            (f"{sector.upper()}{i:03d}.NS", f"{sector} co {i}", sector, "OTHER", "desc")
+            for i in range(MAX_CANDIDATES_PER_SECTOR)
+        ])
+
+    result = candidate_companies(db_session, ["infra", "oil_gas"])
+
+    assert len(result) == 2 * MAX_CANDIDATES_PER_SECTOR
+
+
+def test_an_explicit_limit_from_the_caller_is_honoured_unchanged(db_session):
+    for sector in ["infra", "oil_gas", "banking", "pharma", "fmcg", "it"]:
+        _seed(db_session, [
+            (f"{sector.upper()}{i:03d}.NS", f"{sector} co {i}", sector, "OTHER", "desc")
+            for i in range(5)
+        ])
+
+    result = candidate_companies(
+        db_session, ["infra", "oil_gas", "banking", "pharma", "fmcg", "it"], limit_per_sector=5,
+    )
+
+    assert len(result) == 30

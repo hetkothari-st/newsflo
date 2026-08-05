@@ -184,9 +184,24 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "stumble -- usually affects ONLY that company's own sector, and "
             "often not even that: it is NOT evidence about its industry, its "
             "theme, or companies that merely share a buzzword with it.\n\n"
-            "THEN identify every financial, business, or economic "
-            "sector DIRECTLY affected by this news -- the sectors the news is "
-            "actually about, not knock-on effects. For each, give its direction "
+            "THEN identify EVERY financial, business, or economic sector this "
+            "news directly reaches -- not just the single most obvious one. A "
+            "real event almost always lands on several sectors at once: the "
+            "one the story is literally about, plus every other sector whose "
+            "own economics the SAME event touches directly. Work through the "
+            "transmission channels deliberately, one at a time, before you "
+            "stop: who manufactures the thing involved, who supplies its "
+            "components and raw materials, who buys or operates it, who "
+            "maintains and services it, who builds or runs the infrastructure "
+            "it depends on, who finances or insures it, who regulates it, and "
+            "who competes with it. Include a sector whenever you can state a "
+            "specific channel like that for it. Stopping at the headline "
+            "sector while three or four others have a genuine, statable "
+            "channel is a failure of thoroughness, not caution -- a later "
+            "step re-reads every company you surface and removes the ones "
+            "that do not hold up, so a sector with a real channel is not "
+            "risky to name; a sector with no channel is.\n\n"
+            "For each, give its direction "
             "(bullish/bearish) and a one-line mechanism explaining WHY that "
             "sector is affected. Zero sectors is a correct answer when nothing "
             "in the facts genuinely supports one -- this is common and "
@@ -197,7 +212,12 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "insurance/supply-chain effect). Do not manufacture a mechanism "
             "just to have something to report -- 'this could affect "
             "sentiment', 'this relates to the broader economy', or 'this is "
-            "part of the AI/EV/green-energy theme' is not a real mechanism."
+            "part of the AI/EV/green-energy theme' is not a real mechanism. "
+            "The instruction above to be thorough does NOT weaken this: "
+            "breadth means not missing a sector that has a real channel, "
+            "never inventing a channel so that a sector can be listed. A "
+            "story with no economic mechanism at all still returns zero "
+            "sectors, however thorough you are being."
         )
         framing += (
             "\n\nConsult the KNOWN TRANSMISSION CHAINS reference below. When a "
@@ -417,6 +437,42 @@ CASCADE_COMPANY_RATIONALE_INSTRUCTIONS = (
     "\"historical: \")."
 )
 
+# Shared by both company stages (direct and cascade). The breadth this asks
+# for is safe ONLY because of the two rails that bracket it: the model can
+# select nothing outside the CANDIDATE COMPANIES block (real DB rows,
+# enum-constrained, see app.companies.candidates), and everything it does
+# select is re-read by app.analysis.verification, which is the pipeline's
+# precision stage. The failure this replaces was the opposite of noise: a
+# 737 MAX certification story returning three companies because the framing
+# told the model that naming "1-3 real companies per sector" was the normal
+# outcome. Breadth here must always come from selecting more REAL candidates,
+# never from ranking a sector's constituents by size -- that is what put a
+# food-delivery company on a crude-oil story, and it stays disabled.
+_BREADTH_INSTRUCTION = (
+    "BE THOROUGH, NOT REPRESENTATIVE. Work down the candidate list company "
+    "by company and name EVERY one whose own business the mechanism "
+    "genuinely reaches -- not a sample of the most obvious ones. Five, ten, "
+    "or more companies is the correct answer whenever the candidates support "
+    "it. Stopping at two or three while a sixth and seventh genuinely "
+    "qualify is a failure, not restraint: the reader is asking which "
+    "companies this news touches, and a short list of only the household "
+    "names answers a different question. Look specifically past the largest "
+    "names to the component suppliers, the parts and materials makers, the "
+    "operators and service providers, and the smaller specialists in the "
+    "list -- those are the companies most often missed.\n\n"
+    "Selecting more from the candidate list is safe by construction: every "
+    "entry is a real, tradeable company, you cannot record one that is not "
+    "listed, and a later step re-reads each company you name and removes any "
+    "whose mechanism does not hold up. The error you must avoid is skipping "
+    "a company with a genuine channel. What is still forbidden is inventing: "
+    "do not name a company whose connection you cannot state concretely, and "
+    "do not stretch a mechanism to cover one more name. A company you "
+    "include needs a specific channel -- a cost line, a revenue line, a "
+    "customer/supplier/competitor relationship, or a regulatory exposure -- "
+    "stated for THAT company. \"It is a major player in this sector\" is not "
+    "a channel and never qualifies a company, however thorough you are being."
+)
+
 _COMPANY_ITEM_PROPERTIES = {
     "name": {"type": "string"},
     "ticker": {"type": ["string", "null"]},
@@ -565,6 +621,7 @@ def _identify_companies(
             "note about THIS event? If the link is thematic, speculative, or "
             "merely being in the same industry/buzzword universe, exclude it. "
             "Zero companies for a sector is correct when none genuinely fit."
+            f"\n\n{_BREADTH_INSTRUCTION}"
         )
         parent_context = ""
         parent_tickers = None
@@ -601,12 +658,9 @@ def _identify_companies(
             "the same sector reaching an unrelated company merely because "
             "it's also big and well-known in that sector is NOT -- if you "
             "cannot state the specific mechanism for a company beyond "
-            "\"it's a major player in this sector,\" leave it out. Naming "
-            "1-3 real companies per sector with a genuine mechanism each is "
-            "the normal, expected outcome for a sector whose own mechanism is "
-            "genuinely broad (a rate/policy/commodity/currency move reaching "
-            "costs or spending economy-wide) -- reach for that before "
-            "concluding there is nothing to name. But do not force it: if "
+            "\"it's a major player in this sector,\" leave it out.\n\n"
+            f"{_BREADTH_INSTRUCTION}\n\n"
+            "But do not force it: if "
             "the sector's mechanism only plausibly reaches through vague "
             "language like \"changing consumer spending\" or \"increased "
             "engagement\" rather than something concrete (a specific cost, "

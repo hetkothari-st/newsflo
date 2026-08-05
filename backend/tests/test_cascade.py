@@ -210,6 +210,42 @@ def test_cascade_sector_prompt_has_no_rulebook_digest():
     assert "KNOWN TRANSMISSION CHAINS" not in prompt
 
 
+def test_primary_sector_framing_asks_for_every_sector_with_a_real_channel():
+    # The Boeing 737 MAX 7 regression: _identify_sectors returned only
+    # `defense`, so airlines/airports, aerospace components, forgings and
+    # infra had no candidate list to be selected from at all. Breadth has to
+    # start here -- no later stage can recover a sector never named.
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+    _identify_sectors(client, "some facts", None)
+    prompt = client.last_messages[-1]["content"]
+
+    assert "EVERY financial, business, or economic sector" in prompt
+    assert "not just the single most obvious one" in prompt
+    # Names the transmission channels to walk, rather than leaving "directly
+    # affected" to be read as "the sector the headline is about".
+    for channel in ["supplies its components", "who buys or operates it",
+                    "maintains and services it", "who regulates it"]:
+        assert channel in prompt
+    assert "failure of thoroughness" in prompt
+
+
+def test_primary_sector_framing_keeps_the_zero_sector_guard_intact():
+    # The hard guard that a story with no economic mechanism correctly
+    # returns nothing. Broadening the framing above must not erode it: an
+    # accident/crime/human-interest story still yields zero sectors.
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+    _identify_sectors(client, "some facts", None)
+    prompt = client.last_messages[-1]["content"]
+
+    assert "Zero sectors is a correct answer" in prompt
+    assert "accident, disaster, crime, or human-interest story has zero real sectors" in prompt
+    assert "Do not manufacture a mechanism" in prompt
+    # And the breadth instruction is explicitly scoped so it cannot be read
+    # as licence to invent a channel.
+    assert "does NOT weaken this" in prompt
+    assert "never inventing a channel" in prompt
+
+
 def test_company_rationale_instructions_forbid_verbatim_echo():
     from app.analysis.cascade import COMPANY_RATIONALE_INSTRUCTIONS
     assert "verbatim" in COMPANY_RATIONALE_INSTRUCTIONS.lower()
@@ -267,6 +303,72 @@ def test_identify_companies_direct_stage_sets_impact_level_and_sector():
     assert company.reasons == _FULL_COMPANY_FIELDS["reasons"]
     assert company.evidence_refs == _FULL_COMPANY_FIELDS["evidence_refs"]
     assert company.alternative_hypothesis == _FULL_COMPANY_FIELDS["alternative_hypothesis"]
+
+
+def test_company_framings_ask_for_breadth_and_no_longer_cap_at_three():
+    # The correction that overshot: the cascade framing used to tell the
+    # model that naming "1-3 real companies per sector" was the normal,
+    # expected outcome, which capped a 737 MAX story at three companies
+    # total. Both stages now carry the same breadth instruction.
+    from app.analysis.cascade import _BREADTH_INSTRUCTION
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+    _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+    direct_prompt = client.last_messages[1]["content"]
+
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+    _identify_companies(
+        client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+    cascade_prompt = client.last_messages[1]["content"]
+
+    for prompt in (direct_prompt, cascade_prompt):
+        assert _BREADTH_INSTRUCTION in prompt
+        assert "1-3 real companies per sector" not in prompt
+    assert "Five, ten, " in _BREADTH_INSTRUCTION
+    assert "component suppliers" in _BREADTH_INSTRUCTION
+
+
+def test_breadth_instruction_still_forbids_inventing_and_size_reasoning():
+    # Breadth must come from selecting more REAL candidates, never from
+    # size-ranked fan-out -- that is what put a food-delivery company on a
+    # crude-oil story.
+    from app.analysis.cascade import _BREADTH_INSTRUCTION
+
+    assert "cannot record one that is not" in _BREADTH_INSTRUCTION
+    assert "still forbidden is inventing" in _BREADTH_INSTRUCTION
+    assert "major player in this sector" in _BREADTH_INSTRUCTION
+
+
+def test_identify_companies_returns_many_companies_for_one_sector(db_session):
+    # The product requirement, asserted end-to-end on the stage: nothing in
+    # parsing, grounding, or the post-filter caps how many companies come
+    # back from a single sector.
+    tickers = [f"AERO{i:02d}.NS" for i in range(12)]
+    for ticker in tickers:
+        db_session.add(Company(
+            ticker=ticker, name=f"Aero Supplier {ticker}", sector="defense", index_tier="OTHER",
+        ))
+    db_session.commit()
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": [{
+        "sector": "defense",
+        "companies": [_full_company(f"Aero Supplier {t}", t) for t in tickers],
+    }]}})
+
+    mentions = _identify_companies(
+        client, facts="facts",
+        sectors=[SectorFinding(sector="defense", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    assert [m.ticker for m in mentions] == tickers
+    assert all(m.impact_level == "direct" for m in mentions)
 
 
 def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
