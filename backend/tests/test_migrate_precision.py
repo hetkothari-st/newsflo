@@ -19,7 +19,9 @@ from app.models import (
     CarOutcome,
     Company,
     EmailNotification,
+    MarketMove,
     User,
+    utcnow,
 )
 from app.pipeline import CONFIDENCE_FLOOR, LEVEL_CONFIDENCE_MULTIPLIER
 from migrate_precision import run_migration
@@ -70,6 +72,97 @@ def test_below_floor_deletion_leaves_no_dangling_dependents(db_session):
     assert db_session.query(CarOutcome).filter_by(alert_company_id=below_floor_id).count() == 0
     assert db_session.query(EmailNotification).filter_by(alert_company_id=below_floor_id).count() == 0
     assert db_session.query(AlertCompanyTranslation).filter_by(alert_company_id=below_floor_id).count() == 0
+
+
+def test_below_floor_deletion_takes_its_market_move_but_spares_a_surviving_alert_companys(db_session):
+    """Regression test for the root-cause bug this migration shares with
+    reanalyze_cascade.py: MarketMove references alert_id/company_id
+    directly, not alert_company_id, so it is NOT in ALERT_COMPANY_DEPENDENTS
+    and the dependents loop never touches it. Deleting ~270 sub-floor rows
+    in production without this fix would orphan their MarketMove rows and
+    reproduce the exact StopIteration crash
+    app.market.alert_measurement.compute_alert_measurement hit in
+    production. Two AlertCompany rows on the SAME alert -- one below the
+    floor (deleted), one above it (kept) -- each with their own MarketMove.
+    The below-floor row's MarketMove must go with it; the kept row's
+    MarketMove must survive untouched. That second half is the one that
+    catches an over-broad delete (e.g. filtering only on alert_id and
+    sweeping up a surviving row's own measurement).
+    """
+    deleted_co = Company(ticker="HPCL.NS", name="HPCL", sector="oil_gas", index_tier="NIFTY50")
+    kept_co = Company(ticker="BPCL.NS", name="BPCL", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add_all([deleted_co, kept_co])
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/mm-orphan", title="t")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="test")
+    db_session.add(alert)
+    db_session.commit()
+
+    below_floor = AlertCompany(
+        alert_id=alert.id, company_id=deleted_co.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+        confidence_score=CONFIDENCE_FLOOR - 1,
+    )
+    kept = AlertCompany(
+        alert_id=alert.id, company_id=kept_co.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+        confidence_score=CONFIDENCE_FLOOR + 30,
+    )
+    db_session.add_all([below_floor, kept])
+    db_session.commit()
+    below_floor_id, kept_id = below_floor.id, kept.id
+
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=deleted_co.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=-1.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=kept_co.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=2.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    run_migration(db_session, dry_run=False)
+
+    assert db_session.query(AlertCompany).filter_by(id=below_floor_id).count() == 0
+    assert db_session.query(AlertCompany).filter_by(id=kept_id).count() == 1
+    assert db_session.query(MarketMove).filter_by(alert_id=alert.id, company_id=deleted_co.id).count() == 0
+    survivor_move = db_session.query(MarketMove).filter_by(alert_id=alert.id, company_id=kept_co.id).one()
+    assert survivor_move.excess_move_pct == 2.0
+
+
+def test_dry_run_leaves_market_move_rows_untouched(db_session):
+    company = Company(ticker="IOC.NS", name="IOC", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/mm-dry-run", title="t")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="test")
+    db_session.add(alert)
+    db_session.commit()
+
+    below_floor = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+        confidence_score=CONFIDENCE_FLOOR - 1,
+    )
+    db_session.add(below_floor)
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        excess_move_pct=-1.0, measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    run_migration(db_session, dry_run=True)
+
+    assert db_session.query(MarketMove).filter_by(alert_id=alert.id, company_id=company.id).count() == 1
 
 
 def test_dry_run_deletes_nothing(db_session):

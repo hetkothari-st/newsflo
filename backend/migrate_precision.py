@@ -39,6 +39,23 @@ cleanup_orphan_company_refs.py and delete_demo_companies -- rather than
 redefined here, since a second copy of that list is exactly the failure
 mode this task fixed three times over.
 
+A deleted AlertCompany row also orphans a MarketMove row -- but MarketMove
+is NOT in ALERT_COMPANY_DEPENDENTS (it references alert_id/company_id
+directly, not alert_company_id), so the dependents loop above never
+touches it. Same bug class as reanalyze_cascade.py's -- reanalyzing alert
+1447 left 53 orphaned MarketMove rows, one of which crashed
+app.market.alert_measurement.compute_alert_measurement's bare next() with
+StopIteration (a 500 on GET /api/feed-v2). This script deletes roughly 270
+sub-floor rows in production and has not yet been run there, so left
+unfixed it would reproduce that exact crash at scale the first time it
+runs. Fixed by deleting, for every (alert_id, company_id) pair losing its
+last AlertCompany row, the matching MarketMove row -- computed by set
+difference against every SURVIVING AlertCompany's own (alert_id,
+company_id) pairs, not just "was this row deleted": a company_id is not
+guaranteed unique per alert_id (no unique constraint on the pair), so a
+naive per-deleted-row delete could remove a MarketMove row a different,
+KEPT AlertCompany row on the same alert+company still needs.
+
 Idempotent: re-running changes nothing further. Pass --dry-run to see counts
 without writing.
 
@@ -60,7 +77,7 @@ from sqlalchemy.orm import Session
 
 from app.companies.integrity import ALERT_COMPANY_DEPENDENTS, DEMO_TICKERS
 from app.db import SessionLocal
-from app.models import AlertCompany, Company
+from app.models import AlertCompany, Company, MarketMove
 from app.pipeline import CONFIDENCE_FLOOR, LEVEL_CONFIDENCE_MULTIPLIER
 
 
@@ -142,9 +159,39 @@ def run_migration(session: Session, dry_run: bool = False) -> None:
                 model.alert_company_id.in_(rows_to_delete_ids)
             ).delete(synchronize_session=False)
 
+    # MarketMove rows for every (alert_id, company_id) pair that is about to
+    # lose its LAST AlertCompany row (see module docstring). Computed BEFORE
+    # the delete loop below, while rows_to_delete's own rows are still
+    # queryable, so "surviving" can be expressed as "not one of the rows
+    # we're about to delete" via rows_to_delete_ids rather than requiring a
+    # flush first.
+    candidate_pairs = {(r.alert_id, r.company_id) for r in rows_to_delete}
+    market_move_deletions = 0
+    for alert_id, company_id in candidate_pairs:
+        survivor = (
+            session.query(AlertCompany.id)
+            .filter(
+                AlertCompany.alert_id == alert_id,
+                AlertCompany.company_id == company_id,
+                ~AlertCompany.id.in_(rows_to_delete_ids),
+            )
+            .first()
+        )
+        if survivor is not None:
+            # A different, KEPT AlertCompany row on this same alert still
+            # points at this same company -- its MarketMove is still in
+            # use, so it must not be deleted.
+            continue
+        market_move_deletions += (
+            session.query(MarketMove)
+            .filter_by(alert_id=alert_id, company_id=company_id)
+            .delete(synchronize_session=False)
+        )
+
     for row in rows_to_delete:
         session.delete(row)
     session.commit()
+    print(f"market_moves rows deleted alongside orphaned alert_companies: {market_move_deletions}")
     print("\nDone.")
 
 
