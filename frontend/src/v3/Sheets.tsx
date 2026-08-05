@@ -66,7 +66,7 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
         <>
           <p className="seclab">What they do</p>
           <BusinessDescription text={info.businessDesc} sourceUrl={info.businessDescSourceUrl} />
-          <Fundamentals data={info.fundamentals} />
+          <Fundamentals data={info.fundamentals} variant="glance" />
         </>
       )}
       {/* Its own block, not tucked under "What they do" -- an empirical

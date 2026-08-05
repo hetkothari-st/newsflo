@@ -322,7 +322,10 @@ describe('Shell card feed', () => {
     // fundamentals-design.md. The date is load-bearing (spec 5.1), not
     // decoration: PE is price-derived and this data refreshes monthly.
     expect(screen.getByText(/Oil Exploration & Production/)).toBeInTheDocument();
-    expect(screen.getByText('9.50')).toBeInTheDocument();
+    // Glance speaks plain language ("Price vs yearly profit 9.5×"), not
+    // ratio codes -- laypeople don't know what P/E means.
+    expect(screen.getByText('Price vs yearly profit')).toBeInTheDocument();
+    expect(screen.getByText('9.5×')).toBeInTheDocument();
     expect(screen.getByText(/2026-08-04/)).toBeInTheDocument();
     expect(screen.getByText(/glance view/i)).toBeInTheDocument();
     // Deep-dive-only content must NOT be present -- (i) = glance and stay.
