@@ -142,6 +142,11 @@ body:has(.nf4) { background: #fafafa; }
    fill the viewport below the header (--headh, measured live in ShellV4),
    so the homepage shows one complete card and none of the next. */
 .nf4 .storycard.first { min-height: calc(100vh - var(--headh, 220px)); min-height: calc(100dvh - var(--headh, 220px)); }
+/* No standalone snap point for the first card: it is already fully
+   visible at the page-top snap (with the masthead). One swipe from the
+   homepage therefore lands square on card two -- no intermediate stop
+   that just realigns card one. */
+.nf4 .storycard.first { scroll-snap-align: none; }
 @media (min-width: 900px) {
   .nf4 .storycard {
     grid-template-columns: 2fr 1fr;
