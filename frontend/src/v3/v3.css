@@ -41,7 +41,7 @@
 .nf3 .capf { display: flex; gap: 4px; }
 .nf3 .capf button { font: inherit; font-size: 10px; padding: 3px 8px; border-radius: 6px; cursor: pointer; background: transparent; color: var(--ink3); border: 0.5px solid var(--border); }
 .nf3 .capf button.on { background: var(--s2); color: var(--ink); border-color: var(--ink3); }
-.nf3 .theme-btn { background: none; border: none; color: var(--ink2); cursor: pointer; font-size: 16px; }
+.nf3 .theme-btn { background: none; border: none; color: var(--ink2); cursor: pointer; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; }
 
 /* view host */
 .nf3 .view { flex: 1; overflow-y: auto; display: none; }

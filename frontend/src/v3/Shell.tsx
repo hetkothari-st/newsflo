@@ -94,9 +94,32 @@ export default function Shell() {
               className="theme-btn"
               onClick={() => setCalendarOpen(true)}
               aria-label="Calendar"
+              title="News by date"
               data-testid="calendar-button"
             >
-              ▦
+              {/* Calendar glyph (frame + binding rings + date grid) -- the
+                  old ▦ box read as a generic grid. currentColor so it
+                  follows the button ink in both themes. */}
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+                <rect
+                  x="1"
+                  y="2.5"
+                  width="12"
+                  height="10.5"
+                  rx="1.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+                <line x1="1" y1="5.8" x2="13" y2="5.8" stroke="currentColor" strokeWidth="1.2" />
+                <line x1="4.2" y1="0.8" x2="4.2" y2="3.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                <line x1="9.8" y1="0.8" x2="9.8" y2="3.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                <rect x="3.4" y="7.6" width="1.8" height="1.8" rx="0.4" fill="currentColor" />
+                <rect x="6.1" y="7.6" width="1.8" height="1.8" rx="0.4" fill="currentColor" />
+                <rect x="8.8" y="7.6" width="1.8" height="1.8" rx="0.4" fill="currentColor" />
+                <rect x="3.4" y="10.2" width="1.8" height="1.8" rx="0.4" fill="currentColor" />
+                <rect x="6.1" y="10.2" width="1.8" height="1.8" rx="0.4" fill="currentColor" />
+              </svg>
             </button>
             <span className="langpick">
               <LanguagePicker />
