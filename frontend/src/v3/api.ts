@@ -67,9 +67,12 @@ export interface LayerRow {
   cap_tier: CapTier | null;
   liquidity_tier: LiquidityTier | null;
   delivery_pct: number | null;
-  // Superseded by `fundamentals` below -- backend now always sends null
-  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
+  // Sourced description. Non-null ONLY when it can be attributed -- the
+  // backend withholds the legacy LLM-invented text (app.companies.
+  // descriptions.sourced_description). The URL is the CC BY-SA
+  // attribution and must be rendered wherever the text is.
   business_desc: string | null;
+  business_desc_source_url?: string | null;
   // Sent by app.market.ripple_layers.compute_ripple_layers (backs
   // AlertDetail.layers[].rows) and app.market.ripple.get_sector_peers_for_alert
   // (backs StockDeepDive.peers below) -- both already emit it (Task 7).
@@ -108,9 +111,12 @@ export interface StockDeepDive {
   name: string;
   sector: string;
   cap_tier: CapTier | null;
-  // Superseded by `fundamentals` below -- backend now always sends null
-  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
+  // Sourced description. Non-null ONLY when it can be attributed -- the
+  // backend withholds the legacy LLM-invented text (app.companies.
+  // descriptions.sourced_description). The URL is the CC BY-SA
+  // attribution and must be rendered wherever the text is.
   business_desc: string | null;
+  business_desc_source_url?: string | null;
   // Sent by app.routers.stock_deep_dive._company_facts, which already
   // calls fundamentals_payload(company) (Task 7).
   fundamentals?: Fundamentals | null;

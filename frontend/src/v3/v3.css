@@ -231,6 +231,12 @@
 .nf3 .comp .cbar { flex: 1; height: 5px; background: var(--s0); border-radius: 3px; overflow: hidden; }
 .nf3 .comp .cw { font-family: var(--mono); font-size: 10px; color: var(--ink2); width: 64px; text-align: right; }
 .nf3 .desc { font-size: 13px; color: var(--ink2); line-height: 1.55; }
+/* Sourced "what they do" sentence, above the BSE classification block. The
+   source link is deliberately quiet but always present -- it is the CC BY-SA
+   attribution, not decoration. */
+.nf3 .bdesc { font-size: 13px; color: var(--ink2); line-height: 1.55; margin: 0 0 10px; }
+.nf3 .bdesc-src { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink3); text-decoration: none; border-bottom: 1px solid var(--s0); white-space: nowrap; }
+.nf3 .bdesc-src:hover { color: var(--ink2); }
 /* Per-story reasoning bullets under "What they do" (deep-dive sheet).
    Custom ::before bullets, flush with the sheet's other content -- the
    global reset zeroes list padding and native ::marker rendering was

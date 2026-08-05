@@ -19,6 +19,7 @@ import {
   isThinTrading,
   moveColor,
 } from './format';
+import BusinessDescription from '../components/BusinessDescription';
 import Fundamentals from '../components/Fundamentals';
 import type { Fundamentals as FundamentalsData } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -32,6 +33,9 @@ export interface InfoSheetData {
   // business_desc paragraph. Null when this company has no official BSE
   // classification -- renders no "What they do" section at all.
   fundamentals?: FundamentalsData | null;
+  // Sourced description + its CC BY-SA attribution. Both or neither.
+  businessDesc?: string | null;
+  businessDescSourceUrl?: string | null;
   logoUrl: string | null;
 }
 
@@ -53,11 +57,12 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
           </div>
         </div>
       </div>
-      {/* No fallback text: an unclassified company renders no section here
-          at all -- Fundamentals itself returns null when data is null. */}
-      {info.fundamentals && (
+      {/* No fallback text: a company with neither a sourced description nor
+          an official classification renders no section here at all. */}
+      {(info.fundamentals || info.businessDesc) && (
         <>
           <p className="seclab">What they do</p>
+          <BusinessDescription text={info.businessDesc} sourceUrl={info.businessDescSourceUrl} />
           <Fundamentals data={info.fundamentals} />
         </>
       )}
@@ -230,12 +235,15 @@ export function DeepDiveSheetContent({
           ))}
         </>
       )}
-      {/* No fallback text: business_desc was LLM-invented and the backend
-          now always sends null. An unclassified company renders nothing
-          here -- Fundamentals itself returns null. */}
-      {data.fundamentals && (
+      {/* No fallback text: a company with neither a sourced description nor
+          an official classification renders nothing here. */}
+      {(data.fundamentals || data.business_desc) && (
         <>
           <p className="seclab">What they do</p>
+          <BusinessDescription
+            text={data.business_desc}
+            sourceUrl={data.business_desc_source_url}
+          />
           <Fundamentals data={data.fundamentals} />
         </>
       )}
