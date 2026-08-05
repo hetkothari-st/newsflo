@@ -36,8 +36,14 @@
   font-size: 16px;
   letter-spacing: -0.16px;
   line-height: 1.5;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
 }
+/* Inshorts-style paging: one flick lands square on the next story card.
+   Applied only on the feed with no ripple band open (see ShellV4). */
+.nf4.snap { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+.nf4.snap .ticker { scroll-snap-align: start; }
 
 .nf4 * { box-sizing: border-box; }
 .nf4 button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
@@ -109,18 +115,30 @@
 }
 .nf4 .capf4 button.on { font-size: 18px; color: var(--ink); }
 
-/* ---------- LEAD STORY ---------- */
-.nf4 .lead { padding: 64px 16px 48px; display: grid; grid-template-columns: 1fr; gap: 24px; }
-@media (min-width: 900px) {
-  .nf4 .lead { grid-template-columns: 2fr 1fr; align-items: start; padding: 80px 32px 64px; }
+/* ---------- STORY CARDS (every story = front-page treatment) ---------- */
+/* One full-viewport snap slot per card -- a flick lands square on the
+   next story, Inshorts-style. Content-centered inside the slot. */
+.nf4 .storycard {
+  min-height: 100vh;
+  min-height: 100dvh;
+  scroll-snap-align: start;
+  border-top: 1px solid var(--hairline);
+  padding: 48px 16px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-content: center;
 }
-.nf4 .lead .lmove {
+@media (min-width: 900px) {
+  .nf4 .storycard { grid-template-columns: 2fr 1fr; align-items: center; padding: 64px 32px; }
+}
+.nf4 .storycard .lmove {
   font-family: var(--serif);
   font-size: 77px;
   line-height: 0.9;
   font-weight: 400;
 }
-.nf4 .lead h1 {
+.nf4 .storycard h1 {
   font-family: var(--serif);
   font-weight: 400;
   font-size: clamp(36px, 6vw, 77px);
@@ -128,15 +146,16 @@
   margin: 12px 0 16px;
   cursor: pointer;
 }
-.nf4 .lead .lgist {
+.nf4 .storycard .lgist {
   font-family: var(--serif);
   font-size: 20px;
   line-height: 1.3;
   letter-spacing: -0.2px;
   max-width: 56ch;
 }
-.nf4 .lead .lplate {
+.nf4 .storycard .lplate {
   width: 100%;
+  max-height: 44vh;
   aspect-ratio: 1 / 1;
   object-fit: cover;
   /* Monochrome halftone-plate treatment per the reference's imagery
@@ -160,32 +179,6 @@
 /* ---------- SECTION RULE ---------- */
 .nf4 .rule { border: 0; border-top: 1px solid var(--ink); margin: 0; }
 .nf4 .rule-hair { border: 0; border-top: 1px solid var(--hairline); margin: 0; }
-
-/* ---------- STORY ROWS ---------- */
-.nf4 .story { padding: 32px 16px; cursor: pointer; }
-@media (min-width: 900px) { .nf4 .story { padding: 32px; } }
-.nf4 .story .srow4 { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
-.nf4 .story .sbody { flex: 1; min-width: 0; }
-/* Story-row plate: small monochrome square, sharp corners -- same
-   halftone treatment as the hero, scaled to a column thumbnail. */
-.nf4 .story .splate {
-  width: 128px;
-  height: 128px;
-  object-fit: cover;
-  filter: grayscale(1) contrast(1.12);
-  flex-shrink: 0;
-  display: block;
-}
-.nf4 .story h2 {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(24px, 3.2vw, 35px);
-  line-height: 1.1;
-  margin: 0;
-  max-width: 30ch;
-}
-.nf4 .story .smove { font-family: var(--serif); font-size: 32px; line-height: 1; white-space: nowrap; }
-.nf4 .story .metaline { margin-top: 12px; }
 
 .nf4 .up { color: var(--data-up); }
 .nf4 .down { color: var(--data-down); }
@@ -217,6 +210,14 @@
   flex-wrap: wrap;
 }
 .nf4 .band .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; }
+
+/* Cap filter inside the affected-companies band -- paper-on-ink text
+   buttons, active gains scale only (same rule as everywhere else). */
+.nf4 .bandfilters { display: flex; gap: 16px; align-items: baseline; padding: 0 16px 16px; border-bottom: 1px solid var(--sepia); flex-wrap: wrap; }
+.nf4 .bandfilters .bflab { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; opacity: 0.6; }
+.nf4 .bandfilters button { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; color: var(--paper); opacity: 0.45; }
+.nf4 .bandfilters button.on { font-size: 18px; opacity: 1; }
+@media (min-width: 900px) { .nf4 .bandfilters { padding-left: 32px; padding-right: 32px; } }
 
 .nf4 .layer4 { padding: 24px 16px 8px; }
 @media (min-width: 900px) { .nf4 .layer4, .nf4 .band .sumline, .nf4 .band .stamp { padding-left: 32px; padding-right: 32px; } }
@@ -463,10 +464,9 @@
   .nf4 .navrow { padding: 12px 8px; }
   .nf4 .navlinks { gap: 14px; }
   .nf4 .capf4 { gap: 12px; }
-  .nf4 .lead { padding: 32px 16px 32px; }
-  .nf4 .lead .lmove { font-size: 56px; }
-  .nf4 .story .srow4 { flex-wrap: wrap; }
-  .nf4 .story .splate { width: 96px; height: 96px; order: -1; }
+  .nf4 .storycard { padding: 32px 16px; gap: 16px; }
+  .nf4 .storycard .lmove { font-size: 56px; }
+  .nf4 .storycard .lplate { max-height: 34vh; }
   .nf4 .crow { flex-wrap: wrap; row-gap: 2px; }
   .nf4 .crow .nm4 { flex-basis: 100%; order: 3; white-space: normal; }
   .nf4 .band .sumline { gap: 20px; }

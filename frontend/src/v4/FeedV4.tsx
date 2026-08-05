@@ -121,19 +121,28 @@ function MetaLine({ alert, onToggle }: { alert: FeedAlert; onToggle: () => void 
   );
 }
 
+const BAND_CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string; title: string }> = [
+  { cap: 'ALL', label: 'ALL', title: 'All companies' },
+  { cap: 'LARGE', label: 'L', title: 'Large cap (top 100 by market cap)' },
+  { cap: 'MID', label: 'M', title: 'Mid cap (rank 101–250)' },
+  { cap: 'SMALL', label: 'S', title: 'Small cap (rank 251–500)' },
+  { cap: 'MICRO', label: 'µ', title: 'Micro cap (rank 501+)' },
+];
+
 function RippleBand({
   alert,
   detail,
-  capFilter,
   onClose,
   onOpenDeepDive,
 }: {
   alert: FeedAlert;
   detail: AlertDetail | null;
-  capFilter: CapTier | 'ALL';
   onClose: () => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
 }) {
+  // The cap filter lives inside each story's affected-companies section
+  // (user decision) -- per-card state, narrowing only this ripple's rows.
+  const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
   const visibleRows = (layer: RippleLayer) =>
     capFilter === 'ALL' ? layer.rows : layer.rows.filter((row) => row.cap_tier === capFilter);
   const anyRows = detail !== null && detail.layers.some((layer) => visibleRows(layer).length > 0);
@@ -150,6 +159,20 @@ function RippleBand({
         <span>
           Volume <b>{alert.volume_multiple === null ? '—' : `${alert.volume_multiple.toFixed(1)}×`}</b>
         </span>
+      </div>
+      <div className="bandfilters" role="group" aria-label="Cap tier filter">
+        <span className="bflab">Cap tier</span>
+        {BAND_CAP_FILTERS.map(({ cap, label, title }) => (
+          <button
+            key={cap}
+            className={capFilter === cap ? 'on' : ''}
+            onClick={() => setCapFilter(cap)}
+            aria-label={`Cap filter ${cap}`}
+            title={title}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       {detail === null && <p className="bandempty">Setting the type…</p>}
       {detail !== null && !anyRows && (
@@ -204,17 +227,19 @@ function RippleBand({
 }
 
 export default function FeedV4({
-  capFilter,
   date,
   onEdition,
   onOpenDeepDive,
+  onBandOpenChange,
 }: {
-  capFilter: CapTier | 'ALL';
   // null = today (with latest-edition fallback); YYYY-MM-DD = a back
   // issue picked from the archive, fetched exactly, no fallback.
   date: string | null;
   onEdition: (edition: { count: number; date: string | null }) => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
+  // Lets the shell drop scroll-snapping while a ripple band is open --
+  // mandatory snap would fight scrolling through a tall band.
+  onBandOpenChange: (open: boolean) => void;
 }) {
   const { token } = useAuth();
   const [alerts, setAlerts] = useState<FeedAlert[] | null>(null);
@@ -227,6 +252,7 @@ export default function FeedV4({
     setAlerts(null);
     setError(null);
     setOpenId(null);
+    onBandOpenChange(false);
     (async () => {
       try {
         let result = await getFeedAlerts(token, { lang: 'en', date: date ?? undefined });
@@ -248,11 +274,15 @@ export default function FeedV4({
     return () => {
       cancelled = true;
     };
-  }, [token, date, onEdition]);
+  }, [token, date, onEdition, onBandOpenChange]);
 
   const toggle = useCallback(
     (alertId: number) => {
-      setOpenId((current) => (current === alertId ? null : alertId));
+      const next = openId === alertId ? null : alertId;
+      setOpenId(next);
+      // Outside the setState updater: notifying the shell from inside one
+      // is a cross-component update during render (React warns).
+      onBandOpenChange(next !== null);
       setDetails((current) => {
         if (current[alertId]) return current;
         getAlertDetail(alertId, token, 'en')
@@ -263,73 +293,40 @@ export default function FeedV4({
         return current;
       });
     },
-    [token],
+    [openId, token, onBandOpenChange],
   );
 
-  // Same story-level filter the v3 shell ships: a story matches when ANY
-  // tagged company sits in the chosen tier.
-  const visible = (alerts ?? []).filter(
-    (alert) =>
-      capFilter === 'ALL' ||
-      (alert.cap_tiers ? alert.cap_tiers.includes(capFilter) : alert.peak_cap_tier === capFilter),
-  );
+  const closeBand = useCallback(() => {
+    setOpenId(null);
+    onBandOpenChange(false);
+  }, [onBandOpenChange]);
 
   if (error !== null) return <p className="empty4">{error}</p>;
   if (alerts !== null && alerts.length === 0)
     return <p className="empty4">No measured stories yet today. New editions appear as the market reacts.</p>;
-  if (alerts !== null && visible.length === 0)
-    return <p className="empty4">No stories in this cap tier today. Tap “All” for the full edition.</p>;
 
-  const [lead, ...rest] = visible;
-
+  // Every story gets the full front-page treatment (user decision) --
+  // one full-viewport snap slot per card, Inshorts-style.
   return (
     <div>
-      {lead && (
-        <>
-          <div className="lead">
-            <div>
-              <div className={`lmove ${moveClass(lead.excess_move_pct)}`}>
-                {lead.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(lead.excess_move_pct).toFixed(1)}%
-              </div>
-              <h1 onClick={() => toggle(lead.id)}>{lead.article.title}</h1>
-              <p className="lgist">{lead.summary_short ?? lead.summary_long ?? ''}</p>
-              <MetaLine alert={lead} onToggle={() => toggle(lead.id)} />
-            </div>
-            <Plate src={lead.article.image_url} category={lead.category} className="lplate" />
-          </div>
-          {openId === lead.id && (
-            <RippleBand
-              alert={lead}
-              detail={details[lead.id] ?? null}
-              capFilter={capFilter}
-              onClose={() => setOpenId(null)}
-              onOpenDeepDive={onOpenDeepDive}
-            />
-          )}
-          <hr className="rule" />
-        </>
-      )}
-      {rest.map((alert, index) => (
+      {alerts?.map((alert) => (
         <div key={alert.id}>
-          {index > 0 && <hr className="rule-hair" />}
-          <div className="story" onClick={() => toggle(alert.id)} data-testid={`v4story-${alert.id}`}>
-            <div className="srow4">
-              <div className="sbody">
-                <h2>{alert.article.title}</h2>
-                <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
-              </div>
-              <span className={`smove ${moveClass(alert.excess_move_pct)}`}>
+          <div className="storycard" data-testid={`v4story-${alert.id}`}>
+            <div>
+              <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
-              </span>
-              <Plate src={alert.article.image_url} category={alert.category} className="splate" />
+              </div>
+              <h1 onClick={() => toggle(alert.id)}>{alert.article.title}</h1>
+              <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
+              <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
             </div>
+            <Plate src={alert.article.image_url} category={alert.category} className="lplate" />
           </div>
           {openId === alert.id && (
             <RippleBand
               alert={alert}
               detail={details[alert.id] ?? null}
-              capFilter={capFilter}
-              onClose={() => setOpenId(null)}
+              onClose={closeBand}
               onOpenDeepDive={onOpenDeepDive}
             />
           )}

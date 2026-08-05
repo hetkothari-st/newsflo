@@ -7,7 +7,6 @@
    experiment runs. */
 import { useState } from 'react';
 import './v4.css';
-import type { CapTier } from '../v3/api';
 import ArchiveV4 from './ArchiveV4';
 import DeepDiveV4 from './DeepDiveV4';
 import FeedV4 from './FeedV4';
@@ -24,14 +23,6 @@ const NAV_ITEMS: Array<{ view: View; label: string }> = [
   { view: 'arch', label: 'Archive' },
 ];
 
-const CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string; title: string }> = [
-  { cap: 'ALL', label: 'ALL', title: 'All companies' },
-  { cap: 'LARGE', label: 'L', title: 'Large cap (top 100 by market cap)' },
-  { cap: 'MID', label: 'M', title: 'Mid cap (rank 101–250)' },
-  { cap: 'SMALL', label: 'S', title: 'Small cap (rank 251–500)' },
-  { cap: 'MICRO', label: 'µ', title: 'Micro cap (rank 501+)' },
-];
-
 const IST_DATE = new Intl.DateTimeFormat('en-IN', {
   weekday: 'long',
   day: 'numeric',
@@ -42,8 +33,8 @@ const IST_DATE = new Intl.DateTimeFormat('en-IN', {
 
 export default function ShellV4() {
   const [view, setView] = useState<View>('feed');
-  const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
+  const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
@@ -60,7 +51,11 @@ export default function ShellV4() {
         : `${edition.count} MEASURED ${edition.count === 1 ? 'STORY' : 'STORIES'}`;
 
   return (
-    <div className="nf4">
+    // Inshorts-style paging on the feed: the shell is the scroll container
+    // and snaps per story card. Snapping is dropped while a ripple band is
+    // open (mandatory snap fights scrolling through a tall band) and on
+    // every non-feed section.
+    <div className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''}`}>
       <div className="ticker">
         <span>{IST_DATE.format(new Date()).toUpperCase()}</span>
         <span>{editionLabel}</span>
@@ -82,21 +77,6 @@ export default function ShellV4() {
             </button>
           ))}
         </nav>
-        {view === 'feed' && (
-          <div className="capf4" role="group" aria-label="Cap tier filter">
-            {CAP_FILTERS.map(({ cap, label, title }) => (
-              <button
-                key={cap}
-                className={capFilter === cap ? 'on' : ''}
-                onClick={() => setCapFilter(cap)}
-                aria-label={`Cap filter ${cap}`}
-                title={title}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {view === 'feed' && feedDate !== null && (
@@ -108,10 +88,10 @@ export default function ShellV4() {
 
       {view === 'feed' && (
         <FeedV4
-          capFilter={capFilter}
           date={feedDate}
           onEdition={setEdition}
           onOpenDeepDive={openDeepDive}
+          onBandOpenChange={setBandOpen}
         />
       )}
       {view === 'disc' && <DiscoverV4 onOpenDeepDive={openDeepDive} />}
