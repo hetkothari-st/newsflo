@@ -14,9 +14,28 @@ def test_master_refresh_never_raises(monkeypatch):
 
 
 def test_detail_refresh_never_raises(monkeypatch):
+    # Patch the function the job actually calls to choose its day. Patching
+    # an internal of it is not enough: detail_target_day also consults
+    # latest_detail_day, which reads the real data/universe directory, so a
+    # developer machine holding a partial snapshot turned this unit test
+    # into a live 45-minute BSE fetch.
     monkeypatch.setattr(
-        scheduler.snapshot, "latest_snapshot_day", lambda _root: None,
+        scheduler.snapshot, "detail_target_day", lambda _root, _today: None,
     )
+    scheduler._run_universe_detail_refresh()
+
+
+def test_detail_refresh_does_no_network_when_there_is_no_snapshot(monkeypatch):
+    """The guard above is load-bearing -- assert it, so the seam cannot
+    silently move again."""
+    monkeypatch.setattr(
+        scheduler.snapshot, "detail_target_day", lambda _root, _today: None,
+    )
+
+    def explode(*args, **kwargs):
+        raise AssertionError("detail refresh must not fetch without a snapshot")
+
+    monkeypatch.setattr(scheduler.fetchers, "fetch_bse_details", explode)
     scheduler._run_universe_detail_refresh()
 
 
@@ -44,8 +63,11 @@ def test_jobs_are_registered(monkeypatch):
         assert "universe_master_refresh" in jobs
         assert jobs["universe_master_refresh"].trigger.interval == timedelta(hours=24)
 
+        # Daily, not monthly: BSE throttles us to roughly half throughput, so
+        # the pass runs on a 45-minute budget each day and resumes into the
+        # same dated directory until it completes.
         assert "universe_detail_refresh" in jobs
-        assert jobs["universe_detail_refresh"].trigger.interval == timedelta(days=30)
+        assert jobs["universe_detail_refresh"].trigger.interval == timedelta(hours=24)
     finally:
         scheduler._scheduler = None
 

@@ -75,3 +75,32 @@ def test_latest_detail_day_picks_the_newest_day_that_actually_has_details(tmp_pa
 
     assert snapshot.latest_snapshot_day(str(tmp_path)) == day_b
     assert snapshot.latest_detail_day(str(tmp_path)) == day_a
+
+
+def _detail_day(root, day, code="500001"):
+    path = snapshot.detail_path(str(root), day, code)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}", encoding="utf-8")
+
+
+def test_detail_target_day_continues_an_in_progress_pass(tmp_path):
+    """The daily master refresh makes a fresh empty directory every morning.
+    The detail pass must keep filling yesterday's, or it restarts forever."""
+    _detail_day(tmp_path, date(2026, 8, 5))
+    (tmp_path / "2026-08-08").mkdir()
+    assert snapshot.detail_target_day(str(tmp_path), date(2026, 8, 8)) == date(2026, 8, 5)
+
+
+def test_detail_target_day_starts_fresh_once_the_pass_is_stale(tmp_path):
+    _detail_day(tmp_path, date(2026, 6, 1))
+    (tmp_path / "2026-08-08").mkdir()
+    assert snapshot.detail_target_day(str(tmp_path), date(2026, 8, 8)) == date(2026, 8, 8)
+
+
+def test_detail_target_day_falls_back_to_the_newest_snapshot(tmp_path):
+    (tmp_path / "2026-08-08").mkdir()
+    assert snapshot.detail_target_day(str(tmp_path), date(2026, 8, 8)) == date(2026, 8, 8)
+
+
+def test_detail_target_day_is_none_without_any_snapshot(tmp_path):
+    assert snapshot.detail_target_day(str(tmp_path), date(2026, 8, 8)) is None

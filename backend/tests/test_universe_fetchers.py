@@ -150,3 +150,37 @@ def test_a_successful_scrip_resets_the_breaker(tmp_path):
     )
     assert result["aborted"] is False
     assert result["fetched"] == 9
+
+
+def test_detail_pass_stops_cleanly_on_its_time_budget(tmp_path):
+    """A slow source is consumed in short daily runs. The budget must stop
+    the loop between scrips, leaving everything fetched so far on disk."""
+    ticks = iter([0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+
+    def clock():
+        return next(ticks)
+
+    result = fetchers.fetch_bse_details(
+        str(tmp_path), date(2026, 8, 5), [str(500000 + i) for i in range(10)],
+        opener=lambda url: b'{"Table":[{"scrip_cd":"1"}]}',
+        sleep=lambda _s: None, throttle_seconds=0,
+        time_budget_seconds=3, clock=clock,
+    )
+    assert result["exhausted"] is True
+    assert 0 < result["fetched"] < 10
+    assert result["remaining"] == 10 - result["fetched"]
+    # What it did fetch is durable -- that is what makes the next run resume.
+    on_disk = fetchers.snapshot.fetched_scrip_codes(str(tmp_path), date(2026, 8, 5))
+    assert len(on_disk) == result["fetched"]
+
+
+def test_a_pass_that_finishes_within_budget_is_not_marked_exhausted(tmp_path):
+    result = fetchers.fetch_bse_details(
+        str(tmp_path), date(2026, 8, 5), ["500001", "500002"],
+        opener=lambda url: b'{"Table":[{"scrip_cd":"1"}]}',
+        sleep=lambda _s: None, throttle_seconds=0,
+        time_budget_seconds=3600, clock=lambda: 0,
+    )
+    assert result["exhausted"] is False
+    assert result["fetched"] == 2
+    assert result["remaining"] == 0
