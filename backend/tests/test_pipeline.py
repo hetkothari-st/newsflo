@@ -1347,3 +1347,29 @@ def test_a_confirmed_direction_keeps_its_rationale(db_session, monkeypatch):
     }])
 
     assert alert.companies[0].rationale == "This is clearly good news for the company."
+
+
+def test_market_moves_are_stamped_with_the_alert_category(db_session, monkeypatch):
+    """Subsystem D reads market_moves.category, never a live join to
+    alerts -- an alert recategorized later must not re-shuffle which range
+    pool its historical measurements belong to."""
+    from app.models import MarketMove
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    _stub_measurement(monkeypatch, excess_move_pct=2.4)
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "This is clearly good news for the company.",
+        "key_points": ["good news"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }])
+
+    moves = db_session.query(MarketMove).all()
+    assert moves, "persist path should have measured at least one company"
+    assert all(m.category == alert.category for m in moves)

@@ -386,6 +386,10 @@ def _persist_alert(
         if company_obj is not None:
             move = measure_company_move(session, company_obj)
             move.alert_id = alert.id
+            # Copied, not joined: alerts get recategorized later and the
+            # volatility-range pools must not re-shuffle when they do
+            # (spec 2026-08-05 §3.2).
+            move.category = alert.category
             session.add(move)
             market_moves.append(move)
 
