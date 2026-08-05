@@ -36,8 +36,13 @@ def send_pending_notifications(
             f"Company: {company.name} ({company.ticker})\n"
             f"Direction: {alert_company.direction}\n"
             f"Estimated move: {alert_company.magnitude_low}% to {alert_company.magnitude_high}%\n"
-            f"Why: {alert_company.rationale}\n"
         )
+        # rationale is nullable (a sector_inference/fan-out row persists
+        # none, and a row whose direction was flipped by measurement has its
+        # now-contradictory rationale cleared -- see app.pipeline._persist_alert)
+        # -- omit the line entirely rather than emit a literal "Why: None".
+        if alert_company.rationale:
+            body += f"Why: {alert_company.rationale}\n"
 
         try:
             ok = email_fn(to=user.email, subject=subject, body=body)

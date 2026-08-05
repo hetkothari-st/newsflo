@@ -21,7 +21,11 @@ export default function StockRow({
       <div className="srow" onClick={() => onOpenDeepDive(row.ticker)} data-testid={`srow-${row.ticker}`}>
         <CompanyLogo logoUrl={row.logo_url} ticker={row.ticker} sector={row.sector} size="sm" />
         <span className="tkr">{row.ticker}</span>
-        <span className={`tag ${capClass(row.cap_tier)}`}>{row.cap_tier ?? '—'}</span>
+        {/* No tag at all when the company has no honest India cap tier
+            (foreign listings, stale caps) -- a "—" chip reads as broken. */}
+        {row.cap_tier !== null && (
+          <span className={`tag ${capClass(row.cap_tier)}`}>{row.cap_tier}</span>
+        )}
         {row.liquidity_tier !== null && (
           <span className={`liq liq-${liqShort(row.liquidity_tier)}`}>{liqShort(row.liquidity_tier)}</span>
         )}

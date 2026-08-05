@@ -19,28 +19,6 @@ from app.config import (
 # served, and so the app keeps working if Anthropic's own rate limit is hit.
 ANTHROPIC_MODEL = "claude-sonnet-4-5"
 
-# Gemini is the analysis pipeline's primary provider (replaces the dead
-# Anthropic slot -- see docs/superpowers/specs/2026-07-27-gemini-primary-
-# reasoning-provider-design.md). "gemini-flash-latest" is an alias Google
-# keeps pointed at their current recommended flash model, not a dated
-# version string -- same reasoning as FALLBACK_MODEL's own history below
-# (a hardcoded model name needs a manual swap when a provider deprecates
-# it; an alias doesn't).
-GEMINI_MODEL = "gemini-flash-latest"
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-
-
-class GeminiAPIError(Exception):
-    """Raised on any non-2xx response from the Gemini API, and on any
-    httpx.HTTPError raised before a response even exists (connection
-    refused, DNS failure, connect/read timeout) -- covers rate limits/quota
-    exhaustion (429), auth failures, server errors, and network/connection
-    failures alike, same "any provider-level failure should degrade to the
-    fallback provider" discipline AnthropicAPIError already provides for
-    Anthropic.
-    """
-
-
 MODEL = "llama-3.3-70b-versatile"
 # Groq enforces daily token quotas PER MODEL, not per key -- multiple keys on
 # the same org share one quota bucket for a given model (confirmed: 3 keys
@@ -60,6 +38,47 @@ MODEL = "llama-3.3-70b-versatile"
 # generic small Llama model.
 FALLBACK_MODEL = "openai/gpt-oss-20b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# Gemini is the analysis pipeline's primary provider (replaces the dead
+# Anthropic slot -- see docs/superpowers/specs/2026-07-27-gemini-primary-
+# reasoning-provider-design.md). "gemini-flash-latest" is an alias Google
+# keeps pointed at their current recommended flash model, not a dated
+# version string -- same reasoning as FALLBACK_MODEL's own history above
+# (a hardcoded model name needs a manual swap when a provider deprecates
+# it; an alias doesn't).
+GEMINI_MODEL = "gemini-flash-latest"
+
+# The stage-quality slot. cascade.py already distinguishes its hardest calls
+# (company identification, which passes MODEL) from its cheaper ones (facts,
+# sectors, edge verification, which pass FALLBACK_MODEL) -- but
+# _GeminiCompletions discarded the model kwarg entirely via **_ignored, so
+# every stage silently ran on GEMINI_MODEL and that distinction was dead
+# code. Honoring it makes the paid migration a one-line change here rather
+# than a pipeline rewrite: point this at a stronger model and the hard
+# stages upgrade on their own.
+#
+# Today both slots resolve to the same free flash model, so this is a no-op
+# in behavior and a real change in structure.
+GEMINI_STRONG_MODEL = "gemini-flash-latest"
+
+# Company/sector identification is extraction, not brainstorming. Gemini
+# defaults to 1.0 when unset, which is the wrong end of the range for a task
+# whose output must be reproducible enough to regression-test.
+ANALYSIS_TEMPERATURE = 0.2
+
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+class GeminiAPIError(Exception):
+    """Raised on any non-2xx response from the Gemini API, and on any
+    httpx.HTTPError raised before a response even exists (connection
+    refused, DNS failure, connect/read timeout) -- covers rate limits/quota
+    exhaustion (429), auth failures, server errors, and network/connection
+    failures alike, same "any provider-level failure should degrade to the
+    fallback provider" discipline AnthropicAPIError already provides for
+    Anthropic.
+    """
+
 
 # How each provider this client layer can talk to handles a repeated,
 # cacheable prompt prefix (cost-optimization phase 2). "explicit" = the
@@ -221,17 +240,20 @@ class _GeminiCompletions:
     same duck-typing contract as _AnthropicCompletions, one provider over.
     """
 
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str = GEMINI_MODEL, strong_model: str = GEMINI_STRONG_MODEL):
         self._api_key = api_key
         self._model = model
+        self._strong_model = strong_model
 
-    def create(self, *, max_tokens, tools, messages, tier=None, call_name=None, **_ignored):
-        # Model tiering (cost-optimization phase 4): only a CHEAP tier
-        # changes anything. A reasoning-tier call (the default for every
-        # call site, and the only thing a protected call can ever be) is
-        # sent on this adapter's own configured model, exactly as it was
-        # before tiering existed.
-        model = LLM_TIER_MODELS["gemini"][LLM_TIER_CHEAP] if tier == LLM_TIER_CHEAP else self._model
+    def _resolve_model(self, requested: str | None) -> str:
+        """Callers pass Groq model names (MODEL for the hard stages,
+        FALLBACK_MODEL for the cheap ones). Map that intent onto this
+        provider's own two slots rather than discarding it."""
+        if requested == MODEL:
+            return self._strong_model
+        return self._model
+
+    def create(self, *, max_tokens, tools, messages, model=None, tier=None, call_name=None, **_ignored):
         system_content = None
         contents = []
         for m in messages:
@@ -262,12 +284,27 @@ class _GeminiCompletions:
             "contents": contents,
             "tools": [{"function_declarations": [function_declaration]}],
             "tool_config": {"function_calling_config": {"mode": "ANY"}},
-            "generationConfig": {"maxOutputTokens": max_tokens},
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": ANALYSIS_TEMPERATURE,
+            },
         }
         if system_content is not None:
             body["systemInstruction"] = {"parts": [{"text": system_content}]}
 
-        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={self._api_key}"
+        # Two independent model selections, composed. The caller's `model`
+        # slot (MODEL vs FALLBACK_MODEL) picks between this adapter's own
+        # strong/cheap Gemini slots via _resolve_model. Model tiering
+        # (cost-optimization phase 4) sits ABOVE that and only ever
+        # downgrades: a CHEAP tier overrides the slot choice outright, while
+        # a reasoning-tier call (the default at every call site, and the only
+        # thing a protected call can ever be) leaves _resolve_model's answer
+        # untouched -- exactly as it behaved before tiering existed.
+        if tier == LLM_TIER_CHEAP:
+            resolved_model = LLM_TIER_MODELS["gemini"][LLM_TIER_CHEAP]
+        else:
+            resolved_model = self._resolve_model(model)
+        url = f"{GEMINI_BASE_URL}/models/{resolved_model}:generateContent?key={self._api_key}"
         try:
             response = httpx.post(url, json=body, timeout=60.0)
         except httpx.HTTPError as exc:
@@ -286,7 +323,7 @@ class _GeminiCompletions:
             raise GeminiAPIError(f"Gemini API returned {response.status_code}: {response.text}")
 
         data = response.json()
-        record_usage(usage_from_gemini(data, call_name=call_name, model=model, tier=tier))
+        record_usage(usage_from_gemini(data, call_name=call_name, model=resolved_model, tier=tier))
         candidates = data.get("candidates") or []
         # A safety block or MAX_TOKENS truncation omits "content" entirely
         # (finishReason: "SAFETY"/"MAX_TOKENS" with no content key) -- .get(...)
@@ -306,17 +343,20 @@ class _GeminiCompletions:
 
 
 class _GeminiChat:
-    def __init__(self, api_key: str, model: str):
-        self.completions = _GeminiCompletions(api_key, model)
+    def __init__(self, api_key: str, model: str, strong_model: str):
+        self.completions = _GeminiCompletions(api_key, model, strong_model)
 
 
 class GeminiAdapter:
     """Duck-types the OpenAI client surface analyze_article uses, backed by
     a raw Gemini generateContent REST call, so the rest of the pipeline
-    never needs to know which provider actually served a given call."""
+    never needs to know which provider actually served a given call.
+    Honors the caller's model slot (see _GeminiCompletions._resolve_model)."""
 
-    def __init__(self, api_key: str, model: str = GEMINI_MODEL):
-        self.chat = _GeminiChat(api_key, model)
+    def __init__(
+        self, api_key: str, model: str = GEMINI_MODEL, strong_model: str = GEMINI_STRONG_MODEL,
+    ):
+        self.chat = _GeminiChat(api_key, model, strong_model)
 
 
 class _AnthropicCompletions:

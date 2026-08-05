@@ -33,7 +33,8 @@ function WhyExplanation({ companies, mechanism }: { companies: AlertCompany[]; m
   // edge exists at all (shouldn't normally happen -- _build_graph's root-
   // backfill guarantees a news->sector edge -- but never show a blank WHY).
   const top = rankByConfidence(companies)[0];
-  const text = mechanism ?? truncatedRationale(top.rationale);
+  const text = mechanism ?? (top.rationale ? truncatedRationale(top.rationale) : null);
+  if (text === null) return null;
   return (
     <div className="flex max-w-md flex-col items-center gap-1 px-2 text-center">
       <span className="font-data text-[10px] uppercase tracking-widest text-muted">Why</span>

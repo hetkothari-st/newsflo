@@ -71,7 +71,7 @@ export interface AlertCompany {
   excess_move_pct?: number | null;
   magnitude_low: number;
   magnitude_high: number;
-  rationale: string;
+  rationale: string | null; // null for sector_inference rows and for rows whose direction measurement flipped
   key_points: string[]; // short, scannable version of `rationale` -- empty for legacy alerts
   confidence_score: number; // 0-100, how directly evidenced this company's call is
   time_horizon: string; // Immediate | Short-Term | Medium-Term | Long-Term
@@ -260,7 +260,7 @@ export interface LatestAlertSignal {
   alert_id: number;
   created_at: string;
   direction: string; // bullish | bearish
-  rationale: string;
+  rationale: string | null; // null for sector_inference rows and for rows whose direction measurement flipped
   key_points: string[];
   confidence: string; // llm_estimate | calibrated
   category: string;

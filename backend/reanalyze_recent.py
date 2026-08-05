@@ -13,6 +13,12 @@ it never changes which companies an alert lists.
 Prints the old and new rationale/key_points for every row it touches
 before committing, so there is a console record of what changed.
 
+Passes ``session=`` to analyze_article, same as the live pipeline, so the
+fresh call is grounded against the real candidate list/ticker enum rather
+than unconstrained. This script never calls resolve_companies (it only
+updates rationale/key_points on AlertCompany rows already present), so it
+has no anchor_sub_sectors map to build.
+
 Not part of the test suite and not imported by the app.
 
 Usage (from the backend/ directory, against whichever DATABASE_URL is
@@ -49,7 +55,7 @@ def main(limit: int, force: bool) -> None:
             print("  (using cached analysis -- pass --force for a fresh LLM call)")
         else:
             try:
-                result = analyze_article(client, article.title, article_text(article))
+                result = analyze_article(client, article.title, article_text(article), session=session)
             except Exception as exc:
                 print(f"  SKIPPED (analysis call failed: {exc})")
                 continue

@@ -39,7 +39,7 @@ def test_persist_alert_writes_a_market_move_row_per_company(db_session, monkeypa
     db_session.commit()
     article = _article(db_session)
 
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: _fake_analysis())
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: _fake_analysis())
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -72,7 +72,7 @@ def test_persist_alert_does_not_crash_when_measurement_raises_no_data(db_session
     db_session.add(company)
     db_session.commit()
     article = _article(db_session)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: _fake_analysis())
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: _fake_analysis())
 
     created = process_new_articles(db_session, claude_client=object())
 

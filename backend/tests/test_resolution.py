@@ -4,8 +4,11 @@ from app.companies.resolution import resolve_companies
 from app.models import Company
 
 
-def _make_company(session, ticker, name, sector, market_cap, index_tier="NIFTY50"):
-    company = Company(ticker=ticker, name=name, sector=sector, index_tier=index_tier, market_cap=market_cap)
+def _make_company(session, ticker, name, sector, market_cap, index_tier="NIFTY50", sub_sector=None):
+    company = Company(
+        ticker=ticker, name=name, sector=sector, index_tier=index_tier, market_cap=market_cap,
+        sub_sector=sub_sector,
+    )
     session.add(company)
     session.commit()
     return company
@@ -28,15 +31,25 @@ def test_resolve_direct_mention(db_session):
     assert resolved[0]["key_points"] == ["Crude prices ease", "Refining margins widen"]
 
 
-def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
-    # 3 top-tier companies plus 5 lower-tier companies: more than 5 total in
-    # the sector, so the resolver must prefer the higher-tier companies.
-    nifty50_tickers = [f"OILN50_{i}.NS" for i in range(3)]
+def test_resolve_sector_inference_picks_top_3_by_index_tier(db_session):
+    # TOP_N_SECTOR_COMPANIES lowered from 5 to 3 (Task 11): 2 top-tier
+    # companies plus 5 lower-tier companies -- more than 3 total in the
+    # sector, so the resolver must still prefer the higher-tier companies
+    # before falling back to fill the remaining slot from OTHER tier.
+    # Anchored to refining_marketing (post-fan-out-requires-anchor fix) so
+    # the fan-out actually returns rows to rank.
+    nifty50_tickers = [f"OILN50_{i}.NS" for i in range(2)]
     other_tickers = [f"OILOTHER_{i}.NS" for i in range(5)]
     for ticker in nifty50_tickers:
-        _make_company(db_session, ticker, ticker, "oil_gas", market_cap=None, index_tier="NIFTY50")
+        _make_company(
+            db_session, ticker, ticker, "oil_gas", market_cap=None, index_tier="NIFTY50",
+            sub_sector="refining_marketing",
+        )
     for ticker in other_tickers:
-        _make_company(db_session, ticker, ticker, "oil_gas", market_cap=None, index_tier="OTHER")
+        _make_company(
+            db_session, ticker, ticker, "oil_gas", market_cap=None, index_tier="OTHER",
+            sub_sector="refining_marketing",
+        )
 
     mention = CompanyMention(
         name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
@@ -44,17 +57,19 @@ def test_resolve_sector_inference_picks_top_5_by_index_tier(db_session):
         confidence_score=55, time_horizon="Medium-Term",
     )
 
-    resolved = resolve_companies(db_session, [mention])
+    resolved = resolve_companies(
+        db_session, [mention], anchor_sub_sectors={"oil_gas": {"refining_marketing"}},
+    )
 
-    assert len(resolved) == 5
+    assert len(resolved) == 3
     assert all(r["basis"] == "sector_inference" for r in resolved)
 
     resolved_tickers = {
         db_session.get(Company, r["company_id"]).ticker for r in resolved
     }
-    # All 3 NIFTY50 companies must be included in preference to OTHER tier.
+    # Both NIFTY50 companies must be included in preference to OTHER tier.
     assert set(nifty50_tickers).issubset(resolved_tickers)
-    assert len(resolved_tickers & set(other_tickers)) == 2
+    assert len(resolved_tickers & set(other_tickers)) == 1
 
 
 def test_resolve_sector_inference_at_indirect_l1_chains_to_the_stated_parent(db_session):
@@ -64,7 +79,7 @@ def test_resolve_sector_inference_at_indirect_l1_chains_to_the_stated_parent(db_
     # indirect entry does.
     parent = _make_company(db_session, "HDFCBANK.NS", "HDFC Bank", "banking", 1_000_000.0)
     for i in range(3):
-        _make_company(db_session, f"AUTO_{i}.NS", f"Auto Co {i}", "auto", None)
+        _make_company(db_session, f"AUTO_{i}.NS", f"Auto Co {i}", "auto", None, sub_sector="auto_component")
     direct_mention = CompanyMention(
         name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, sector="banking",
         direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="rate exposure",
@@ -77,7 +92,10 @@ def test_resolve_sector_inference_at_indirect_l1_chains_to_the_stated_parent(db_
         impact_level="indirect_l1", parent_ticker="HDFCBANK.NS",
     )
 
-    resolved = resolve_companies(db_session, [direct_mention, sector_wide_l1])
+    resolved = resolve_companies(
+        db_session, [direct_mention, sector_wide_l1],
+        anchor_sub_sectors={"auto": {"auto_component"}},
+    )
 
     sector_rows = [r for r in resolved if r["basis"] == "sector_inference"]
     assert len(sector_rows) == 3
@@ -88,7 +106,7 @@ def test_resolve_sector_inference_at_indirect_l1_chains_to_the_stated_parent(db_
 def test_resolve_sector_inference_at_indirect_l2_chains_through_l1(db_session):
     parent = _make_company(db_session, "HDFCBANK.NS", "HDFC Bank", "banking", 1_000_000.0)
     l1_company = _make_company(db_session, "MARUTI.NS", "Maruti Suzuki", "auto", 500_000.0)
-    _make_company(db_session, "COMP_A.NS", "Component Co A", "metals", None)
+    _make_company(db_session, "COMP_A.NS", "Component Co A", "metals", None, sub_sector="steel")
 
     mentions = [
         CompanyMention(
@@ -110,7 +128,7 @@ def test_resolve_sector_inference_at_indirect_l2_chains_through_l1(db_session):
         ),
     ]
 
-    resolved = resolve_companies(db_session, mentions)
+    resolved = resolve_companies(db_session, mentions, anchor_sub_sectors={"metals": {"steel"}})
 
     sector_row = next(r for r in resolved if r["basis"] == "sector_inference")
     assert sector_row["impact_level"] == "indirect_l2"
@@ -204,7 +222,10 @@ def test_resolve_dedupes_repeated_sector_inference_across_mentions(db_session):
     # duplicate rows for a single article. Same sector mentioned twice must
     # resolve the sector's companies only once.
     for i in range(3):
-        _make_company(db_session, f"OIL_{i}.NS", f"Oil Co {i}", "oil_gas", None, index_tier="NIFTY50")
+        _make_company(
+            db_session, f"OIL_{i}.NS", f"Oil Co {i}", "oil_gas", None, index_tier="NIFTY50",
+            sub_sector="refining_marketing",
+        )
     mentions = [
         CompanyMention(
             name="Indian Oil Corporation", ticker="IOC.NS", is_direct=False, sector="oil_gas",
@@ -218,22 +239,32 @@ def test_resolve_dedupes_repeated_sector_inference_across_mentions(db_session):
         ),
     ]
 
-    resolved = resolve_companies(db_session, mentions)
+    resolved = resolve_companies(
+        db_session, mentions, anchor_sub_sectors={"oil_gas": {"refining_marketing"}},
+    )
 
     assert len(resolved) == 3
     assert len({r["company_id"] for r in resolved}) == 3
 
 
 def test_tier_rank_prefers_niftynext50_over_midcap150(db_session):
-    next50 = _make_company(db_session, "NEXT50CO.NS", "Next50 Co", "oil_gas", None, index_tier="NIFTYNEXT50")
-    midcap = _make_company(db_session, "MIDCO.NS", "Mid Co", "oil_gas", None, index_tier="NIFTYMIDCAP150")
+    next50 = _make_company(
+        db_session, "NEXT50CO.NS", "Next50 Co", "oil_gas", None, index_tier="NIFTYNEXT50",
+        sub_sector="refining_marketing",
+    )
+    midcap = _make_company(
+        db_session, "MIDCO.NS", "Mid Co", "oil_gas", None, index_tier="NIFTYMIDCAP150",
+        sub_sector="refining_marketing",
+    )
 
     mention = CompanyMention(
         name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="crude spike",
         confidence_score=55, time_horizon="Medium-Term",
     )
-    resolved = resolve_companies(db_session, [mention])
+    resolved = resolve_companies(
+        db_session, [mention], anchor_sub_sectors={"oil_gas": {"refining_marketing"}},
+    )
     resolved_ids = [r["company_id"] for r in resolved]
 
     assert resolved_ids.index(next50.id) < resolved_ids.index(midcap.id)
@@ -368,10 +399,112 @@ def test_resolve_drops_indirect_entry_whose_parent_ticker_never_resolved(db_sess
     assert resolved == []
 
 
-from app.companies.matching import aliases
+def test_sector_inference_entry_has_no_rationale(db_session):
+    db_session.add(Company(
+        ticker="ITC.NS", name="ITC Ltd.", sector="fmcg", index_tier="NIFTY50", sub_sector="staples_food",
+    ))
+    db_session.commit()
+
+    resolved = resolve_companies(
+        db_session,
+        [CompanyMention(
+            name="fmcg sector", is_direct=False, sector="fmcg",
+            direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+            rationale="Sector-wide exposure via fmcg: some template text",
+            time_horizon="Short-Term",
+        )],
+        anchor_sub_sectors={"fmcg": {"staples_food"}},
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0]["basis"] == "sector_inference"
+    assert resolved[0]["rationale"] is None
+
+
+def test_direct_mention_keeps_its_rationale(db_session):
+    db_session.add(Company(ticker="HPCL.NS", name="Hindustan Petroleum Corporation", sector="oil_gas", index_tier="NIFTY50"))
+    db_session.commit()
+
+    resolved = resolve_companies(db_session, [CompanyMention(
+        name="Hindustan Petroleum Corporation", ticker="HPCL.NS", is_direct=True,
+        direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+        rationale="Real, article-specific reasoning.", time_horizon="Short-Term",
+    )])
+
+    assert resolved[0]["rationale"] == "Real, article-specific reasoning."
+
+
+def test_fanout_prefers_companies_sharing_a_named_company_sub_sector(db_session):
+    db_session.add_all([
+        Company(ticker="ITC.NS", name="ITC Ltd.", sector="fmcg",
+                sub_sector="staples_food", index_tier="NIFTY50"),
+        Company(ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg",
+                sub_sector="retail", index_tier="NIFTY50"),
+        Company(ticker="NESTLEIND.NS", name="Nestle India Ltd.", sector="fmcg",
+                sub_sector="staples_food", index_tier="NIFTY50"),
+    ])
+    db_session.commit()
+
+    resolved = resolve_companies(
+        db_session,
+        [CompanyMention(
+            name="fmcg sector", is_direct=False, sector="fmcg",
+            direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+            rationale="r", time_horizon="Short-Term",
+        )],
+        anchor_sub_sectors={"fmcg": {"staples_food"}},
+    )
+
+    tickers = {r["company_id"] for r in resolved}
+    names = {
+        db_session.query(Company).get(cid).ticker for cid in tickers
+    }
+    assert names == {"ITC.NS", "NESTLEIND.NS"}
+
+
+def test_fanout_without_an_anchor_resolves_to_nothing_not_the_whole_sector(db_session):
+    # DELIBERATE BEHAVIOUR CHANGE, not a weakened test: this used to assert
+    # the opposite (a whole-sector fallback when no anchor was present).
+    # That fallback was the original plan's call
+    # ("an unanchored sector still deserves its exposure tier, just a less
+    # targeted one") and it was wrong -- measured on the real DB, fmcg has
+    # 408 rows and only 78 (19%) carry a sub_sector, so an anchor cannot
+    # form 81% of the time, and the unanchored top-3-by-market-cap fallback
+    # let ETERNAL.NS (large but sector-wide-irrelevant) win a slot on a
+    # story that never named it or anything like it. See the "no anchor ->
+    # no rows" comment at the resolve_companies call site: the fan-out's
+    # only justification is a named company's mechanism reaching
+    # structurally similar companies, and without an anchor there is no
+    # "structurally similar" to reach. Do NOT restore the fallback here.
+    db_session.add_all([
+        Company(ticker="ITC.NS", name="ITC Ltd.", sector="fmcg",
+                sub_sector="staples_food", index_tier="NIFTY50"),
+        Company(ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg",
+                sub_sector="retail", index_tier="NIFTY50"),
+    ])
+    db_session.commit()
+
+    resolved = resolve_companies(db_session, [CompanyMention(
+        name="fmcg sector", is_direct=False, sector="fmcg",
+        direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+        rationale="r", time_horizon="Short-Term",
+    )])
+
+    assert resolved == []
+
+
+def test_top_n_sector_companies_is_three():
+    from app.companies.resolution import TOP_N_SECTOR_COMPANIES
+    assert TOP_N_SECTOR_COMPANIES == 3
 
 
 def _sector_mention(sector):
+    # CompanyMention.name is a required str field (not Optional) -- a
+    # sector-wide fan-out mention doesn't use it for resolution (dispatch is
+    # on is_direct/sector, see resolve_companies), but it must still be a
+    # valid string to pass schema validation, consistent with how every
+    # other sector mention in this file is constructed (e.g. name="oil
+    # sector" above).
     return CompanyMention(
         name=f"{sector} sector", ticker=None, is_direct=False, sector=sector,
         direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
@@ -403,44 +536,170 @@ def test_ambiguous_name_resolves_to_nothing(db_session):
     assert resolve_companies(db_session, [_name_mention("Apollo")]) == []
 
 
+_OIL_GAS_ANCHOR = {"oil_gas": {"refining_marketing"}}
+
+
 def test_sector_fanout_ranks_by_market_cap(db_session):
     # BIG is in the lowest index tier but is far larger. Under the old
-    # _TIER_RANK-first ordering SMALL won; market cap now leads.
-    _make_company(db_session, "BIG.NS", "Big Oil Limited", "oil_gas", 900000.0, index_tier="OTHER")
-    _make_company(db_session, "SMALL.NS", "Small Oil Limited", "oil_gas", 100.0, index_tier="NIFTY50")
+    # _TIER_RANK-first ordering SMALL won; market cap now leads. Anchored
+    # to refining_marketing so the fan-out returns rows at all.
+    _make_company(
+        db_session, "BIG.NS", "Big Oil Limited", "oil_gas", 900000.0, index_tier="OTHER",
+        sub_sector="refining_marketing",
+    )
+    _make_company(
+        db_session, "SMALL.NS", "Small Oil Limited", "oil_gas", 100.0, index_tier="NIFTY50",
+        sub_sector="refining_marketing",
+    )
 
-    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")], anchor_sub_sectors=_OIL_GAS_ANCHOR)
     assert db_session.get(Company, resolved[0]["company_id"]).ticker == "BIG.NS"
 
 
 def test_sector_fanout_still_falls_back_to_index_tier_without_caps(db_session):
     # Guards the concurrent work in f39fd55: when no company has a market
     # cap, nullslast() leaves every row tied and _TIER_RANK must still
-    # decide the order.
-    _make_company(db_session, "LOW.NS", "Low Tier Oil Limited", "oil_gas", None, index_tier="OTHER")
-    _make_company(db_session, "HIGH.NS", "High Tier Oil Limited", "oil_gas", None, index_tier="NIFTY50")
+    # decide the order. Anchored so the fan-out returns rows at all.
+    _make_company(
+        db_session, "LOW.NS", "Low Tier Oil Limited", "oil_gas", None, index_tier="OTHER",
+        sub_sector="refining_marketing",
+    )
+    _make_company(
+        db_session, "HIGH.NS", "High Tier Oil Limited", "oil_gas", None, index_tier="NIFTY50",
+        sub_sector="refining_marketing",
+    )
 
-    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")], anchor_sub_sectors=_OIL_GAS_ANCHOR)
     assert db_session.get(Company, resolved[0]["company_id"]).ticker == "HIGH.NS"
 
 
 def test_sector_fanout_excludes_non_tradeable_companies(db_session):
-    shell = _make_company(db_session, "SHELL.BO", "Dormant Shell Limited", "oil_gas", 5000000.0, index_tier="OTHER")
+    shell = _make_company(
+        db_session, "SHELL.BO", "Dormant Shell Limited", "oil_gas", 5000000.0, index_tier="OTHER",
+        sub_sector="refining_marketing",
+    )
     shell.tradeability = "SUSPENDED"
     db_session.commit()
-    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
+    _make_company(
+        db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER",
+        sub_sector="refining_marketing",
+    )
 
-    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")], anchor_sub_sectors=_OIL_GAS_ANCHOR)
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
 
 
 def test_sector_fanout_excludes_global_companies(db_session):
-    xom = _make_company(db_session, "XOM", "Exxon Mobil", "oil_gas", 9000000.0, index_tier="GLOBAL_LARGE_CAP")
+    xom = _make_company(
+        db_session, "XOM", "Exxon Mobil", "oil_gas", 9000000.0, index_tier="GLOBAL_LARGE_CAP",
+        sub_sector="refining_marketing",
+    )
     xom.market = "GLOBAL"
     db_session.commit()
-    _make_company(db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER")
+    _make_company(
+        db_session, "REAL.NS", "Real Oil Limited", "oil_gas", 100.0, index_tier="OTHER",
+        sub_sector="refining_marketing",
+    )
 
-    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")])
+    resolved = resolve_companies(db_session, [_sector_mention("oil_gas")], anchor_sub_sectors=_OIL_GAS_ANCHOR)
     tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
     assert tickers == {"REAL.NS"}
+
+
+# --- I2: the direct-mention path must apply the same market/tradeability
+# filter as the sector fan-out branch above -- confirmed live, a direct
+# mention of "BP" resolved to a real Company row with basis='direct_mention'
+# because nothing restricted the ticker/alias lookup to tradeable Indian
+# rows. ---
+
+def test_direct_mention_to_a_global_company_does_not_resolve(db_session):
+    bp = _make_company(db_session, "BP", "BP plc", "oil_gas", 900000.0, index_tier="GLOBAL_LARGE_CAP")
+    bp.market = "GLOBAL"
+    db_session.commit()
+    mention = CompanyMention(
+        name="BP plc", ticker="BP", is_direct=True, sector=None,
+        direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0, rationale="refining margins",
+        confidence_score=70, time_horizon="Short-Term",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved == []
+
+
+def test_direct_mention_to_a_restricted_company_does_not_resolve(db_session):
+    company = _make_company(db_session, "RESTRICTED.NS", "Restricted Co Ltd.", "oil_gas", 900000.0)
+    company.tradeability = "RESTRICTED"
+    db_session.commit()
+    mention = CompanyMention(
+        name="Restricted Co Ltd.", ticker="RESTRICTED.NS", is_direct=True, sector=None,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="n/a",
+        confidence_score=70, time_horizon="Short-Term",
+    )
+
+    resolved = resolve_companies(db_session, [mention])
+
+    assert resolved == []
+
+
+# --- I3: a resolution-level regression guard for the actual fan-out
+# behaviour, since score_golden.py only scores already-persisted rows and
+# is blind to a company like ETERNAL.NS moving in and out of a sector's
+# fan-out.
+#
+# UPDATED after a follow-up review: an earlier version of this test pinned
+# "ETERNAL.NS loses to 3 bigger fmcg names in an unanchored top-3" -- that
+# was still wrong, because it assumed the unanchored fallback should exist
+# at all. Measured on the real DB, ETERNAL.NS legitimately re-enters fmcg
+# post-repair (sub_sector "retail", not a catch-all) with a genuinely large
+# market cap (~Rs 3.01T -- Eternal/Zomato really is that size, not a
+# data-quality artifact), and DOES rank in the real top-3 by market cap,
+# ahead of NESTLEIND.NS. Filtering the exact 3 largest fmcg names apart
+# from ETERNAL.NS is not a stable defense: whichever unrelated company is
+# currently largest wins the unanchored slot, on any sector, forever. The
+# actual fix (this branch) is that an unanchored fan-out returns NOTHING --
+# see the "no anchor -> no rows" comment in resolve_companies. This test
+# now asserts exactly that: ETERNAL.NS cannot appear because NO company
+# can, regardless of market cap, when the mention carries no anchor. ---
+
+def test_unanchored_fmcg_fanout_returns_nothing_regardless_of_eternal_market_cap(db_session):
+    _make_company(db_session, "HINDUNILVR.NS", "Hindustan Unilever Ltd.", "fmcg", 5_000_000.0, index_tier="OTHER")
+    _make_company(db_session, "ITC.NS", "ITC Ltd.", "fmcg", 4_000_000.0, index_tier="OTHER")
+    _make_company(db_session, "NESTLEIND.NS", "Nestle India Ltd.", "fmcg", 3_000_000.0, index_tier="OTHER")
+    _make_company(db_session, "ETERNAL.NS", "Eternal Ltd.", "fmcg", 3_010_000.0, index_tier="OTHER")
+
+    resolved = resolve_companies(db_session, [_sector_mention("fmcg")])
+
+    # Asserts on the actual returned set, not a count: this fails just as
+    # loudly if resolve_companies starts returning ANY company here (a
+    # revived whole-sector fallback), not only if it specifically revives
+    # ETERNAL.NS.
+    assert resolved == []
+
+
+def test_anchored_fmcg_fanout_still_excludes_eternal_when_anchor_points_elsewhere(db_session):
+    # Companion to the unanchored case above: when an anchor IS present
+    # (the model named a real personal_care/staples_food company), the
+    # fan-out must still exclude ETERNAL.NS (sub_sector "retail") on its
+    # own sub-sector merits, market cap aside -- this is the anchored path
+    # that closes the originally-reported bug. Duplicates the intent of
+    # test_fanout_prefers_companies_sharing_a_named_company_sub_sector
+    # above with ETERNAL.NS given the larger market cap, so a ranking-only
+    # "fix" that dropped the anchor filter but kept ordering would still
+    # be caught here.
+    _make_company(
+        db_session, "HINDUNILVR.NS", "Hindustan Unilever Ltd.", "fmcg", 1_000_000.0, index_tier="OTHER",
+        sub_sector="personal_care",
+    )
+    _make_company(
+        db_session, "ETERNAL.NS", "Eternal Ltd.", "fmcg", 3_010_000.0, index_tier="OTHER",
+        sub_sector="retail",
+    )
+
+    resolved = resolve_companies(
+        db_session, [_sector_mention("fmcg")], anchor_sub_sectors={"fmcg": {"personal_care"}},
+    )
+
+    tickers = {db_session.get(Company, r["company_id"]).ticker for r in resolved}
+    assert tickers == {"HINDUNILVR.NS"}

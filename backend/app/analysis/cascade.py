@@ -38,6 +38,8 @@ from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
+from app.analysis.verification import verify_companies
+from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -438,13 +440,22 @@ _COMPANY_ITEM_REQUIRED = [
 ]
 
 
-def build_company_tool(parent_tickers: list[str] | None) -> dict:
+def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str] | None = None) -> dict:
     """parent_tickers=None builds the direct/primary-stage tool (stage 3, no
     parent_ticker field). A non-empty list builds a cascade-stage tool
     (stages 5/7), adding a parent_ticker field enum-constrained to
-    parent_tickers so the model cannot invent a nonexistent parent."""
+    parent_tickers so the model cannot invent a nonexistent parent.
+
+    valid_tickers, when given, enum-constrains `ticker` to companies that
+    actually exist in the database (see app.companies.candidates) -- the
+    model selects from real rows instead of recalling a symbol. Left
+    unconstrained (nullable string) when None, preserving the ungrounded
+    behavior for callers with no DB session.
+    """
     properties = dict(_COMPANY_ITEM_PROPERTIES)
     required = list(_COMPANY_ITEM_REQUIRED)
+    if valid_tickers:
+        properties["ticker"] = {"type": "string", "enum": valid_tickers}
     if parent_tickers:
         properties["parent_ticker"] = {"type": "string", "enum": parent_tickers}
         required.append("parent_ticker")
@@ -481,7 +492,7 @@ def build_company_tool(parent_tickers: list[str] | None) -> dict:
 
 def _identify_companies(
     client, facts: str, sectors: list[SectorFinding], impact_level: str,
-    parent_pool: list[CompanyMention] | None,
+    parent_pool: list[CompanyMention] | None, session=None,
 ) -> list[CompanyMention]:
     """sectors: the sector(s) to find companies within (from a prior
     _identify_sectors call). impact_level: stamped onto every returned
@@ -580,6 +591,24 @@ def _identify_companies(
         )
         parent_context = f"\n\nMust chain from one of these companies:\n{parent_lines}"
 
+    # Grounding (see app.companies.candidates): give the model the real
+    # companies in these sectors so it selects rather than recalls. session
+    # is None for callers with no DB (older tests) -- those stay ungrounded.
+    valid_tickers: list[str] | None = None
+    candidate_block = ""
+    if session is not None:
+        candidates = candidate_companies(session, [s.sector for s in sectors])
+        if candidates:
+            valid_tickers = candidate_tickers(candidates)
+            candidate_block = (
+                "\n\nCANDIDATE COMPANIES -- choose ONLY from this list. These are "
+                "the real, tradeable companies in the sectors above, with what "
+                "each actually does. A company not in this list cannot be "
+                "recorded, so do not name one. Selecting NONE of them for a "
+                "sector is a correct answer when none genuinely fits.\n"
+                + format_candidates(candidates)
+            )
+
     rationale_instructions = COMPANY_RATIONALE_INSTRUCTIONS if parent_pool is None else CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
 
     def _compose(instructions: str) -> str:
@@ -598,13 +627,19 @@ def _identify_companies(
         without splitting the cacheable prefix. Nothing about the
         instructions themselves changes here -- only where they sit
         relative to the data they apply to.
+
+        `candidate_block` (the real DB companies this call must choose from)
+        rides the variable tail, not the prefix: it is derived from THIS
+        call's sectors, so it is not cacheable, and it must stay adjacent to
+        the sector lines it enumerates.
         """
         return (
             f"{framing}\n\n"
             f"{instructions}\n\n"
             f"Facts: {facts}\n\n"
             f"Sectors:\n{sector_lines}"
-            f"{parent_context}\n\n"
+            f"{parent_context}"
+            f"{candidate_block}\n\n"
             "Now apply the instructions above to these facts and sectors, "
             "filling in every field exactly as they specify."
         )
@@ -613,7 +648,7 @@ def _identify_companies(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": _compose(rationale_instructions)},
     ]
-    tool = build_company_tool(parent_tickers if parent_tickers else None)
+    tool = build_company_tool(parent_tickers if parent_tickers else None, valid_tickers=valid_tickers)
 
     def _call(model: str):
         return client.chat.completions.create(
@@ -657,10 +692,23 @@ def _identify_companies(
         raise ValueError("No record_sector_companies tool_use block")
     arguments = json.loads(tool_call.function.arguments)
 
+    # Provider-side enum enforcement is not reliable for nested array items
+    # (see the SECTORS filter at the end of _identify_sectors for the same
+    # failure mode confirmed in production). When grounding is active, drop
+    # any ticker outside the candidate list rather than letting an invented
+    # symbol through to resolution.
+    allowed = set(valid_tickers) if valid_tickers else None
+
     mentions: list[CompanyMention] = []
     for group in arguments.get("sector_companies", []):
         sector = group.get("sector")
         for company in group.get("companies", []):
+            if allowed is not None and company.get("ticker") not in allowed:
+                logger.warning(
+                    "dropping off-candidate ticker %r (%r) from grounded company stage",
+                    company.get("ticker"), company.get("name"),
+                )
+                continue
             mentions.append(CompanyMention(
                 name=company["name"], ticker=company.get("ticker"), is_direct=True,
                 sector=sector, direction=company["direction"],
@@ -677,6 +725,7 @@ def _identify_companies(
 
 def _identify_cascade_companies_per_sector(
     client, facts: str, sectors: list[SectorFinding], impact_level: str, parent_pool: list[CompanyMention],
+    session=None,
 ) -> tuple[list[CompanyMention], list[dict]]:
     """Calls _identify_companies ONCE PER SECTOR rather than bundling every
     cascade sector into one call. Confirmed in production: bundling 5-7
@@ -704,7 +753,10 @@ def _identify_cascade_companies_per_sector(
         succeeded = False
         for attempt in range(2):  # try once, retry once
             try:
-                mentions.extend(_identify_companies(client, facts, [sector], impact_level=impact_level, parent_pool=parent_pool))
+                mentions.extend(_identify_companies(
+                    client, facts, [sector], impact_level=impact_level,
+                    parent_pool=parent_pool, session=session,
+                ))
                 succeeded = True
                 break
             except Exception as exc:
@@ -946,8 +998,24 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
     return edges
 
 
+# Event types whose mechanism is genuinely broad enough that "every prominent
+# company in this sector has some exposure" is a defensible claim -- a rate,
+# commodity, currency, or trade/policy move really does reach costs, credit,
+# or spending across a whole sector.
+#
+# Everything else is narrow: one company's earnings, one deal, one contract
+# win. For those, sector-wide fan-out asserts an exposure that does not
+# exist, which is most of what made alerts balloon to 35 companies. A narrow
+# story's companies come from the analyzed stages alone.
+BROAD_EVENT_TYPES = frozenset({
+    "repo_rate_change", "inflation", "macro_data", "fiscal_policy",
+    "monsoon_weather", "crude_oil", "commodity_price", "currency_move",
+    "global_rates", "trade_policy",
+})
+
+
 def _sector_fanout_mentions(
-    sectors: list[SectorFinding], impact_level: str, parent_ticker: str | None = None,
+    sectors: list[SectorFinding], impact_level: str,
 ) -> list[CompanyMention]:
     """Deterministic sector-wide fan-out: whatever specific companies the LLM
     named for a sector (direct or cascade alike) is confirmed in production to
@@ -959,16 +1027,13 @@ def _sector_fanout_mentions(
     already deduplicated against the LLM's own picks by resolve_companies's
     seen_company_ids, so a company already named is never added twice.
 
-    impact_level/parent_ticker: for a cascade sector (indirect_l1/l2), every
-    company this deterministic add resolves to needs SOME parent to chain
-    from (resolve_companies drops an indirect entry with no resolvable
-    parent) -- parent_ticker should be the cascade stage's own parent pool's
-    first ticker. A deterministic add has no LLM-stated specific link to any
-    ONE parent (unlike the LLM's own cascade picks, which each state which
-    specific parent they chain from), so attributing it to the pool's first
-    company is an honest simplification, not a real claim about that
-    specific link -- same "reach for the strongest available signal, don't
-    fabricate specificity" discipline used elsewhere in this pipeline.
+    impact_level is stamped onto every returned mention. The sole caller
+    (analyze_article) only ever invokes this at the primary/direct level --
+    fan-out is deliberately never applied to a cascade sector (see
+    BROAD_EVENT_TYPES's usage below: "a cascade sector is already one hop
+    from the news; fanning it out ... stacks a generic claim on top of an
+    indirect one") -- so parent_ticker is always left at its default (None)
+    here; a direct-level CompanyMention needs no parent to chain from.
 
     magnitude_low/high are placeholders (this is a sector, not a company the
     LLM ever estimated a range for) -- unused by feed-v2 (which only ever
@@ -980,13 +1045,13 @@ def _sector_fanout_mentions(
             name=f"{sector.sector} sector", is_direct=False, sector=sector.sector,
             direction=sector.direction, magnitude_low=1.0, magnitude_high=3.0,
             rationale=f"Sector-wide exposure via {sector.sector}: {sector.mechanism}",
-            time_horizon="Short-Term", impact_level=impact_level, parent_ticker=parent_ticker,
+            time_horizon="Short-Term", impact_level=impact_level,
         )
         for sector in sectors
     ]
 
 
-def analyze_article(client, title: str, content: str) -> AnalysisOutput:
+def analyze_article(client, title: str, content: str, session=None) -> AnalysisOutput:
     """Runs the sector-cascade chain (see module docstring for why the call
     count now scales with cascade sector count) and composes the result into the
     same AnalysisOutput shape app.pipeline.py already consumes. Failure
@@ -1018,14 +1083,22 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
 
     try:
         primary_companies = _identify_companies(
-            client, facts_result.facts, primary_sectors, impact_level="direct", parent_pool=None,
+            client, facts_result.facts, primary_sectors, impact_level="direct",
+            parent_pool=None, session=session,
         )
     except Exception as exc:
         logger.warning("cascade stage 3 (primary companies) failed, truncating: %s", exc)
         primary_companies = []
     all_companies.extend(primary_companies)
 
-    all_companies.extend(_sector_fanout_mentions(primary_sectors, impact_level="direct"))
+    # Fan-out only for genuinely broad events, and only at the primary level.
+    # A cascade sector is already one hop from the news; fanning it out to
+    # every prominent constituent stacks a generic claim on top of an
+    # indirect one, which is where the worst noise came from (auto and
+    # banking names on a crude-oil story via L1/L2 fan-out).
+    fanout_allowed = facts_result.event_type in BROAD_EVENT_TYPES
+    if fanout_allowed:
+        all_companies.extend(_sector_fanout_mentions(primary_sectors, impact_level="direct"))
 
     l1_parent_tickers_present = [c for c in primary_companies if c.ticker]
     if l1_parent_tickers_present:
@@ -1038,16 +1111,12 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
         if l1_sectors:
             l1_companies, l1_gaps = _identify_cascade_companies_per_sector(
                 client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
-                parent_pool=l1_parent_tickers_present,
+                parent_pool=l1_parent_tickers_present, session=session,
             )
         else:
             l1_companies, l1_gaps = [], []
         all_companies.extend(l1_companies)
         all_gaps.extend(l1_gaps)
-        if l1_sectors:
-            all_companies.extend(_sector_fanout_mentions(
-                l1_sectors, impact_level="indirect_l1", parent_ticker=l1_parent_tickers_present[0].ticker,
-            ))
 
         l2_parent_tickers_present = [c for c in l1_companies if c.ticker]
         if l1_sectors and l2_parent_tickers_present:
@@ -1060,16 +1129,18 @@ def analyze_article(client, title: str, content: str) -> AnalysisOutput:
             if l2_sectors:
                 l2_companies, l2_gaps = _identify_cascade_companies_per_sector(
                     client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
-                    parent_pool=l2_parent_tickers_present,
+                    parent_pool=l2_parent_tickers_present, session=session,
                 )
             else:
                 l2_companies, l2_gaps = [], []
             all_companies.extend(l2_companies)
             all_gaps.extend(l2_gaps)
-            if l2_sectors:
-                all_companies.extend(_sector_fanout_mentions(
-                    l2_sectors, impact_level="indirect_l2", parent_ticker=l2_parent_tickers_present[0].ticker,
-                ))
+
+    # Verification (see app.analysis.verification): the only stage that asks
+    # whether a company BELONGS rather than asking for more companies. Runs
+    # once over the whole assembled list, after every generative stage and
+    # before edges, so a dropped company never reaches the graph either.
+    all_companies = verify_companies(client, facts_result.facts, title, all_companies)
 
     try:
         edges = _generate_edges(client, facts_result.facts, facts_result.event_type, all_companies)

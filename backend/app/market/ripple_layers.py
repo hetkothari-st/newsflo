@@ -115,6 +115,20 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     rows_flat: list[dict] = []
     contexts: list[RowContext] = []
     bucket_keys: list[str] = []
+    # True only for deterministic sector-wide fan-out rows (basis ==
+    # "sector_inference") -- the actual condition "is not a fan-out row",
+    # never a proxy. bucket_keys[i] == "SECTOR_WIDE" is NOT equivalent to
+    # this: relation_to_ripple_relationship returns SECTOR_WIDE for several
+    # genuinely-analyzed relations (credit_cost/regulation/currency/
+    # correlation) AND as its default for an unrecognized/empty relation --
+    # which engine_relation always is for a company with no ImpactEdge at
+    # all. Using bucket_keys as the fan-out proxy barred every such
+    # genuinely-analyzed indirect_l1/indirect_l2 row from tiers 1
+    # (generated layers) and 2 (static template), even though it was
+    # legitimately offered to refinement's generate_ripple_layers and may
+    # have been grouped into a section there -- silently dropping it at
+    # read time instead.
+    is_fanout: list[bool] = []
     for alert_company in alert.companies:
         company = alert_company.company
         move = moves_by_company_id.get(alert_company.company_id)
@@ -122,7 +136,18 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         exposure_only = is_exposure_only(status)
 
         engine_relation = relation_by_company_id.get(alert_company.company_id, "")
-        if alert_company.impact_level == "direct":
+        # basis, not impact_level, decides the bucket. A sector-inference row
+        # is deterministic fan-out (app.analysis.cascade._sector_fanout_mentions
+        # -> app.companies.resolution's top-N-by-tier expansion) with no
+        # article-specific reasoning behind it, and it carries
+        # impact_level="direct" for a PRIMARY sector -- so dispatching on
+        # impact_level rendered it identically to a genuinely analyzed
+        # company. Confirmed live: ETERNAL.NS (food delivery) shown as
+        # "directly affected" by a crude-oil supply shock. Sector exposure is
+        # still shown, but only ever in the SECTOR_WIDE bucket.
+        if alert_company.basis == "sector_inference":
+            relationship = "SECTOR_WIDE"
+        elif alert_company.impact_level == "direct":
             relationship = "DIRECT"
         else:
             relationship = relation_to_ripple_relationship(engine_relation)
@@ -154,6 +179,7 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             row["intensity"] = _intensity_for_company_move(session, company, move, breadth_score)
         rows_flat.append(row)
         bucket_keys.append(relationship)
+        is_fanout.append(alert_company.basis == "sector_inference")
         contexts.append(RowContext(
             sector=company.sector,
             sub_sector=company.sub_sector,
@@ -179,7 +205,21 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         .all()
     )
     if generated:
-        index_by_ticker = {rows_flat[i]["ticker"]: i for i in remaining_indices}
+        # Only analyzed rows are claimable by a generated (tier-1) layer.
+        # A sector-inference row is deterministic fan-out with no
+        # article-specific reasoning; letting a story-specific section claim
+        # it would bypass the SECTOR_WIDE routing above and reintroduce the
+        # exact misrepresentation that routing exists to prevent. Tested on
+        # is_fanout (basis == "sector_inference"), NOT bucket_keys ==
+        # "SECTOR_WIDE" -- a genuinely analyzed row can also land in the
+        # SECTOR_WIDE bucket (e.g. no ImpactEdge at all, or a
+        # credit_cost/regulation/currency/correlation relation), and must
+        # still be claimable here.
+        index_by_ticker = {
+            rows_flat[i]["ticker"]: i
+            for i in remaining_indices
+            if not is_fanout[i]
+        }
         claimed: set[int] = set()
         for gen_layer in generated:
             row_indices = [
@@ -211,6 +251,29 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         template = template_layers_for(alert.event_type)
     if template is not None:
         assigned, unmatched = assign_to_template(template, contexts)
+        # RowContext carries no `basis`, so a template matcher keyed on
+        # sector or impact_level alone (MACRO_POLICY's "banks vs NBFCs",
+        # SUPPLY_CHAIN's "protected makers") will happily claim a
+        # deterministic fan-out row into a DIRECT-family layer -- the same
+        # misrepresentation the bucket routing above exists to prevent, one
+        # tier up. Rather than teach every matcher about basis (and reshape
+        # RowContext for it), pull fan-out rows back out of whatever they
+        # were assigned to and let them fall through to the generic buckets,
+        # where the routing already sends them to SECTOR_WIDE. Filtering
+        # `contexts` before the call is NOT an option: assigned/unmatched are
+        # indices into that list. Tested on is_fanout, not bucket_keys ==
+        # "SECTOR_WIDE" -- see the is_fanout comment above; the same
+        # over-broad proxy would otherwise pull genuinely-analyzed rows back
+        # out of a template layer they were correctly assigned to.
+        reclaimed = []
+        for layer_index, row_indices in list(assigned.items()):
+            kept = [i for i in row_indices if not is_fanout[i]]
+            reclaimed.extend(i for i in row_indices if is_fanout[i])
+            if kept:
+                assigned[layer_index] = kept
+            else:
+                del assigned[layer_index]
+        unmatched = sorted(set(unmatched) | set(reclaimed))
         for layer_index, layer_def in enumerate(template):
             row_indices = assigned.get(layer_index)
             if not row_indices:

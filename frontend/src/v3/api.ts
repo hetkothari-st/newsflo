@@ -51,6 +51,9 @@ export interface FeedAlert {
   peak_ticker: string;
   peak_company_name: string;
   peak_cap_tier: CapTier | null;
+  // Distinct tiers across ALL tagged companies -- drives the top-bar cap
+  // filter (a story matches when any affected company sits in the tier).
+  cap_tiers: CapTier[];
   verdict: Verdict;
   intensity: Intensity;
   breadth_score: number;

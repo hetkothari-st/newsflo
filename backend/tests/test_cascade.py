@@ -4,11 +4,12 @@ from types import SimpleNamespace
 import pytest
 
 from app.analysis.cascade import (
-    analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
+    BROAD_EVENT_TYPES, analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
     _identify_companies, _identify_sectors, _sector_fanout_mentions, _sector_mechanism_edges,
     build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
+from app.models import Company
 from app.reasoning.rulebook import CHAINS
 
 
@@ -565,6 +566,15 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
                 elif name == "record_sector_companies":
                     response = self._outer._company_responses[self._outer._company_call_count]
                     self._outer._company_call_count += 1
+                elif name == "record_company_verdicts":
+                    # Verification stage (app.analysis.verification) runs
+                    # once over the whole assembled company list, after every
+                    # generative stage and before edges -- not itself under
+                    # test here, just needs a well-formed response (every
+                    # company kept) so this end-to-end test isn't coupled to
+                    # verification behavior.
+                    tickers = kwargs["tools"][0]["function"]["parameters"]["properties"]["verdicts"]["items"]["properties"]["ticker"]["enum"]
+                    response = {"verdicts": [{"ticker": t, "belongs": True} for t in tickers]}
                 elif name == "record_edge_verification":
                     # currency_move has a CHAINS entry, so analyze_article's
                     # final stage (_generate_edges) makes one verification
@@ -593,14 +603,19 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
 
     assert result.category == "macro_policy"
     assert result.event_type == "currency_move"
-    assert len(result.companies) == 4
-    direct, sector_wide, cascade, cascade_sector_wide = result.companies
+    # 3, not 4: the deterministic sector-wide fan-out now only fires at the
+    # primary level -- both cascade fan-out call sites (L1/L2) were deleted
+    # entirely (Task 11), so the L1 cascade sector (railways_transport) gets
+    # no sector-wide mention of its own, only the LLM-named cascade company.
+    assert len(result.companies) == 3
+    direct, sector_wide, cascade = result.companies
     assert direct.ticker == "HDFCBANK.NS"
     assert direct.impact_level == "direct"
     assert direct.parent_ticker is None
     # One deterministic sector-wide fan-out mention per primary sector (here
     # just "banking") -- lets resolve_companies's top-N-by-tier lookup add
     # this sector's other real companies regardless of what the LLM named.
+    # currency_move is a BROAD_EVENT_TYPES member, so the gate lets it fire.
     assert sector_wide.is_direct is False
     assert sector_wide.sector == "banking"
     assert sector_wide.direction == "bearish"
@@ -608,23 +623,17 @@ def test_analyze_article_composes_all_seven_stages_end_to_end():
     assert cascade.ticker == "IRCTC.NS"
     assert cascade.impact_level == "indirect_l1"
     assert cascade.parent_ticker == "HDFCBANK.NS"
-    # Same deterministic fan-out, now for the L1 cascade sector
-    # (railways_transport) -- chained from the L1 stage's own parent pool
-    # (here just HDFC Bank, the only primary company with a ticker).
-    assert cascade_sector_wide.is_direct is False
-    assert cascade_sector_wide.sector == "railways_transport"
-    assert cascade_sector_wide.impact_level == "indirect_l1"
-    assert cascade_sector_wide.parent_ticker == "HDFCBANK.NS"
-    # 7 calls: facts, primary sectors, primary companies, L1 sectors, L1
+    # 8 calls: facts, primary sectors, primary companies, L1 sectors, L1
     # companies, L2 sectors -- the L2-sector call DOES run (L1 sectors and
     # L1 companies-with-tickers are both non-empty, so the orchestrator's
     # guards let it through), but it returns zero L2 sectors, so stage 7
-    # (L2 companies) never runs -- then one final edge-verification call
+    # (L2 companies) never runs -- then one company-verification call (see
+    # app.analysis.verification) and finally one edge-verification call
     # (currency_move has a CHAINS entry) before edges are returned.
     assert client.calls == [
         "record_facts", "record_sectors", "record_sector_companies",
         "record_sectors", "record_sector_companies", "record_sectors",
-        "record_edge_verification",
+        "record_company_verdicts", "record_edge_verification",
     ]
     # Both real sectors found across the run (banking primary, railways_transport
     # L1) get their own news->sector mechanism edge, carrying the actual
@@ -652,8 +661,11 @@ def test_analyze_article_propagates_primary_sector_stage_failure():
 
 
 def test_analyze_article_truncates_and_returns_direct_companies_when_primary_company_stage_fails():
+    # event_type must be a BROAD_EVENT_TYPES member for the deterministic
+    # fan-out to fire at all (see test_broad_event_types_include_rate_and_
+    # commodity_moves) -- "repo_rate_change" here, not "other".
     client = ScriptedClient({
-        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_facts": {"facts": "f", "category": "other", "event_type": "repo_rate_change"},
         "record_sectors": {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "m"}]},
         "record_sector_companies": ValueError("boom"),
     })
@@ -670,18 +682,21 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
     assert result.companies[0].sector == "banking"
 
 
-def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level_and_parent():
+def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level():
+    # parent_ticker was removed as a dead parameter -- the L1/L2 cascade call
+    # sites that used to pass it were deleted, and the sole remaining caller
+    # (analyze_article, at the primary/direct level only) never does.
     sectors = [
         SectorFinding(sector="auto", direction="bearish", mechanism="input cost pass-through"),
         SectorFinding(sector="metals", direction="bullish", mechanism="commodity price rise"),
     ]
 
-    mentions = _sector_fanout_mentions(sectors, impact_level="indirect_l2", parent_ticker="MARUTI.NS")
+    mentions = _sector_fanout_mentions(sectors, impact_level="indirect_l2")
 
     assert len(mentions) == 2
     assert all(m.is_direct is False for m in mentions)
     assert all(m.impact_level == "indirect_l2" for m in mentions)
-    assert all(m.parent_ticker == "MARUTI.NS" for m in mentions)
+    assert all(m.parent_ticker is None for m in mentions)
     assert {m.sector for m in mentions} == {"auto", "metals"}
     assert {m.direction for m in mentions} == {"bearish", "bullish"}
 
@@ -702,9 +717,10 @@ def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
     # the named company so the L1/L2 cascade stages never trigger (keeps
     # this test scoped to stage 3's own output, not the whole 7-stage chain
     # -- see test_analyze_article_composes_all_seven_stages_end_to_end for
-    # that).
+    # that). event_type must be a BROAD_EVENT_TYPES member for fan-out to
+    # fire at all -- "crude_oil" here, not "other".
     client = ScriptedClient({
-        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_facts": {"facts": "f", "category": "other", "event_type": "crude_oil"},
         "record_sectors": {"sectors": [
             {"sector": "banking", "direction": "bearish", "mechanism": "rate exposure"},
             {"sector": "oil_gas", "direction": "bullish", "mechanism": "crude price pass-through"},
@@ -725,6 +741,35 @@ def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
     assert by_sector["oil_gas"].direction == "bullish"
     assert all(c.impact_level == "direct" for c in sector_wide)
     assert all(c.ticker is None for c in sector_wide)
+
+
+def test_analyze_article_skips_fanout_for_a_narrow_event_type():
+    # Same setup as test_analyze_article_adds_one_sector_wide_mention_per_
+    # primary_sector (two primary sectors, one LLM-named direct company in
+    # "banking" only, "oil_gas" left with no specific company) -- but
+    # event_type is "earnings", a NARROW event NOT in BROAD_EVENT_TYPES.
+    # This directly proves the gate is wired into the call site itself, not
+    # just that BROAD_EVENT_TYPES contains the right strings in isolation --
+    # the two "other"-event tests elsewhere in this file don't assert
+    # company composition, so they'd pass identically whether the gate
+    # existed or not.
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "earnings"},
+        "record_sectors": {"sectors": [
+            {"sector": "banking", "direction": "bearish", "mechanism": "rate exposure"},
+            {"sector": "oil_gas", "direction": "bullish", "mechanism": "crude price pass-through"},
+        ]},
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [_full_company("HDFC Bank", None)]},
+        ]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    named = [c for c in result.companies if c.name == "HDFC Bank"]
+    sector_wide = [c for c in result.companies if c.is_direct is False]
+    assert len(named) == 1
+    assert sector_wide == []
 
 
 def test_analyze_article_logs_swallowed_stage_failures(caplog):
@@ -949,3 +994,127 @@ def test_generate_edges_missing_verification_for_one_index_kept_unverified_not_d
     missing = [e for e in edges if "[UNVERIFIED" in e["note"]]
     assert len(missing) == 1
     assert missing[0]["from"] == proposed[1]["from"]
+
+
+def test_company_tool_enum_constrains_ticker_to_candidates():
+    tool = build_company_tool(None, valid_tickers=["HPCL.NS", "BPCL.NS"])
+    ticker_schema = (
+        tool["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert ticker_schema["enum"] == ["HPCL.NS", "BPCL.NS"]
+
+
+def test_company_tool_leaves_ticker_unconstrained_without_candidates():
+    tool = build_company_tool(None)
+    ticker_schema = (
+        tool["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert "enum" not in ticker_schema
+
+
+def test_identify_companies_injects_candidates_into_the_prompt(db_session):
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas",
+        index_tier="NIFTY50", business_desc="Refines crude oil.",
+    ))
+    db_session.commit()
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+    _identify_companies(
+        client, facts="facts", sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    prompt = client.last_messages[1]["content"]
+    assert "HPCL.NS" in prompt
+    assert "Refines crude oil." in prompt
+
+
+def test_identify_companies_drops_a_ticker_outside_the_candidate_list(db_session):
+    # Provider enums are not reliably enforced for nested array items
+    # (cascade.py:282) -- the defensive post-filter must catch this rather
+    # than let an invented ticker through to resolution.
+    db_session.add(Company(
+        ticker="HPCL.NS", name="Hindustan Petroleum", sector="oil_gas", index_tier="NIFTY50",
+    ))
+    db_session.commit()
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": [{
+        "sector": "oil_gas",
+        "companies": [
+            _full_company("Hindustan Petroleum", "HPCL.NS"),
+            _full_company("Invented Ltd.", "INVENTED.NS"),
+        ],
+    }]}})
+
+    mentions = _identify_companies(
+        client, facts="facts", sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    assert [m.ticker for m in mentions] == ["HPCL.NS"]
+
+
+def test_identify_companies_without_a_session_stays_ungrounded(db_session):
+    # db_session is seeded with nothing and passed nowhere here -- proves a
+    # caller that omits `session` entirely (the default) gets the exact old,
+    # unconstrained behavior even though a DB is available in-process.
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": [{
+        "sector": "oil_gas",
+        "companies": [_full_company("Anything Ltd.", "ANY.NS")],
+    }]}})
+
+    mentions = _identify_companies(
+        client, facts="facts", sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None,
+    )
+
+    assert [m.ticker for m in mentions] == ["ANY.NS"]
+
+
+def test_analyze_article_drops_a_company_verification_rejects(monkeypatch):
+    import app.analysis.cascade as cascade_module
+
+    monkeypatch.setattr(
+        cascade_module, "verify_companies",
+        lambda client, facts, title, companies: [c for c in companies if c.ticker != "BAD.NS"],
+    )
+    # ScriptedClient (defined above) keys its canned response by tool name,
+    # not by call order -- reused for every subsequent call to the same
+    # tool (e.g. the L1/L2 cascade sector and company stages that follow
+    # the primary ones), which is fine here: event_type "other" has no
+    # CHAINS entry, so _generate_edges never makes its own verify call, and
+    # verify_companies itself is monkeypatched above rather than exercised
+    # for real. The only thing under test is that analyze_article actually
+    # calls (the monkeypatched) verify_companies and uses its result --
+    # not the cascade's own sector/company reasoning.
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [{"sector": "banking", "direction": "bearish", "mechanism": "m"}]},
+        "record_sector_companies": {"sector_companies": [{
+            "sector": "banking",
+            "companies": [
+                _full_company("Good Ltd.", "GOOD.NS"),
+                _full_company("Bad Ltd.", "BAD.NS"),
+            ],
+        }]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    tickers = [c.ticker for c in result.companies]
+    assert "BAD.NS" not in tickers
+    assert "GOOD.NS" in tickers
+
+
+def test_broad_event_types_include_rate_and_commodity_moves():
+    assert "repo_rate_change" in BROAD_EVENT_TYPES
+    assert "crude_oil" in BROAD_EVENT_TYPES
+
+
+def test_narrow_event_types_are_excluded():
+    assert "earnings" not in BROAD_EVENT_TYPES
+    assert "merger_acquisition" not in BROAD_EVENT_TYPES
+    assert "order_win_contract" not in BROAD_EVENT_TYPES

@@ -2,11 +2,15 @@ from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.analysis.schemas import CompanyMention
+from app.companies.integrity import DEMO_TICKERS, is_demo_company
 from app.companies.matching import matcher
 from app.config import settings
 from app.models import Company
 
-TOP_N_SECTOR_COMPANIES = 5
+# Lowered from 5. Fan-out is an exposure tier, not an analysis tier -- three
+# prominent constituents convey "this sector has exposure" as well as five
+# do, at 40% less noise.
+TOP_N_SECTOR_COMPANIES = 3
 
 # Portable (SQLite + Postgres) ordering expression: rank companies by index
 # tier so sector-inference picks the most prominent companies first. Lower
@@ -35,7 +39,15 @@ def _to_resolved(
         "direction": mention.direction,
         "magnitude_low": mention.magnitude_low,
         "magnitude_high": mention.magnitude_high,
-        "rationale": mention.rationale,
+        # A sector-inference row's "rationale" is a template built from the
+        # sector's own one-line mechanism (app.analysis.cascade.
+        # _sector_fanout_mentions), not reasoning about THIS company -- and
+        # it reads exactly like analysis, which is how a food-delivery
+        # company came to carry a paragraph about crude-driven packaging
+        # costs. Persist nothing rather than something that misrepresents
+        # itself; the row still renders as a flagged exposure via
+        # app.reasoning.ripple_relationship.is_exposure_only.
+        "rationale": None if basis == "sector_inference" else mention.rationale,
         "key_points": mention.key_points,
         # Raw LLM value if present, otherwise None -- always overwritten by
         # app.reasoning.confidence.compute_confidence before persistence
@@ -52,6 +64,15 @@ def _to_resolved(
         "impact_level": impact_level,
         "parent_company_id": parent_company_id,
     }
+
+
+def _is_tradeable_indian(company: Company) -> bool:
+    """Same market/tradeability restriction as this module's own fan-out
+    branch (below) -- without it, a direct mention resolving to a
+    RESTRICTED/SME/SUSPENDED row, or a curated GLOBAL row, persists as a
+    real alert_companies row with basis='direct_mention'. Confirmed live: a
+    direct mention of "BP" resolved to a real Company row this way."""
+    return company.market == "INDIA" and company.tradeability == "NORMAL"
 
 
 def _find_direct_company(session: Session, mention: CompanyMention) -> Company | None:
@@ -71,7 +92,7 @@ def _find_direct_company(session: Session, mention: CompanyMention) -> Company |
     if result is None:
         return None
     company = session.get(Company, result.company_id)
-    if company is None:
+    if company is None or is_demo_company(company.ticker) or not _is_tradeable_indian(company):
         return None
     return company
 
@@ -91,14 +112,17 @@ def _find_direct_company_legacy(session: Session, mention: CompanyMention) -> Co
     """
     if mention.ticker:
         company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
-        if company is not None:
+        if company is not None and not is_demo_company(company.ticker) and _is_tradeable_indian(company):
             return company
     if not mention.name:
         return None
     name_lower = mention.name.strip().lower()
     if not name_lower:
         return None
-    all_companies = session.query(Company).all()
+    all_companies = [
+        c for c in session.query(Company).all()
+        if not is_demo_company(c.ticker) and _is_tradeable_indian(c)
+    ]
     exact = [c for c in all_companies if c.name.strip().lower() == name_lower]
     if len(exact) == 1:
         return exact[0]
@@ -108,7 +132,10 @@ def _find_direct_company_legacy(session: Session, mention: CompanyMention) -> Co
     return None
 
 
-def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[dict]:
+def resolve_companies(
+    session: Session, mentions: list[CompanyMention],
+    anchor_sub_sectors: dict[str, set[str]] | None = None,
+) -> list[dict]:
     """Resolve every mention to a Company, deduplicated by company_id across
     the WHOLE mentions list.
 
@@ -133,6 +160,16 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
     each cascade level), so an indirect one still needs its own
     parent_ticker chain resolved the same way a direct_mention indirect
     entry does.
+
+    anchor_sub_sectors: {sector: {sub_sector, ...}} built from the companies
+    the model NAMED for each sector. REQUIRED for a sector-wide fan-out
+    mention to produce any rows at all: a sector's fan-out is restricted to
+    companies sharing one of those sub-sectors, so a crude-oil story
+    reaching "fmcg" pulls staples_food (where the named companies are)
+    rather than every prominent fmcg name regardless of what it sells. When
+    a sector has NO anchor here, the fan-out for that mention resolves to
+    nothing -- see the "no anchor -> no rows" comment at the call site
+    below for why this is not a fallback bug.
     """
     resolved = []
     seen_company_ids: set[int] = set()
@@ -170,24 +207,47 @@ def resolve_companies(session: Session, mentions: list[CompanyMention]) -> list[
         else:
             if not mention.sector:
                 continue
+            anchors = (anchor_sub_sectors or {}).get(mention.sector)
+            if not anchors:
+                # No anchor -> no rows. This is deliberate, not a missing
+                # fallback: the fan-out's ONLY justification is "the named
+                # company's mechanism reaches structurally similar
+                # companies" -- an anchor is what establishes WHICH part of
+                # the sector the mechanism reaches. Without one, picking the
+                # TOP_N_SECTOR_COMPANIES largest names by market cap asserts
+                # an exposure nobody established; it's blind top-N-by-size
+                # selection, exactly what this resolver exists to remove.
+                # Measured on the real DB: only ~19% of fmcg rows carry a
+                # sub_sector, so an anchor cannot form 81% of the time --
+                # and an earlier version of this fallback let ETERNAL.NS (a
+                # legitimately large, but sector-wide-irrelevant, fmcg
+                # company) win an unanchored top-3 slot regardless of what
+                # the article was actually about. Zero rows for this
+                # mention is the honest answer; the fan-out tier was never
+                # required to be populated on every alert.
+                continue
             parent_company_id, ok = _resolve_parent(mention)
             if not ok:
                 continue
-            companies = (
+            query = (
                 session.query(Company)
                 .filter_by(sector=mention.sector)
+                .filter(Company.ticker.notin_(DEMO_TICKERS))
                 # Dormant shells and non-Indian rows must never surface as
                 # affected companies once the universe grows from 509 to
-                # ~4,967 (spec 8.4).
+                # ~4,967 (spec §8.4).
                 .filter(Company.market == "INDIA")
                 .filter(Company.tradeability == "NORMAL")
+                .filter(Company.sub_sector.in_(anchors))
+            )
+            companies = (
                 # Rank by real size, not Nifty membership: after the full
                 # universe ingest ~4,200 of ~4,967 companies sit in
                 # index_tier='OTHER', which collapses the tier ranking into
                 # alphabetical order. _TIER_RANK stays as the tiebreak, which
-                # keeps pre-existing fan-out tests (whose companies have no
-                # market cap) ordering as before.
-                .order_by(
+                # is also what keeps the pre-existing fan-out tests (whose
+                # companies have no market cap) ordering as before.
+                query.order_by(
                     Company.market_cap.desc().nullslast(),
                     _TIER_RANK.asc(),
                     Company.ticker.asc(),

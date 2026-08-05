@@ -238,7 +238,12 @@ class AlertCompany(Base):
     direction = Column(String, nullable=False)  # bullish | bearish
     magnitude_low = Column(Float, nullable=False)
     magnitude_high = Column(Float, nullable=False)
-    rationale = Column(Text, nullable=False)
+    # Nullable since the precision work: a sector_inference row persists no
+    # rationale at all (app.companies.resolution._to_resolved), and a row
+    # whose direction was flipped by measurement has its now-contradictory
+    # rationale cleared (app.pipeline._persist_alert). Both are "show
+    # nothing rather than something misleading", not missing data.
+    rationale = Column(Text, nullable=True)
     key_points_json = Column(Text, nullable=True)  # JSON-encoded list[str]; null for pre-existing rows
     confidence_score = Column(Integer, nullable=False, default=50)
     time_horizon = Column(String, nullable=False, default="Short-Term")

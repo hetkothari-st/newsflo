@@ -45,6 +45,35 @@ DEDUP_LOOKBACK_HOURS = 24
 # real evidence/calibration signal, just discounted by distance.
 LEVEL_CONFIDENCE_MULTIPLIER = {"direct": 1.0, "indirect_l1": 0.7, "indirect_l2": 0.45}
 
+# Minimum confidence_score for an AlertCompany row to be persisted.
+#
+# Deliberately modest, and NOT the relevance defence. Measured on production
+# data, a floor of 40 removes 20 rows of 881 -- and only 16 of 557
+# sector_inference rows (2%), the exact category that produced the reported
+# bug. Median confidence_score is 50 at every impact level because
+# calibration (weight 0.30) and rulebook match (0.20) contribute 0.0 for
+# nearly every row, so half the weight is inert and scores cluster. Raising
+# the floor to 50 would cut correct direct_mention rows at the median while
+# still keeping half the fan-out.
+#
+# Relevance is enforced structurally instead: basis-keyed bucketing
+# (app.market.ripple_layers), candidate grounding (app.companies.candidates),
+# and the per-company verification pass (app.analysis.verification). This
+# floor only trims the degenerate tail.
+#
+# Compared against compute_confidence()'s PRE-multiplier score (see
+# _build_alert_company's `pre_multiplier_score` return value), never the
+# post-LEVEL_CONFIDENCE_MULTIPLIER value stored in confidence_score. The
+# floor and the multiplier answer different questions -- "is this
+# reasoning well-evidenced?" vs. "how far from the article is this?" -- and
+# compounding them was never intended: with calibration contributing 0.0 for
+# nearly every row, a typical pre-multiplier score of ~69 survives the floor
+# fine on its own, but 69 * 0.45 (indirect_l2's multiplier) = 31, BELOW this
+# floor -- so comparing the floor to the post-multiplier value meant no
+# indirect_l2 row could ever be persisted, for any article, silently killing
+# the entire L2 cascade stage.
+CONFIDENCE_FLOOR = 40
+
 
 def _decode_json_list(value: str | None) -> list[str]:
     if not value:
@@ -198,12 +227,20 @@ def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
 
 def _build_alert_company(
     session: Session, alert_id: int, article: Article, category: str, entry: dict,
-) -> AlertCompany:
+) -> tuple[AlertCompany, int]:
     """Build one AlertCompany row (unattached -- caller must session.add it)
     from a resolved entry dict, computing calibration/confidence fresh. Split
     out of _persist_alert so a one-off re-analysis script can attach fresh
     rows to an EXISTING alert without duplicating this calibration logic --
     see backend/reanalyze_cascade.py.
+
+    Returns (alert_company, pre_multiplier_score): the AlertCompany's own
+    confidence_score is the LEVEL_CONFIDENCE_MULTIPLIER-discounted value
+    (what's displayed/persisted); pre_multiplier_score is
+    compute_confidence()'s raw score before that discount, which
+    CONFIDENCE_FLOOR must be compared against (see CONFIDENCE_FLOOR's own
+    comment) -- returned here rather than recomputed by the caller so this
+    stays the single place that calls compute_confidence.
     """
     calibrated = get_calibrated_magnitude(session, category=category, company_id=entry["company_id"])
     if calibrated is not None:
@@ -244,7 +281,7 @@ def _build_alert_company(
     confidence_score = round(result.score * level_multiplier)
     confidence_band = result.band if level_multiplier == 1.0 else band_for_score(confidence_score)
 
-    return AlertCompany(
+    alert_company = AlertCompany(
         alert_id=alert_id,
         company_id=entry["company_id"],
         direction=entry["direction"],
@@ -273,6 +310,7 @@ def _build_alert_company(
         impact_level=impact_level,
         parent_company_id=entry.get("parent_company_id"),
     )
+    return alert_company, result.score
 
 
 def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: str) -> int | None:
@@ -324,10 +362,23 @@ def _persist_alert(
     session.flush()
 
     alert_companies = []
+    kept_entries = []
     for entry in entries:
-        alert_company = _build_alert_company(session, alert.id, article, category, entry)
+        alert_company, pre_multiplier_score = _build_alert_company(session, alert.id, article, category, entry)
+        # Floor check is against the PRE-multiplier score, not the
+        # LEVEL_CONFIDENCE_MULTIPLIER-discounted alert_company.confidence_score
+        # -- see CONFIDENCE_FLOOR's own comment. Compounding the two meant no
+        # indirect_l2 row (0.45x) could ever clear the floor.
+        if pre_multiplier_score < CONFIDENCE_FLOOR:
+            logger.info(
+                "dropping company_id=%s from alert_id=%s: confidence %s below floor %s",
+                entry["company_id"], alert.id, pre_multiplier_score, CONFIDENCE_FLOOR,
+            )
+            continue
         session.add(alert_company)
         alert_companies.append(alert_company)
+        kept_entries.append(entry)
+    entries = kept_entries
 
     market_moves = []
     for entry in entries:
@@ -354,8 +405,19 @@ def _persist_alert(
     moves_by_company_id = {m.company_id: m for m in market_moves}
     for alert_company in alert_companies:
         move = moves_by_company_id.get(alert_company.company_id)
-        if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
-            alert_company.direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+        if move is None or move.measurement_status != "ok" or move.excess_move_pct is None:
+            continue
+        measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+        if measured_direction != alert_company.direction:
+            # The rationale and key_points argue for the direction the LLM
+            # predicted, which the measured reaction has just contradicted.
+            # Leaving them produces a bearish badge above bullish prose for
+            # the same company. Drop the text rather than keep an argument
+            # for a call that no longer stands -- refine_alert generates a
+            # fresh, measurement-aware `why` for this company below.
+            alert_company.rationale = None
+            alert_company.key_points_json = json.dumps([])
+        alert_company.direction = measured_direction
 
     if client is not None:
         if settings.refinement_mode == "deferred":
@@ -430,6 +492,26 @@ def _persist_alert(
     return alert
 
 
+def build_anchor_sub_sectors(session: Session, companies: list) -> dict[str, set[str]]:
+    """Anchor each sector's fan-out to the sub-sectors of the companies the
+    model actually named there -- see resolve_companies.
+
+    Extracted out of process_new_articles so reanalyze_cascade.py (and any
+    other caller re-running analysis outside the live pipeline) builds the
+    exact same map rather than a hand-rolled copy that can drift -- a
+    duplicated version of this loop is exactly the failure mode that let the
+    fmcg/Eternal sector fan-out bug slip through in the first place.
+    """
+    anchor_sub_sectors: dict[str, set[str]] = {}
+    for mention in companies:
+        if not (mention.is_direct and mention.ticker and mention.sector):
+            continue
+        company = session.query(Company).filter_by(ticker=mention.ticker).one_or_none()
+        if company is not None and company.sub_sector:
+            anchor_sub_sectors.setdefault(mention.sector, set()).add(company.sub_sector)
+    return anchor_sub_sectors
+
+
 def process_new_articles(session: Session, claude_client, throttle_seconds: float = 0) -> int:
     """Run the filter -> analyze -> resolve -> alert pipeline over every
     CATEGORIZED article.
@@ -488,7 +570,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         if analysis is None:
             for attempt in range(2):  # try once, retry once
                 try:
-                    analysis = analyze_article(claude_client, article.title, article_text(article))
+                    analysis = analyze_article(claude_client, article.title, article_text(article), session=session)
                     break
                 except Exception:
                     # Logged, not swallowed silently -- a burst of
@@ -510,7 +592,8 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
 
             store_analysis_cache(session, article, analysis)
 
-        resolved = resolve_companies(session, analysis.companies)
+        anchor_sub_sectors = build_anchor_sub_sectors(session, analysis.companies)
+        resolved = resolve_companies(session, analysis.companies, anchor_sub_sectors=anchor_sub_sectors)
         _persist_alert(
             session, article, analysis.category, resolved,
             event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges, client=claude_client,

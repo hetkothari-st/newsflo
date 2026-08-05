@@ -65,7 +65,7 @@ def test_correction_preserves_alert_history(db_session):
     db_session.commit()
     alert = _alert(db_session)
     db_session.add(AlertCompany(
-        alert_id=alert.id, company_id=company.id, direction="POSITIVE", rationale="r",
+        alert_id=alert.id, company_id=company.id, direction="POSITIVE",
         magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
     ))
     db_session.commit()
@@ -119,7 +119,7 @@ def test_merge_moves_alert_history_and_deletes_the_phantom(db_session):
 
     alert = _alert(db_session)
     db_session.add(AlertCompany(
-        alert_id=alert.id, company_id=phantom_id, direction="POSITIVE", rationale="r",
+        alert_id=alert.id, company_id=phantom_id, direction="POSITIVE",
         magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
     ))
     db_session.commit()
@@ -364,11 +364,11 @@ def test_merge_leaves_no_orphans_across_all_fk_columns(db_session):
     db_session.commit()
 
     ac_direct = AlertCompany(
-        alert_id=alert.id, company_id=phantom_id, direction="POSITIVE", rationale="r",
+        alert_id=alert.id, company_id=phantom_id, direction="POSITIVE",
         magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
     )
     ac_parent = AlertCompany(
-        alert_id=alert.id, company_id=other_id, direction="POSITIVE", rationale="r",
+        alert_id=alert.id, company_id=other_id, direction="POSITIVE",
         magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
         parent_company_id=phantom_id,
     )
@@ -508,7 +508,7 @@ def test_dry_run_leaves_the_database_byte_identical(tmp_path):
         session.add(alert)
         session.commit()
         session.add(AlertCompany(
-            alert_id=alert.id, company_id=phantom.id, direction="POSITIVE", rationale="r",
+            alert_id=alert.id, company_id=phantom.id, direction="POSITIVE",
             magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
         ))
         session.commit()

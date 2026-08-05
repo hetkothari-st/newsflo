@@ -15,7 +15,17 @@ from app.models import (
     ImpactEdge,
     User,
 )
-from app.pipeline import process_new_articles
+from app.pipeline import _persist_alert, decode_key_points, process_new_articles
+
+
+def _article(session):
+    article = Article(
+        source="test", url="https://example.com/confidence-floor",
+        title="Confidence floor test article", content="c",
+    )
+    session.add(article)
+    session.commit()
+    return article
 
 
 def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
@@ -39,7 +49,7 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -92,7 +102,7 @@ def test_process_new_articles_reconciles_direction_to_measured_move(db_session, 
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     # The LLM guessed "bullish" before the market had reacted. The real,
     # measured move went the other way -- persisted direction must defer
@@ -133,7 +143,7 @@ def test_process_new_articles_keeps_llm_direction_when_unmeasured(db_session, mo
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     # measure_company_move stays on conftest's autouse "no_data" stub.
 
     created = process_new_articles(db_session, claude_client=object())
@@ -166,7 +176,7 @@ def test_process_new_articles_uses_full_content_over_summary_when_available(db_s
         )],
     )
     captured = {}
-    def fake_analyze(client, title, content):
+    def fake_analyze(client, title, content, session=None):
         captured["content"] = content
         return fake_output
     monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
@@ -221,7 +231,7 @@ def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_se
             time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -260,7 +270,7 @@ def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_s
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -298,7 +308,7 @@ def test_process_new_articles_sends_email_notification_for_holder(db_session, mo
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -315,7 +325,7 @@ def test_process_new_articles_marks_analysis_failed_after_retries(db_session, mo
     db_session.add(article)
     db_session.commit()
 
-    def boom(client, title, content):
+    def boom(client, title, content, session=None):
         raise RuntimeError("api down")
 
     monkeypatch.setattr(pipeline_module, "analyze_article", boom)
@@ -359,7 +369,7 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
     )
     call_count = {"n": 0}
 
-    def counting_analyze(client, title, content):
+    def counting_analyze(client, title, content, session=None):
         call_count["n"] += 1
         return fake_output
 
@@ -407,7 +417,7 @@ def test_process_new_articles_sets_image_url_from_og_image_fetch(db_session, mon
             confidence_score=85, time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "fetch_og_image", lambda url: "https://example.com/img.jpg")
 
     created = process_new_articles(db_session, claude_client=object())
@@ -429,7 +439,7 @@ def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch)
         session.commit()
 
     monkeypatch.setattr(pipeline_module, "filter_new_articles", fake_filter)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: (_ for _ in ()).throw(AssertionError("should not be called")))
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -515,8 +525,24 @@ def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_com
 
 
 def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_session, monkeypatch):
+    # A sector-wide fan-out mention now requires an anchor to return any
+    # rows at all (resolve_companies no longer falls back to the whole
+    # sector -- see app.companies.resolution's "no anchor -> no rows"
+    # comment). ANCHOR.NS's own direct mention is what establishes the
+    # "refining_marketing" anchor for the "oil_gas" fan-out below; A.NS and
+    # B.NS share that sub_sector so they're what the fan-out actually
+    # reaches. This keeps testing the original point of this test --
+    # confidence_score/time_horizon get copied onto every fanned-out row --
+    # without relying on the removed whole-sector fallback.
+    db_session.add(Company(
+        ticker="ANCHOR.NS", name="Anchor Oil Ltd.", sector="oil_gas", index_tier="NIFTY50",
+        sub_sector="refining_marketing", market_cap=1.0,
+    ))
     for ticker, tier in [("A.NS", "NIFTY50"), ("B.NS", "NIFTYNEXT50")]:
-        db_session.add(Company(ticker=ticker, name=ticker, sector="oil_gas", index_tier=tier, market_cap=1.0))
+        db_session.add(Company(
+            ticker=ticker, name=ticker, sector="oil_gas", index_tier=tier, market_cap=1.0,
+            sub_sector="refining_marketing",
+        ))
     db_session.commit()
 
     article = Article(source="test", url="https://example.com/b", title="Oil sector news", content="x")
@@ -525,23 +551,94 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
 
     fake_output = AnalysisOutput(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
-            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="sector-wide tailwind",
-            key_points=[], confidence_score=55, time_horizon="Medium-Term",
-        )],
+        companies=[
+            CompanyMention(
+                name="Anchor Oil Ltd.", ticker="ANCHOR.NS", is_direct=True, sector="oil_gas",
+                direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="direct exposure",
+                key_points=[], confidence_score=55, time_horizon="Medium-Term", impact_level="direct",
+            ),
+            CompanyMention(
+                name="oil sector", ticker=None, is_direct=False, sector="oil_gas",
+                direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="sector-wide tailwind",
+                key_points=[], confidence_score=55, time_horizon="Medium-Term",
+            ),
+        ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 
     alert = db_session.query(Alert).one()
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
-    assert len(rows) == 2
+    # ANCHOR.NS (direct_mention) + A.NS/B.NS (sector_inference fan-out).
+    assert len(rows) == 3
+    fanout_tickers = {r.company.ticker for r in rows if r.basis == "sector_inference"}
+    assert fanout_tickers == {"A.NS", "B.NS"}
     # Same reasoning as above -- the Confidence Engine, not the LLM,
     # produces confidence_score now.
     assert all(0 <= r.confidence_score <= 100 for r in rows)
     assert all(r.time_horizon == "Medium-Term" for r in rows)
+
+
+def test_process_new_articles_anchors_fan_out_to_the_named_companys_sub_sector(db_session, monkeypatch):
+    # Models the reported production bug directly: a crude-oil story's fmcg
+    # fan-out pulled in Eternal (food delivery, fmcg/retail) alongside HUL
+    # (fmcg/personal_care) with no article-specific reason for Eternal at
+    # all. process_new_articles must build the anchor_sub_sectors map from
+    # the model's own direct mention (HUL, personal_care) and pass it
+    # through to resolve_companies, so the sector-wide fan-out mention for
+    # "fmcg" only reaches Dabur (also personal_care) and never Eternal
+    # (retail) -- this is the one thing that actually excludes Eternal; if
+    # app.pipeline's anchor-map construction were silently wrong (empty, or
+    # keyed on the wrong field), fan-out would revert to whole-sector and
+    # Eternal would come straight back with every other test still green.
+    hul = Company(
+        ticker="HINDUNILVR.NS", name="Hindustan Unilever Ltd.", sector="fmcg",
+        sub_sector="personal_care", index_tier="NIFTY50", market_cap=1.0,
+    )
+    dabur = Company(
+        ticker="DABUR.NS", name="Dabur India Ltd.", sector="fmcg",
+        sub_sector="personal_care", index_tier="NIFTYNEXT50", market_cap=1.0,
+    )
+    eternal = Company(
+        ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg",
+        sub_sector="retail", index_tier="NIFTY50", market_cap=1.0,
+    )
+    db_session.add_all([hul, dabur, eternal])
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/anchor-fanout", title="Crude oil spikes", content="x")
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(
+        category="oil_gas", event_type="crude_oil",
+        companies=[
+            CompanyMention(
+                name="Hindustan Unilever", ticker="HINDUNILVR.NS", is_direct=True, sector="fmcg",
+                direction="bearish", magnitude_low=-2.0, magnitude_high=-1.0,
+                rationale="Palm oil and packaging costs rise with crude.",
+                key_points=[], confidence_score=60, time_horizon="Medium-Term",
+                impact_level="direct",
+            ),
+            CompanyMention(
+                name="fmcg sector", ticker=None, is_direct=False, sector="fmcg",
+                direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
+                rationale="Sector-wide input cost exposure.",
+                key_points=[], confidence_score=50, time_horizon="Medium-Term",
+            ),
+        ],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+
+    process_new_articles(db_session, claude_client=object())
+
+    alert = db_session.query(Alert).one()
+    rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
+    resolved_tickers = {r.company.ticker for r in rows}
+
+    assert resolved_tickers == {"HINDUNILVR.NS", "DABUR.NS"}
+    assert "ETERNAL.NS" not in resolved_tickers
 
 
 def test_process_new_articles_persists_evidence_discipline_fields(db_session, monkeypatch):
@@ -570,7 +667,7 @@ def test_process_new_articles_persists_evidence_discipline_fields(db_session, mo
             alternative_hypothesis="Already priced in.",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -608,7 +705,7 @@ def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, mon
             reasons=["Refining margins widen."], evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 2
@@ -637,10 +734,17 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
         companies=[CompanyMention(
             name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
             direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            time_horizon="Short-Term", reasons=["Refining margins widen."], evidence_refs=[],
+            time_horizon="Short-Term", reasons=["Refining margins widen."],
+            # A matched rule (plus the fully-cited claim) keeps this row's
+            # confidence_score above CONFIDENCE_FLOOR despite the reasoning-
+            # consistency penalty below, so the row this test asserts on is
+            # actually persisted rather than dropped by the floor -- the
+            # contradiction-detection behavior under test is independent of
+            # evidence completeness.
+            evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(
         pipeline_module, "get_or_fetch_financial_snapshot",
         lambda session, ticker: {"price": 2500.0, "return_1m": -12.0, "return_3m": -20.0},
@@ -678,7 +782,7 @@ def test_process_new_articles_no_contradiction_when_snapshot_unavailable(db_sess
             time_horizon="Short-Term",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
 
     created = process_new_articles(db_session, claude_client=object())
@@ -706,20 +810,28 @@ def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confid
     fake_output = AnalysisOutput(
         category="it", event_type="other",
         companies=[
+            # Both mentions carry a matched rule + fully-cited claim so their
+            # baseline confidence_score clears CONFIDENCE_FLOOR even after
+            # the indirect entry's 0.7x LEVEL_CONFIDENCE_MULTIPLIER discount
+            # below -- this test is about the discount being applied and
+            # being strictly smaller than the direct entry's score, not about
+            # the floor, so both rows must actually survive to be compared.
             CompanyMention(
                 name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban hits Nvidia directly",
                 time_horizon="Short-Term", impact_level="direct",
+                reasons=["Export ban restricts chip shipments."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
             CompanyMention(
                 name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
                 rationale="TSMC fabs Nvidia's chips; lower Nvidia orders reduce TSMC's foundry revenue.",
                 time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+                reasons=["Lower Nvidia orders reduce TSMC's foundry revenue."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
 
     created = process_new_articles(db_session, claude_client=object())
@@ -750,19 +862,26 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     fake_output = AnalysisOutput(
         category="it",
         companies=[
+            # Matched rule + fully-cited claim on both, same reasoning as
+            # test_process_new_articles_persists_indirect_impact_chain_with_decayed_confidence
+            # above: keeps the indirect row's confidence_score above
+            # CONFIDENCE_FLOOR after its 0.7x discount, so it survives to be
+            # reused on the second (dedup) pass this test exercises.
             CompanyMention(
                 name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
                 time_horizon="Short-Term", impact_level="direct",
+                reasons=["Export ban restricts chip shipments."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
             CompanyMention(
                 name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
                 direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
                 time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+                reasons=["Lower Nvidia orders reduce TSMC's foundry revenue."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
     assert process_new_articles(db_session, claude_client=object()) == 1
 
@@ -770,7 +889,7 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     newer_article = Article(source="test", url="https://example.com/indirect-b", title="Chip export ban announced")
     db_session.add(newer_article)
     db_session.commit()
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: (_ for _ in ()).throw(AssertionError("should not be called")))
     assert process_new_articles(db_session, claude_client=object()) == 1
 
     reused_indirect = (
@@ -813,7 +932,7 @@ def test_process_new_articles_cache_hit_skips_llm_call_and_throttle_sleep(db_ses
     pipeline_module.store_analysis_cache(db_session, article, cached_output)
     db_session.commit()
 
-    def fail_if_called(client, title, content):
+    def fail_if_called(client, title, content, session=None):
         raise AssertionError("analyze_article must not be called on a cache hit")
     monkeypatch.setattr(pipeline_module, "analyze_article", fail_if_called)
 
@@ -867,7 +986,7 @@ def test_process_new_articles_analysis_cache_deterministic(db_session, monkeypat
         AnalysisOutput(category="other", companies=[]),  # DIFFERENT output -- must never be reached
     ]
 
-    def fake_analyze(client, title, content):
+    def fake_analyze(client, title, content, session=None):
         result = outputs[call_count["n"]]
         call_count["n"] += 1
         return result
@@ -1043,9 +1162,188 @@ def test_process_new_articles_persists_edges_from_analysis(db_session, monkeypat
             "relation": "demand", "direction": "bullish", "note": "n", "source": "llm_only",
         }],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 
     alert = db_session.query(Alert).one()
     assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 1
+
+
+from app.pipeline import CONFIDENCE_FLOOR
+
+
+def test_entries_below_the_confidence_floor_are_not_persisted(db_session, monkeypatch):
+    # compute_confidence is deterministic; force a below-floor score rather
+    # than trying to construct inputs that happen to produce one.
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR - 1, band="LOW"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "direct",
+    }])
+
+    assert alert.companies == []
+
+
+def test_entries_at_the_confidence_floor_are_persisted(db_session, monkeypatch):
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR, band="MODERATE"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "direct",
+    }])
+
+    assert len(alert.companies) == 1
+
+
+def test_indirect_l2_row_clearing_the_floor_pre_multiplier_is_persisted_with_multiplied_score(db_session, monkeypatch):
+    # Regression test for the CONFIDENCE_FLOOR / LEVEL_CONFIDENCE_MULTIPLIER
+    # compounding bug: with calibration contributing 0.0 for nearly every
+    # row, a typical pre-multiplier score (~69) survives the floor on its
+    # own, but 69 * 0.45 (indirect_l2's multiplier) = 31 < CONFIDENCE_FLOOR
+    # (40) -- so comparing the floor against the POST-multiplier value meant
+    # no indirect_l2 row could ever be persisted, for any article. The floor
+    # must be checked against the raw, pre-multiplier compute_confidence()
+    # score; the persisted confidence_score must still carry the multiplier.
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    # Exactly at the floor pre-multiplier -- passes the check.
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR, band="MODERATE"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "indirect_l2",
+    }])
+
+    assert len(alert.companies) == 1
+    # Persisted value still carries the 0.45x indirect_l2 discount --
+    # strictly below the floor, proving the floor gate itself used the
+    # pre-multiplier score, not this one.
+    expected_score = round(CONFIDENCE_FLOOR * pipeline_module.LEVEL_CONFIDENCE_MULTIPLIER["indirect_l2"])
+    assert alert.companies[0].confidence_score == expected_score
+    assert expected_score < CONFIDENCE_FLOOR
+
+
+def test_indirect_l2_row_genuinely_failing_the_floor_pre_multiplier_is_dropped(db_session, monkeypatch):
+    import app.pipeline as pipeline_module
+    from app.reasoning.confidence import ConfidenceResult
+
+    # Below the floor even before any multiplier is applied -- must still
+    # be dropped, same as a direct row with the same raw score.
+    monkeypatch.setattr(
+        pipeline_module, "compute_confidence",
+        lambda **kwargs: ConfidenceResult(score=CONFIDENCE_FLOOR - 1, band="LOW"),
+    )
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": [], "basis": "direct_mention", "time_horizon": "Short-Term",
+        "impact_level": "indirect_l2",
+    }])
+
+    assert alert.companies == []
+
+
+def _stub_measurement(monkeypatch, excess_move_pct):
+    """Monkeypatch app.pipeline.measure_company_move to return an "ok"
+    MarketMove with the given excess_move_pct, for any company passed in.
+    Mirrors the inline fake_measure pattern used by
+    test_process_new_articles_reconciles_direction_to_measured_move above
+    and by test_market_move_wiring.py."""
+    from app.models import MarketMove, utcnow
+
+    def fake_measure(session, company_obj):
+        return MarketMove(
+            company_id=company_obj.id, benchmark_ticker="^NSEI",
+            measurement_status="ok", excess_move_pct=excess_move_pct, measured_at=utcnow(),
+        )
+
+    monkeypatch.setattr(pipeline_module, "measure_company_move", fake_measure)
+
+
+def test_a_flipped_direction_clears_the_stale_rationale(db_session, monkeypatch):
+    # The LLM called bullish; the measured move came back negative. The
+    # rationale argues the bullish case and must not survive under a bearish
+    # badge.
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    _stub_measurement(monkeypatch, excess_move_pct=-3.1)
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "This is clearly good news for the company.",
+        "key_points": ["good news"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }])
+
+    ac = alert.companies[0]
+    assert ac.direction == "bearish"
+    assert ac.rationale is None
+    assert decode_key_points(ac) == []
+
+
+def test_a_confirmed_direction_keeps_its_rationale(db_session, monkeypatch):
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    _stub_measurement(monkeypatch, excess_move_pct=2.4)
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "This is clearly good news for the company.",
+        "key_points": ["good news"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }])
+
+    assert alert.companies[0].rationale == "This is clearly good news for the company."
