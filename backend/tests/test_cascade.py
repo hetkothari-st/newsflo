@@ -6,7 +6,7 @@ import pytest
 
 from app.analysis.cascade import (
     BROAD_EVENT_TYPES, TOOL_CALL_ATTEMPTS, MissingToolCallError, analyze_article, _extract_facts,
-    _forced_tool_arguments, _generate_edges, _identify_cascade_companies_per_sector,
+    _forced_tool_arguments, _generate_edges, _identify_companies_per_sector,
     _identify_companies, _identify_sectors, _is_stochastic_tool_failure,
     _retry_forced_tool_call, _sector_fanout_mentions, _sector_mechanism_edges,
     build_company_tool, build_sector_tool,
@@ -710,12 +710,16 @@ class PerSectorScriptedClient:
     """Returns one scripted response per call, keyed by call order --
     unlike ScriptedClient (one fixed response per tool name), this lets a
     test give each of several same-tool-name calls its own distinct
-    response, proving _identify_cascade_companies_per_sector makes one
+    response, proving _identify_companies_per_sector makes one
     real call per sector rather than bundling them."""
 
     def __init__(self, responses: list):
         self._responses = list(responses)
         self.calls = []
+        # One entry per call, so a test can assert what EACH call carried --
+        # which is the whole point of a per-sector stage.
+        self.prompts = []
+        self.ticker_enums = []
 
     class _Completions:
         def __init__(self, outer):
@@ -724,6 +728,10 @@ class PerSectorScriptedClient:
         def create(self, **kwargs):
             name = kwargs["tool_choice"]["function"]["name"]
             self._outer.calls.append(name)
+            self._outer.prompts.append(kwargs["messages"][1]["content"])
+            item_props = (kwargs["tools"][0]["function"]["parameters"]["properties"]
+                          ["sector_companies"]["items"]["properties"]["companies"]["items"]["properties"])
+            self._outer.ticker_enums.append(item_props["ticker"].get("enum"))
             response = self._outer._responses.pop(0)
             if isinstance(response, Exception):
                 raise response
@@ -735,7 +743,7 @@ class PerSectorScriptedClient:
         return SimpleNamespace(completions=self._Completions(self))
 
 
-def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
+def test_identify_companies_per_sector_makes_one_call_per_sector():
     banking = SectorFinding(sector="banking", direction="bearish", mechanism="m", parent_sector="oil_gas")
     auto = SectorFinding(sector="auto", direction="bearish", mechanism="m", parent_sector="oil_gas")
     parent_pool = [CompanyMention(
@@ -748,7 +756,7 @@ def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
     ])
 
-    result, gaps = _identify_cascade_companies_per_sector(
+    result, gaps = _identify_companies_per_sector(
         client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
@@ -758,7 +766,7 @@ def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
     assert gaps == []
 
 
-def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_others():
+def test_identify_companies_per_sector_skips_a_failing_sector_not_the_others():
     banking = SectorFinding(sector="banking", direction="bearish", mechanism="m", parent_sector="oil_gas")
     auto = SectorFinding(sector="auto", direction="bearish", mechanism="m", parent_sector="oil_gas")
     parent_pool = [CompanyMention(
@@ -772,7 +780,7 @@ def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_ot
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
     ])
 
-    result, gaps = _identify_cascade_companies_per_sector(
+    result, gaps = _identify_companies_per_sector(
         client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
@@ -782,7 +790,7 @@ def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_ot
     assert gaps[0]["attempts"] == 2
 
 
-def test_identify_cascade_companies_per_sector_retries_then_records_gap():
+def test_identify_companies_per_sector_retries_then_records_gap():
     sectors = [
         SectorFinding(sector="banking", direction="bullish", mechanism="m1", parent_sector="oil_gas"),
         SectorFinding(sector="auto", direction="bullish", mechanism="m2", parent_sector="oil_gas"),
@@ -821,7 +829,7 @@ def test_identify_cascade_companies_per_sector_retries_then_records_gap():
                 ]})],
             ))])
 
-    mentions, gaps = _identify_cascade_companies_per_sector(
+    mentions, gaps = _identify_companies_per_sector(
         FlakyThenGoodClient(), facts="f", sectors=sectors, impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
@@ -832,6 +840,100 @@ def test_identify_cascade_companies_per_sector_retries_then_records_gap():
     assert gaps[0]["last_error"]
     assert len(mentions) == 1
     assert mentions[0].ticker == "MARUTI.NS"  # the "auto" sector still succeeded
+
+
+def test_identify_companies_per_sector_direct_stage_makes_one_call_per_sector():
+    # The prompt-size fix: the direct stage used to bundle every primary
+    # sector into ONE call, so the candidate block carried 60 candidates x N
+    # sectors and the request measured past the per-minute token ceiling of
+    # both models (gpt-oss-20b 8,000, llama 12,000) -- a 413, i.e. zero
+    # companies for the article. One call per sector, same helper the cascade
+    # stages use, keeps each prompt to one sector's candidates.
+    sectors = [
+        SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
+        SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
+        SectorFinding(sector="oil_gas", direction="bullish", mechanism="m3"),
+    ]
+    client = PerSectorScriptedClient([
+        {"sector_companies": [{"sector": "banking", "companies": [_full_company("HDFC Bank", "HDFCBANK.NS")]}]},
+        {"sector_companies": [{"sector": "auto", "companies": [
+            _full_company("Maruti", "MARUTI.NS"), _full_company("Tata Motors", "TATAMOTORS.NS"),
+        ]}]},
+        {"sector_companies": [{"sector": "oil_gas", "companies": [_full_company("Reliance", "RELIANCE.NS")]}]},
+    ])
+
+    result, gaps = _identify_companies_per_sector(
+        client, facts="f", sectors=sectors, impact_level="direct", parent_pool=None,
+    )
+
+    assert client.calls == ["record_sector_companies"] * 3
+    # Every sector's companies come back, not just the last call's.
+    assert [c.ticker for c in result] == [
+        "HDFCBANK.NS", "MARUTI.NS", "TATAMOTORS.NS", "RELIANCE.NS",
+    ]
+    assert all(c.impact_level == "direct" for c in result)
+    assert all(c.parent_ticker is None for c in result)
+    assert gaps == []
+
+
+def test_identify_companies_per_sector_direct_stage_gap_on_one_sector_keeps_the_others():
+    # A single sector's failure must not cost the article every direct
+    # company, which is exactly what the old one-bundled-call shape did.
+    sectors = [
+        SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
+        SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
+    ]
+    # FOUR failures for banking, not two: on the direct stage every attempt
+    # is a full-rulebook request AND, if that fails, a slim-prompt retry
+    # (preserved from before this became per-sector), so each of the helper's
+    # two sector-level attempts issues two physical calls.
+    client = PerSectorScriptedClient([
+        ValueError("boom"), ValueError("boom slim"),
+        ValueError("boom again"), ValueError("boom again slim"),
+        {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS")]}]},
+    ])
+
+    result, gaps = _identify_companies_per_sector(
+        client, facts="f", sectors=sectors, impact_level="direct", parent_pool=None,
+    )
+
+    assert [c.ticker for c in result] == ["MARUTI.NS"]
+    assert len(gaps) == 1
+    assert gaps[0]["sector"] == "banking"
+    assert gaps[0]["impact_level"] == "direct"
+    assert gaps[0]["parent_ticker"] is None
+    assert gaps[0]["attempts"] == 2
+    assert gaps[0]["last_error"]
+
+
+def test_direct_stage_prompt_and_enum_carry_only_that_sectors_candidates(db_session):
+    # The actual mechanism of the size fix: each call's grounding block (and
+    # its ticker enum) is ONE sector's candidates, not every sector's.
+    for i in range(3):
+        db_session.add(Company(ticker=f"BANK{i}.NS", name=f"Bank {i}", sector="banking", index_tier="OTHER"))
+        db_session.add(Company(ticker=f"AUTO{i}.NS", name=f"Auto {i}", sector="auto", index_tier="OTHER"))
+    db_session.commit()
+
+    client = PerSectorScriptedClient([
+        {"sector_companies": []},
+        {"sector_companies": []},
+    ])
+
+    _identify_companies_per_sector(
+        client, facts="f",
+        sectors=[
+            SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
+            SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
+        ],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    banking_prompt, auto_prompt = client.prompts
+    banking_enum, auto_enum = client.ticker_enums
+    assert "BANK0.NS" in banking_prompt and "AUTO0.NS" not in banking_prompt
+    assert "AUTO0.NS" in auto_prompt and "BANK0.NS" not in auto_prompt
+    assert set(banking_enum) == {"BANK0.NS", "BANK1.NS", "BANK2.NS"}
+    assert set(auto_enum) == {"AUTO0.NS", "AUTO1.NS", "AUTO2.NS"}
 
 
 def test_analyze_article_composes_all_seven_stages_end_to_end():
@@ -970,7 +1072,7 @@ def test_analyze_article_propagates_primary_sector_stage_failure():
         analyze_article(client, title="t", content="c")
 
 
-def test_analyze_article_truncates_and_returns_direct_companies_when_primary_company_stage_fails():
+def test_analyze_article_records_a_gap_when_the_primary_company_stage_fails():
     # event_type must be a BROAD_EVENT_TYPES member for the deterministic
     # fan-out to fire at all (see test_broad_event_types_include_rate_and_
     # commodity_moves) -- "repo_rate_change" here, not "other".
@@ -990,6 +1092,13 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
     assert len(result.companies) == 1
     assert result.companies[0].is_direct is False
     assert result.companies[0].sector == "banking"
+    # And the failure is RECORDED, not silently swallowed: the direct stage
+    # goes through the same per-sector retry-then-gap path as the cascade
+    # stages, so a sector whose company lookup never succeeded is visible
+    # as a gap rather than indistinguishable from "no companies here".
+    assert [(g["sector"], g["impact_level"], g["attempts"]) for g in result.gaps] == [
+        ("banking", "direct", 2),
+    ]
 
 
 def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level():
@@ -1044,13 +1153,45 @@ def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
 
     named = [c for c in result.companies if c.name == "HDFC Bank"]
     sector_wide = [c for c in result.companies if c.is_direct is False]
-    assert len(named) == 1
+    # Two named mentions, not one: the direct stage now makes ONE CALL PER
+    # PRIMARY SECTOR (two sectors here), and ScriptedClient replays its one
+    # canned record_sector_companies response for each of them. What this
+    # test is about is the sector-wide fan-out below -- one per primary
+    # sector regardless of what the LLM named.
+    assert len(named) == 2
     assert len(sector_wide) == 2
     by_sector = {c.sector: c for c in sector_wide}
     assert by_sector["banking"].direction == "bearish"
     assert by_sector["oil_gas"].direction == "bullish"
     assert all(c.impact_level == "direct" for c in sector_wide)
     assert all(c.ticker is None for c in sector_wide)
+
+
+def test_analyze_article_calls_the_direct_company_stage_once_per_primary_sector():
+    # Orchestrator-level guard on the size fix: three primary sectors must
+    # produce THREE direct-company calls, each carrying its own sector, not
+    # one call carrying all three (which measured over both models'
+    # per-minute token ceilings and returned zero companies).
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [
+            {"sector": "banking", "direction": "bearish", "mechanism": "m1"},
+            {"sector": "auto", "direction": "bearish", "mechanism": "m2"},
+            {"sector": "oil_gas", "direction": "bullish", "mechanism": "m3"},
+        ]},
+        # No ticker on the named company, so the L1/L2 cascade stages never
+        # run and every record_sector_companies call below is a DIRECT one.
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [_full_company("HDFC Bank", None)]},
+        ]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    company_calls = [c for c in client.calls if c["name"] == "record_sector_companies"]
+    assert len(company_calls) == 3
+    assert len([c for c in result.companies if c.impact_level == "direct"]) == 3
+    assert result.gaps == []
 
 
 def test_analyze_article_skips_fanout_for_a_narrow_event_type():
@@ -1078,7 +1219,9 @@ def test_analyze_article_skips_fanout_for_a_narrow_event_type():
 
     named = [c for c in result.companies if c.name == "HDFC Bank"]
     sector_wide = [c for c in result.companies if c.is_direct is False]
-    assert len(named) == 1
+    # One named mention per primary sector -- see the sibling test above for
+    # why the per-sector direct stage makes this 2 with ScriptedClient.
+    assert len(named) == 2
     assert sector_wide == []
 
 

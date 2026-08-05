@@ -300,7 +300,7 @@ class CascadeGap(Base):
     after a retry -- recorded instead of silently dropped, so the user can
     always see "this ripple path was considered and could not be
     resolved" rather than a difference between runs that looks like a
-    missing feature. See app.analysis.cascade._identify_cascade_companies_per_sector."""
+    missing feature. See app.analysis.cascade._identify_companies_per_sector."""
     __tablename__ = "cascade_gaps"
 
     id = Column(Integer, primary_key=True)
@@ -309,7 +309,7 @@ class CascadeGap(Base):
     impact_level = Column(String, nullable=False)
     # The per-sector cascade call chains from a POOL of parent companies,
     # not one -- null here, not misleadingly picking just the first parent.
-    # See the comment at the call site in _identify_cascade_companies_per_sector.
+    # See the comment at the call site in _identify_companies_per_sector.
     parent_ticker = Column(String, nullable=True)
     attempts = Column(Integer, nullable=False)
     last_error = Column(Text, nullable=True)

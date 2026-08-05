@@ -37,22 +37,31 @@ MODEL = "llama-3.3-70b-versatile"
 # better fit for this app's strict, deeply-nested tool schemas than a
 # generic small Llama model.
 #
-# MODEL also has a hard Groq TOKENS-PER-MINUTE ceiling -- 12,000 -- that is
-# separate from, and much tighter than, its daily quota above. Measured live
-# (2026-08): app.analysis.cascade._identify_companies's direct-company-stage
-# prompt runs 13,000-19,000 tokens (SECTOR_DEFINITIONS + the full rulebook/
-# playbook block + the grounded candidate-company list), which is OVER that
-# ceiling before a single token of output is generated. MODEL returned 413
-# "Request too large" on BOTH that full prompt AND its slim (no rulebook)
-# retry -- it cannot serve that stage at any prompt size the app sends it,
-# not an intermittent failure. FALLBACK_MODEL, given the identical ~14k-token
-# prompt, returned 429 (daily quota) instead of 413 -- no comparable
-# per-minute size ceiling -- so it can at least attempt the call. Because of
-# this, _identify_companies tries FALLBACK_MODEL FIRST and MODEL second, the
-# only stage in this codebase where the order is inverted -- see the comment
-# at that call site before "restoring" MODEL-first there, and see
-# _GeminiCompletions._resolve_model below for a second-order consequence of
-# that inversion.
+# Both models also have a hard Groq TOKENS-PER-MINUTE ceiling, separate from
+# and much tighter than the daily quotas above. Measured live (2026-08):
+#
+#     openai/gpt-oss-20b        8,000 TPM   (FALLBACK_MODEL)
+#     llama-3.3-70b-versatile  12,000 TPM   (MODEL)
+#
+# An earlier version of this comment recorded only llama's 12,000 and drew
+# the wrong conclusion from it -- that llama alone could not serve
+# app.analysis.cascade._identify_companies while gpt-oss could. gpt-oss is
+# in fact the SMALLER budget of the two. The direct-company stage's old
+# BUNDLED prompt (every primary sector's candidate block in one call) billed
+# 17,607 tokens full / 11,888 slim, over BOTH ceilings, so that stage 413'd
+# on every article and produced zero companies regardless of model order.
+# The remedy was the prompt, not the model: cascade.py now issues ONE CALL
+# PER SECTOR (_identify_companies_per_sector), and a one-sector prompt is
+# measured comfortably inside 8,000 tokens -- it fits BOTH models.
+#
+# _identify_companies still tries FALLBACK_MODEL FIRST and MODEL second, the
+# only stage in this codebase where the order is inverted, but now purely on
+# quality grounds: gpt-oss is built for reliable nested tool calling, which
+# is what record_sector_companies' schema demands, and MODEL is a separate
+# quota bucket that still answers when gpt-oss's daily budget is exhausted.
+# See the comment at that call site before "restoring" MODEL-first there, and
+# see _GeminiCompletions._resolve_model below for a second-order consequence
+# of that inversion.
 FALLBACK_MODEL = "openai/gpt-oss-20b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 

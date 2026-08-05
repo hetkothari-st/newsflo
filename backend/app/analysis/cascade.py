@@ -5,15 +5,16 @@ companies L1 -> cascade sectors L2 -> cascade companies L2). See
 docs/superpowers/specs/2026-07-20-sector-cascade-reasoning-design.md.
 
 Originally a fixed 7 calls total. Confirmed in production that bundling
-every cascade sector's company lookup into one call degrades to an empty
-response once there are several sectors (each company's required fields
-are verbose enough that 5-7 sectors' worth doesn't fit one tool call's
-token budget, and the model returns nothing rather than a partial result)
--- so cascade company identification (stages 5/7) now makes one call PER
-cascade sector via _identify_cascade_companies_per_sector, making the
-total call count scale with how many cascade sectors are actually found
-(typically 1 for facts + 1-2 for primary sectors/companies + N for each
-cascade level's sectors and companies), not a fixed 7.
+several sectors' company lookup into one call degrades to an empty
+response (each company's required fields are verbose enough that 5-7
+sectors' worth doesn't fit one tool call's token budget, and the model
+returns nothing rather than a partial result) and, worse, overflows the
+providers' per-minute token ceilings outright (a 413, i.e. zero companies)
+-- so EVERY company-identification stage, direct (3) and cascade (5/7)
+alike, now makes one call PER SECTOR via _identify_companies_per_sector.
+The total call count therefore scales with how many sectors are actually
+found (1 for facts + 1 for primary sectors + N per sector at each company
+stage + 1 per cascade sector level), not a fixed 7.
 
 All three stage functions below (_extract_facts, _identify_sectors,
 _identify_companies) are pure: given a client and inputs, they issue one
@@ -686,14 +687,12 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_mode
     tool_use_failed 400 (the model's tool-call structure was unparseable).
 
     `fallback_model` defaults to FALLBACK_MODEL (gpt-oss-20b) -- the shape
-    every OTHER caller of this function wants -- but _identify_companies's
-    direct-company stage calls this with the two arguments INVERTED
-    (model=FALLBACK_MODEL, fallback_model=MODEL). That inversion is
-    deliberate, not a bug: see the comment at that call site and
-    FALLBACK_MODEL's own docstring in claude_client.py for the measured
-    reason (llama-3.3-70b-versatile's Groq per-minute token ceiling cannot
-    serve that stage's prompt AT ALL, so trying it first is a guaranteed,
-    wasted 413 every time).
+    every OTHER caller of this function wants -- but _identify_companies
+    calls this with the two arguments INVERTED (model=FALLBACK_MODEL,
+    fallback_model=MODEL). That inversion is deliberate, not a bug:
+    gpt-oss-20b is the better model for this stage's deeply-nested tool
+    schema. See the comment at that call site and FALLBACK_MODEL's own
+    docstring in claude_client.py.
 
     Any other exception -- and a second failure on `fallback_model`, of any
     kind -- propagates untouched. This is deliberate: a malformed schema on
@@ -728,7 +727,13 @@ def _identify_companies(
     CompanyMention programmatically (never asked of the LLM). parent_pool:
     for a cascade stage, the companies (from the previous company-stage)
     each returned company must chain from via parent_ticker; None for the
-    direct/primary stage (stage 3)."""
+    direct/primary stage (stage 3).
+
+    Every pipeline caller now reaches this through
+    _identify_companies_per_sector and passes exactly ONE sector -- a
+    multi-sector list still works (older tests use one), but it rebuilds the
+    prompt-size problem that made this stage fail outright, so do not call it
+    that way from the pipeline."""
     sector_lines = "\n".join(f"- {s.sector} ({s.direction}): {s.mechanism}" for s in sectors)
     if parent_pool is None:
         framing = (
@@ -842,11 +847,11 @@ def _identify_companies(
         """Stable prefix first, variable content last (cost-optimization
         phase 2). `framing` and `instructions` are per-stage constants --
         the direct stage's instructions alone carry the whole rulebook and
-        playbook block, ~6k tokens -- while only the facts/sectors/parents
+        playbook block, ~5.7k tokens -- while only the facts/sectors/parents
         block changes between calls. Leading with the constants makes the
         cacheable prefix as long as it can be, which matters most exactly
-        where this call is repeated: the cascade stages run it once per
-        sector, re-sending identical instructions every time.
+        where this call is repeated: EVERY company stage now runs it once
+        per sector, re-sending identical instructions every time.
 
         The closing line is not filler. The old ordering put the field
         instructions immediately before the answer, and that adjacency is
@@ -894,33 +899,33 @@ def _identify_companies(
 
         # Model order INVERTED relative to a naive "always try MODEL first":
         # FALLBACK_MODEL (gpt-oss-20b) goes FIRST here, MODEL (llama) is the
-        # fallback. Measured live (2026-08): this stage's prompt runs
-        # 13,000-19,000 tokens depending on how many sectors it's fanning
-        # out over (SECTOR_DEFINITIONS + the full rulebook/playbook block +
-        # the grounded candidate-company list), and Groq enforces a 12,000
-        # tokens-PER-MINUTE ceiling on llama-3.3-70b-versatile specifically.
-        # That ceiling made llama return 413 "Request too large" on BOTH the
-        # full prompt AND the slim retry below -- it can never serve this
-        # call, full stop, no matter which prompt variant is sent. Calling it
-        # first was a guaranteed, wasted 413 on every single invocation of
-        # this stage before doing anything useful. gpt-oss-20b, given the
-        # identical ~14k-token prompt, returned 429 (daily token quota) not
-        # 413 -- a different, much less restrictive limit with no comparable
-        # per-minute size ceiling -- so it is the one model of the two that
-        # can actually accept this prompt, and belongs first.
+        # fallback.
         #
-        # DO NOT "restore" llama-first here without re-measuring: it is the
-        # obvious-looking default (MODEL is the primary-quality slot
-        # everywhere else that has a choice) but it is provably unable to
-        # serve this specific stage. This is also NOT a blanket "gpt-oss is
-        # just better" verdict -- extract_facts/identify_sectors/
-        # generate_edges never touch MODEL at all (their prompts are small
-        # enough that FALLBACK_MODEL alone has always been enough), and
-        # verify_companies (app/analysis/verification.py) still tries MODEL
-        # first because its prompt has no rulebook/playbook/candidate block
-        # and is measured to stay well under the 12k-token ceiling. This
-        # inversion is specific to identify_companies's prompt size, not a
-        # general model preference.
+        # Groq's per-minute token ceilings, both measured live (2026-08):
+        # openai/gpt-oss-20b 8,000 TPM, llama-3.3-70b-versatile 12,000 TPM.
+        # The earlier version of this comment concluded from the 12k figure
+        # that llama "can never serve this stage" while gpt-oss could -- that
+        # conclusion was wrong in both directions. gpt-oss is the SMALLER
+        # budget of the two, and the bundled prompt this stage used to send
+        # (every primary sector's candidates at once: 17,607 tokens full,
+        # 11,888 slim) fit NEITHER, which is why every article was getting
+        # zero direct companies. The fix was the prompt, not the model order:
+        # one sector per call (see _identify_companies_per_sector) puts this
+        # prompt comfortably inside 8,000 tokens, so it now fits BOTH models.
+        #
+        # gpt-oss-20b stays first on quality grounds, not size ones: it is
+        # purpose-built for reliable nested tool/function calling, which is
+        # exactly what record_sector_companies' deeply-nested schema needs
+        # (see FALLBACK_MODEL's comment in claude_client.py). MODEL is the
+        # fallback because it is a separate quota bucket that can still
+        # answer when gpt-oss's daily budget is exhausted.
+        #
+        # This is NOT a blanket "gpt-oss is just better" verdict --
+        # extract_facts/identify_sectors/generate_edges never touch MODEL at
+        # all (their prompts are small enough that FALLBACK_MODEL alone has
+        # always been enough), and verify_companies
+        # (app/analysis/verification.py) still tries MODEL first because its
+        # prompt has no rulebook/playbook/candidate block at all.
         try:
             response = _call_with_model_fallback(
                 _call, FALLBACK_MODEL, call_name="identify_companies", fallback_model=MODEL,
@@ -928,21 +933,20 @@ def _identify_companies(
         except Exception as exc:
             if parent_pool is not None:
                 raise
-            # The direct-stage prompt carries the full rulebook/playbook block
-            # (~6k tokens) on top of the sector/candidate content already
-            # counted above. Retry once with the slim cascade-style
-            # instructions (no rulebook/playbooks): a less-informed answer
-            # beats losing every direct company -- the alert simply gets no
-            # rule citations that run. The retry itself still gets the
+            # The direct-stage prompt carries the full rulebook/playbook
+            # block (~5.7k tokens measured: the full/slim production pair
+            # differed by exactly that block) on top of the sector/candidate
+            # content already counted above -- which is why the full variant
+            # is the one that can still exceed a per-minute ceiling even now
+            # that the candidate block is one sector's worth. Retry once with
+            # the slim cascade-style instructions (no rulebook/playbooks): a
+            # less-informed answer beats losing every direct company -- the
+            # alert simply gets no rule citations that run, and the slim
+            # variant is measured well inside gpt-oss-20b's 8,000 TPM at one
+            # sector per call. The retry itself still gets the
             # RateLimitError/tool_use_failed -> fallback_model ladder,
             # gpt-oss-20b first, llama second, same order as the primary
-            # attempt above and for the same measured reason (llama's 12k
-            # TPM ceiling can't serve this stage regardless of which prompt
-            # variant is sent) -- historically (pre-inversion, when MODEL was
-            # tried first) a real production failure was full+llama 413'd,
-            # then slim+llama 400'd with tool_use_failed, and only
-            # slim+gpt-oss actually succeeded, which is the production
-            # evidence this whole reordering is based on.
+            # attempt above.
             logger.warning(
                 "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
             )
@@ -991,28 +995,44 @@ def _identify_companies(
     return mentions
 
 
-def _identify_cascade_companies_per_sector(
-    client, facts: str, sectors: list[SectorFinding], impact_level: str, parent_pool: list[CompanyMention],
-    session=None,
+def _identify_companies_per_sector(
+    client, facts: str, sectors: list[SectorFinding], impact_level: str,
+    parent_pool: list[CompanyMention] | None, session=None,
 ) -> tuple[list[CompanyMention], list[dict]]:
     """Calls _identify_companies ONCE PER SECTOR rather than bundling every
-    cascade sector into one call. Confirmed in production: bundling 5-7
+    sector into one call. Serves BOTH company stages: the direct/primary
+    stage (stage 3, parent_pool=None) and the cascade stages (5/7, with a
+    parent_pool) -- one implementation, so the per-sector call shape, the
+    retry, and the gap recording cannot drift between them.
+
+    Confirmed in production for the cascade stages first: bundling 5-7
     cascade sectors (each company requires a long rationale/key_points/
     reasons/evidence_refs/risks/assumptions/unknowns block, easily 500+
     tokens) into a single max_tokens=8192 tool call made the model return a
     degenerate empty response (no exception, just `{}` -- silently zero
     companies) even though every sector had a genuine, findable answer. The
     SAME sectors, called one at a time, reliably produced rich, correct,
-    multi-company results. Direct/primary companies (stage 3) do not use
-    this -- that stage empirically has few enough sectors (the article's
-    own direct subject, not a wide cascade fan-out) that bundling is fine.
+    multi-company results.
+
+    The direct stage was exempted from this on the theory that it has few
+    enough sectors for bundling to be safe. Measured in production (2026-08)
+    that was wrong, and in a harder way than a degraded answer: its bundled
+    prompt carried EVERY primary sector's candidate block at once and billed
+    17,607 tokens (11,888 with the rulebook dropped), over the per-minute
+    token ceiling of BOTH available models -- openai/gpt-oss-20b at 8,000 TPM
+    and llama-3.3-70b-versatile at 12,000 -- so every article 413'd here and
+    got ZERO direct companies. One sector per call carries one sector's
+    candidates, which fits both ceilings with room to spare (see
+    app.companies.candidates for the measured budget).
 
     A failure on one sector is retried once (2 attempts total) before being
     recorded as a gap dict in the returned gaps list -- never silently
     dropped, so a genuine transient failure (rate limit, malformed
     response) is distinguishable from "this sector genuinely has no
-    cascade companies" (which returns normally with an empty list, not a
-    gap). A gap on one sector does not lose another sector's results.
+    companies" (which returns normally with an empty list, not a gap). A gap
+    on one sector does not lose another sector's results -- which is the
+    other half of what the direct stage gains here: it used to be one call
+    whose single failure cost the article every direct company at once.
 
     This 2-attempt loop sits OUTSIDE _identify_companies' own
     _retry_forced_tool_call, and the two are complementary rather than
@@ -1038,16 +1058,19 @@ def _identify_cascade_companies_per_sector(
             except Exception as exc:
                 last_error = str(exc)
         if not succeeded:
-            logger.warning("cascade company lookup for sector %r failed after retry, recording gap: %s", sector.sector, last_error)
+            logger.warning(
+                "%s company lookup for sector %r failed after retry, recording gap: %s",
+                impact_level, sector.sector, last_error,
+            )
             gaps.append({
                 "sector": sector.sector,
                 "impact_level": impact_level,
                 # parent_pool is a POOL of companies this sector's lookup
-                # chains from, not a single one -- there is no single
-                # correct parent_ticker to attribute a whole-sector
-                # failure to, so this is intentionally left None rather
-                # than picking (and thereby misrepresenting) just the
-                # first entry.
+                # chains from, not a single one (and None entirely on the
+                # direct stage) -- there is no single correct parent_ticker
+                # to attribute a whole-sector failure to, so this is
+                # intentionally left None rather than picking (and thereby
+                # misrepresenting) just the first entry.
                 "parent_ticker": None,
                 "attempts": 2,
                 "last_error": last_error,
@@ -1340,10 +1363,10 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
     failure propagates, failing the whole article -- identical to the old
     single-call analyze_article's behavior. A failure at any later stage
     truncates the pipeline there: everything produced by stages that
-    already succeeded is still returned. Per-sector cascade-company
-    failures (stages 5/7) are retried and, if still unresolved, recorded
-    as gaps rather than truncating the pipeline (see
-    _identify_cascade_companies_per_sector).
+    already succeeded is still returned. Per-sector company failures --
+    now at EVERY company stage, direct (3) and cascade (5/7) alike -- are
+    retried and, if still unresolved, recorded as gaps rather than
+    truncating the pipeline (see _identify_companies_per_sector).
     """
     facts_result = _extract_facts(client, title, content)
     primary_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=None)
@@ -1361,15 +1384,18 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
             companies=all_companies, gaps=all_gaps, facts=facts_result.facts,
         )
 
-    try:
-        primary_companies = _identify_companies(
-            client, facts_result.facts, primary_sectors, impact_level="direct",
-            parent_pool=None, session=session,
-        )
-    except Exception as exc:
-        logger.warning("cascade stage 3 (primary companies) failed, truncating: %s", exc)
-        primary_companies = []
+    # One call per primary sector, same as the cascade stages -- a bundled
+    # call carried every sector's candidate block at once and exceeded both
+    # models' per-minute token ceilings, costing the article every direct
+    # company (see _identify_companies_per_sector). A sector that still fails
+    # after its retry becomes a gap and no longer takes the other sectors'
+    # companies down with it, so there is nothing left to "truncate" here.
+    primary_companies, primary_gaps = _identify_companies_per_sector(
+        client, facts_result.facts, primary_sectors, impact_level="direct",
+        parent_pool=None, session=session,
+    )
     all_companies.extend(primary_companies)
+    all_gaps.extend(primary_gaps)
 
     # Fan-out only for genuinely broad events, and only at the primary level.
     # A cascade sector is already one hop from the news; fanning it out to
@@ -1389,7 +1415,7 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
             l1_sectors = []
         all_sectors.extend(l1_sectors)
         if l1_sectors:
-            l1_companies, l1_gaps = _identify_cascade_companies_per_sector(
+            l1_companies, l1_gaps = _identify_companies_per_sector(
                 client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
                 parent_pool=l1_parent_tickers_present, session=session,
             )
@@ -1407,7 +1433,7 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
                 l2_sectors = []
             all_sectors.extend(l2_sectors)
             if l2_sectors:
-                l2_companies, l2_gaps = _identify_cascade_companies_per_sector(
+                l2_companies, l2_gaps = _identify_companies_per_sector(
                     client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
                     parent_pool=l2_parent_tickers_present, session=session,
                 )

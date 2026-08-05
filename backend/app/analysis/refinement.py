@@ -355,7 +355,7 @@ def generate_ripple_layers(client, title: str, facts: str, companies: list[dict]
         # 1536 was too tight for this tool's nested per-layer schema
         # (title/relationship/note/tickers x N sections) -- the same
         # starved-response failure mode documented in
-        # cascade.py::_identify_cascade_companies_per_sector, where a
+        # cascade.py::_identify_companies_per_sector, where a
         # too-small budget for a nested-array response makes the model
         # return no tool call at all rather than a partial one.
         return client.chat.completions.create(

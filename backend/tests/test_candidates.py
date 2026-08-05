@@ -153,6 +153,27 @@ def test_returns_up_to_sixty_companies_for_one_sector(db_session):
 
 # -- prompt-size guards ---------------------------------------------------
 
+def test_a_full_single_sector_block_drops_business_desc(db_session):
+    # The budget that matters after the 2026-08 per-sector fix: every
+    # company-stage call carries ONE sector, so a full 60-candidate block is
+    # the worst case for a single prompt. With descriptions those 60 rows
+    # measure ~6.5-8.3k tokens on the slim prompt, against gpt-oss-20b's
+    # 8,000 tokens/minute; without them, ~4.4-5.3k. Hence
+    # LONG_LIST_THRESHOLD sits BELOW MAX_CANDIDATES_PER_SECTOR -- breadth
+    # (the count) is kept and the line is trimmed instead.
+    assert LONG_LIST_THRESHOLD < MAX_CANDIDATES_PER_SECTOR
+    _seed(db_session, [
+        (f"C{i:03d}.NS", f"Company {i}", "infra", "OTHER", "A long business description here.")
+        for i in range(MAX_CANDIDATES_PER_SECTOR)
+    ])
+
+    text = format_candidates(candidate_companies(db_session, ["infra"]))
+
+    assert "A long business description here." not in text
+    assert text.count("\n") + 1 == MAX_CANDIDATES_PER_SECTOR
+    assert "C059.NS" in text
+
+
 def test_a_short_list_keeps_business_desc(db_session):
     _seed(db_session, [("HPCL.NS", "Hindustan Petroleum", "oil_gas", "NIFTY50", "Refines crude oil.")])
 
