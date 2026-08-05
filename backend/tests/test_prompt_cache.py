@@ -164,7 +164,7 @@ def test_identify_companies_puts_instructions_before_the_facts(parent_pool):
         c, _FACTS, sectors, impact_level="direct", parent_pool=pool,
     ))
 
-    instructions_at = prompt.index("- ticker: write the EXACT ticker symbol")
+    instructions_at = prompt.index(cascade._COMPANY_FIELD_INSTRUCTIONS)
     facts_at = prompt.index(_FACTS)
     assert instructions_at < facts_at
     # ...and the instructions are still pointed at from the end, so losing

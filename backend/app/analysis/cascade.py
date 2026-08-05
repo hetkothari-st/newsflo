@@ -478,57 +478,46 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
 # now-deleted, instructions) that app.pipeline._persist_alert's
 # rulebook_ids_json extraction depends on -- both are load-bearing, not
 # cosmetic prompt text.
+#
+# COMPRESSED HARD (2026-08) and it must STAY compressed. Every rule that was
+# here is still here; only the wording is shorter. What was deliberately
+# removed is the EXPLANATION of the schema's optional fields (risks,
+# assumptions, unknowns, alternative_hypothesis, evidence_refs) -- they now
+# cost one clause instead of six lines, because they are no longer required
+# (see _COMPANY_ITEM_REQUIRED) and a 20B model fills them poorly anyway.
+# The reason for all of this is a hard token budget, not taste: see
+# tests/test_prompt_budget.py and GROQ_TPM_CEILING. Adding prose back here
+# is the single easiest way to break company identification in production
+# again, which is exactly how it broke.
 _COMPANY_FIELD_INSTRUCTIONS = (
-    "- ticker: write the EXACT ticker symbol as it trades, including the "
-    "exchange suffix -- Indian companies almost always end in \".NS\" (NSE, "
-    "e.g. \"MARUTI.NS\", \"RELIANCE.NS\", \"HINDUNILVR.NS\") or occasionally "
-    "\".BO\" (BSE); global companies typically have no suffix (e.g. \"BP\", "
-    "\"AAPL\"). This match must be exact -- a ticker off by the suffix alone "
-    "(e.g. \"MARUTI\" instead of \"MARUTI.NS\") will fail to resolve to a "
-    "real record and the company will be silently dropped. If you are not "
-    "confident of the exact ticker, set it to null rather than guessing a "
-    "close-but-wrong symbol.\n"
-    "- name: the company's real, commonly-used legal name (e.g. \"Maruti "
-    "Suzuki India Ltd.\", not an invented or shortened variant) -- if the "
-    "ticker above is null or turns out wrong, this name is the only other "
-    "way the company can be matched to a real record.\n"
-    "For each company:\n"
-    "- rationale: name the specific mechanism for THAT company -- its "
-    "specific role (upstream producer vs refiner vs distributor vs miner: "
-    "never assume every company in a sector plays the same role), its "
-    "market position, and a real precedent if you know one. Never restate a "
-    "price/number the article already reports as if it were analysis -- "
-    "explain WHY this specific news moves this specific company, and HOW.\n"
-    "- key_points: 1-4 plain-language sentences (full sentences, no word "
-    "cap, typically 15-30 words) a reader with ZERO finance background can "
-    "read once and immediately understand WHY this affects this company and "
-    "HOW. Spell out the causal chain: [what happened] -> [what that changes "
-    "for this company -- its costs, sales, profit, what its customers do] "
-    "-> [why that's good or bad]. Replace or immediately unpack finance "
-    "jargon (never leave \"margin compression\", \"deal pipeline "
-    "pressure\", or similar unexplained). Never: (a) restating a "
-    "price/number the article already reports; (b) a vague sentiment line "
-    "with no mechanism; (c) a generic, always-true company fact untied to "
-    "this specific news; (d) a jargon-dense sentence an ordinary reader "
-    "would have to look up. Fewer, clearer sentences beat more, vaguer "
-    "ones -- 1-2 entries is correct when that's all the genuine mechanism "
-    "supports.\n"
-    "- reasons: 1-4 short, distinct, individually-citable reasons "
-    "supporting the direction call.\n"
-    "- risks: 0-3 specific risks that could invalidate this call. "
-    "assumptions: 0-3 things assumed true that, if wrong, change the call. "
-    "unknowns: 0-3 pieces of missing information that would make this call "
-    "more reliable.\n"
-    "- alternative_hypothesis: one sentence describing a plausible "
-    "competing interpretation, or why none is credible.\n"
+    "- ticker: the EXACT symbol as traded, suffix included (\"MARUTI.NS\", "
+    "not \"MARUTI\"). A wrong suffix fails to resolve and the company is "
+    "silently dropped, so use null rather than a close-but-wrong guess.\n"
+    "- name: the real legal name (\"Maruti Suzuki India Ltd.\") -- the only "
+    "fallback when the ticker is null or wrong.\n"
+    "- rationale: the mechanism for THAT company -- its specific role "
+    "(producer vs refiner vs distributor; never assume one role per "
+    "sector), its market position, and a real precedent if you know one. "
+    "Explain WHY this news moves THIS company and HOW; never restate a "
+    "price or number the article already reports as if it were analysis.\n"
+    "- key_points: 1-2 plain sentences (15-30 words each) a reader with "
+    "ZERO finance background understands on one read. Spell out the chain: "
+    "[what happened] -> [what it changes for this company: costs, sales, "
+    "profit, what its customers do] -> [why that is good or bad]. Unpack "
+    "any jargon you use (never leave \"margin compression\" bare). "
+    "Forbidden: restating the article's own numbers; vague sentiment with "
+    "no mechanism; a generic, always-true company fact; a sentence an "
+    "ordinary reader would have to look up.\n"
+    "- reasons: 1-4 short, distinct, individually-citable reasons for the "
+    "direction call.\n"
     "- time_horizon: exactly one of Immediate, Short-Term, Medium-Term, "
-    "Long-Term, based on when the mechanism actually plays out.\n\n"
-    "Never invent a specific-sounding number, study, or historical case "
-    "(e.g. \"UK data from 2018-2020 showed X% decline\") that you are not "
-    "genuinely confident is real -- a fabricated statistic dressed up as "
-    "evidence is worse than an honest qualitative statement with no number "
-    "at all. If you don't have a real, specific precedent, describe the "
-    "mechanism in plain qualitative terms instead of manufacturing one."
+    "Long-Term -- when the mechanism actually plays out.\n"
+    "- risks, assumptions, unknowns, alternative_hypothesis and "
+    "evidence_refs are OPTIONAL: fill them only when you have something "
+    "specific and real.\n\n"
+    "Never invent a number, study or historical case you are not genuinely "
+    "confident is real -- an honest qualitative statement beats a "
+    "fabricated statistic every time."
 )
 
 # Was wired into the direct stage's (stage 3) primary attempt as the
@@ -577,10 +566,9 @@ COMPANY_RATIONALE_INSTRUCTIONS = (
 # (article facts + real-world knowledge), not a rulebook that isn't provided.
 CASCADE_COMPANY_RATIONALE_INSTRUCTIONS = (
     f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
-    "- evidence_refs: one entry per `reasons` item -- either a quoted or "
-    "closely paraphrased fact from the article (prefix \"article: \"), or "
-    "a specific historical precedent you actually know (prefix "
-    "\"historical: \")."
+    "- evidence_refs (optional): up to one entry per `reasons` item -- an "
+    "article fact (prefix \"article: \") or a precedent you actually know "
+    "(prefix \"historical: \")."
 )
 
 # Shared by both company stages (direct and cascade). The breadth this asks
@@ -595,28 +583,20 @@ CASCADE_COMPANY_RATIONALE_INSTRUCTIONS = (
 # never from ranking a sector's constituents by size -- that is what put a
 # food-delivery company on a crude-oil story, and it stays disabled.
 _BREADTH_INSTRUCTION = (
-    "BE THOROUGH, NOT REPRESENTATIVE. Work down the candidate list company "
-    "by company and name EVERY one whose own business the mechanism "
-    "genuinely reaches -- not a sample of the most obvious ones. Five, ten, "
-    "or more companies is the correct answer whenever the candidates support "
-    "it. Stopping at two or three while a sixth and seventh genuinely "
-    "qualify is a failure, not restraint: the reader is asking which "
-    "companies this news touches, and a short list of only the household "
-    "names answers a different question. Look specifically past the largest "
-    "names to the component suppliers, the parts and materials makers, the "
-    "operators and service providers, and the smaller specialists in the "
-    "list -- those are the companies most often missed.\n\n"
-    "Selecting more from the candidate list is safe by construction: every "
-    "entry is a real, tradeable company, you cannot record one that is not "
-    "listed, and a later step re-reads each company you name and removes any "
-    "whose mechanism does not hold up. The error you must avoid is skipping "
-    "a company with a genuine channel. What is still forbidden is inventing: "
-    "do not name a company whose connection you cannot state concretely, and "
-    "do not stretch a mechanism to cover one more name. A company you "
-    "include needs a specific channel -- a cost line, a revenue line, a "
-    "customer/supplier/competitor relationship, or a regulatory exposure -- "
-    "stated for THAT company. \"It is a major player in this sector\" is not "
-    "a channel and never qualifies a company, however thorough you are being."
+    "BE THOROUGH, NOT REPRESENTATIVE. Work down the candidate list and name "
+    "EVERY company the mechanism genuinely reaches, not a sample of the "
+    "obvious ones. Five, ten or more is correct whenever the candidates "
+    "support it; stopping at two or three while a sixth qualifies is a "
+    "failure, not restraint. Look past the largest names to the component "
+    "suppliers, materials makers, operators, service providers and smaller "
+    "specialists -- those are most often missed. Selecting more is safe: "
+    "every entry is a real, tradeable company and a later step removes any "
+    "whose mechanism does not hold up.\n\n"
+    "What is forbidden is inventing or stretching. Each company you include "
+    "needs a specific channel stated for THAT company -- a cost line, a "
+    "revenue line, a customer/supplier/competitor relationship, or a "
+    "regulatory exposure. \"It is a major player in this sector\" is not a "
+    "channel."
 )
 
 _COMPANY_ITEM_PROPERTIES = {
@@ -635,10 +615,27 @@ _COMPANY_ITEM_PROPERTIES = {
     "unknowns": {"type": "array", "items": {"type": "string"}},
     "alternative_hypothesis": {"type": "string"},
 }
+# risks / assumptions / unknowns / alternative_hypothesis / evidence_refs are
+# deliberately NOT required (2026-08). They cost tokens twice -- input tokens
+# to explain in _COMPANY_FIELD_INSTRUCTIONS, output tokens to generate -- and
+# a 20B model produces them poorly. Dropping them from `required` is what
+# bought the prompt back under openai/gpt-oss-20b's 8,000 TPM ceiling, which
+# is what lets the reliable-tool-calling model serve this stage at all (see
+# tests/test_prompt_budget.py). The properties stay in the schema, so a model
+# that has something real to say still may -- they are optional, not gone.
+#
+# Everything downstream already tolerates their absence: schemas.
+# CompanyMention defaults them to []/None, app.companies.resolution passes
+# whatever it got, app.pipeline._build_alert_company reads them with
+# `.get(...) or []`, and the API serializers decode a missing column to [].
+# The ONE place absence was NOT tolerated was scoring -- an empty
+# evidence_refs used to drive app.reasoning.confidence's evidence AND
+# rulebook components to a hard 0.0 and put every company under
+# app.pipeline.CONFIDENCE_FLOOR. Fixed there, in compute_confidence; see its
+# comment before changing either end.
 _COMPANY_ITEM_REQUIRED = [
     "name", "direction", "magnitude_low", "magnitude_high", "rationale", "key_points",
-    "time_horizon", "reasons", "evidence_refs", "risks", "assumptions", "unknowns",
-    "alternative_hypothesis",
+    "time_horizon", "reasons",
 ]
 
 
@@ -728,19 +725,55 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_mode
         return call_fn(fallback_model)
 
 
+# Ceiling on the whole assembled company-stage request -- system + user
+# message + serialized tool schema. Lives here, next to the prompt it
+# constrains, and is imported by tests/test_prompt_budget.py, which measures
+# a real assembled prompt against it. It must stay under the SMALLEST
+# GROQ_TPM_CEILING (openai/gpt-oss-20b's 8,000), with the margin absorbing
+# the response tokens Groq bills against the same per-minute budget.
+COMPANY_PROMPT_TOKEN_BUDGET = 6_500
+
 # _identify_companies' prompt is always the SLIM (no rulebook/playbook)
 # variant -- see the comment at that function for why the full variant was
-# dropped entirely. The slim prompt is measured at 10,565-11,524 tokens
-# (2026-08), which fits inside whichever Groq model has the LARGER
-# GROQ_TPM_CEILING (claude_client.py) but not the smaller one. Deriving the
-# ladder from that map (rather than hardcoding "MODEL first") means this
-# stays correct if either model's measured ceiling ever changes -- today
-# that's MODEL (llama-3.3-70b, 12,000 TPM) as the primary attempt and
-# FALLBACK_MODEL (gpt-oss-20b, 8,000 TPM) as the one-retry fallback, the
-# opposite of every other stage in this module (see FALLBACK_MODEL's own
-# comment in claude_client.py for why those stay gpt-oss-first).
-_SLIM_PROMPT_PRIMARY_MODEL = max(GROQ_TPM_CEILING, key=GROQ_TPM_CEILING.get)
-_SLIM_PROMPT_FALLBACK_MODEL = min(GROQ_TPM_CEILING, key=GROQ_TPM_CEILING.get)
+# dropped entirely.
+#
+# This ladder was INVERTED (llama first) and is now back the right way up.
+# The reason for the inversion was purely SIZE: the slim prompt measured
+# 10,565-11,524 tokens, inside MODEL's (llama) 12,000 GROQ_TPM_CEILING but
+# over FALLBACK_MODEL's (gpt-oss) 8,000, so gpt-oss 413'd on nearly every
+# article. But llama fails record_sector_companies' nested tool schema
+# constantly, so putting it first traded a 413 for a tool_use_failed and
+# produced the same ZERO companies either way -- measured in production at 47
+# of the last 48 alerts.
+#
+# The prompt has since been cut under COMPANY_PROMPT_TOKEN_BUDGET, which is
+# under EVERY ceiling in GROQ_TPM_CEILING, so size no longer picks the model.
+# Schema quality does, and the ladder is now the same one every other stage
+# in this module uses: FALLBACK_MODEL (openai/gpt-oss-20b) is built for
+# reliable nested tool/function calling and actually satisfies this schema,
+# so it is PRIMARY; MODEL (llama-3.3-70b) is the one-retry FALLBACK, useful
+# because it is a separate quota bucket that still answers when gpt-oss is
+# rate-limited. See FALLBACK_MODEL's own comment in claude_client.py.
+#
+# The guard on all of this is tests/test_prompt_budget.py: it fails if the
+# prompt outgrows the budget, or if the budget outgrows the smallest ceiling.
+# Without it there is nothing to stop the next paragraph of prompt prose from
+# quietly putting this stage back over gpt-oss's ceiling -- which is exactly
+# how it broke, so do not reorder this ladder to "fix" a size problem. Fix
+# the size.
+_SLIM_PROMPT_PRIMARY_MODEL = FALLBACK_MODEL
+_SLIM_PROMPT_FALLBACK_MODEL = MODEL
+
+# Ceiling on how many already-identified companies a CASCADE-stage prompt
+# lists as chainable parents (and enum-constrains parent_ticker to). Each
+# entry costs a prompt line AND a tool-schema enum entry, and the pool is the
+# entire previous company stage's output across every sector -- so it grows
+# with exactly the breadth _BREADTH_INSTRUCTION asks for. Uncapped, a good
+# primary stage produces a cascade prompt that exceeds the token ceiling and
+# returns ZERO cascade companies, which is the failure this whole module was
+# just repaired for. 20 is well above the number of distinct parents any real
+# cascade link actually chains from.
+MAX_PARENT_POOL = 20
 
 
 def _identify_companies(
@@ -762,21 +795,17 @@ def _identify_companies(
     sector_lines = "\n".join(f"- {s.sector} ({s.direction}): {s.mechanism}" for s in sectors)
     if parent_pool is None:
         framing = (
-            "For each sector below, name the specific companies genuinely, "
-            "directly affected -- both winners and losers where applicable (a "
-            "single sector can have companies benefiting AND companies hurt by "
-            "the same news, e.g. importers vs exporters on a currency move). "
-            "Reason from the event company's actual business-relationship "
-            "graph -- its direct suppliers, direct customers, competitors, "
-            "substitutes, distribution partners, infrastructure/utility "
-            "providers, financing partners -- never from theme or keyword "
-            "similarity. Use your own knowledge of real companies and their "
-            "actual business models; do not force-fit a company that doesn't "
-            "genuinely fit. Final reality check per company: would a "
-            "professional equity analyst include it in a SAME-DAY research "
-            "note about THIS event? If the link is thematic, speculative, or "
-            "merely being in the same industry/buzzword universe, exclude it. "
-            "Zero companies for a sector is correct when none genuinely fit."
+            "For each sector below, name the companies genuinely, directly "
+            "affected -- both winners and losers (one sector can hold both, "
+            "e.g. importers vs exporters on a currency move). Reason from "
+            "the event company's real business-relationship graph -- its "
+            "suppliers, customers, competitors, substitutes, distribution "
+            "partners, infrastructure and financing partners -- never from "
+            "theme or keyword similarity, and never force-fit. Reality check "
+            "per company: would a professional equity analyst put it in a "
+            "SAME-DAY research note on THIS event? If the link is thematic, "
+            "speculative, or merely same-industry, exclude it. Zero "
+            "companies for a sector is correct when none genuinely fit."
             f"\n\n{_BREADTH_INSTRUCTION}"
         )
         parent_context = ""
@@ -787,64 +816,47 @@ def _identify_companies(
         # separately-filtered lists and zip() them; a parent_pool entry
         # with no ticker would then pair the wrong name with the wrong
         # ticker.
-        parent_tickers = [c.ticker for c in parent_pool if c.ticker]
-        parent_lines = "\n".join(f"- {c.ticker} ({c.name})" for c in parent_pool if c.ticker)
+        # Capped (see MAX_PARENT_POOL): parent_pool is the WHOLE previous
+        # company stage's output, which the breadth instruction actively
+        # pushes upward -- an uncapped pool is a prompt term that grows with
+        # our own success and silently re-breaks the token budget
+        # tests/test_prompt_budget.py defends. Truncation keeps the earliest
+        # entries, which are the previous stage's own sector-by-sector order,
+        # not an arbitrary reshuffle.
+        with_tickers = [c for c in parent_pool if c.ticker][:MAX_PARENT_POOL]
+        parent_tickers = [c.ticker for c in with_tickers]
+        parent_lines = "\n".join(f"- {c.ticker} ({c.name})" for c in with_tickers)
         framing = (
-            "For each sector below, name the specific companies affected as a "
-            "ripple from the already-identified companies listed. Every "
-            "company you name MUST chain from one of those via parent_ticker "
-            "(the exact ticker string) -- a real, specific economic link "
-            "(supplier, customer, or close competitor), not merely being in "
-            "the same sector.\n\n"
-            "A sector reaching this stage already has a stated, genuine "
-            "mechanism (see its one-line reason below) -- that mechanism is "
-            "real, but it is SECTOR-level, not yet company-level. Your job "
-            "has two parts, both required: (1) name real companies the "
-            "mechanism genuinely reaches, and (2) for each one, state HOW "
-            "that specific mechanism actually hits THAT company's own "
-            "business (its own revenue exposure, cost structure, or "
-            "customer base) -- not a copy of the sector's one-line reason, "
-            "and not a generic description of what the company does. Being "
-            "a large, well-known name in the sector is NOT by itself a "
-            "reason to include a company -- you still need a genuine, "
-            "specific reason the mechanism reaches that company's own "
-            "business, not just its sector membership. A cascade sector "
-            "caused by rising import/freight costs genuinely reaching an "
-            "import-dependent manufacturer in that sector is a real link; "
-            "the same sector reaching an unrelated company merely because "
-            "it's also big and well-known in that sector is NOT -- if you "
-            "cannot state the specific mechanism for a company beyond "
-            "\"it's a major player in this sector,\" leave it out.\n\n"
+            "For each sector below, name the companies affected as a ripple "
+            "from the already-identified companies listed. Every company "
+            "MUST chain from one of those via parent_ticker (the exact "
+            "ticker string) through a real economic link -- supplier, "
+            "customer, or close competitor -- not shared sector "
+            "membership.\n\n"
+            "The sector's one-line reason below is real but SECTOR-level. "
+            "Both halves of your job are required: (1) name companies the "
+            "mechanism genuinely reaches, and (2) for each, state HOW it "
+            "hits THAT company's own business -- its revenue exposure, cost "
+            "structure or customer base -- not a copy of the sector reason "
+            "and not a description of what the company does.\n\n"
             f"{_BREADTH_INSTRUCTION}\n\n"
-            "But do not force it: if "
-            "the sector's mechanism only plausibly reaches through vague "
-            "language like \"changing consumer spending\" or \"increased "
-            "engagement\" rather than something concrete (a specific cost, "
-            "a specific revenue line, a specific customer relationship), "
-            "that is not a real company-level link -- zero companies for "
-            "that sector is the correct, honest answer, not a shortfall. "
-            "Never invent a precise-sounding statistic, study, or "
-            "historical case you are not genuinely confident is real to "
-            "make a weak connection sound stronger -- an honest \"this link "
-            "is real but modest\" beats a fabricated data point every "
-            "time. Final reality check per company: would a professional "
-            "equity analyst include it in a SAME-DAY research note about "
-            "THIS event? A single company's own temporary stumble (its "
-            "earnings miss, its stock drop, its CEO's commentary) does NOT "
-            "ripple to companies that merely share its theme or industry -- "
-            "for such events, few or zero cascade companies is the correct "
-            "answer.\n\n"
-            "Each company you name MUST be a real, separate, independently "
-            "publicly-traded company with its own ticker -- NEVER a division, "
-            "segment, subsidiary, or business unit of a company you (or the "
-            "parent list above) already named. Do not write a name like "
-            "\"[Company] - [Segment] Division\" or \"[Company]'s [Segment] "
-            "arm\" -- that is the SAME company again, not a genuine cascade "
-            "link, and it cannot be resolved to a real database row. If your "
-            "first instinct is a division/segment of an already-named "
-            "company, name a genuinely different, separate company in that "
-            "sector instead -- do not omit the sector just because your "
-            "first instinct was a segment name."
+            "But do not force it. If the mechanism only reaches through "
+            "vague language (\"changing consumer spending\", \"increased "
+            "engagement\") rather than a specific cost, revenue line or "
+            "customer relationship, that is not a company-level link -- zero "
+            "companies is then the honest answer. Reality check per company: "
+            "would a professional equity analyst put it in a SAME-DAY "
+            "research note on THIS event? One company's own temporary "
+            "stumble (an earnings miss, a stock drop, CEO commentary) does "
+            "NOT ripple to companies that merely share its theme -- for "
+            "those, few or zero is correct.\n\n"
+            "Each company MUST be a separate, independently listed company "
+            "with its own ticker -- NEVER a division, segment, subsidiary or "
+            "business unit of a company already named above. \"[Company] - "
+            "[Segment] Division\" is the SAME company again, cannot resolve "
+            "to a real record, and is not a cascade link; name a genuinely "
+            "different company in that sector instead of dropping the "
+            "sector."
         )
         parent_context = f"\n\nMust chain from one of these companies:\n{parent_lines}"
 
@@ -922,20 +934,10 @@ def _identify_companies(
                 **tier_kwargs("identify_companies"),
             )
 
-        # Model order INVERTED relative to a naive "always try MODEL first",
-        # and relative to every OTHER stage in this module (gpt-oss-20b
-        # first, purely on schema-quality grounds -- see FALLBACK_MODEL's
-        # comment in claude_client.py). Here the order is driven by prompt
-        # SIZE, not quality: this stage's prompt is always the slim variant
-        # (rationale_instructions above), measured at 10,565-11,524 tokens
-        # (2026-08) -- inside MODEL's (llama) 12,000 GROQ_TPM_CEILING but
-        # over FALLBACK_MODEL's (gpt-oss) 8,000, so gpt-oss would 413 on this
-        # prompt far more often than not. _SLIM_PROMPT_PRIMARY_MODEL /
-        # _SLIM_PROMPT_FALLBACK_MODEL (defined above, derived from
-        # GROQ_TPM_CEILING rather than hardcoded here) put MODEL first for
-        # exactly that reason, with FALLBACK_MODEL as the one-retry fallback
-        # for the cases the slim prompt IS small enough to fit it (few
-        # candidates) or MODEL itself is rate-limited/malformed.
+        # Ladder order (gpt-oss primary, llama fallback) and the reasoning
+        # behind it live with _SLIM_PROMPT_PRIMARY_MODEL above -- it is now
+        # the SAME ordering every other stage in this module uses, because
+        # the prompt fits every GROQ_TPM_CEILING and size no longer decides.
         #
         # A full-rulebook attempt used to be tried first for the direct
         # stage (parent_pool is None), with this slim ladder as its retry on
