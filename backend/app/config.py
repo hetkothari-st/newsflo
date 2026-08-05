@@ -317,6 +317,12 @@ VERDICT_EXCESS_THRESHOLD_PCT = 2.0
 CAR_FLAT_THRESHOLD_PCT = 0.5  # |car_pct| below this counts as FLAT (neither held nor reversed)
 CAR_SUMMARY_SAMPLE_THRESHOLD = 5  # matches calibration/track_record.py's WIN_RATE_SAMPLE_THRESHOLD convention
 
+# -- Event volatility ranges (subsystem D, spec 2026-08-05) --------------
+# Minimum measured events before a range is stored/shown at each level.
+# Below both: no row, nothing shown -- omit rather than fabricate.
+EVENT_VOL_COMPANY_MIN_EVENTS = 3
+EVENT_VOL_SECTOR_MIN_EVENTS = 5
+
 # AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
 # LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live
 # Company.market_cap every call -- never a hardcoded company list.

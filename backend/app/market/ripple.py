@@ -18,6 +18,7 @@ this alert's companies.
 from sqlalchemy.orm import Session
 
 from app.companies.branding import logo_url
+from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
@@ -63,9 +64,11 @@ def _alert_company_rows(
             "name": company.name,
             "sector": company.sector,
             "cap_tier": (resolved := resolve_cap_tier(session, company)) and resolved.tier,
-            # business_desc was LLM-invented and is no longer populated; the
-            # key stays so the frontend can migrate without a lockstep deploy.
-            "business_desc": None,
+            # Sourced descriptions only -- the legacy LLM-invented values
+            # stay withheld. The URL is the CC BY-SA attribution and must
+            # travel with the text.
+            "business_desc": (_desc := sourced_description(company))[0],
+            "business_desc_source_url": _desc[1],
             "fundamentals": fundamentals_payload(company),
             "direction": alert_company.direction,
             "excess_move_pct": None,

@@ -19,7 +19,9 @@ import {
   isThinTrading,
   moveColor,
 } from './format';
+import BusinessDescription from '../components/BusinessDescription';
 import Fundamentals from '../components/Fundamentals';
+import VolatilityRange, { type VolatilityRangeData } from '../components/VolatilityRange';
 import type { Fundamentals as FundamentalsData } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
@@ -32,7 +34,12 @@ export interface InfoSheetData {
   // business_desc paragraph. Null when this company has no official BSE
   // classification -- renders no "What they do" section at all.
   fundamentals?: FundamentalsData | null;
+  // Sourced description + its CC BY-SA attribution. Both or neither.
+  businessDesc?: string | null;
+  businessDescSourceUrl?: string | null;
   logoUrl: string | null;
+  // Subsystem D: empirical reaction range for this alert's news category.
+  volatilityRange?: VolatilityRangeData | null;
 }
 
 export type SheetRequest =
@@ -53,14 +60,19 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
           </div>
         </div>
       </div>
-      {/* No fallback text: an unclassified company renders no section here
-          at all -- Fundamentals itself returns null when data is null. */}
-      {info.fundamentals && (
+      {/* No fallback text: a company with neither a sourced description nor
+          an official classification renders no section here at all. */}
+      {(info.fundamentals || info.businessDesc) && (
         <>
           <p className="seclab">What they do</p>
+          <BusinessDescription text={info.businessDesc} sourceUrl={info.businessDescSourceUrl} />
           <Fundamentals data={info.fundamentals} />
         </>
       )}
+      {/* Its own block, not tucked under "What they do" -- an empirical
+          reaction range is a different kind of fact than a business
+          description, and VolatilityRange carries its own label line. */}
+      <VolatilityRange range={info.volatilityRange} />
       <p className="disc">Glance view. Tap the row for the full impact breakdown.</p>
     </>
   );
@@ -201,6 +213,7 @@ export function DeepDiveSheetContent({
           </div>
         </div>
       )}
+      <VolatilityRange range={data.volatility_range} />
       {data.intensity !== null && (
         <>
           <p className="seclab">How this score is built · {data.intensity.components.length} signals</p>
@@ -230,12 +243,15 @@ export function DeepDiveSheetContent({
           ))}
         </>
       )}
-      {/* No fallback text: business_desc was LLM-invented and the backend
-          now always sends null. An unclassified company renders nothing
-          here -- Fundamentals itself returns null. */}
-      {data.fundamentals && (
+      {/* No fallback text: a company with neither a sourced description nor
+          an official classification renders nothing here. */}
+      {(data.fundamentals || data.business_desc) && (
         <>
           <p className="seclab">What they do</p>
+          <BusinessDescription
+            text={data.business_desc}
+            sourceUrl={data.business_desc_source_url}
+          />
           <Fundamentals data={data.fundamentals} />
         </>
       )}

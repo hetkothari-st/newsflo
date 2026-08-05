@@ -14,10 +14,12 @@ import json
 from sqlalchemy.orm import Session
 
 from app.companies.branding import logo_url
+from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import cap_tier_map
+from app.market.event_volatility import lookup_range, ranges_for_category
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
 from app.models import Alert, AlertRippleLayer, ImpactEdge, MarketMove
@@ -93,7 +95,7 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     rows: [...]} -- rows carry ticker, name, sector, cap_tier,
     liquidity_tier, delivery_pct, direction, excess_move_pct,
     intensity, is_exposure_only, in_my_holdings, why, business_desc,
-    fundamentals, logo_url. Every affected company appears exactly once (peak included
+    fundamentals, volatility_range, logo_url. Every affected company appears exactly once (peak included
     -- the card back is the complete who's-affected view, spec §2)."""
     moves_by_company_id = {
         m.company_id: m for m in session.query(MarketMove).filter_by(alert_id=alert.id).all()
@@ -104,6 +106,9 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     breadth_score = compute_breadth_score(ok_excess_values)
 
     cap_tiers = cap_tier_map(session)
+
+    # One query for the whole card back, not one per row (spec §6).
+    vol_by_company, vol_by_sector = ranges_for_category(session, alert.category)
 
     edges = session.query(ImpactEdge).filter_by(alert_id=alert.id).all()
     relation_by_company_id: dict[int, str] = {}
@@ -162,10 +167,15 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             "cap_tier": cap_tiers.get(company.ticker),
             "liquidity_tier": compute_liquidity_tier(move.avg_traded_value if move else None),
             "delivery_pct": move.delivery_pct if move else None,
-            # business_desc was LLM-invented and is no longer populated; the
-            # key stays so the frontend can migrate without a lockstep deploy.
-            "business_desc": None,
+            # Sourced descriptions only -- the legacy LLM-invented values
+            # stay withheld. The URL is the CC BY-SA attribution and must
+            # travel with the text.
+            "business_desc": (_desc := sourced_description(company))[0],
+            "business_desc_source_url": _desc[1],
             "fundamentals": fundamentals_payload(company),
+            # Empirical reaction range for this news category (subsystem D).
+            # None below the sample thresholds -- omit, never fabricate.
+            "volatility_range": lookup_range(vol_by_company, vol_by_sector, company),
             "direction": alert_company.direction,
             "excess_move_pct": None,
             "intensity": None,
