@@ -167,7 +167,12 @@ export function DeepDiveSheetContent({
     );
   }
 
-  const sectorLine = `${data.sector}${data.pe != null ? ` · PE ${data.pe.toFixed(1)}` : ' · PE —'}`;
+  // No PE in the header: it came from a different source (live yfinance)
+  // than the BSE-sourced P/E in the fundamentals block below, and showing
+  // two unlabeled, disagreeing P/Es on one sheet (33.9 vs 76.92 for L&T,
+  // seen live) reads as broken data. One P/E, with provenance, in the
+  // fundamentals block.
+  const sectorLine = data.sector;
 
   return (
     <>
@@ -252,7 +257,7 @@ export function DeepDiveSheetContent({
             text={data.business_desc}
             sourceUrl={data.business_desc_source_url}
           />
-          <Fundamentals data={data.fundamentals} />
+          <Fundamentals data={data.fundamentals} variant="glance" />
         </>
       )}
       {(data.why !== null || data.rationale !== null) && (
