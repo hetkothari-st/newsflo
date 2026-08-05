@@ -62,14 +62,17 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
       </div>
       {/* No fallback text: a company with neither a sourced description nor
           an official classification renders no section here at all. */}
-      {(info.fundamentals || info.businessDesc || info.volatilityRange) && (
+      {(info.fundamentals || info.businessDesc) && (
         <>
           <p className="seclab">What they do</p>
           <BusinessDescription text={info.businessDesc} sourceUrl={info.businessDescSourceUrl} />
-          <VolatilityRange range={info.volatilityRange} />
           <Fundamentals data={info.fundamentals} />
         </>
       )}
+      {/* Its own block, not tucked under "What they do" -- an empirical
+          reaction range is a different kind of fact than a business
+          description, and VolatilityRange carries its own label line. */}
+      <VolatilityRange range={info.volatilityRange} />
       <p className="disc">Glance view. Tap the row for the full impact breakdown.</p>
     </>
   );
@@ -210,7 +213,7 @@ export function DeepDiveSheetContent({
           </div>
         </div>
       )}
-      {data.excess_move_pct !== null && <VolatilityRange range={data.volatility_range} />}
+      <VolatilityRange range={data.volatility_range} />
       {data.intensity !== null && (
         <>
           <p className="seclab">How this score is built · {data.intensity.components.length} signals</p>

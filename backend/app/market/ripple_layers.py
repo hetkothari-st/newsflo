@@ -95,7 +95,7 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     rows: [...]} -- rows carry ticker, name, sector, cap_tier,
     liquidity_tier, delivery_pct, direction, excess_move_pct,
     intensity, is_exposure_only, in_my_holdings, why, business_desc,
-    fundamentals, logo_url. Every affected company appears exactly once (peak included
+    fundamentals, volatility_range, logo_url. Every affected company appears exactly once (peak included
     -- the card back is the complete who's-affected view, spec §2)."""
     moves_by_company_id = {
         m.company_id: m for m in session.query(MarketMove).filter_by(alert_id=alert.id).all()

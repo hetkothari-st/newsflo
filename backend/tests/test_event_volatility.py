@@ -20,9 +20,11 @@ AS_OF = date(2026, 8, 5)
 def make_company(db_session):
     """No such fixture exists in conftest.py -- local factory following the
     Company-construction pattern used elsewhere (e.g. test_market_move_wiring.py)."""
-    def _make(ticker, sector="other", name=None, index_tier="OTHER"):
+    def _make(ticker, sector="other", name=None, index_tier="OTHER",
+              market="INDIA", tradeability="NORMAL"):
         company = Company(
             ticker=ticker, name=name or ticker, sector=sector, index_tier=index_tier,
+            market=market, tradeability=tradeability,
         )
         db_session.add(company)
         db_session.flush()
@@ -46,8 +48,17 @@ def test_event_volatility_range_table_exists(db_session):
 def test_market_move_carries_its_alert_category(db_session):
     """Copied at measurement time -- alerts get recategorized later, and a
     live join would silently re-shuffle historical ranges (same hazard
-    calibration_samples.category already documents)."""
-    assert hasattr(MarketMove, "category")
+    calibration_samples.category already documents). Round-trip a real
+    value through the table rather than just checking the column exists."""
+    move = MarketMove(
+        alert_id=1, company_id=1, benchmark_ticker="^CNXPHARMA",
+        excess_move_pct=1.5, category="pharma", measurement_status="ok",
+    )
+    db_session.add(move)
+    db_session.flush()
+    db_session.expire(move)
+    got = db_session.query(MarketMove).one()
+    assert got.category == "pharma"
 
 
 def test_thresholds_live_in_config_not_code():
@@ -55,9 +66,19 @@ def test_thresholds_live_in_config_not_code():
     assert config.EVENT_VOL_SECTOR_MIN_EVENTS == 5
 
 
-def _fact(company_id=1, sector="pharma", category="pharma", move=1.0):
-    return ev.MoveFact(company_id=company_id, sector=sector,
-                       category=category, excess_move_pct=move)
+_fact_alert_id_seq = count(1)
+
+
+def _fact(company_id=1, sector="pharma", category="pharma", move=1.0, alert_id=None):
+    """alert_id defaults to a fresh value per call -- most tests build one
+    fact per (implicit) event, so the default keeps them reading the same
+    as before this parameter existed. Pass alert_id explicitly to model
+    several measurements sharing one event (one alert resolving multiple
+    same-sector companies)."""
+    if alert_id is None:
+        alert_id = next(_fact_alert_id_seq)
+    return ev.MoveFact(company_id=company_id, sector=sector, category=category,
+                       excess_move_pct=move, alert_id=alert_id)
 
 
 # --- compute_ranges: grouping and thresholds --------------------------------
@@ -82,9 +103,14 @@ def test_two_events_earn_no_company_row():
 
 def test_sector_pool_needs_five_events_and_includes_company_row_earners():
     """The sector row describes the sector, not 'the leftovers' -- company
-    1's three measurements count toward the pharma pool too."""
-    facts = [_fact(company_id=1, move=m) for m in (-1.8, 0.6, 2.4)]
-    facts += [_fact(company_id=2, move=m) for m in (-4.0, 5.0)]
+    1's three measurements count toward the pharma pool too. Each fact
+    below is a DISTINCT event (alert_id 1-5) -- n_events counts events, not
+    measurement rows, so this must stay five events to earn the row."""
+    facts = [_fact(company_id=1, alert_id=1, move=-1.8),
+             _fact(company_id=1, alert_id=2, move=0.6),
+             _fact(company_id=1, alert_id=3, move=2.4)]
+    facts += [_fact(company_id=2, alert_id=4, move=-4.0),
+              _fact(company_id=2, alert_id=5, move=5.0)]
     rows = ev.compute_ranges(facts)
     sector = [r for r in rows if r["level"] == "SECTOR"]
     assert len(sector) == 1
@@ -94,6 +120,31 @@ def test_sector_pool_needs_five_events_and_includes_company_row_earners():
     assert sector[0]["min_excess_move_pct"] == -4.0
     assert sector[0]["max_excess_move_pct"] == 5.0
     assert sector[0]["median_excess_move_pct"] == 0.6
+
+
+def test_one_shared_alert_across_five_companies_earns_no_sector_row():
+    """n_events counts DISTINCT alerts, not measurements: one broad alert
+    that resolves 5 same-sector companies is a single day's cross-sectional
+    spread, not 5 independent observations of how this category behaves --
+    it must not alone clear EVENT_VOL_SECTOR_MIN_EVENTS."""
+    facts = [_fact(company_id=i, alert_id=1, move=float(i)) for i in range(1, 6)]
+    assert not [r for r in ev.compute_ranges(facts) if r["level"] == "SECTOR"]
+
+
+def test_mixed_alerts_n_events_counts_distinct_alerts_not_measurements():
+    """6 measurements from 5 distinct alerts (alert 1 resolves both company
+    1 and company 2) must report n_events=5, not 6."""
+    facts = [
+        _fact(company_id=1, alert_id=1, move=1.0),
+        _fact(company_id=2, alert_id=1, move=2.0),
+        _fact(company_id=3, alert_id=2, move=3.0),
+        _fact(company_id=4, alert_id=3, move=4.0),
+        _fact(company_id=5, alert_id=4, move=5.0),
+        _fact(company_id=6, alert_id=5, move=6.0),
+    ]
+    sector = [r for r in ev.compute_ranges(facts) if r["level"] == "SECTOR"]
+    assert len(sector) == 1
+    assert sector[0]["n_events"] == 5
 
 
 def test_four_sector_events_earn_no_sector_row():
@@ -166,6 +217,26 @@ def test_collect_facts_excludes_unusable_rows(db_session, make_company):
     facts = ev.collect_move_facts(db_session)
     assert [f.excess_move_pct for f in facts] == [1.5]
     assert facts[0].sector == "pharma"
+
+
+def test_collect_facts_excludes_global_market_companies(db_session, make_company):
+    """A curated GLOBAL company (app.companies.global_seed) can still carry
+    a measured market_move, but every other consumer of these pools --
+    deep dive, card back -- is India-only. Same restriction as
+    app.companies.resolution._is_tradeable_indian's fan-out branch."""
+    company = make_company("BP", sector="oil_gas", market="GLOBAL")
+    _move(db_session, company, category="oil_gas", excess=2.0)
+    facts = ev.collect_move_facts(db_session)
+    assert facts == []
+
+
+def test_collect_facts_excludes_non_normal_tradeability_companies(db_session, make_company):
+    """RESTRICTED/SME/SUSPENDED rows must not feed pools, same restriction
+    as the resolver's fan-out branch."""
+    company = make_company("SMESHELL.NS", sector="pharma", tradeability="SME")
+    _move(db_session, company, category="pharma", excess=2.0)
+    facts = ev.collect_move_facts(db_session)
+    assert facts == []
 
 
 # --- apply_ranges ------------------------------------------------------------

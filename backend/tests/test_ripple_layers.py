@@ -256,6 +256,9 @@ def test_rows_without_stored_ranges_carry_null_not_a_number(db_session):
     alert = _alert_with_layers(db_session)
 
     layers = compute_ripple_layers(db_session, alert, set())
+    rows_checked = 0
     for layer in layers:
         for row in layer["rows"]:
             assert row["volatility_range"] is None
+            rows_checked += 1
+    assert rows_checked > 0

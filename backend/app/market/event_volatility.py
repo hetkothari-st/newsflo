@@ -29,6 +29,11 @@ class MoveFact:
     sector: str | None
     category: str
     excess_move_pct: float
+    # The alert (news event) this measurement came from. n_events counts
+    # DISTINCT alert_ids in a pool, not measurement rows -- one broad alert
+    # that resolves 5 same-sector companies is ONE day's cross-sectional
+    # spread, not 5 independent observations of how this category behaves.
+    alert_id: int
 
 
 def collect_move_facts(session: Session) -> list[MoveFact]:
@@ -36,13 +41,21 @@ def collect_move_facts(session: Session) -> list[MoveFact]:
     a company whose sector was corrected contributes to its current
     sector's pool, not its historical one. Rows with NULL category
     (pre-backfill) are excluded, never joined live to alerts: one source
-    of truth per row (spec §3.2)."""
+    of truth per row (spec §3.2).
+
+    Restricted to India/NORMAL companies -- same restriction as
+    app.companies.resolution._is_tradeable_indian's own fan-out branch.
+    Without it, a curated GLOBAL company or a RESTRICTED/SME/SUSPENDED row
+    (which can still carry a measured market_move) would feed a pool whose
+    every other consumer (deep dive, card back) is India/NORMAL-only."""
     rows = (
         session.query(MarketMove, Company.sector)
         .join(Company, Company.id == MarketMove.company_id)
         .filter(MarketMove.measurement_status == "ok")
         .filter(MarketMove.excess_move_pct.isnot(None))
         .filter(MarketMove.category.isnot(None))
+        .filter(Company.market == "INDIA")
+        .filter(Company.tradeability == "NORMAL")
         .all()
     )
     return [
@@ -51,14 +64,18 @@ def collect_move_facts(session: Session) -> list[MoveFact]:
             sector=sector,
             category=move.category,
             excess_move_pct=move.excess_move_pct,
+            alert_id=move.alert_id,
         )
         for move, sector in rows
     ]
 
 
-def _range_stats(moves: list[float]) -> dict:
+def _range_stats(alert_ids: set[int], moves: list[float]) -> dict:
+    """min/median/max span every usable measurement in the pool; n_events
+    is the count of DISTINCT alerts backing it, not the measurement count
+    -- see MoveFact.alert_id."""
     return {
-        "n_events": len(moves),
+        "n_events": len(alert_ids),
         "min_excess_move_pct": min(moves),
         "median_excess_move_pct": median(moves),
         "max_excess_move_pct": max(moves),
@@ -68,32 +85,42 @@ def _range_stats(moves: list[float]) -> dict:
 def compute_ranges(facts: list[MoveFact]) -> list[dict]:
     """Pure: facts in, range-row dicts out.
 
-    COMPANY rows need EVENT_VOL_COMPANY_MIN_EVENTS; SECTOR pools need
-    EVENT_VOL_SECTOR_MIN_EVENTS and include every company's measurements
-    (the sector row describes the sector, not "the leftovers"). sector
-    'other' or None pools nothing -- an absence of classification is not a
-    peer group."""
-    by_company: dict[tuple[int, str], list[float]] = defaultdict(list)
-    by_sector: dict[tuple[str, str], list[float]] = defaultdict(list)
+    Thresholds gate on DISTINCT EVENTS (alert_ids), not measurement rows:
+    COMPANY rows need EVENT_VOL_COMPANY_MIN_EVENTS distinct alerts; SECTOR
+    pools need EVENT_VOL_SECTOR_MIN_EVENTS distinct alerts and include
+    every company's measurements (the sector row describes the sector, not
+    "the leftovers"). One alert resolving 5 same-sector companies is 1
+    event, not 5 -- it must not alone clear the sector threshold. For
+    COMPANY rows this coincides with measurement count (market_moves has
+    UNIQUE(alert_id, company_id)); implemented uniformly with SECTOR rows
+    regardless. min/median/max always span ALL usable measurements in the
+    pool, not just one per alert. sector 'other' or None pools nothing --
+    an absence of classification is not a peer group."""
+    by_company: dict[tuple[int, str], list[tuple[int, float]]] = defaultdict(list)
+    by_sector: dict[tuple[str, str], list[tuple[int, float]]] = defaultdict(list)
     for fact in facts:
-        by_company[(fact.company_id, fact.category)].append(fact.excess_move_pct)
+        by_company[(fact.company_id, fact.category)].append((fact.alert_id, fact.excess_move_pct))
         if fact.sector and fact.sector != "other":
-            by_sector[(fact.sector, fact.category)].append(fact.excess_move_pct)
+            by_sector[(fact.sector, fact.category)].append((fact.alert_id, fact.excess_move_pct))
 
     rows: list[dict] = []
-    for (company_id, category), moves in sorted(by_company.items()):
-        if len(moves) < config.EVENT_VOL_COMPANY_MIN_EVENTS:
+    for (company_id, category), pairs in sorted(by_company.items()):
+        alert_ids = {alert_id for alert_id, _ in pairs}
+        if len(alert_ids) < config.EVENT_VOL_COMPANY_MIN_EVENTS:
             continue
+        moves = [excess for _, excess in pairs]
         rows.append({
             "level": "COMPANY", "company_id": company_id, "sector": None,
-            "category": category, **_range_stats(moves),
+            "category": category, **_range_stats(alert_ids, moves),
         })
-    for (sector, category), moves in sorted(by_sector.items()):
-        if len(moves) < config.EVENT_VOL_SECTOR_MIN_EVENTS:
+    for (sector, category), pairs in sorted(by_sector.items()):
+        alert_ids = {alert_id for alert_id, _ in pairs}
+        if len(alert_ids) < config.EVENT_VOL_SECTOR_MIN_EVENTS:
             continue
+        moves = [excess for _, excess in pairs]
         rows.append({
             "level": "SECTOR", "company_id": None, "sector": sector,
-            "category": category, **_range_stats(moves),
+            "category": category, **_range_stats(alert_ids, moves),
         })
     return rows
 

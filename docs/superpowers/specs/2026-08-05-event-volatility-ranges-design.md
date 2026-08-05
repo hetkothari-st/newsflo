@@ -32,7 +32,11 @@ volatility range per event (D).
   for months; min/median/max is honest at n=3. Bullish and bearish events
   of one category are pooled deliberately — the range describes response
   spread, and its sign structure (e.g. −4%…−1% for a category that only
-  ever hurts this stock) is itself the information.
+  ever hurts this stock) is itself the information. The COMPANY/SECTOR
+  thresholds below gate on the count of DISTINCT news events (alert_ids)
+  behind a group, not the count of measurement rows — one broad alert that
+  resolves several same-sector companies is one day's cross-sectional
+  spread, not one independent observation per company.
 
 ## 3. Data model
 
@@ -48,7 +52,7 @@ aggregate with no identity worth preserving, so no upsert machinery.
 | `company_id` | int FK companies, nullable | set on COMPANY rows, NULL on SECTOR rows |
 | `sector` | str, nullable | set on SECTOR rows (taxonomy sector key), NULL on COMPANY rows |
 | `category` | str, NOT NULL | alert category |
-| `n_events` | int, NOT NULL | usable measurements backing this row |
+| `n_events` | int, NOT NULL | count of distinct news events (alerts) backing this row; min/median/max span all usable measurements from those events |
 | `min_excess_move_pct` | float, NOT NULL | |
 | `median_excess_move_pct` | float, NOT NULL | |
 | `max_excess_move_pct` | float, NOT NULL | |

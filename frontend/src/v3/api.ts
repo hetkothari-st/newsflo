@@ -2,6 +2,7 @@
    Fresh module for the v3 surface -- the old lib/feedV2Api.ts stays for
    the retired feed-v2 components until they are deleted. */
 import type { Fundamentals } from '../lib/api';
+import type { VolatilityRangeData } from '../components/VolatilityRange';
 
 export type CapTier = 'LARGE' | 'MID' | 'SMALL' | 'MICRO';
 export type LiquidityTier = 'LOW' | 'MODERATE' | 'HIGH';
@@ -85,15 +86,11 @@ export interface LayerRow {
   why: string | null;
   logo_url: string | null;
   // Subsystem D: empirical reaction range for this alert's news category.
-  // Null below sample thresholds or (deep dive) outside alert context.
-  volatility_range: {
-    level: 'COMPANY' | 'SECTOR';
-    n_events: number;
-    min_excess_move_pct: number;
-    median_excess_move_pct: number;
-    max_excess_move_pct: number;
-    as_of: string;
-  } | null;
+  // Optional, mirroring how `fundamentals?:` above documents its
+  // producers: app.market.ripple_layers rows emit it (null below sample
+  // thresholds), but app.market.ripple.get_sector_peers_for_alert peer
+  // rows do not set this key at all.
+  volatility_range?: VolatilityRangeData | null;
 }
 
 export interface RippleLayer {
@@ -149,15 +146,9 @@ export interface StockDeepDive {
   section_title: string | null;
   peers: LayerRow[];
   // Subsystem D: empirical reaction range for this alert's news category.
-  // Null below sample thresholds or (deep dive) outside alert context.
-  volatility_range: {
-    level: 'COMPANY' | 'SECTOR';
-    n_events: number;
-    min_excess_move_pct: number;
-    median_excess_move_pct: number;
-    max_excess_move_pct: number;
-    as_of: string;
-  } | null;
+  // Sent by app.routers.stock_deep_dive -- null below sample thresholds or
+  // outside alert context, never omitted from the response.
+  volatility_range?: VolatilityRangeData | null;
 }
 
 export interface DiscoveryEntry {
