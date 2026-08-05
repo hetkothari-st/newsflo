@@ -138,6 +138,10 @@ body:has(.nf4) { background: #fafafa; }
 /* A card whose story has no usable image collapses to one row -- the
    1fr plate row would otherwise reintroduce the dead space. */
 .nf4 .storycard:not(:has(.lplate)) { grid-template-rows: auto; align-content: center; }
+/* The FIRST card shares the homepage with the masthead: natural height
+   with a bounded plate, so the whole card sits above the fold on load. */
+.nf4 .storycard.first { min-height: 0; }
+.nf4 .storycard.first .lplate { height: 34vh; min-height: 180px; }
 @media (min-width: 900px) {
   .nf4 .storycard {
     grid-template-columns: 2fr 1fr;
@@ -146,10 +150,11 @@ body:has(.nf4) { background: #fafafa; }
     padding: 48px 32px;
   }
   .nf4 .storycard:not(:has(.lplate)) { grid-template-columns: 1fr; align-items: center; }
+  .nf4 .storycard.first .lplate { height: 100%; min-height: 180px; }
 }
 .nf4 .storycard .lmove {
   font-family: var(--serif);
-  font-size: 77px;
+  font-size: 64px;
   line-height: 0.9;
   font-weight: 400;
 }
@@ -480,7 +485,7 @@ body:has(.nf4) { background: #fafafa; }
   .nf4 .navlinks { gap: 14px; }
   .nf4 .capf4 { gap: 12px; }
   .nf4 .storycard { padding: 24px 16px; gap: 16px; }
-  .nf4 .storycard .lmove { font-size: 56px; }
+  .nf4 .storycard .lmove { font-size: 44px; }
   .nf4 .crow { flex-wrap: wrap; row-gap: 2px; }
   .nf4 .crow .nm4 { flex-basis: 100%; order: 3; white-space: normal; }
   .nf4 .band .sumline { gap: 20px; }

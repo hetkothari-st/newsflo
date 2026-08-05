@@ -309,9 +309,16 @@ export default function FeedV4({
   // one full-viewport snap slot per card, Inshorts-style.
   return (
     <div>
-      {alerts?.map((alert) => (
+      {alerts?.map((alert, index) => (
         <div key={alert.id}>
-          <div className="storycard" data-testid={`v4story-${alert.id}`}>
+          {/* The first card shares the homepage with the masthead, so it
+              runs compact -- natural height, bounded plate -- and is fully
+              visible without scrolling. Cards after it get the full
+              viewport slot. */}
+          <div
+            className={`storycard ${index === 0 ? 'first' : ''}`}
+            data-testid={`v4story-${alert.id}`}
+          >
             <div>
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
