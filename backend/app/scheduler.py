@@ -333,6 +333,26 @@ def _run_universe_detail_refresh() -> None:
         logger.exception("Universe detail refresh failed")
 
 
+def _run_event_volatility_refresh() -> None:
+    """Nightly: rebuild event_volatility_ranges from measured market_moves
+    (subsystem D). DB-only -- no network. Coverage widens by itself as the
+    app measures more events; nothing manual, ever. Logged, never raises,
+    same discipline as every other job."""
+    from app.market.event_volatility import rebuild
+
+    session = SessionLocal()
+    try:
+        result = rebuild(session, date.today())
+        logger.info(
+            "Event volatility refresh: facts=%s deleted=%s inserted=%s",
+            result["facts"], result["deleted"], result["inserted"],
+        )
+    except Exception:
+        logger.exception("Event volatility refresh failed")
+    finally:
+        session.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     scheduler = BackgroundScheduler()
@@ -424,6 +444,15 @@ def start_scheduler() -> None:
         # Never at boot: a restart loop would hammer BSE.
         next_run_time=datetime.now(timezone.utc) + timedelta(hours=6),
         id="universe_detail_refresh",
+    )
+    scheduler.add_job(
+        _run_event_volatility_refresh,
+        trigger="interval",
+        hours=24,
+        # DB-only and cheap, but still not at boot -- a crash loop should
+        # not be re-aggregating tables.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=30),
+        id="event_volatility_refresh",
     )
     scheduler.start()
     _scheduler = scheduler

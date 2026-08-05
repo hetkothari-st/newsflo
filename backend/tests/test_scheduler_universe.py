@@ -78,6 +78,50 @@ def test_business_profile_refresh_is_no_longer_scheduled():
     assert not hasattr(scheduler, "_run_business_profile_refresh")
 
 
+def test_event_volatility_refresh_is_registered_nightly(monkeypatch):
+    monkeypatch.setattr(scheduler.BackgroundScheduler, "start", lambda self: None)
+    try:
+        scheduler.start_scheduler()
+        jobs = {job.id: job for job in scheduler._scheduler.get_jobs()}
+        assert "event_volatility_refresh" in jobs
+        assert jobs["event_volatility_refresh"].trigger.interval == timedelta(hours=24)
+    finally:
+        scheduler._scheduler = None
+
+
+def test_event_volatility_refresh_never_raises_and_does_no_network(monkeypatch):
+    """Rebuild reads the DB only. Any urllib call from this job is a bug.
+
+    A bare monkeypatch of urllib.request.urlopen is not enough on its own:
+    the job body wraps everything in try/except Exception, so an
+    AssertionError raised by an accidental network call would be swallowed
+    right alongside a legitimate DB error, and this test would pass either
+    way. To make the no-network claim load-bearing, also monkeypatch
+    rebuild itself to record that it ran and to raise if it ever touches
+    urlopen internally -- proving the job called through to rebuild (DB-only
+    work) rather than short-circuiting into some network path, and that no
+    exception was swallowed along the way.
+    """
+    import urllib.request
+
+    def explode(*args, **kwargs):
+        raise AssertionError("event volatility refresh must not touch the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", explode)
+
+    calls = []
+
+    def fake_rebuild(session, as_of):
+        calls.append(as_of)
+        return {"facts": 0, "deleted": 0, "inserted": 0}
+
+    monkeypatch.setattr("app.market.event_volatility.rebuild", fake_rebuild)
+
+    scheduler._run_event_volatility_refresh()
+
+    assert len(calls) == 1
+
+
 def test_registered_job_ids_do_not_include_the_profile_refresh(monkeypatch):
     # Assert on the scheduler's own registry, not on source text -- a prior
     # review found a getsource-based assertion hid a real defect for 20 tasks.
