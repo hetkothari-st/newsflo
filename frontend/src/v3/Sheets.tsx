@@ -21,6 +21,7 @@ import {
 } from './format';
 import BusinessDescription from '../components/BusinessDescription';
 import Fundamentals from '../components/Fundamentals';
+import VolatilityRange, { type VolatilityRangeData } from '../components/VolatilityRange';
 import type { Fundamentals as FundamentalsData } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/language';
@@ -37,6 +38,8 @@ export interface InfoSheetData {
   businessDesc?: string | null;
   businessDescSourceUrl?: string | null;
   logoUrl: string | null;
+  // Subsystem D: empirical reaction range for this alert's news category.
+  volatilityRange?: VolatilityRangeData | null;
 }
 
 export type SheetRequest =
@@ -59,10 +62,11 @@ export function InfoSheetContent({ info }: { info: InfoSheetData }) {
       </div>
       {/* No fallback text: a company with neither a sourced description nor
           an official classification renders no section here at all. */}
-      {(info.fundamentals || info.businessDesc) && (
+      {(info.fundamentals || info.businessDesc || info.volatilityRange) && (
         <>
           <p className="seclab">What they do</p>
           <BusinessDescription text={info.businessDesc} sourceUrl={info.businessDescSourceUrl} />
+          <VolatilityRange range={info.volatilityRange} />
           <Fundamentals data={info.fundamentals} />
         </>
       )}
@@ -206,6 +210,7 @@ export function DeepDiveSheetContent({
           </div>
         </div>
       )}
+      {data.excess_move_pct !== null && <VolatilityRange range={data.volatility_range} />}
       {data.intensity !== null && (
         <>
           <p className="seclab">How this score is built · {data.intensity.components.length} signals</p>

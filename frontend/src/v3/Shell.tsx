@@ -64,6 +64,7 @@ export default function Shell() {
         businessDesc: row.business_desc,
         businessDescSourceUrl: row.business_desc_source_url,
         logoUrl: row.logo_url,
+        volatilityRange: row.volatility_range,
       },
     });
   };

@@ -84,6 +84,16 @@ export interface LayerRow {
   in_my_holdings: boolean;
   why: string | null;
   logo_url: string | null;
+  // Subsystem D: empirical reaction range for this alert's news category.
+  // Null below sample thresholds or (deep dive) outside alert context.
+  volatility_range: {
+    level: 'COMPANY' | 'SECTOR';
+    n_events: number;
+    min_excess_move_pct: number;
+    median_excess_move_pct: number;
+    max_excess_move_pct: number;
+    as_of: string;
+  } | null;
 }
 
 export interface RippleLayer {
@@ -138,6 +148,16 @@ export interface StockDeepDive {
   rationale: string | null;
   section_title: string | null;
   peers: LayerRow[];
+  // Subsystem D: empirical reaction range for this alert's news category.
+  // Null below sample thresholds or (deep dive) outside alert context.
+  volatility_range: {
+    level: 'COMPANY' | 'SECTOR';
+    n_events: number;
+    min_excess_move_pct: number;
+    median_excess_move_pct: number;
+    max_excess_move_pct: number;
+    as_of: string;
+  } | null;
 }
 
 export interface DiscoveryEntry {
