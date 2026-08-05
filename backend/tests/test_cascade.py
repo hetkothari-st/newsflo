@@ -1,11 +1,14 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 from app.analysis.cascade import (
-    BROAD_EVENT_TYPES, analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
-    _identify_companies, _identify_sectors, _sector_fanout_mentions, _sector_mechanism_edges,
+    BROAD_EVENT_TYPES, TOOL_CALL_ATTEMPTS, MissingToolCallError, analyze_article, _extract_facts,
+    _forced_tool_arguments, _generate_edges, _identify_cascade_companies_per_sector,
+    _identify_companies, _identify_sectors, _is_stochastic_tool_failure,
+    _retry_forced_tool_call, _sector_fanout_mentions, _sector_mechanism_edges,
     build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
@@ -555,9 +558,12 @@ def test_identify_companies_cascade_stage_raises_when_both_models_fail_tool_use_
             client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
         )
 
-    # Cascade stage never gets the slim retry -- exactly two calls (primary
-    # then FALLBACK_MODEL), not four.
-    assert len(client.calls) == 2
+    # Cascade stage never gets the slim retry, so ONE stochastic attempt is
+    # exactly two calls (primary then FALLBACK_MODEL), not four. The
+    # tool_use_failed that survives both models is a stochastic failure, so
+    # _retry_forced_tool_call runs that whole ladder TOOL_CALL_ATTEMPTS
+    # times before giving up: 3 x 2 = 6 calls, and still a raise.
+    assert len(client.calls) == 2 * TOOL_CALL_ATTEMPTS
 
 
 def test_identify_companies_does_not_retry_on_a_different_bad_request_error():
@@ -1411,3 +1417,288 @@ def test_narrow_event_types_are_excluded():
     assert "earnings" not in BROAD_EVENT_TYPES
     assert "merger_acquisition" not in BROAD_EVENT_TYPES
     assert "order_win_contract" not in BROAD_EVENT_TYPES
+
+
+# ---------------------------------------------------------------------------
+# _retry_forced_tool_call -- the shared bounded retry around every forced
+# tool call in this module. Confirmed in production on the SAME article,
+# minutes apart: no tool_use block, a 400 tool_use_failed with a trailing
+# `"}` artifact, a 400 tool_use_failed with an empty generation, and a valid
+# payload wrapped in a ```json fence. All stochastic; all retryable.
+# ---------------------------------------------------------------------------
+
+
+def _rate_limit_error():
+    import httpx
+    from openai import RateLimitError
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(status_code=429, request=request)
+    return RateLimitError("rate limited", response=response, body=None)
+
+
+def _oversize_error():
+    """Groq's 413 "Request too large" -- the openai SDK has no dedicated
+    subclass for 413, so it surfaces as a plain APIStatusError."""
+    import httpx
+    from openai import APIStatusError
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(status_code=413, request=request)
+    return APIStatusError("Request too large", response=response, body=None)
+
+
+def _no_tool_call_response():
+    """A 200 OK whose message carries prose (or a ```json fence) but no
+    tool_use block, despite tool_choice forcing one."""
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=None))])
+
+
+def _bad_json_response(tool_name):
+    """A tool call whose `arguments` blob is not valid JSON -- the live
+    failure had a trailing `"}` artifact past the end of the object."""
+    tool_call = SimpleNamespace(
+        function=SimpleNamespace(name=tool_name, arguments='{"sectors": []}"}'),
+    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))])
+
+
+def _raise_tool_use_failed():
+    raise _tool_use_failed_error()
+
+
+@pytest.mark.parametrize("failure", [
+    pytest.param(_no_tool_call_response, id="no_tool_use_block"),
+    pytest.param(lambda: _bad_json_response("record_sectors"), id="unparseable_arguments"),
+    pytest.param(_raise_tool_use_failed, id="tool_use_failed_400"),
+])
+def test_retry_helper_retries_every_stochastic_failure_class_then_succeeds(failure):
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        if len(attempts) == 1:
+            return _forced_tool_arguments(failure(), "record_sectors")
+        return {"sectors": ["ok"]}
+
+    assert _retry_forced_tool_call(attempt, stage="identify_sectors") == {"sectors": ["ok"]}
+    assert len(attempts) == 2
+
+
+@pytest.mark.parametrize("exc_factory, label", [
+    (_rate_limit_error, "rate limit -- model/key rotation already handles it"),
+    (_oversize_error, "413 -- an identical oversized prompt cannot fit on a retry"),
+    (lambda: RuntimeError("provider down"), "unknown failure -- must surface loudly"),
+])
+def test_retry_helper_does_not_retry_non_stochastic_failures(exc_factory, label):
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        raise exc_factory()
+
+    with pytest.raises(Exception):
+        _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    assert len(attempts) == 1, "must not retry: " + label
+
+
+def test_retry_helper_does_not_retry_a_validation_error_despite_it_being_a_valueerror():
+    # pydantic's ValidationError subclasses ValueError, and so does the
+    # MissingToolCallError this helper DOES retry. A schema our own code can
+    # no longer satisfy is a real bug -- it must surface on attempt 1, not
+    # after three identical failures. This is why _is_stochastic_tool_failure
+    # matches MissingToolCallError by type rather than catching ValueError.
+    from app.analysis.schemas import FactsResult
+
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        return FactsResult.model_validate({"facts": "f"})  # missing required fields
+
+    with pytest.raises(Exception):
+        _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    assert len(attempts) == 1
+
+
+def test_retry_helper_gives_up_after_three_attempts_and_raises():
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        return _forced_tool_arguments(_no_tool_call_response(), "record_facts")
+
+    with pytest.raises(MissingToolCallError):
+        _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    assert len(attempts) == TOOL_CALL_ATTEMPTS == 3
+
+
+def test_retry_helper_logs_each_retry_with_stage_and_attempt_number(caplog):
+    # The whole point of logging these: the real stochastic failure rate of
+    # these calls is otherwise invisible in production behind a silent
+    # recovery.
+    def attempt():
+        return _forced_tool_arguments(_no_tool_call_response(), "record_facts")
+
+    with caplog.at_level(logging.WARNING, logger="app.analysis.cascade"):
+        with pytest.raises(MissingToolCallError):
+            _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    # 3 attempts -> 2 retry warnings (the final failure raises, it does not log).
+    assert len(warnings) == TOOL_CALL_ATTEMPTS - 1
+    messages = [r.getMessage() for r in warnings]
+    assert all("extract_facts" in m for m in messages)
+    assert "attempt 1/3" in messages[0]
+    assert "attempt 2/3" in messages[1]
+
+
+def test_is_stochastic_tool_failure_classification():
+    assert _is_stochastic_tool_failure(MissingToolCallError("no block")) is True
+    assert _is_stochastic_tool_failure(_tool_use_failed_error()) is True
+    try:
+        json.loads('{"a": 1}"}')
+    except json.JSONDecodeError as exc:
+        assert _is_stochastic_tool_failure(exc) is True
+    else:
+        pytest.fail("expected a JSONDecodeError")
+
+    assert _is_stochastic_tool_failure(_rate_limit_error()) is False
+    assert _is_stochastic_tool_failure(_oversize_error()) is False
+    assert _is_stochastic_tool_failure(ValueError("a plain ValueError")) is False
+
+
+def test_extract_facts_retries_a_missing_tool_use_block_and_succeeds():
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        class _Completions:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def create(self, **kwargs):
+                self._outer.calls += 1
+                if self._outer.calls == 1:
+                    return _no_tool_call_response()
+                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+                    tool_calls=[FakeToolCall("record_facts", {
+                        "facts": "x", "category": "other", "event_type": "other",
+                    })],
+                ))])
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = FlakyClient()
+    result = _extract_facts(client, title="t", content="c")
+
+    assert result.facts == "x"
+    assert client.calls == 2
+
+
+def test_identify_sectors_retries_a_tool_use_failed_400_and_succeeds():
+    class FlakyClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.attempts = getattr(self._outer, "attempts", 0) + 1
+                if self._outer.attempts == 1:
+                    raise _tool_use_failed_error()
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = FlakyClient({"record_sectors": {"sectors": [
+        {"sector": "banking", "direction": "bearish", "mechanism": "m"},
+    ]}})
+
+    result = _identify_sectors(client, facts="f", parent_sectors=None)
+
+    assert [s.sector for s in result] == ["banking"]
+    assert client.attempts == 2
+
+
+def test_identify_sectors_gives_up_after_three_attempts():
+    class AlwaysNoToolCallClient:
+        def __init__(self):
+            self.calls = 0
+
+        class _Completions:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def create(self, **kwargs):
+                self._outer.calls += 1
+                return _no_tool_call_response()
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = AlwaysNoToolCallClient()
+
+    with pytest.raises(MissingToolCallError, match="record_sectors"):
+        _identify_sectors(client, facts="f", parent_sectors=None)
+
+    assert client.calls == TOOL_CALL_ATTEMPTS
+
+
+def test_identify_companies_retries_an_unparseable_arguments_blob_and_succeeds():
+    # The stochastic retry wraps the EXISTING model-fallback ladder rather
+    # than duplicating it: this failure is not a tool_use_failed 400, so the
+    # ladder does nothing and only the outer retry recovers the stage.
+    class BadJsonOnceClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.attempts = getattr(self._outer, "attempts", 0) + 1
+                if self._outer.attempts == 1:
+                    return _bad_json_response("record_sector_companies")
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = BadJsonOnceClient({"record_sector_companies": {"sector_companies": [
+        {"sector": "banking", "companies": [_FULL_COMPANY_FIELDS]},
+    ]}})
+
+    result = _identify_companies(
+        client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None,
+    )
+
+    assert [c.ticker for c in result] == ["HDFCBANK.NS"]
+    assert client.attempts == 2
+
+
+def test_edge_verification_retries_before_falling_back_to_the_unverified_chain():
+    # Without the retry, one prose answer from a small model threw away a
+    # whole verified chain (or kept it unverified). The retry must run first.
+    event_type = next(iter(CHAINS))
+
+    class FlakyClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.attempts = getattr(self._outer, "attempts", 0) + 1
+                if self._outer.attempts == 1:
+                    return _no_tool_call_response()
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = FlakyClient({"record_edge_verification": {"verifications": [], "llm_only_edges": []}})
+
+    edges = _generate_edges(client, facts="f", event_type=event_type, companies=[])
+
+    assert client.attempts == 2
+    # Retry succeeded, so the chain went through real verification -- no
+    # "verification call failed" fallback marker anywhere.
+    assert not any("verification call failed" in e.get("note", "") for e in edges)

@@ -16,11 +16,19 @@ total call count scale with how many cascade sectors are actually found
 cascade level's sectors and companies), not a fixed 7.
 
 All three stage functions below (_extract_facts, _identify_sectors,
-_identify_companies) are pure: given a client and inputs, they make exactly
-one LLM call and return parsed, validated output, raising on a genuinely
-malformed response (no tool_use block). The orchestrator (analyze_article)
-is responsible for sequencing them and for the truncate-on-failure
-behavior described in the design spec.
+_identify_companies) are pure: given a client and inputs, they issue one
+logical LLM call and return parsed, validated output, raising on a
+genuinely malformed response (no tool_use block). The orchestrator
+(analyze_article) is responsible for sequencing them and for the
+truncate-on-failure behavior described in the design spec.
+
+"One logical call" now means up to TOOL_CALL_ATTEMPTS physical attempts:
+every forced tool call in this module goes through _retry_forced_tool_call,
+which retries the identical request when the model returns garbage instead
+of a usable tool call (no tool_use block / 400 tool_use_failed /
+unparseable arguments JSON). See that helper and
+_is_stochastic_tool_failure for the exact allow-list and for why rate
+limits, auth failures, and 413s are deliberately NOT retried there.
 """
 import json
 import logging
@@ -42,6 +50,131 @@ from app.analysis.verification import verify_companies
 from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
 
 logger = logging.getLogger(__name__)
+
+# Every forced tool call in this module (tool_choice pinned to one function)
+# gets this many attempts before it gives up and raises. Confirmed repeatedly
+# in production: the SAME article, minutes apart, produced "no record_sectors
+# tool_use block" (model answered in prose), a 400 tool_use_failed with a
+# trailing `"}` artifact, a 400 tool_use_failed with an empty generation
+# ("Tool choice is required, but model did not call a tool"), and once a valid
+# payload wrapped in a ```json fence instead of a tool call -- and the
+# identical prompt succeeded on a later attempt. These are stochastic
+# small-model failures (openai/gpt-oss-20b, llama-3.3-70b-versatile on Groq),
+# not deterministic ones, so a bounded retry of the identical request is the
+# correct remedy. 3 keeps the worst case bounded (and, in _identify_companies,
+# multiplies with the model-fallback ladder rather than replacing it).
+TOOL_CALL_ATTEMPTS = 3
+
+
+class MissingToolCallError(ValueError):
+    """A 200 OK response that carried no tool_use block for the forced tool
+    -- the model answered in prose (or in a markdown ```json fence) despite
+    tool_choice pinning it to exactly one function.
+
+    A distinct type rather than a bare ValueError so _is_stochastic_tool_failure
+    can retry THIS and nothing else that happens to be a ValueError: pydantic's
+    ValidationError is a ValueError subclass too, and a schema our own code
+    can no longer satisfy is a real bug that must surface immediately, not be
+    retried three times and then re-raised. Still subclasses ValueError so
+    existing callers/tests that catch ValueError keep working."""
+
+
+def _is_tool_use_failed(exc: Exception) -> bool:
+    """True only for Groq's 400 `code: "tool_use_failed"` -- the model
+    emitted a malformed tool-call blob (confirmed live: a llama-style
+    `<function=record_sector_companies>{...}` string with unbalanced
+    brackets, and separately an empty generation reported as "Tool choice is
+    required, but model did not call a tool") that Groq's parser could not
+    turn into a tool call at all.
+
+    Matches structurally on BadRequestError.code, never on the exception's
+    message text: that message embeds the model's entire failed generation
+    verbatim, which is long and unstable content to substring-match against.
+    A BadRequestError with any OTHER code (e.g. a genuinely malformed schema
+    on our side) must NOT match here -- see _call_with_model_fallback's own
+    docstring for why that distinction matters."""
+    return isinstance(exc, BadRequestError) and exc.code == "tool_use_failed"
+
+
+def _is_stochastic_tool_failure(exc: Exception) -> bool:
+    """True for the three ways a forced tool call comes back as garbage the
+    model could plausibly get right on an identical retry:
+
+      1. MissingToolCallError -- 200 OK, no tool_use block (prose, or a
+         ```json fence, instead of a tool call).
+      2. A 400 `tool_use_failed` -- the provider itself could not parse the
+         model's tool-call blob.
+      3. json.JSONDecodeError on the tool arguments -- a tool call came back
+         but its `arguments` string is not valid JSON (confirmed live: a
+         trailing `"}` artifact).
+
+    This is a strict ALLOW-list, not a deny-list, and that is deliberate.
+    Everything else propagates on the first failure:
+
+      - RateLimitError -- already handled by model/key rotation
+        (_call_with_model_fallback, and the key rotation in claude_client);
+        hammering a rate-limited endpoint two more times makes it worse.
+      - AuthenticationError / any other 4xx -- a bad key or a malformed
+        schema on OUR side is deterministic; retrying only delays the loud
+        failure that should surface it.
+      - 413 "Request too large" -- retrying the IDENTICAL oversized prompt
+        cannot succeed. The direct-company stage's existing slim-prompt retry
+        (a genuinely DIFFERENT, shorter prompt) is the right remedy there.
+
+    A deny-list would have quietly swept all of those in as new failure modes
+    appear, which is exactly the drift this helper exists to prevent."""
+    if isinstance(exc, MissingToolCallError):
+        return True
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    return _is_tool_use_failed(exc)
+
+
+def _retry_forced_tool_call(attempt_fn, *, stage: str, attempts: int = TOOL_CALL_ATTEMPTS):
+    """Run `attempt_fn` up to `attempts` times, retrying ONLY the stochastic
+    garbage-output failures `_is_stochastic_tool_failure` recognises.
+
+    `attempt_fn` must perform the whole forced-tool-call round trip -- issue
+    the request AND extract/parse the tool arguments -- because two of the
+    three retryable failures (no tool_use block, unparseable arguments)
+    happen after the HTTP call returns 200. Anything it raises that is not a
+    stochastic failure propagates immediately, untouched; so does the final
+    attempt's failure, which callers already handle (analyze_article
+    truncates the pipeline at the failed stage).
+
+    The single shared implementation is the point: every forced-tool-call
+    stage in this module routes through here, so the retry policy cannot
+    drift between stages the way four pasted try/excepts would.
+
+    Each retry logs at WARNING with the stage name and attempt number, so the
+    real production failure rate of these calls is measurable from logs
+    rather than invisible behind a silent recovery."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return attempt_fn()
+        except Exception as exc:
+            if attempt >= attempts or not _is_stochastic_tool_failure(exc):
+                raise
+            logger.warning(
+                "%s: malformed forced tool call on attempt %d/%d, retrying: %s",
+                stage, attempt, attempts, exc,
+            )
+    raise AssertionError("unreachable: the loop above either returns or raises")
+
+
+def _forced_tool_arguments(response, tool_name: str, context: str = "") -> dict:
+    """Pull the forced tool call out of `response` and parse its JSON
+    arguments. Raises MissingToolCallError when the model returned no such
+    tool call, or json.JSONDecodeError when the arguments blob is malformed
+    -- both retryable classes, raised identically for every stage so
+    _retry_forced_tool_call sees one consistent shape."""
+    message = response.choices[0].message
+    tool_calls = message.tool_calls or []
+    tool_call = next((tc for tc in tool_calls if tc.function.name == tool_name), None)
+    if tool_call is None:
+        raise MissingToolCallError(f"No {tool_name} tool_use block{context}")
+    return json.loads(tool_call.function.arguments)
+
 
 FACTS_INSTRUCTIONS = (
     "Read this news article closely and extract its core facts and economic "
@@ -113,20 +246,22 @@ def _extract_facts(client, title: str, content: str) -> FactsResult:
             ),
         },
     ]
-    response = client.chat.completions.create(
-        model=FALLBACK_MODEL,
-        max_tokens=1024,
-        tools=[build_facts_tool()],
-        tool_choice={"type": "function", "function": {"name": "record_facts"}},
-        messages=messages,
-        **tier_kwargs("extract_facts"),
-    )
-    message = response.choices[0].message
-    tool_calls = message.tool_calls or []
-    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_facts"), None)
-    if tool_call is None:
-        raise ValueError(f"No record_facts tool_use block for article: {title!r}")
-    arguments = json.loads(tool_call.function.arguments)
+
+    def _attempt() -> dict:
+        response = client.chat.completions.create(
+            model=FALLBACK_MODEL,
+            max_tokens=1024,
+            tools=[build_facts_tool()],
+            tool_choice={"type": "function", "function": {"name": "record_facts"}},
+            messages=messages,
+            **tier_kwargs("extract_facts"),
+        )
+        return _forced_tool_arguments(response, "record_facts", f" for article: {title!r}")
+
+    arguments = _retry_forced_tool_call(_attempt, stage="extract_facts")
+    # Validation stays OUTSIDE the retry on purpose: a ValidationError here
+    # means well-formed JSON that our schema rejects, which is not the
+    # stochastic garbage class -- see _is_stochastic_tool_failure.
     return FactsResult.model_validate(arguments)
 
 
@@ -303,20 +438,19 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
         },
     ]
     tool = build_sector_tool(cascade=parent_sectors is not None, valid_parents=valid_parents)
-    response = client.chat.completions.create(
-        model=FALLBACK_MODEL,
-        max_tokens=2048,
-        tools=[tool],
-        tool_choice={"type": "function", "function": {"name": "record_sectors"}},
-        messages=messages,
-        **tier_kwargs("identify_sectors"),
-    )
-    message = response.choices[0].message
-    tool_calls = message.tool_calls or []
-    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_sectors"), None)
-    if tool_call is None:
-        raise ValueError("No record_sectors tool_use block")
-    arguments = json.loads(tool_call.function.arguments)
+
+    def _attempt() -> dict:
+        response = client.chat.completions.create(
+            model=FALLBACK_MODEL,
+            max_tokens=2048,
+            tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_sectors"}},
+            messages=messages,
+            **tier_kwargs("identify_sectors"),
+        )
+        return _forced_tool_arguments(response, "record_sectors")
+
+    arguments = _retry_forced_tool_call(_attempt, stage="identify_sectors")
     findings = [SectorFinding.model_validate(s) for s in arguments.get("sectors", [])]
     # Defensive filter: the tool schema enum-constrains `sector` to SECTORS,
     # but that constraint isn't always strictly enforced server-side for a
@@ -546,21 +680,6 @@ def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str
     }
 
 
-def _is_tool_use_failed(exc: Exception) -> bool:
-    """True only for Groq's 400 `code: "tool_use_failed"` -- the model
-    emitted a malformed tool-call blob (confirmed live: a llama-style
-    `<function=record_sector_companies>{...}` string with unbalanced
-    brackets) that Groq's parser could not turn into a tool call at all.
-
-    Matches structurally on BadRequestError.code, never on the exception's
-    message text: that message embeds the model's entire failed generation
-    verbatim, which is long and unstable content to substring-match against.
-    A BadRequestError with any OTHER code (e.g. a genuinely malformed schema
-    on our side) must NOT match here -- see _call_with_model_fallback's own
-    docstring for why that distinction matters."""
-    return isinstance(exc, BadRequestError) and exc.code == "tool_use_failed"
-
-
 def _call_with_model_fallback(call_fn, model: str, call_name: str):
     """Try `model`; retry once on FALLBACK_MODEL, with the identical prompt,
     on either a RateLimitError (quota/rate-limited) or a tool_use_failed 400
@@ -745,51 +864,58 @@ def _identify_companies(
             "filling in every field exactly as they specify."
         )
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": _compose(rationale_instructions)},
-    ]
     tool = build_company_tool(parent_tickers if parent_tickers else None, valid_tickers=valid_tickers)
 
-    def _call(model: str):
-        return client.chat.completions.create(
-            model=model,
-            max_tokens=8192,
-            tools=[tool],
-            tool_choice={"type": "function", "function": {"name": "record_sector_companies"}},
-            messages=messages,
-            **tier_kwargs("identify_companies"),
-        )
+    def _attempt() -> dict:
+        # Messages are rebuilt per attempt so the slim-prompt downgrade below
+        # is scoped to the attempt that needed it: a 413 on one attempt must
+        # not silently strip the rulebook from every later attempt too.
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": _compose(rationale_instructions)},
+        ]
 
-    try:
-        response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies")
-    except Exception as exc:
-        if parent_pool is not None:
-            raise
-        # The direct-stage prompt carries the full rulebook/playbook block
-        # (~6k tokens). When the primary provider is unavailable and the
-        # call degrades to Groq, that block alone can push the request past
-        # Groq's per-request token cap (observed live: 413 "Request too
-        # large", losing the entire direct-company stage). Retry once with
-        # the slim cascade-style instructions (no rulebook/playbooks): a
-        # less-informed answer beats losing every direct company -- the
-        # alert simply gets no rule citations that run. The retry itself
-        # still gets the RateLimitError/tool_use_failed -> FALLBACK_MODEL
-        # ladder: a real production failure was full+primary 413'd, then
-        # slim+primary 400'd with tool_use_failed, and only slim+FALLBACK_MODEL
-        # actually succeeded.
-        logger.warning(
-            "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
-        )
-        messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
-        response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies (slim retry)")
+        def _call(model: str):
+            return client.chat.completions.create(
+                model=model,
+                max_tokens=8192,
+                tools=[tool],
+                tool_choice={"type": "function", "function": {"name": "record_sector_companies"}},
+                messages=messages,
+                **tier_kwargs("identify_companies"),
+            )
 
-    message = response.choices[0].message
-    tool_calls = message.tool_calls or []
-    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_sector_companies"), None)
-    if tool_call is None:
-        raise ValueError("No record_sector_companies tool_use block")
-    arguments = json.loads(tool_call.function.arguments)
+        try:
+            response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies")
+        except Exception as exc:
+            if parent_pool is not None:
+                raise
+            # The direct-stage prompt carries the full rulebook/playbook block
+            # (~6k tokens). When the primary provider is unavailable and the
+            # call degrades to Groq, that block alone can push the request past
+            # Groq's per-request token cap (observed live: 413 "Request too
+            # large", losing the entire direct-company stage). Retry once with
+            # the slim cascade-style instructions (no rulebook/playbooks): a
+            # less-informed answer beats losing every direct company -- the
+            # alert simply gets no rule citations that run. The retry itself
+            # still gets the RateLimitError/tool_use_failed -> FALLBACK_MODEL
+            # ladder: a real production failure was full+primary 413'd, then
+            # slim+primary 400'd with tool_use_failed, and only slim+FALLBACK_MODEL
+            # actually succeeded.
+            logger.warning(
+                "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
+            )
+            messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
+            response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies (slim retry)")
+
+        return _forced_tool_arguments(response, "record_sector_companies")
+
+    # This stage already had a model-fallback ladder (and, for the direct
+    # stage, a slim-prompt retry). The stochastic retry wraps BOTH rather
+    # than duplicating either: one attempt here is a full ladder, and a
+    # ladder that ends in garbage output is retried up to TOOL_CALL_ATTEMPTS
+    # times -- the same shared policy every other forced-tool-call stage gets.
+    arguments = _retry_forced_tool_call(_attempt, stage="identify_companies")
 
     # Provider-side enum enforcement is not reliable for nested array items
     # (see the SECTORS filter at the end of _identify_sectors for the same
@@ -844,6 +970,14 @@ def _identify_cascade_companies_per_sector(
     response) is distinguishable from "this sector genuinely has no
     cascade companies" (which returns normally with an empty list, not a
     gap). A gap on one sector does not lose another sector's results.
+
+    This 2-attempt loop sits OUTSIDE _identify_companies' own
+    _retry_forced_tool_call, and the two are complementary rather than
+    redundant: this one catches every exception (a rate limit that outlived
+    the key/model rotation reaches here and becomes a gap), while the inner
+    one retries only the stochastic garbage-output classes. The `attempts: 2`
+    recorded on the gap counts THIS loop's sector-level attempts, which is
+    what the gap is about.
     """
     mentions: list[CompanyMention] = []
     gaps: list[dict] = []
@@ -1035,18 +1169,22 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
                 ),
             },
         ]
-        try:
+
+        def _attempt() -> dict:
             response = client.chat.completions.create(
                 model=FALLBACK_MODEL, max_tokens=2048, tools=[tool],
                 tool_choice={"type": "function", "function": {"name": "record_edge_verification"}},
                 messages=messages,
                 **tier_kwargs("generate_edges"),
             )
-            message = response.choices[0].message
-            tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_edge_verification"), None)
-            if tool_call is None:
-                raise ValueError("No record_edge_verification tool_use block")
-            arguments = json.loads(tool_call.function.arguments)
+            return _forced_tool_arguments(response, "record_edge_verification")
+
+        try:
+            # Retried on the stochastic garbage classes before the fallback
+            # below fires: dropping (or leaving unverified) a whole proposed
+            # chain because one small-model call answered in prose is exactly
+            # the avoidable loss TOOL_CALL_ATTEMPTS exists for.
+            arguments = _retry_forced_tool_call(_attempt, stage="generate_edges")
             verifications = {v["index"]: v for v in arguments.get("verifications", [])}
 
             for i, proposed_edge in enumerate(proposed):

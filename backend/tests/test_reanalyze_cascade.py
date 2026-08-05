@@ -150,7 +150,12 @@ def test_deletes_every_dependent_row_before_replacing_alert_companies(db_session
     monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
     monkeypatch.setattr(reanalyze_cascade, "analyze_article", fake_analyze_article)
 
-    reanalyze_cascade.main(limit=5, days=None, force=False)
+    # allow_empty=True: this test's fresh analysis deliberately resolves to
+    # zero over a non-empty alert, which is exactly the shape the data-loss
+    # guard now refuses by default. The guard has its own coverage below;
+    # here the empty result is just the simplest way to force a full
+    # delete-everything sweep so the dependents cleanup can be asserted.
+    reanalyze_cascade.main(limit=5, days=None, force=False, allow_empty=True)
 
     assert db_session.query(AlertCompany).filter_by(id=old_ac_id).count() == 0
     assert db_session.query(CalibrationSample).filter_by(alert_company_id=old_ac_id).count() == 0
@@ -206,7 +211,12 @@ def test_reanalysis_leaves_no_orphaned_market_move_rows(db_session, monkeypatch)
     monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
     monkeypatch.setattr(reanalyze_cascade, "analyze_article", fake_analyze_article)
 
-    reanalyze_cascade.main(limit=5, days=None, force=False)
+    # allow_empty=True: the orphan-producing shape is precisely "replace a
+    # non-empty alert with zero companies", which the data-loss guard now
+    # blocks by default -- opted into explicitly so this regression stays
+    # covered (an operator who genuinely passes --allow-empty must still not
+    # be left with orphaned MarketMove rows).
+    reanalyze_cascade.main(limit=5, days=None, force=False, allow_empty=True)
 
     assert db_session.query(AlertCompany).filter_by(alert_id=alert_id).count() == 0
     assert db_session.query(MarketMove).filter_by(alert_id=alert_id).count() == 0
@@ -254,7 +264,10 @@ def test_alert_id_targets_only_the_given_alert(db_session, monkeypatch):
     monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
     monkeypatch.setattr(reanalyze_cascade, "analyze_article", fake_analyze_article)
 
-    reanalyze_cascade.main(None, None, False, alert_ids=[alert1_id])
+    # allow_empty=True so the targeted alert really is emptied -- "was this
+    # alert touched at all" is the assertion, and the default guard would
+    # make an untouched alert1 ambiguous with an untargeted one.
+    reanalyze_cascade.main(None, None, False, alert_ids=[alert1_id], allow_empty=True)
 
     assert db_session.query(AlertCompany).filter_by(alert_id=alert1_id).count() == 0
     remaining_alert2_ids = {ac.id for ac in db_session.query(AlertCompany).filter_by(alert_id=alert2_id).all()}
@@ -299,7 +312,7 @@ def test_alert_id_nonexistent_is_reported_and_skipped_not_crashed(db_session, mo
 
     # Missing id first, then a real one -- proves the loop doesn't abort on
     # the bad id and still processes what follows it.
-    reanalyze_cascade.main(None, None, False, alert_ids=[missing_id, alert_id])
+    reanalyze_cascade.main(None, None, False, alert_ids=[missing_id, alert_id], allow_empty=True)
 
     captured = capsys.readouterr()
     assert str(missing_id) in captured.out
@@ -429,3 +442,270 @@ def test_reanalysis_reconciles_direction_the_same_way_the_live_pipeline_does(db_
     move = db_session.query(MarketMove).filter_by(alert_id=alert_id).one()
     assert move.measurement_status == "ok"
     assert move.excess_move_pct == -3.1
+
+
+# ---------------------------------------------------------------------------
+# EMPTY-RESULT GUARD -- the data-loss fix.
+#
+# analyze_article does NOT raise when a middle stage fails: it truncates and
+# returns whatever earlier stages produced, so a stage-3 failure yields a
+# well-formed AnalysisOutput with an EMPTY companies list. This script used
+# to delete the alert's companies first and write that empty result over
+# them. Confirmed live on alert 1447: 3 good companies (and their
+# calibration/outcome history) replaced with 0.
+# ---------------------------------------------------------------------------
+
+
+def test_zero_company_result_over_a_non_empty_alert_leaves_the_existing_rows_intact(
+    db_session, monkeypatch, capsys,
+):
+    alert, company = _make_alert_with_company(db_session, url="https://example.com/wipe", ticker="GGG.NS")
+    alert_id = alert.id
+    original_ids = {ac.id for ac in alert.companies}
+    assert original_ids
+
+    def failed_stage_analysis(client, title, content, session=None):
+        # Exactly what a truncated stage-3 failure returns: no exception,
+        # just an empty companies list.
+        return AnalysisOutput(category="test", companies=[], edges=[], gaps=[])
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(reanalyze_cascade, "analyze_article", failed_stage_analysis)
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    surviving = {ac.id for ac in db_session.query(AlertCompany).filter_by(alert_id=alert_id).all()}
+    assert surviving == original_ids, "the good companies were replaced with zero"
+
+    out = capsys.readouterr().out
+    # Reported distinctly from the normal "reanalyzed, now has N" line.
+    assert "SKIPPED" in out
+    assert "ZERO companies" in out
+    assert "--allow-empty" in out
+    assert "company count:" not in out
+
+
+def test_zero_company_result_also_leaves_dependent_history_intact(db_session, monkeypatch):
+    """The guard is worth having precisely because the delete cascades:
+    CalibrationSample/CarOutcome history is what makes the wipe
+    irreversible. None of it may be touched when the guard fires."""
+    alert, company = _make_alert_with_company(db_session, url="https://example.com/wipe-deps", ticker="HHH.NS")
+    alert_id = alert.id
+    ac_id = alert.companies[0].id
+
+    db_session.add(CalibrationSample(
+        alert_company_id=ac_id, category="test", company_id=company.id,
+        direction="bullish", magnitude_actual=1.5, horizon_days=1,
+    ))
+    db_session.add(CarOutcome(
+        alert_company_id=ac_id, company_id=company.id, category="test",
+        day0_excess_move_pct=1.0, car_pct=1.0,
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert_id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.8, sector_move_pct=-0.6, excess_move_pct=-4.2,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: AnalysisOutput(
+            category="test", companies=[], edges=[], gaps=[]),
+    )
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    assert db_session.query(AlertCompany).filter_by(id=ac_id).count() == 1
+    assert db_session.query(CalibrationSample).filter_by(alert_company_id=ac_id).count() == 1
+    assert db_session.query(CarOutcome).filter_by(alert_company_id=ac_id).count() == 1
+    assert db_session.query(MarketMove).filter_by(alert_id=alert_id).count() == 1
+
+
+def test_allow_empty_overrides_the_guard_and_writes_the_empty_result(db_session, monkeypatch, capsys):
+    """Zero genuinely IS the right answer sometimes (a reclassified article
+    that turns out to affect no listed company). --allow-empty is the
+    operator's explicit yes."""
+    alert, _ = _make_alert_with_company(db_session, url="https://example.com/allow-empty", ticker="III.NS")
+    alert_id = alert.id
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert_id).count() == 1
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: AnalysisOutput(
+            category="test", companies=[], edges=[], gaps=[]),
+    )
+
+    reanalyze_cascade.main(limit=5, days=None, force=False, allow_empty=True)
+
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert_id).count() == 0
+    out = capsys.readouterr().out
+    assert "company count: 1 -> 0" in out
+    assert "ZERO companies" not in out
+
+
+def test_zero_company_result_over_an_already_empty_alert_is_not_blocked(db_session, monkeypatch, capsys):
+    """The guard is about LOSING data. An alert that already has no
+    companies has none to lose, so a zero result there is a normal
+    (no-op) replacement, not a suspected failure."""
+    article = Article(source="test", url="https://example.com/already-empty", title="t")
+    db_session.add(article)
+    db_session.commit()
+    alert = Alert(article_id=article.id, category="test")
+    db_session.add(alert)
+    db_session.commit()
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: AnalysisOutput(
+            category="test", companies=[], edges=[], gaps=[]),
+    )
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    out = capsys.readouterr().out
+    assert "company count: 0 -> 0" in out
+    assert "ZERO companies" not in out
+
+
+def test_a_raised_stage_leaves_the_existing_companies_and_history_intact(db_session, monkeypatch, capsys):
+    """The already-existing skip path: analyze_article raising (a stage-1/2
+    failure propagates by design) must not have deleted anything. Verified
+    explicitly rather than assumed -- the whole bug class is 'delete first,
+    then discover the new answer is bad'."""
+    alert, company = _make_alert_with_company(db_session, url="https://example.com/raised", ticker="JJJ.NS")
+    alert_id = alert.id
+    ac_id = alert.companies[0].id
+
+    db_session.add(CalibrationSample(
+        alert_company_id=ac_id, category="test", company_id=company.id,
+        direction="bullish", magnitude_actual=1.5, horizon_days=1,
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert_id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=1.0, sector_move_pct=0.1, excess_move_pct=0.9,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    def raising_analysis(client, title, content, session=None):
+        raise ValueError("No record_sectors tool_use block")
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(reanalyze_cascade, "analyze_article", raising_analysis)
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    assert db_session.query(AlertCompany).filter_by(id=ac_id).count() == 1
+    assert db_session.query(CalibrationSample).filter_by(alert_company_id=ac_id).count() == 1
+    assert db_session.query(MarketMove).filter_by(alert_id=alert_id).count() == 1
+
+    out = capsys.readouterr().out
+    assert "SKIPPED (analysis call failed" in out
+    assert "left untouched" in out
+
+
+def test_a_normal_successful_reanalysis_still_replaces_cleanly(db_session, monkeypatch, capsys):
+    """The guard must not get in the way of the ordinary case: a fresh
+    analysis with real companies replaces the old rows exactly as before."""
+    alert, old_company = _make_alert_with_company(db_session, url="https://example.com/normal", ticker="KKK.NS")
+    alert_id = alert.id
+    old_company_id = old_company.id
+
+    new_company = Company(ticker="LLL.NS", name="LLL", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(new_company)
+    db_session.commit()
+    new_company_id = new_company.id
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: _fake_analysis_with_company("LLL.NS"),
+    )
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    remaining = db_session.query(AlertCompany).filter_by(alert_id=alert_id).all()
+    assert len(remaining) == 1
+    # Asserted on company_id, not row id: SQLite reuses a deleted rowid, so
+    # the replacement row can legitimately land on old_ac_id again.
+    assert remaining[0].company_id == new_company_id
+    assert remaining[0].company_id != old_company_id, "the old company should have been replaced"
+
+    out = capsys.readouterr().out
+    assert "company count: 1 -> 1" in out
+    assert "SKIPPED" not in out
+
+
+def test_a_shrink_that_is_not_a_total_wipe_is_written_but_flagged(db_session, monkeypatch, capsys):
+    """Documented, deliberate asymmetry: a partial/truncated analysis is NOT
+    distinguishable from a genuinely smaller correct answer at this call
+    site (AnalysisOutput carries no truncation marker), and shrinking is the
+    intended effect of this script -- the precision work exists to strip
+    hallucinated companies. So only a total wipe to zero is blocked; any
+    smaller shrink is written and merely flagged for the operator."""
+    alert, first = _make_alert_with_company(db_session, url="https://example.com/shrink", ticker="MMM.NS")
+    alert_id = alert.id
+    second = Company(ticker="NNN.NS", name="NNN", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(second)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=alert_id, company_id=second.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+    ))
+    db_session.commit()
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert_id).count() == 2
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: _fake_analysis_with_company("MMM.NS"),
+    )
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert_id).count() == 1
+    out = capsys.readouterr().out
+    assert "company count: 2 -> 1" in out
+    assert "SHRANK (2 -> 1)" in out
+
+
+def test_allow_empty_flag_is_off_by_default_and_parsed_from_the_cli():
+    """A wrong 'yes' here is irreversible, so the default must be off. Run
+    the real CLI so the argparse wiring (not just main's keyword default) is
+    what's under test."""
+    script = Path(__file__).resolve().parent.parent / "reanalyze_cascade.py"
+
+    help_text = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True, text=True, cwd=script.parent,
+    )
+    assert help_text.returncode == 0
+    assert "--allow-empty" in help_text.stdout
+
+    parser_defaults = subprocess.run(
+        [sys.executable, "-c",
+         "import reanalyze_cascade, inspect;"
+         "sig = inspect.signature(reanalyze_cascade.reanalyze_alert);"
+         "print(sig.parameters['allow_empty'].default);"
+         "print(inspect.signature(reanalyze_cascade.main).parameters['allow_empty'].default)"],
+        capture_output=True, text=True, cwd=script.parent,
+    )
+    assert parser_defaults.stdout.split() == ["False", "False"], parser_defaults.stderr
