@@ -295,7 +295,10 @@ describe('Shell card feed', () => {
     // Sourced classification/ratio/date replace the old business_desc
     // paragraph in the deep-dive's own "What they do" section too.
     expect(sheet.getByText(/Refineries & Marketing/)).toBeInTheDocument();
-    expect(sheet.getByText('6.40')).toBeInTheDocument();
+    // Deep dive speaks the same plain language as the glance now -- "6.4×"
+    // under "Price vs yearly profit", not a bare "P/E 6.40" code.
+    expect(sheet.getByText('Price vs yearly profit')).toBeInTheDocument();
+    expect(sheet.getByText('6.4×')).toBeInTheDocument();
     expect(sheet.getByText(/2026-08-04/)).toBeInTheDocument();
     expect(sheet.getByText(/how this score is built/i)).toBeInTheDocument();
     expect(sheet.getByText('Materiality')).toBeInTheDocument();
