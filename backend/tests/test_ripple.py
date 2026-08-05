@@ -406,7 +406,8 @@ def test_sector_peers_row_shape_matches_ripple_row_shape(db_session):
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "direction", "excess_move_pct", "intensity",
-        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "fundamentals", "why", "logo_url",
+        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "business_desc_source_url", "fundamentals",
+        "why", "logo_url",
     }
 
 
@@ -483,7 +484,8 @@ def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "relationship", "direction", "excess_move_pct",
-        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "fundamentals", "why", "logo_url",
+        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "business_desc_source_url", "fundamentals",
+        "why", "logo_url",
     }
     assert result[0]["relationship"] == "BENEFICIARY"
 

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -271,16 +271,33 @@ def _run_universe_master_refresh() -> None:
         session.close()
 
 
+# BSE throttles this app's egress hard: measured 2026-08-05, roughly half
+# of back-to-back detail requests time out, but a retried scrip succeeds
+# essentially always (25/25 with up to 3 attempts). So the pass is not
+# blocked, it is slow -- and the way to consume a slow source unattended is
+# a small budget every day rather than one long run every month.
+_DETAIL_BUDGET_SECONDS = 45 * 60
+_DETAIL_THROTTLE_SECONDS = 1.5
+_DETAIL_MAX_RETRIES = 4
+
+
 def _run_universe_detail_refresh() -> None:
-    """Monthly: the ~5,000-request official-classification pass against the
-    latest master snapshot on disk. Resumable -- fetch_bse_details skips
-    codes already fetched for that day, so an interrupted run continues
-    from disk on the next firing. Any failure is logged, never raised, same
-    as every other scheduler job."""
+    """Daily, time-boxed: chips away at the ~4,700-request official-
+    classification pass until it is complete, then idles until the snapshot
+    ages out.
+
+    Resumable in two senses. Within a directory, fetch_bse_details skips
+    codes already on disk. Across days, detail_target_day keeps writing into
+    the SAME dated directory instead of following the daily master refresh
+    into a fresh empty one -- without that, a daily job would restart the
+    whole pass every morning and never finish it.
+
+    Any failure is logged, never raised, same as every other scheduler job.
+    """
     from app.companies.universe import normalize
 
     try:
-        day = snapshot.latest_snapshot_day(snapshot.DEFAULT_ROOT)
+        day = snapshot.detail_target_day(snapshot.DEFAULT_ROOT, date.today())
         if day is None:
             logger.warning("Universe detail refresh skipped: no snapshot on disk")
             return
@@ -290,15 +307,50 @@ def _run_universe_detail_refresh() -> None:
         codes = [(r.get("SCRIP_CD") or "").strip() for r in rows]
         result = fetchers.fetch_bse_details(
             snapshot.DEFAULT_ROOT, day, [c for c in codes if c],
+            throttle_seconds=_DETAIL_THROTTLE_SECONDS,
+            max_retries=_DETAIL_MAX_RETRIES,
+            time_budget_seconds=_DETAIL_BUDGET_SECONDS,
         )
         # Never silent: the count of scrips whose detail fetch failed must
         # always be visible, not just buried in a list.
         logger.info(
-            "Universe detail refresh: fetched=%s skipped=%s failed=%s",
-            result["fetched"], result["skipped"], len(result["failed"]),
+            "Universe detail refresh (%s): fetched=%s skipped=%s failed=%s "
+            "remaining=%s exhausted=%s aborted=%s",
+            day.isoformat(), result["fetched"], result["skipped"],
+            len(result["failed"]), result.get("remaining"),
+            result.get("exhausted", False), result.get("aborted", False),
         )
+        if result.get("aborted"):
+            # Distinct from "ran out of time": every retry of 50 scrips in a
+            # row failed, which is a source problem, not a pacing one.
+            logger.error(
+                "Universe detail refresh ABORTED: BSE refused %s consecutive "
+                "scrips. Classification data is unchanged, not cleared; the "
+                "next daily firing resumes from disk.",
+                len(result["failed"]),
+            )
     except Exception:
         logger.exception("Universe detail refresh failed")
+
+
+def _run_event_volatility_refresh() -> None:
+    """Nightly: rebuild event_volatility_ranges from measured market_moves
+    (subsystem D). DB-only -- no network. Coverage widens by itself as the
+    app measures more events; nothing manual, ever. Logged, never raises,
+    same discipline as every other job."""
+    from app.market.event_volatility import rebuild
+
+    session = SessionLocal()
+    try:
+        result = rebuild(session, date.today())
+        logger.info(
+            "Event volatility refresh: facts=%s deleted=%s inserted=%s",
+            result["facts"], result["deleted"], result["inserted"],
+        )
+    except Exception:
+        logger.exception("Event volatility refresh failed")
+    finally:
+        session.close()
 
 
 def start_scheduler() -> None:
@@ -384,11 +436,23 @@ def start_scheduler() -> None:
     scheduler.add_job(
         _run_universe_detail_refresh,
         trigger="interval",
-        days=30,
-        # Never at boot: this is ~5,000 throttled requests taking 30-40
-        # minutes, and a restart loop would hammer BSE.
-        next_run_time=datetime.now(timezone.utc) + timedelta(days=1),
+        # Daily, not monthly. BSE throttles us to roughly half throughput,
+        # so the pass no longer fits one sitting -- it takes a 45-minute
+        # budget each day and resumes into the same directory until done,
+        # then does nothing until that snapshot is 30 days old.
+        hours=24,
+        # Never at boot: a restart loop would hammer BSE.
+        next_run_time=datetime.now(timezone.utc) + timedelta(hours=6),
         id="universe_detail_refresh",
+    )
+    scheduler.add_job(
+        _run_event_volatility_refresh,
+        trigger="interval",
+        hours=24,
+        # DB-only and cheap, but still not at boot -- a crash loop should
+        # not be re-aggregating tables.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=30),
+        id="event_volatility_refresh",
     )
     scheduler.start()
     _scheduler = scheduler

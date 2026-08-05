@@ -14,9 +14,28 @@ def test_master_refresh_never_raises(monkeypatch):
 
 
 def test_detail_refresh_never_raises(monkeypatch):
+    # Patch the function the job actually calls to choose its day. Patching
+    # an internal of it is not enough: detail_target_day also consults
+    # latest_detail_day, which reads the real data/universe directory, so a
+    # developer machine holding a partial snapshot turned this unit test
+    # into a live 45-minute BSE fetch.
     monkeypatch.setattr(
-        scheduler.snapshot, "latest_snapshot_day", lambda _root: None,
+        scheduler.snapshot, "detail_target_day", lambda _root, _today: None,
     )
+    scheduler._run_universe_detail_refresh()
+
+
+def test_detail_refresh_does_no_network_when_there_is_no_snapshot(monkeypatch):
+    """The guard above is load-bearing -- assert it, so the seam cannot
+    silently move again."""
+    monkeypatch.setattr(
+        scheduler.snapshot, "detail_target_day", lambda _root, _today: None,
+    )
+
+    def explode(*args, **kwargs):
+        raise AssertionError("detail refresh must not fetch without a snapshot")
+
+    monkeypatch.setattr(scheduler.fetchers, "fetch_bse_details", explode)
     scheduler._run_universe_detail_refresh()
 
 
@@ -44,8 +63,11 @@ def test_jobs_are_registered(monkeypatch):
         assert "universe_master_refresh" in jobs
         assert jobs["universe_master_refresh"].trigger.interval == timedelta(hours=24)
 
+        # Daily, not monthly: BSE throttles us to roughly half throughput, so
+        # the pass runs on a 45-minute budget each day and resumes into the
+        # same dated directory until it completes.
         assert "universe_detail_refresh" in jobs
-        assert jobs["universe_detail_refresh"].trigger.interval == timedelta(days=30)
+        assert jobs["universe_detail_refresh"].trigger.interval == timedelta(hours=24)
     finally:
         scheduler._scheduler = None
 
@@ -54,6 +76,53 @@ def test_business_profile_refresh_is_no_longer_scheduled():
     # It fabricated a business description for every company with a NULL one,
     # every 6 hours. After the universe ingest that is ~5,140 companies.
     assert not hasattr(scheduler, "_run_business_profile_refresh")
+
+
+def test_event_volatility_refresh_is_registered_nightly(monkeypatch):
+    monkeypatch.setattr(scheduler.BackgroundScheduler, "start", lambda self: None)
+    try:
+        scheduler.start_scheduler()
+        jobs = {job.id: job for job in scheduler._scheduler.get_jobs()}
+        assert "event_volatility_refresh" in jobs
+        assert jobs["event_volatility_refresh"].trigger.interval == timedelta(hours=24)
+    finally:
+        scheduler._scheduler = None
+
+
+def test_event_volatility_refresh_never_raises_and_does_no_network(monkeypatch):
+    """Rebuild reads the DB only. Any urllib call from this job is a bug.
+
+    A bare monkeypatch of urllib.request.urlopen is not enough on its own:
+    the job body wraps everything in try/except Exception, so an
+    AssertionError raised by an accidental network call would be swallowed
+    right alongside a legitimate DB error, and this test would pass either
+    way. Stubbing rebuild() and asserting it is called exactly once proves
+    the job wrapper calls rebuild() exactly once with no network call
+    before it, and that nothing on that path swallowed an exception. It
+    does NOT prove the real rebuild() body is network-free -- fake_rebuild
+    never inspects rebuild's internals, so a stray urlopen call added AFTER
+    rebuild() returns would still be swallowed here and pass. rebuild()'s
+    network-freedom rests on it being plain SQLAlchemy ORM code (see
+    app/market/event_volatility.py), not on this test.
+    """
+    import urllib.request
+
+    def explode(*args, **kwargs):
+        raise AssertionError("event volatility refresh must not touch the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", explode)
+
+    calls = []
+
+    def fake_rebuild(session, as_of):
+        calls.append(as_of)
+        return {"facts": 0, "deleted": 0, "inserted": 0}
+
+    monkeypatch.setattr("app.market.event_volatility.rebuild", fake_rebuild)
+
+    scheduler._run_event_volatility_refresh()
+
+    assert len(calls) == 1
 
 
 def test_registered_job_ids_do_not_include_the_profile_refresh(monkeypatch):

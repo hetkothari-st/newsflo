@@ -52,6 +52,29 @@ def latest_snapshot_day(root: str) -> date | None:
     return max(days) if days else None
 
 
+def detail_target_day(root: str, today: date, max_age_days: int = 30) -> date | None:
+    """Which snapshot day the detail pass should write into.
+
+    An in-progress pass CONTINUES in its own directory instead of restarting
+    in today's. That is what lets the pass run on a short daily budget and
+    converge over several days: the daily master refresh creates a fresh
+    dated directory every morning with an empty bse_detail/, so a job that
+    always targeted the newest day would re-fetch all ~4,700 scrips every
+    single day and never finish one.
+
+    Once that directory is ``max_age_days`` old the data is stale and a new
+    pass starts in the current day's directory -- which is also what stops a
+    completed pass from being re-run daily forever: until the boundary, every
+    scrip is already on disk and the job does nothing.
+
+    Returns None when there is no snapshot at all to write into.
+    """
+    partial = latest_detail_day(root)
+    if partial is not None and (today - partial).days < max_age_days:
+        return partial
+    return latest_snapshot_day(root)
+
+
 def latest_detail_day(root: str) -> date | None:
     """Newest snapshot day whose bse_detail/ directory exists AND is
     non-empty, or None.

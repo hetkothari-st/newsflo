@@ -2,6 +2,7 @@
    Fresh module for the v3 surface -- the old lib/feedV2Api.ts stays for
    the retired feed-v2 components until they are deleted. */
 import type { Fundamentals } from '../lib/api';
+import type { VolatilityRangeData } from '../components/VolatilityRange';
 
 export type CapTier = 'LARGE' | 'MID' | 'SMALL' | 'MICRO';
 export type LiquidityTier = 'LOW' | 'MODERATE' | 'HIGH';
@@ -67,9 +68,12 @@ export interface LayerRow {
   cap_tier: CapTier | null;
   liquidity_tier: LiquidityTier | null;
   delivery_pct: number | null;
-  // Superseded by `fundamentals` below -- backend now always sends null
-  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
+  // Sourced description. Non-null ONLY when it can be attributed -- the
+  // backend withholds the legacy LLM-invented text (app.companies.
+  // descriptions.sourced_description). The URL is the CC BY-SA
+  // attribution and must be rendered wherever the text is.
   business_desc: string | null;
+  business_desc_source_url?: string | null;
   // Sent by app.market.ripple_layers.compute_ripple_layers (backs
   // AlertDetail.layers[].rows) and app.market.ripple.get_sector_peers_for_alert
   // (backs StockDeepDive.peers below) -- both already emit it (Task 7).
@@ -81,6 +85,12 @@ export interface LayerRow {
   in_my_holdings: boolean;
   why: string | null;
   logo_url: string | null;
+  // Subsystem D: empirical reaction range for this alert's news category.
+  // Optional, mirroring how `fundamentals?:` above documents its
+  // producers: app.market.ripple_layers rows emit it (null below sample
+  // thresholds), but app.market.ripple.get_sector_peers_for_alert peer
+  // rows do not set this key at all.
+  volatility_range?: VolatilityRangeData | null;
 }
 
 export interface RippleLayer {
@@ -108,9 +118,12 @@ export interface StockDeepDive {
   name: string;
   sector: string;
   cap_tier: CapTier | null;
-  // Superseded by `fundamentals` below -- backend now always sends null
-  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
+  // Sourced description. Non-null ONLY when it can be attributed -- the
+  // backend withholds the legacy LLM-invented text (app.companies.
+  // descriptions.sourced_description). The URL is the CC BY-SA
+  // attribution and must be rendered wherever the text is.
   business_desc: string | null;
+  business_desc_source_url?: string | null;
   // Sent by app.routers.stock_deep_dive._company_facts, which already
   // calls fundamentals_payload(company) (Task 7).
   fundamentals?: Fundamentals | null;
@@ -132,6 +145,10 @@ export interface StockDeepDive {
   rationale: string | null;
   section_title: string | null;
   peers: LayerRow[];
+  // Subsystem D: empirical reaction range for this alert's news category.
+  // Sent by app.routers.stock_deep_dive -- null below sample thresholds or
+  // outside alert context, never omitted from the response.
+  volatility_range?: VolatilityRangeData | null;
 }
 
 export interface DiscoveryEntry {

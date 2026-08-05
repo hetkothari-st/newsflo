@@ -55,6 +55,8 @@ _ADDED_COLUMNS = [
     ("alerts", "summary_long", "TEXT"),
     ("alert_companies", "why", "TEXT"),
     ("companies", "business_desc", "TEXT"),
+    ("companies", "business_desc_source_url", "VARCHAR"),
+    ("companies", "business_desc_as_of", "DATE"),
     ("companies", "supply_chain_suppliers_json", "TEXT"),
     ("companies", "supply_chain_customers_json", "TEXT"),
     ("market_moves", "delivery_pct", "FLOAT"),
@@ -96,6 +98,7 @@ _ADDED_COLUMNS = [
     ("companies", "con_roe", "FLOAT"),
     ("companies", "financials_source", "VARCHAR"),
     ("companies", "financials_as_of", "DATE"),
+    ("market_moves", "category", "VARCHAR"),
 ]
 
 
