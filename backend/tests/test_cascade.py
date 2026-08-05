@@ -333,7 +333,7 @@ def test_company_framings_ask_for_breadth_and_no_longer_cap_at_three():
     for prompt in (direct_prompt, cascade_prompt):
         assert _BREADTH_INSTRUCTION in prompt
         assert "1-3 real companies per sector" not in prompt
-    assert "Five, ten, " in _BREADTH_INSTRUCTION
+    assert "Five, ten or more" in _BREADTH_INSTRUCTION
     assert "component suppliers" in _BREADTH_INSTRUCTION
 
 
@@ -343,8 +343,8 @@ def test_breadth_instruction_still_forbids_inventing_and_size_reasoning():
     # crude-oil story.
     from app.analysis.cascade import _BREADTH_INSTRUCTION
 
-    assert "cannot record one that is not" in _BREADTH_INSTRUCTION
-    assert "still forbidden is inventing" in _BREADTH_INSTRUCTION
+    assert "a later step removes any whose mechanism does not hold up" in _BREADTH_INSTRUCTION
+    assert "forbidden is inventing" in _BREADTH_INSTRUCTION
     assert "major player in this sector" in _BREADTH_INSTRUCTION
 
 
@@ -395,43 +395,50 @@ def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
     assert result[0].parent_ticker == "HDFCBANK.NS"
 
 
-def test_identify_companies_direct_stage_calls_the_larger_budget_model_first():
-    # Measured live (2026-08): this stage's prompt is always the slim (no
-    # rulebook) variant, 10,565-11,524 tokens -- inside MODEL's (llama)
-    # 12,000 Groq tokens-per-minute ceiling but over FALLBACK_MODEL's
-    # (gpt-oss) 8,000, so MODEL is tried first. See GROQ_TPM_CEILING in
-    # claude_client.py and the model-order comment at this call site in
-    # cascade.py -- the ordering is derived from that map
-    # (_SLIM_PROMPT_PRIMARY_MODEL/_SLIM_PROMPT_FALLBACK_MODEL), not
-    # hardcoded here or there.
-    from app.analysis.claude_client import MODEL
+def test_identify_companies_direct_stage_calls_the_schema_reliable_model_first():
+    # This stage used to try MODEL (llama) first, and ONLY because the prompt
+    # did not fit gpt-oss's tokens-per-minute ceiling. llama fails this
+    # nested tool schema constantly, so that ordering produced zero companies
+    # on 47 of 48 production alerts. The prompt now fits every ceiling in
+    # GROQ_TPM_CEILING (guarded by tests/test_prompt_budget.py), so the stage
+    # leads with the model that can actually satisfy the schema.
+    from app.analysis.claude_client import FALLBACK_MODEL
 
     client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
 
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
-    assert client.calls == [{"name": "record_sector_companies", "model": MODEL}]
+    assert client.calls == [{"name": "record_sector_companies", "model": FALLBACK_MODEL}]
 
 
-def test_identify_companies_ladder_order_is_derived_from_the_tpm_budget_map():
-    # The ladder must be DRIVEN by GROQ_TPM_CEILING, not an independent
-    # hardcoded guess that happens to agree with it today: the primary model
-    # is whichever key in the map has the larger ceiling, and the fallback is
-    # whichever has the smaller one.
+def test_identify_companies_ladder_leads_with_the_tool_schema_reliable_model():
+    # Both models must appear in the ladder (llama is a separate quota bucket
+    # and a genuinely useful retry when gpt-oss is rate-limited) -- but
+    # gpt-oss leads, because it is the one built for reliable nested
+    # tool/function calling. Ordering by TPM ceiling instead, as this stage
+    # once did, puts llama first and reintroduces the tool_use_failed storm.
     from app.analysis.cascade import _SLIM_PROMPT_FALLBACK_MODEL, _SLIM_PROMPT_PRIMARY_MODEL
-    from app.analysis.claude_client import GROQ_TPM_CEILING
+    from app.analysis.claude_client import FALLBACK_MODEL, GROQ_TPM_CEILING
 
-    assert GROQ_TPM_CEILING[_SLIM_PROMPT_PRIMARY_MODEL] > GROQ_TPM_CEILING[_SLIM_PROMPT_FALLBACK_MODEL]
+    assert _SLIM_PROMPT_PRIMARY_MODEL == FALLBACK_MODEL
     assert {_SLIM_PROMPT_PRIMARY_MODEL, _SLIM_PROMPT_FALLBACK_MODEL} == set(GROQ_TPM_CEILING)
+    # ...and leading with it is only SAFE because the prompt fits its ceiling,
+    # which is the smaller of the two.
+    assert GROQ_TPM_CEILING[_SLIM_PROMPT_PRIMARY_MODEL] == min(GROQ_TPM_CEILING.values())
 
 
 def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+    # Named by ROLE, not by concrete model: this test asserts the ladder
+    # RETRIES, which must stay true whichever model currently leads it.
+    from app.analysis.cascade import (
+        _SLIM_PROMPT_FALLBACK_MODEL as SECONDARY,
+        _SLIM_PROMPT_PRIMARY_MODEL as PRIMARY,
+    )
 
     class RateLimitOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == PRIMARY:
                     from openai import RateLimitError
                     import httpx
                     request = httpx.Request("POST", "https://example.test/v1/chat/completions")
@@ -449,8 +456,8 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": PRIMARY},
+        {"name": "record_sector_companies", "model": SECONDARY},
     ]
 
 
@@ -458,15 +465,18 @@ def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
     # Live production failure: the primary model stayed on Groq returned 400
     # tool_use_failed (a malformed function-call blob it couldn't parse) --
     # distinct from a rate limit, this must ALSO trigger the secondary-model
-    # retry rather than losing the whole stage. Primary here is MODEL
-    # (llama, tried first for this stage's slim prompt -- see cascade.py's
-    # model-order comment); secondary is FALLBACK_MODEL (gpt-oss).
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+    # retry rather than losing the whole stage. Named by ROLE -- see
+    # _SLIM_PROMPT_PRIMARY_MODEL in cascade.py for which model leads today
+    # and why.
+    from app.analysis.cascade import (
+        _SLIM_PROMPT_FALLBACK_MODEL as SECONDARY,
+        _SLIM_PROMPT_PRIMARY_MODEL as PRIMARY,
+    )
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == PRIMARY:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -487,23 +497,25 @@ def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
     assert len(result) == 1
     assert result[0].ticker == "HDFCBANK.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": PRIMARY},
+        {"name": "record_sector_companies", "model": SECONDARY},
     ]
 
 
 def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_use_failed():
     # Same tool_use_failed -> secondary-model ladder must apply to a cascade
-    # stage (parent_pool set), not just the direct stage. Primary is MODEL
-    # (llama), secondary is FALLBACK_MODEL (gpt-oss) -- see cascade.py's
-    # model-order comment: the cascade stage's prompt is the same slim shape
-    # as the direct stage's, so it uses the same TPM-budget-derived order.
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+    # stage (parent_pool set), not just the direct stage: the cascade
+    # prompt is the same slim shape as the direct one, so it rides the same
+    # ladder. Named by ROLE -- see _SLIM_PROMPT_PRIMARY_MODEL in cascade.py.
+    from app.analysis.cascade import (
+        _SLIM_PROMPT_FALLBACK_MODEL as SECONDARY,
+        _SLIM_PROMPT_PRIMARY_MODEL as PRIMARY,
+    )
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == PRIMARY:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -530,8 +542,8 @@ def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_
 
     assert result[0].ticker == "IRCTC.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": PRIMARY},
+        {"name": "record_sector_companies", "model": SECONDARY},
     ]
 
 

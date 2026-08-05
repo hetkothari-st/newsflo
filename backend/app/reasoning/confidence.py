@@ -60,6 +60,17 @@ def _band(score: int) -> str:
     return "VERY_HIGH"
 
 
+def _weighted(components: list[tuple[float, float]]) -> float:
+    """Weighted mean of (component, weight) pairs, renormalised by the
+    weights actually passed in. Passing a SUBSET therefore redistributes the
+    omitted weights proportionally across the rest, which is how an
+    inapplicable signal is excluded without silently scoring it as zero."""
+    total_weight = sum(weight for _, weight in components)
+    if total_weight <= 0:
+        return 0.0
+    return sum(value * weight for value, weight in components) / total_weight
+
+
 def compute_confidence(
     *,
     calibration_sample_count: int,
@@ -120,14 +131,44 @@ def compute_confidence(
     if freshness_component < 0.5:
         penalties.append("Article is more than 3.5 days old")
 
-    raw = (
-        historical_component * WEIGHT_HISTORICAL_CALIBRATION
-        + evidence_component * WEIGHT_EVIDENCE_COMPLETENESS
-        + rule_component * WEIGHT_RULEBOOK_MATCH
-        + source_component * WEIGHT_SOURCE_CREDIBILITY
-        + consistency_component * WEIGHT_REASONING_CONSISTENCY
-        + freshness_component * WEIGHT_DATA_FRESHNESS
-    )
+    # Two scorings of the same evidence, and the BETTER one wins.
+    #
+    # `evidence_refs` is no longer a required tool-schema field (see
+    # app.analysis.cascade._COMPANY_ITEM_REQUIRED -- it was dropped to fit
+    # the company prompt under openai/gpt-oss-20b's token ceiling, which is
+    # what makes company identification work at all). Scored the old way,
+    # a company that supplies none would take a hard 0.0 on BOTH the
+    # evidence and rulebook components and land at ~28 -- under
+    # app.pipeline.CONFIDENCE_FLOOR (40), which silently deletes it. Every
+    # company of every alert would be deleted: the exact zero-companies
+    # outage the prompt work exists to fix, re-entered through the scorer.
+    #
+    # So both components are treated as INAPPLICABLE, not failed, when the
+    # model supplied no evidence refs: their weight is renormalised across
+    # the components that ARE applicable. The rulebook component belongs in
+    # that pair because a rule match is derived exclusively FROM
+    # evidence_refs (app.pipeline._build_alert_company) -- with no refs a
+    # match is structurally impossible, not merely absent.
+    #
+    # Taking the max of the two scorings, rather than switching on
+    # evidence_ref_count == 0, is what keeps the incentive honest: it makes
+    # supplying SOME evidence never score worse than supplying none.
+    # Switching would have made a company with 1 ref for 3 claims (35) score
+    # below one with 0 refs (48) -- rewarding the model for omitting an
+    # optional field, and dropping the more forthcoming answer. Nothing is
+    # ever scored lower than before this change; a full set of refs still
+    # scores exactly as it always did.
+    applicable = [
+        (historical_component, WEIGHT_HISTORICAL_CALIBRATION),
+        (source_component, WEIGHT_SOURCE_CREDIBILITY),
+        (consistency_component, WEIGHT_REASONING_CONSISTENCY),
+        (freshness_component, WEIGHT_DATA_FRESHNESS),
+    ]
+    evidence_scored = applicable + [
+        (evidence_component, WEIGHT_EVIDENCE_COMPLETENESS),
+        (rule_component, WEIGHT_RULEBOOK_MATCH),
+    ]
+    raw = max(_weighted(evidence_scored), _weighted(applicable))
     score = max(0, min(100, round(raw * 100)))
 
     return ConfidenceResult(score=score, band=_band(score), contributors=contributors, penalties=penalties)

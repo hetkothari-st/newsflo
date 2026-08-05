@@ -136,29 +136,36 @@ def test_empty_sector_list_returns_nothing(db_session):
 
 # -- breadth: more genuine material to select from ------------------------
 
-def test_per_sector_limit_is_sixty(db_session):
-    # Raised 40 -> 60. The model can only name companies that appear in this
-    # list, so a genuine supplier ranked 45th in its sector was unreachable
-    # however thorough the prompt asked the model to be.
-    assert MAX_CANDIDATES_PER_SECTOR == 60
+def test_per_sector_limit_stays_deep_enough_for_breadth(db_session):
+    # Raised 40 -> 60 for breadth (the model can only name companies that
+    # appear in this list, so a genuine supplier ranked 45th in its sector
+    # was unreachable however thorough the prompt asked it to be), then
+    # trimmed 60 -> 50 as the LAST lever of the 2026-08 prompt-size fix,
+    # after every prose cut in cascade.py was already taken. Asserted as a
+    # floor rather than an exact value: what matters to the product is that
+    # the list still reaches well past the household names, and what bounds
+    # it from above is tests/test_prompt_budget.py, which measures the real
+    # assembled prompt instead of guessing from a constant.
+    assert MAX_CANDIDATES_PER_SECTOR >= 50
 
 
-def test_returns_up_to_sixty_companies_for_one_sector(db_session):
+def test_returns_up_to_the_per_sector_limit_for_one_sector(db_session):
     _seed(db_session, [
-        (f"C{i:03d}.NS", f"Company {i}", "infra", "OTHER", "desc") for i in range(70)
+        (f"C{i:03d}.NS", f"Company {i}", "infra", "OTHER", "desc")
+        for i in range(MAX_CANDIDATES_PER_SECTOR + 10)
     ])
 
-    assert len(candidate_companies(db_session, ["infra"])) == 60
+    assert len(candidate_companies(db_session, ["infra"])) == MAX_CANDIDATES_PER_SECTOR
 
 
 # -- prompt-size guards ---------------------------------------------------
 
 def test_a_full_single_sector_block_drops_business_desc(db_session):
     # The budget that matters after the 2026-08 per-sector fix: every
-    # company-stage call carries ONE sector, so a full 60-candidate block is
-    # the worst case for a single prompt. With descriptions those 60 rows
-    # measure ~6.5-8.3k tokens on the slim prompt, against gpt-oss-20b's
-    # 8,000 tokens/minute; without them, ~4.4-5.3k. Hence
+    # company-stage call carries ONE sector, so a full
+    # MAX_CANDIDATES_PER_SECTOR block is the worst case for a single prompt.
+    # Keeping descriptions on a block that size costs thousands of tokens
+    # against gpt-oss-20b's 8,000 tokens/minute. Hence
     # LONG_LIST_THRESHOLD sits BELOW MAX_CANDIDATES_PER_SECTOR -- breadth
     # (the count) is kept and the line is trimmed instead.
     assert LONG_LIST_THRESHOLD < MAX_CANDIDATES_PER_SECTOR
@@ -171,7 +178,7 @@ def test_a_full_single_sector_block_drops_business_desc(db_session):
 
     assert "A long business description here." not in text
     assert text.count("\n") + 1 == MAX_CANDIDATES_PER_SECTOR
-    assert "C059.NS" in text
+    assert f"C{MAX_CANDIDATES_PER_SECTOR - 1:03d}.NS" in text
 
 
 def test_a_short_list_keeps_business_desc(db_session):

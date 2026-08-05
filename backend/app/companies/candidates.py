@@ -31,13 +31,23 @@ from app.models import Company
 # size-ranked fan-out that actually picked companies by size is a separate,
 # deliberately constrained mechanism in cascade.py.
 #
-# KEPT at 60 through the 2026-08 prompt-size fix: every company stage now
-# sends ONE SECTOR PER CALL (cascade._identify_companies_per_sector), so this
-# limit bounds the whole candidate block, and 60 without business_desc
-# measures ~4.4-5.3k tokens for the slim prompt against that 8,000 ceiling.
-# Breadth is the product goal, so the per-candidate LINE was trimmed
-# (LONG_LIST_THRESHOLD below) rather than the candidate COUNT.
-MAX_CANDIDATES_PER_SECTOR = 60
+# Trimmed 60 -> 50 (2026-08, second prompt-size pass). Order of levers, and
+# this one was genuinely last: the field instructions and both stage framings
+# in cascade.py were compressed first, and risks/assumptions/unknowns/
+# alternative_hypothesis/evidence_refs were dropped from the tool schema's
+# required list, before a single candidate was given up. Those cuts alone
+# still left the CASCADE-stage prompt (longer framing + a parent-company list
+# + a parent_ticker enum) a few dozen tokens under budget, which is a
+# rounding error, not margin -- and the stage has to fit
+# openai/gpt-oss-20b's 8,000 TPM ceiling with real room, because gpt-oss is
+# the only model that reliably satisfies this tool schema.
+#
+# Each candidate costs TWICE: one prompt line here and one entry in the tool
+# schema's ticker enum. 50 keeps the deep-in-the-list component suppliers and
+# smaller specialists that breadth depends on while buying back the margin.
+# tests/test_prompt_budget.py is what holds the line; do not raise this
+# without re-running it.
+MAX_CANDIDATES_PER_SECTOR = 50
 
 # Above this many candidates in one prompt, format_candidates drops
 # business_desc and emits ticker + name + sub_sector only. See its docstring
