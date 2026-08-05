@@ -185,10 +185,14 @@ function RippleBand({
 
 export default function FeedV4({
   capFilter,
+  date,
   onEdition,
   onOpenDeepDive,
 }: {
   capFilter: CapTier | 'ALL';
+  // null = today (with latest-edition fallback); YYYY-MM-DD = a back
+  // issue picked from the archive, fetched exactly, no fallback.
+  date: string | null;
   onEdition: (edition: { count: number; date: string | null }) => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
 }) {
@@ -200,11 +204,14 @@ export default function FeedV4({
 
   useEffect(() => {
     let cancelled = false;
+    setAlerts(null);
+    setError(null);
+    setOpenId(null);
     (async () => {
       try {
-        let result = await getFeedAlerts(token, { lang: 'en' });
-        let editionDate: string | null = null;
-        if (result.length === 0) {
+        let result = await getFeedAlerts(token, { lang: 'en', date: date ?? undefined });
+        let editionDate: string | null = date;
+        if (result.length === 0 && date === null) {
           const edition = await findLatestEdition(token);
           if (edition !== null) {
             editionDate = edition.date;
@@ -221,7 +228,7 @@ export default function FeedV4({
     return () => {
       cancelled = true;
     };
-  }, [token, onEdition]);
+  }, [token, date, onEdition]);
 
   const toggle = useCallback(
     (alertId: number) => {

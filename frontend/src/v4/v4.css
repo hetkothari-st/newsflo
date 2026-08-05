@@ -417,6 +417,34 @@
   .nf4 .inside .iwarn { margin-left: 32px; }
 }
 
+/* ---------- ARCHIVE ---------- */
+.nf4 .archmonth { font-family: var(--serif); font-size: 24px; }
+.nf4 .archgrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  max-width: 480px;
+  border-top: 1px solid var(--ink);
+  padding-top: 16px;
+}
+.nf4 .archwd { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); text-align: center; padding-bottom: 8px; }
+.nf4 .archday { font-family: var(--serif); font-size: 20px; text-align: center; padding: 8px 0; color: var(--pebble); }
+.nf4 button.archday.on { color: var(--ink); font-weight: 400; border: 1px solid var(--ink); border-radius: var(--radius); }
+
+/* Dateline bar -- reading a back issue. */
+.nf4 .dateline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ink);
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+}
+.nf4 .dateline button { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ink); }
+
 /* ---------- MOBILE ---------- */
 @media (max-width: 600px) {
   .nf4 .ticker { font-size: 10px; gap: 8px; padding: 5px 8px; }

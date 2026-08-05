@@ -8,11 +8,12 @@
 import { useState } from 'react';
 import './v4.css';
 import type { CapTier } from '../v3/api';
+import ArchiveV4 from './ArchiveV4';
 import DeepDiveV4 from './DeepDiveV4';
 import FeedV4 from './FeedV4';
 import { DirectoryV4, DiscoverV4, PortfolioV4, ReviewV4 } from './SectionsV4';
 
-type View = 'feed' | 'disc' | 'dir' | 'pf' | 'car';
+type View = 'feed' | 'disc' | 'dir' | 'pf' | 'car' | 'arch';
 
 const NAV_ITEMS: Array<{ view: View; label: string }> = [
   { view: 'feed', label: 'Feed' },
@@ -20,6 +21,7 @@ const NAV_ITEMS: Array<{ view: View; label: string }> = [
   { view: 'dir', label: 'Directory' },
   { view: 'pf', label: 'Portfolio' },
   { view: 'car', label: 'Review' },
+  { view: 'arch', label: 'Archive' },
 ];
 
 const CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string; title: string }> = [
@@ -43,6 +45,8 @@ export default function ShellV4() {
   const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
+  // null = today's edition; set from the archive to reopen a back issue.
+  const [feedDate, setFeedDate] = useState<string | null>(null);
 
   const openDeepDive = (ticker: string, alertId?: number) => setDeepDive({ ticker, alertId });
 
@@ -95,13 +99,33 @@ export default function ShellV4() {
         )}
       </div>
 
+      {view === 'feed' && feedDate !== null && (
+        <div className="dateline">
+          <span>Reading the {feedDate} edition</span>
+          <button onClick={() => setFeedDate(null)}>Back to today</button>
+        </div>
+      )}
+
       {view === 'feed' && (
-        <FeedV4 capFilter={capFilter} onEdition={setEdition} onOpenDeepDive={openDeepDive} />
+        <FeedV4
+          capFilter={capFilter}
+          date={feedDate}
+          onEdition={setEdition}
+          onOpenDeepDive={openDeepDive}
+        />
       )}
       {view === 'disc' && <DiscoverV4 onOpenDeepDive={openDeepDive} />}
       {view === 'dir' && <DirectoryV4 onOpenDeepDive={openDeepDive} />}
       {view === 'pf' && <PortfolioV4 onOpenDeepDive={openDeepDive} />}
       {view === 'car' && <ReviewV4 />}
+      {view === 'arch' && (
+        <ArchiveV4
+          onPick={(date) => {
+            setFeedDate(date);
+            setView('feed');
+          }}
+        />
+      )}
 
       {deepDive !== null && (
         <DeepDiveV4
