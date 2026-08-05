@@ -206,24 +206,44 @@ body:has(.nf4) { background: #fafafa; }
 
 .nf4 .up { color: var(--data-up); }
 .nf4 .down { color: var(--data-down); }
-.nf4 .band .up { color: var(--data-up-onink); }
-.nf4 .band .down { color: var(--data-down-onink); }
-
-/* ---------- INK BAND (expanded story: the ripple) ---------- */
-.nf4 .band { background: var(--ink); color: var(--paper); padding: 0 0 64px; }
-.nf4 .band .stamp {
-  font-family: var(--condensed);
-  text-transform: uppercase;
-  font-size: clamp(64px, 14vw, 226px);
-  line-height: 0.75;
-  padding: 32px 16px 24px;
-  display: flex;
-  align-items: baseline;
-  gap: 24px;
-  white-space: nowrap;
-  overflow: hidden;
+/* Lifted variants for numerals on the ink-dark deep-dive page. */
+.nf4 .inside .up { color: var(--data-up-onink); }
+.nf4 .inside .down { color: var(--data-down-onink); }
+/* ---------- THE RIPPLE (affected companies -- full-page takeover) ---------- */
+/* Mirrors the deployed card-flip: covers the whole viewport like turning
+   the card over. Same paper theme and type as the rest of the app --
+   serif page title, ruled rows, uppercase meta -- not a separate look.
+   Sits below the deep-dive inside page (z 40). */
+.nf4 .band {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow-y: auto;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0 0 64px;
 }
-.nf4 .band .stamp::after { content: ''; flex: 1; border-top: 1px solid var(--paper); transform: translateY(-0.12em); }
+.nf4 .band .bandclose {
+  position: sticky;
+  top: 0;
+  display: block;
+  margin-left: auto;
+  padding: 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--paper);
+  z-index: 31;
+}
+.nf4 .band .stamp {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(36px, 6vw, 77px);
+  line-height: 0.9;
+  padding: 8px 16px 16px;
+}
 .nf4 .band .sumline {
   display: flex;
   gap: 32px;
@@ -232,15 +252,16 @@ body:has(.nf4) { background: #fafafa; }
   letter-spacing: -0.12px;
   text-transform: uppercase;
   flex-wrap: wrap;
+  color: var(--ash);
 }
-.nf4 .band .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; }
+.nf4 .band .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; color: var(--ink); }
 
-/* Cap filter inside the affected-companies band -- paper-on-ink text
-   buttons, active gains scale only (same rule as everywhere else). */
-.nf4 .bandfilters { display: flex; gap: 16px; align-items: baseline; padding: 0 16px 16px; border-bottom: 1px solid var(--sepia); flex-wrap: wrap; }
-.nf4 .bandfilters .bflab { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; opacity: 0.6; }
-.nf4 .bandfilters button { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; color: var(--paper); opacity: 0.45; }
-.nf4 .bandfilters button.on { font-size: 18px; opacity: 1; }
+/* Cap filter inside the affected-companies page -- same text-tab
+   treatment as everywhere else: active gains scale, never color. */
+.nf4 .bandfilters { display: flex; gap: 16px; align-items: baseline; padding: 0 16px 16px; border-bottom: 1px solid var(--ink); flex-wrap: wrap; }
+.nf4 .bandfilters .bflab { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); }
+.nf4 .bandfilters button { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; color: var(--pebble); }
+.nf4 .bandfilters button.on { font-size: 18px; color: var(--ink); }
 @media (min-width: 900px) { .nf4 .bandfilters { padding-left: 32px; padding-right: 32px; } }
 
 .nf4 .layer4 { padding: 24px 16px 8px; }
@@ -262,6 +283,11 @@ body:has(.nf4) { background: #fafafa; }
   border-top: 1px solid var(--sepia);
   cursor: pointer;
 }
+/* Paper-context overrides for the ripple page (the same .crow renders
+   on ink inside the deep dive, which keeps the base colors). */
+.nf4 .band .crow { border-top-color: var(--hairline); }
+.nf4 .band .crow .cap4 { border-color: var(--ink); }
+.nf4 .band .lnote4 { color: var(--sepia); opacity: 1; }
 .nf4 .crow .tk4 { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; min-width: 12ch; }
 .nf4 .crow .nm4 { font-family: var(--serif); font-size: 16px; flex: 1; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nf4 .crow .cap4 {
@@ -286,12 +312,13 @@ body:has(.nf4) { background: #fafafa; }
   font-weight: 700;
   letter-spacing: -0.12px;
   text-transform: uppercase;
-  color: var(--paper);
+  color: var(--ink);
   padding: 24px 16px 0;
 }
 
-/* ---------- TIMELINE (inside ink band) ---------- */
+/* ---------- TIMELINE (inside the ripple page) ---------- */
 .nf4 .tl4 { padding: 8px 16px 0; }
+.nf4 .band .tl4 .tlrow4 { border-top-color: var(--hairline); }
 @media (min-width: 900px) { .nf4 .tl4 { padding: 8px 32px 0; } }
 .nf4 .tl4 .tlrow4 { border-top: 1px solid var(--sepia); padding: 12px 0; }
 .nf4 .tl4 .tlh4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: -0.12px; margin: 0 0 4px; }

@@ -6,7 +6,7 @@
    the timeline beneath. Data comes from the same feed-v2 endpoints as
    the v3 shell; filter semantics (cap_tiers story match + row-level
    narrowing) are identical. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getAlertDetail,
   getCalendarCounts,
@@ -146,8 +146,27 @@ function RippleBand({
   const visibleRows = (layer: RippleLayer) =>
     capFilter === 'ALL' ? layer.rows : layer.rows.filter((row) => row.cap_tier === capFilter);
   const anyRows = detail !== null && detail.layers.some((layer) => visibleRows(layer).length > 0);
+  // Swipe right anywhere on the ripple page -> back to the story, the
+  // same gesture the deployed card-flip uses.
+  const touchX = useRef<number | null>(null);
   return (
-    <div className="band">
+    <div
+      className="band"
+      role="dialog"
+      aria-label="Affected companies"
+      onTouchStart={(event) => {
+        touchX.current = event.touches[0].clientX;
+      }}
+      onTouchEnd={(event) => {
+        if (touchX.current === null) return;
+        const dx = event.changedTouches[0].clientX - touchX.current;
+        touchX.current = null;
+        if (dx > 55) onClose();
+      }}
+    >
+      <button className="bandclose" onClick={onClose}>
+        Back to the story ×
+      </button>
       <div className="stamp">The Ripple</div>
       <div className="sumline">
         <span>
@@ -220,7 +239,7 @@ function RippleBand({
         </div>
       )}
       <button className="close4" onClick={onClose}>
-        Fold it closed ↑
+        Back to the story ↑
       </button>
     </div>
   );
@@ -301,6 +320,19 @@ export default function FeedV4({
     onBandOpenChange(false);
   }, [onBandOpenChange]);
 
+  // Swipe left on a card -> its ripple page (mirrors the deployed
+  // card-flip gesture; tap on the headline/CTA still works everywhere).
+  const cardTouchX = useRef<number | null>(null);
+  const onCardTouchStart = (event: React.TouchEvent) => {
+    cardTouchX.current = event.touches[0].clientX;
+  };
+  const onCardTouchEnd = (alertId: number) => (event: React.TouchEvent) => {
+    if (cardTouchX.current === null) return;
+    const dx = event.changedTouches[0].clientX - cardTouchX.current;
+    cardTouchX.current = null;
+    if (dx < -55 && openId !== alertId) toggle(alertId);
+  };
+
   if (error !== null) return <p className="empty4">{error}</p>;
   if (alerts !== null && alerts.length === 0)
     return <p className="empty4">No measured stories yet today. New editions appear as the market reacts.</p>;
@@ -318,6 +350,8 @@ export default function FeedV4({
           <div
             className={`storycard ${index === 0 ? 'first' : ''}`}
             data-testid={`v4story-${alert.id}`}
+            onTouchStart={onCardTouchStart}
+            onTouchEnd={onCardTouchEnd(alert.id)}
           >
             <div>
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
