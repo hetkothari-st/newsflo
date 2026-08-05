@@ -395,19 +395,34 @@ def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
     assert result[0].parent_ticker == "HDFCBANK.NS"
 
 
-def test_identify_companies_direct_stage_calls_fallback_model_first():
-    # Measured live (2026-08): MODEL (llama) has a 12k Groq tokens-per-minute
-    # ceiling this stage's 13k-19k-token prompt always exceeds -- it 413s
-    # unconditionally, so FALLBACK_MODEL (gpt-oss-20b, no comparable
-    # per-minute ceiling) is tried first here, uniquely among this module's
-    # stages. See the model-order comment at this call site in cascade.py.
-    from app.analysis.claude_client import FALLBACK_MODEL
+def test_identify_companies_direct_stage_calls_the_larger_budget_model_first():
+    # Measured live (2026-08): this stage's prompt is always the slim (no
+    # rulebook) variant, 10,565-11,524 tokens -- inside MODEL's (llama)
+    # 12,000 Groq tokens-per-minute ceiling but over FALLBACK_MODEL's
+    # (gpt-oss) 8,000, so MODEL is tried first. See GROQ_TPM_CEILING in
+    # claude_client.py and the model-order comment at this call site in
+    # cascade.py -- the ordering is derived from that map
+    # (_SLIM_PROMPT_PRIMARY_MODEL/_SLIM_PROMPT_FALLBACK_MODEL), not
+    # hardcoded here or there.
+    from app.analysis.claude_client import MODEL
 
     client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
 
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
-    assert client.calls == [{"name": "record_sector_companies", "model": FALLBACK_MODEL}]
+    assert client.calls == [{"name": "record_sector_companies", "model": MODEL}]
+
+
+def test_identify_companies_ladder_order_is_derived_from_the_tpm_budget_map():
+    # The ladder must be DRIVEN by GROQ_TPM_CEILING, not an independent
+    # hardcoded guess that happens to agree with it today: the primary model
+    # is whichever key in the map has the larger ceiling, and the fallback is
+    # whichever has the smaller one.
+    from app.analysis.cascade import _SLIM_PROMPT_FALLBACK_MODEL, _SLIM_PROMPT_PRIMARY_MODEL
+    from app.analysis.claude_client import GROQ_TPM_CEILING
+
+    assert GROQ_TPM_CEILING[_SLIM_PROMPT_PRIMARY_MODEL] > GROQ_TPM_CEILING[_SLIM_PROMPT_FALLBACK_MODEL]
+    assert {_SLIM_PROMPT_PRIMARY_MODEL, _SLIM_PROMPT_FALLBACK_MODEL} == set(GROQ_TPM_CEILING)
 
 
 def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
@@ -416,7 +431,7 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     class RateLimitOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == FALLBACK_MODEL:
+                if kwargs["model"] == MODEL:
                     from openai import RateLimitError
                     import httpx
                     request = httpx.Request("POST", "https://example.test/v1/chat/completions")
@@ -434,25 +449,24 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
     assert client.calls == [
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
         {"name": "record_sector_companies", "model": MODEL},
+        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
     ]
 
 
 def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
-    # Live production failure: the slim retry stayed on the primary model
-    # and Groq returned 400 tool_use_failed (a malformed llama-style
-    # function-call blob it couldn't parse) -- distinct from a rate limit,
-    # this must ALSO trigger the secondary-model retry rather than losing
-    # the whole stage. Primary here is FALLBACK_MODEL (gpt-oss-20b, tried
-    # first for this stage -- see cascade.py's model-order comment);
-    # secondary is MODEL (llama).
+    # Live production failure: the primary model stayed on Groq returned 400
+    # tool_use_failed (a malformed function-call blob it couldn't parse) --
+    # distinct from a rate limit, this must ALSO trigger the secondary-model
+    # retry rather than losing the whole stage. Primary here is MODEL
+    # (llama, tried first for this stage's slim prompt -- see cascade.py's
+    # model-order comment); secondary is FALLBACK_MODEL (gpt-oss).
     from app.analysis.claude_client import FALLBACK_MODEL, MODEL
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == FALLBACK_MODEL:
+                if kwargs["model"] == MODEL:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -473,23 +487,23 @@ def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
     assert len(result) == 1
     assert result[0].ticker == "HDFCBANK.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
         {"name": "record_sector_companies", "model": MODEL},
+        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
     ]
 
 
 def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_use_failed():
     # Same tool_use_failed -> secondary-model ladder must apply to a cascade
-    # stage (parent_pool set), not just the direct stage. Primary is
-    # FALLBACK_MODEL (gpt-oss-20b), secondary is MODEL (llama) -- see
-    # cascade.py's model-order comment for why this stage's order is
-    # inverted relative to a naive "MODEL first" default.
+    # stage (parent_pool set), not just the direct stage. Primary is MODEL
+    # (llama), secondary is FALLBACK_MODEL (gpt-oss) -- see cascade.py's
+    # model-order comment: the cascade stage's prompt is the same slim shape
+    # as the direct stage's, so it uses the same TPM-budget-derived order.
     from app.analysis.claude_client import FALLBACK_MODEL, MODEL
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == FALLBACK_MODEL:
+                if kwargs["model"] == MODEL:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -516,8 +530,8 @@ def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_
 
     assert result[0].ticker == "IRCTC.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
         {"name": "record_sector_companies", "model": MODEL},
+        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
     ]
 
 
@@ -568,12 +582,12 @@ def test_identify_companies_cascade_stage_raises_when_both_models_fail_tool_use_
             client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
         )
 
-    # Cascade stage never gets the slim retry, so ONE stochastic attempt is
-    # exactly two calls (FALLBACK_MODEL then MODEL -- this stage's order is
-    # inverted, see cascade.py's model-order comment), not four. The
-    # tool_use_failed that survives both models is a stochastic failure, so
-    # _retry_forced_tool_call runs that whole ladder TOOL_CALL_ATTEMPTS
-    # times before giving up: 3 x 2 = 6 calls, and still a raise.
+    # This stage's prompt is always the one slim variant now (see cascade.py's
+    # model-order comment), so ONE stochastic attempt is exactly two calls
+    # (MODEL then FALLBACK_MODEL), not four. The tool_use_failed that
+    # survives both models is a stochastic failure, so _retry_forced_tool_call
+    # runs that whole ladder TOOL_CALL_ATTEMPTS times before giving up:
+    # 3 x 2 = 6 calls, and still a raise.
     assert len(client.calls) == 2 * TOOL_CALL_ATTEMPTS
 
 
@@ -615,29 +629,17 @@ def test_identify_companies_does_not_retry_on_a_different_bad_request_error():
     assert len(client.calls) == 1
 
 
-def test_identify_companies_direct_stage_retries_slim_on_oversize_rejection():
-    # Simulates Groq's per-request token cap (observed live as 413 "Request
-    # too large"): any prompt carrying the full rulebook block is rejected,
-    # the slim retry (no rulebook) succeeds. The direct stage must recover
-    # instead of losing every direct company.
-    class OversizeRejectingClient(ScriptedClient):
-        class _Completions(ScriptedClient._Completions):
-            def create(self, **kwargs):
-                content = kwargs["messages"][1]["content"]
-                if "ECONOMIC REASONING RULES" in content:
-                    self._outer.calls.append({
-                        "name": kwargs["tool_choice"]["function"]["name"],
-                        "model": kwargs["model"],
-                    })
-                    raise RuntimeError("Request too large (simulated 413)")
-                return super().create(**kwargs)
-
-        @property
-        def chat(self):
-            return SimpleNamespace(completions=self._Completions(self))
-
+def test_identify_companies_direct_stage_never_sends_the_rulebook_block():
+    # The always-413 rung is gone entirely, not just reordered: the direct
+    # stage's prompt never carries the full rulebook/playbook block
+    # (COMPANY_RATIONALE_INSTRUCTIONS). Even scoped to one sector's
+    # candidates that variant measures 16,284-17,243 tokens, over BOTH
+    # models' GROQ_TPM_CEILING regardless of order, so an attempt built from
+    # it could only ever 413. The direct stage now runs the same slim,
+    # rulebook-free prompt as the cascade stages, in ONE physical call on
+    # the happy path (no retry needed).
     company_fields = dict(_FULL_COMPANY_FIELDS, name="HDFC Bank", ticker="HDFCBANK.NS")
-    client = OversizeRejectingClient({
+    client = ScriptedClient({
         "record_sector_companies": {"sector_companies": [
             {"sector": "banking", "companies": [company_fields]},
         ]},
@@ -647,15 +649,15 @@ def test_identify_companies_direct_stage_retries_slim_on_oversize_rejection():
 
     assert len(result) == 1
     assert result[0].ticker == "HDFCBANK.NS"
-    # First call carried the rulebook and was rejected; the retry was slim.
-    assert len(client.calls) == 2
+    assert len(client.calls) == 1
     assert "ECONOMIC REASONING RULES" not in client.last_messages[1]["content"]
 
 
-def test_identify_companies_cascade_stage_does_not_retry_slim():
-    # The slim retry exists only for the direct stage's oversized prompt --
-    # a cascade-stage failure must propagate to analyze_article's own
-    # truncation handling, not silently re-call the model.
+def test_identify_companies_propagates_a_non_retryable_exception_immediately():
+    # Neither stage retries a generic (non-rate-limit, non-tool_use_failed)
+    # exception -- it propagates straight out of _identify_companies' single
+    # physical call, to analyze_article's own truncation handling. Direct and
+    # cascade behave identically here now that both run the same slim ladder.
     class AlwaysFailingClient(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
@@ -670,11 +672,17 @@ def test_identify_companies_cascade_stage_does_not_retry_slim():
         magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
         impact_level="direct",
     )]
-    client = AlwaysFailingClient({})
 
     with pytest.raises(RuntimeError, match="provider down"):
         _identify_companies(
-            client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+            AlwaysFailingClient({}), facts="f", sectors=[_BANKING_SECTOR],
+            impact_level="indirect_l1", parent_pool=parent_pool,
+        )
+
+    with pytest.raises(RuntimeError, match="provider down"):
+        _identify_companies(
+            AlwaysFailingClient({}), facts="f", sectors=[_BANKING_SECTOR],
+            impact_level="direct", parent_pool=None,
         )
 
 
@@ -883,13 +891,14 @@ def test_identify_companies_per_sector_direct_stage_gap_on_one_sector_keeps_the_
         SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
         SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
     ]
-    # FOUR failures for banking, not two: on the direct stage every attempt
-    # is a full-rulebook request AND, if that fails, a slim-prompt retry
-    # (preserved from before this became per-sector), so each of the helper's
-    # two sector-level attempts issues two physical calls.
+    # TWO failures for banking, one per sector-level attempt: the direct
+    # stage's prompt is always the one slim variant now (no separate
+    # full-rulebook attempt to also fail), and a plain ValueError isn't a
+    # RateLimitError/tool_use_failed, so _call_with_model_fallback doesn't
+    # retry it on the fallback model either -- one physical call per
+    # sector-level attempt.
     client = PerSectorScriptedClient([
-        ValueError("boom"), ValueError("boom slim"),
-        ValueError("boom again"), ValueError("boom again slim"),
+        ValueError("boom"), ValueError("boom again"),
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS")]}]},
     ])
 
