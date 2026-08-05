@@ -164,7 +164,18 @@
 /* ---------- STORY ROWS ---------- */
 .nf4 .story { padding: 32px 16px; cursor: pointer; }
 @media (min-width: 900px) { .nf4 .story { padding: 32px; } }
-.nf4 .story .srow4 { display: flex; justify-content: space-between; gap: 24px; align-items: baseline; }
+.nf4 .story .srow4 { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+.nf4 .story .sbody { flex: 1; min-width: 0; }
+/* Story-row plate: small monochrome square, sharp corners -- same
+   halftone treatment as the hero, scaled to a column thumbnail. */
+.nf4 .story .splate {
+  width: 128px;
+  height: 128px;
+  object-fit: cover;
+  filter: grayscale(1) contrast(1.12);
+  flex-shrink: 0;
+  display: block;
+}
 .nf4 .story h2 {
   font-family: var(--serif);
   font-weight: 400;
@@ -455,6 +466,7 @@
   .nf4 .lead { padding: 32px 16px 32px; }
   .nf4 .lead .lmove { font-size: 56px; }
   .nf4 .story .srow4 { flex-wrap: wrap; }
+  .nf4 .story .splate { width: 96px; height: 96px; order: -1; }
   .nf4 .crow { flex-wrap: wrap; row-gap: 2px; }
   .nf4 .crow .nm4 { flex-basis: 100%; order: 3; white-space: normal; }
   .nf4 .band .sumline { gap: 20px; }

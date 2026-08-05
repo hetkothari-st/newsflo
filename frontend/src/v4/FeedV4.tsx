@@ -16,7 +16,27 @@ import {
   type FeedAlert,
   type RippleLayer,
 } from '../v3/api';
+import { categoryArtUrl } from '../v3/categoryArt';
 import { useAuth } from '../lib/auth';
+
+/* Monochrome plate with the v3 fallback chain: the story's own photo,
+   then curated category artwork (publishers that block scraping), then
+   nothing -- a broken-image glyph must never reach the page. */
+function Plate({ src, category, className }: { src: string | null; category: string; className: string }) {
+  const [stage, setStage] = useState<'story' | 'category' | 'none'>(src !== null ? 'story' : 'category');
+  const resolved = stage === 'story' ? src : stage === 'category' ? categoryArtUrl(category) : null;
+  if (resolved === null) return null;
+  return (
+    <img
+      key={resolved}
+      className={className}
+      src={resolved}
+      alt=""
+      loading="lazy"
+      onError={() => setStage(stage === 'story' ? 'category' : 'none')}
+    />
+  );
+}
 
 /* When today's edition is empty (market holiday, early morning, stale
    dev copy of the DB), fall back to the most recent day whose FEED has
@@ -275,9 +295,7 @@ export default function FeedV4({
               <p className="lgist">{lead.summary_short ?? lead.summary_long ?? ''}</p>
               <MetaLine alert={lead} onToggle={() => toggle(lead.id)} />
             </div>
-            {lead.article.image_url !== null && (
-              <img className="lplate" src={lead.article.image_url} alt="" loading="lazy" />
-            )}
+            <Plate src={lead.article.image_url} category={lead.category} className="lplate" />
           </div>
           {openId === lead.id && (
             <RippleBand
@@ -296,12 +314,15 @@ export default function FeedV4({
           {index > 0 && <hr className="rule-hair" />}
           <div className="story" onClick={() => toggle(alert.id)} data-testid={`v4story-${alert.id}`}>
             <div className="srow4">
-              <h2>{alert.article.title}</h2>
+              <div className="sbody">
+                <h2>{alert.article.title}</h2>
+                <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
+              </div>
               <span className={`smove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </span>
+              <Plate src={alert.article.image_url} category={alert.category} className="splate" />
             </div>
-            <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
           </div>
           {openId === alert.id && (
             <RippleBand
