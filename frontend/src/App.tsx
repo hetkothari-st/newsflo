@@ -9,6 +9,7 @@ import HoldingsPage from './pages/HoldingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Shell from './v3/Shell';
+import ShellV4 from './v4/ShellV4';
 import ChartDeckPage from './features/visualize/deck/ChartDeckPage';
 import { useAuth } from './lib/auth';
 
@@ -42,6 +43,12 @@ export default function App() {
 
   if (isShell) {
     return <Shell />;
+  }
+
+  // v4 broadsheet experiment (DESIGN.md "Henry" editorial direction) --
+  // owns the whole viewport like the v3 shell; reachable only at /v4.
+  if (location.pathname === '/v4') {
+    return <ShellV4 />;
   }
 
   // The charts deck (features/visualize/deck, chart-spec Doc-1/Doc-2 +

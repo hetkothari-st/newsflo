@@ -7,9 +7,21 @@ export default defineConfig({
   server: {
     // Dev-time proxy so the browser talks to the FastAPI backend on :8000
     // through the Vite dev server on :5173 (same-origin fetch + WebSocket).
+    // NEWSFLO_API_PORT lets a worktree run its own backend beside the main
+    // checkout's :8000 (parallel-session isolation). globalThis-cast keeps
+    // tsconfig node-types-free (config runs under Node, app code doesn't).
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
-      '/ws': { target: 'ws://127.0.0.1:8000', ws: true },
+      '/api': `http://127.0.0.1:${
+        (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env
+          .NEWSFLO_API_PORT ?? '8000'
+      }`,
+      '/ws': {
+        target: `ws://127.0.0.1:${
+          (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env
+            .NEWSFLO_API_PORT ?? '8000'
+        }`,
+        ws: true,
+      },
     },
   },
   test: {

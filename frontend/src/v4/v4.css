@@ -1,0 +1,441 @@
+/* v4 "Broadsheet" -- the Henry style reference (DESIGN.md): warm
+   monochrome editorial broadside. Paper #fafafa / Ink #2a2722, display
+   serif headlines (Fraunces subbing Louize Display), ultra-condensed
+   masthead sans (Antonio subbing Manuka), grotesque UI face (Inter
+   subbing Neue Montreal). No shadows, one radius (12px), full-bleed
+   paper/ink bands. The single sanctioned departure from the reference's
+   strict monochrome: market numerals carry muted print red/green as
+   functional data ink (user decision). */
+@import url('https://fonts.googleapis.com/css2?family=Antonio:wght@400&family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&family=Inter:wght@400;700&display=swap');
+
+.nf4 {
+  /* Colors -- DESIGN.md tokens verbatim */
+  --paper: #fafafa;
+  --hairline: #eeeeee;
+  --midstone: #9f9f9f;
+  --ash: #666666;
+  --pebble: #b3b3b3;
+  --sepia: #3e3b36;
+  --ink: #2a2722;
+  /* Functional data ink (the one monochrome exception): print-muted, not
+     chart-bright. On-ink variants are lifted for contrast on #2a2722. */
+  --data-up: #1f7a4d;
+  --data-down: #b3362a;
+  --data-up-onink: #7fc9a0;
+  --data-down-onink: #e29a8d;
+
+  --serif: 'Fraunces', 'Georgia', serif;
+  --condensed: 'Antonio', 'Arial Narrow', sans-serif;
+  --grotesque: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  --radius: 12px;
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--grotesque);
+  font-size: 16px;
+  letter-spacing: -0.16px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.nf4 * { box-sizing: border-box; }
+.nf4 button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
+
+/* ---------- TOP TICKER BANNER ---------- */
+.nf4 .ticker {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 16px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ---------- MASTHEAD ---------- */
+.nf4 .masthead {
+  font-family: var(--condensed);
+  font-weight: 400;
+  text-transform: uppercase;
+  /* Edge-to-edge slab -- the reference stamps section mastheads at
+     226-371px; here the wordmark scales with the viewport instead so it
+     spans the full bleed at every width. */
+  font-size: clamp(96px, 23vw, 371px);
+  /* 0.75 is the reference's slab ratio, but Antonio's caps overflow that
+     box and collide with the nav row -- em-padding absorbs the overshoot. */
+  line-height: 0.8;
+  padding: 0.12em 8px 0.08em;
+  text-align: center;
+  user-select: none;
+}
+
+/* ---------- NAV ROW ---------- */
+.nf4 .navrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding: 16px;
+  border-bottom: 1px solid var(--ink);
+}
+.nf4 .navlinks { display: flex; gap: 20px; align-items: baseline; flex-wrap: wrap; }
+.nf4 .navlinks a,
+.nf4 .navlinks button {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-decoration: none;
+}
+.nf4 .navlinks button { color: var(--pebble); }
+.nf4 .navlinks button.on { font-size: 18px; color: var(--ink); }
+/* Cap filter: active = larger, same color/weight -- emphasis from scale
+   only, per the reference's nav-link spec. */
+.nf4 .capf4 { display: flex; gap: 16px; align-items: baseline; }
+.nf4 .capf4 button {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  /* No text-transform here: uppercase would turn the micro-cap 'µ' into
+     a Greek capital Mu ('Μ') -- labels arrive pre-cased instead. */
+  color: var(--pebble);
+}
+.nf4 .capf4 button.on { font-size: 18px; color: var(--ink); }
+
+/* ---------- LEAD STORY ---------- */
+.nf4 .lead { padding: 64px 16px 48px; display: grid; grid-template-columns: 1fr; gap: 24px; }
+@media (min-width: 900px) {
+  .nf4 .lead { grid-template-columns: 2fr 1fr; align-items: start; padding: 80px 32px 64px; }
+}
+.nf4 .lead .lmove {
+  font-family: var(--serif);
+  font-size: 77px;
+  line-height: 0.9;
+  font-weight: 400;
+}
+.nf4 .lead h1 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(36px, 6vw, 77px);
+  line-height: 0.95;
+  margin: 12px 0 16px;
+  cursor: pointer;
+}
+.nf4 .lead .lgist {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  max-width: 56ch;
+}
+.nf4 .lead .lplate {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  /* Monochrome halftone-plate treatment per the reference's imagery
+     rules: no color photography, square corners, ink-on-paper. */
+  filter: grayscale(1) contrast(1.12);
+  display: block;
+}
+
+/* ---------- META LINE ---------- */
+.nf4 .metaline {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  margin-top: 20px;
+}
+.nf4 .metaline .aff { font-weight: 700; cursor: pointer; }
+
+/* ---------- SECTION RULE ---------- */
+.nf4 .rule { border: 0; border-top: 1px solid var(--ink); margin: 0; }
+.nf4 .rule-hair { border: 0; border-top: 1px solid var(--hairline); margin: 0; }
+
+/* ---------- STORY ROWS ---------- */
+.nf4 .story { padding: 32px 16px; cursor: pointer; }
+@media (min-width: 900px) { .nf4 .story { padding: 32px; } }
+.nf4 .story .srow4 { display: flex; justify-content: space-between; gap: 24px; align-items: baseline; }
+.nf4 .story h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(24px, 3.2vw, 35px);
+  line-height: 1.1;
+  margin: 0;
+  max-width: 30ch;
+}
+.nf4 .story .smove { font-family: var(--serif); font-size: 32px; line-height: 1; white-space: nowrap; }
+.nf4 .story .metaline { margin-top: 12px; }
+
+.nf4 .up { color: var(--data-up); }
+.nf4 .down { color: var(--data-down); }
+.nf4 .band .up { color: var(--data-up-onink); }
+.nf4 .band .down { color: var(--data-down-onink); }
+
+/* ---------- INK BAND (expanded story: the ripple) ---------- */
+.nf4 .band { background: var(--ink); color: var(--paper); padding: 0 0 64px; }
+.nf4 .band .stamp {
+  font-family: var(--condensed);
+  text-transform: uppercase;
+  font-size: clamp(64px, 14vw, 226px);
+  line-height: 0.75;
+  padding: 32px 16px 24px;
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.nf4 .band .stamp::after { content: ''; flex: 1; border-top: 1px solid var(--paper); transform: translateY(-0.12em); }
+.nf4 .band .sumline {
+  display: flex;
+  gap: 32px;
+  padding: 0 16px 24px;
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  flex-wrap: wrap;
+}
+.nf4 .band .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; }
+
+.nf4 .layer4 { padding: 24px 16px 8px; }
+@media (min-width: 900px) { .nf4 .layer4, .nf4 .band .sumline, .nf4 .band .stamp { padding-left: 32px; padding-right: 32px; } }
+.nf4 .layer4 .ltitle {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 0 0 4px;
+  font-weight: 400;
+}
+.nf4 .layer4 .lnote4 { font-family: var(--serif); font-size: 16px; line-height: 1.3; opacity: 0.75; max-width: 60ch; margin: 0 0 12px; }
+.nf4 .crow {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--sepia);
+  cursor: pointer;
+}
+.nf4 .crow .tk4 { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; min-width: 12ch; }
+.nf4 .crow .nm4 { font-family: var(--serif); font-size: 16px; flex: 1; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nf4 .crow .cap4 {
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  border: 1px solid var(--paper);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+}
+.nf4 .crow .mv4 { font-family: var(--serif); font-size: 20px; white-space: nowrap; }
+
+.nf4 .band .bandempty {
+  font-family: var(--serif);
+  font-size: 24px;
+  text-align: center;
+  padding: 32px 16px;
+  opacity: 0.85;
+}
+.nf4 .band .close4 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--paper);
+  padding: 24px 16px 0;
+}
+
+/* ---------- TIMELINE (inside ink band) ---------- */
+.nf4 .tl4 { padding: 8px 16px 0; }
+@media (min-width: 900px) { .nf4 .tl4 { padding: 8px 32px 0; } }
+.nf4 .tl4 .tlrow4 { border-top: 1px solid var(--sepia); padding: 12px 0; }
+.nf4 .tl4 .tlh4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: -0.12px; margin: 0 0 4px; }
+.nf4 .tl4 .tld4 { font-family: var(--serif); font-size: 16px; line-height: 1.3; margin: 0; opacity: 0.9; max-width: 60ch; }
+
+/* ---------- EMPTY / FOOTER ---------- */
+.nf4 .empty4 {
+  font-family: var(--serif);
+  font-size: 32px;
+  line-height: 1.2;
+  text-align: center;
+  padding: 96px 16px;
+  max-width: 34ch;
+  margin: 0 auto;
+}
+.nf4 .foot4 {
+  padding: 16px;
+  border-top: 1px solid var(--ink);
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* ---------- SECTION PAGES (Discover / Directory / Portfolio / Review) ---------- */
+.nf4 .page4 { padding: 32px 16px 64px; }
+@media (min-width: 900px) { .nf4 .page4 { padding: 48px 32px 80px; } }
+.nf4 .page4 .phead {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(36px, 6vw, 77px);
+  line-height: 0.9;
+  margin: 0 0 8px;
+}
+.nf4 .page4 .psub {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  margin: 0 0 32px;
+  max-width: 56ch;
+  color: var(--sepia);
+}
+
+/* Tabs / filters as uppercase text -- active gains scale, never color. */
+.nf4 .texttabs { display: flex; gap: 20px; align-items: baseline; flex-wrap: wrap; margin-bottom: 24px; }
+.nf4 .texttabs button {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--pebble);
+}
+.nf4 .texttabs button.on { font-size: 18px; color: var(--ink); }
+
+/* Ruled entry rows shared by Discover / Directory / Portfolio. */
+.nf4 .entry4 { border-top: 1px solid var(--hairline); padding: 16px 0; cursor: pointer; }
+.nf4 .entry4:first-of-type { border-top: 1px solid var(--ink); }
+.nf4 .entry4 .etop { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.nf4 .entry4 .ename { font-family: var(--serif); font-size: 24px; line-height: 1.2; flex: 1 1 16ch; min-width: 0; }
+.nf4 .entry4 .emetric { font-family: var(--serif); font-size: 24px; white-space: nowrap; }
+.nf4 .entry4 .ewhy { font-family: var(--serif); font-size: 16px; line-height: 1.3; color: var(--sepia); margin: 6px 0 0; max-width: 64ch; }
+.nf4 .entry4 .emeta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  margin-top: 8px;
+  color: var(--ash);
+}
+.nf4 .entry4 .emeta .warn4 { color: var(--ink); font-weight: 700; }
+
+/* Ghost tag (paper variant) -- outlined only, per the reference. */
+.nf4 .gtag { border: 1px solid var(--ink); border-radius: var(--radius); padding: 2px 8px; font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; white-space: nowrap; }
+
+/* Select controls restyled as editorial text. */
+.nf4 select {
+  font-family: var(--grotesque);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+
+/* Portfolio count -- a broadside numeral. */
+.nf4 .pfcount { font-family: var(--serif); font-size: 77px; line-height: 0.9; margin: 0 0 4px; }
+.nf4 .pfcount small { font-size: 24px; color: var(--ash); }
+
+/* Review CAR bars -- kept as data, in the sanctioned data ink. */
+.nf4 .carrow4 { border-top: 1px solid var(--hairline); padding: 16px 0; }
+.nf4 .carrow4:first-of-type { border-top: 1px solid var(--ink); }
+.nf4 .carrow4 .chl { font-family: var(--serif); font-size: 24px; line-height: 1.2; margin: 0 0 8px; max-width: 40ch; }
+.nf4 .cartrack4 { display: flex; gap: 6px; height: 56px; align-items: stretch; max-width: 320px; }
+.nf4 .cartrack4 > div { flex: 1; display: flex; flex-direction: column; }
+.nf4 .carbar4 { width: 100%; }
+.nf4 .carlbl4 { display: flex; gap: 6px; max-width: 320px; font-size: 12px; letter-spacing: -0.12px; color: var(--ash); margin-top: 4px; }
+.nf4 .carlbl4 span { flex: 1; text-align: center; }
+
+/* ---------- DEEP DIVE: the "inside page" ---------- */
+.nf4 .inside {
+  position: fixed;
+  inset: 0;
+  background: var(--ink);
+  color: var(--paper);
+  overflow-y: auto;
+  z-index: 40;
+  padding-bottom: 64px;
+}
+.nf4 .inside .istamp {
+  font-family: var(--condensed);
+  text-transform: uppercase;
+  font-size: clamp(48px, 11vw, 180px);
+  line-height: 0.8;
+  padding: 0.15em 16px 0.1em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nf4 .inside .iclose {
+  position: sticky;
+  top: 0;
+  display: block;
+  margin-left: auto;
+  padding: 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--paper);
+  z-index: 41;
+}
+.nf4 .inside .isub { padding: 0 16px 24px; font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; opacity: 0.75; }
+.nf4 .inside .inums { display: flex; gap: 32px; flex-wrap: wrap; padding: 0 16px 24px; border-bottom: 1px solid var(--sepia); margin: 0 0 8px; }
+.nf4 .inside .inums .l4 { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; opacity: 0.75; }
+.nf4 .inside .inums .v4 { font-family: var(--serif); font-size: 32px; line-height: 1.1; }
+.nf4 .inside .isec { padding: 24px 16px 0; }
+.nf4 .inside .isec .ilab { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; margin: 0 0 8px; opacity: 0.75; }
+.nf4 .inside .isec p, .nf4 .inside .isec li { font-family: var(--serif); font-size: 20px; line-height: 1.3; margin: 0 0 8px; max-width: 60ch; }
+.nf4 .inside .isec ul { margin: 0; padding-left: 20px; }
+.nf4 .inside .comp4 { display: flex; align-items: baseline; gap: 12px; border-top: 1px solid var(--sepia); padding: 8px 0; max-width: 480px; }
+.nf4 .inside .comp4 .cl { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; min-width: 12ch; }
+.nf4 .inside .comp4 .cbar { flex: 1; height: 8px; background: var(--sepia); border-radius: var(--radius); overflow: hidden; }
+.nf4 .inside .comp4 .cbar i { display: block; height: 100%; background: var(--paper); }
+.nf4 .inside .comp4 .cv { font-family: var(--serif); font-size: 16px; }
+.nf4 .inside .iwarn { font-family: var(--serif); font-size: 20px; line-height: 1.3; border: 1px solid var(--paper); border-radius: var(--radius); padding: 16px; margin: 24px 16px 0; max-width: 60ch; }
+@media (min-width: 900px) {
+  .nf4 .inside .istamp, .nf4 .inside .isub, .nf4 .inside .inums { padding-left: 32px; padding-right: 32px; }
+  .nf4 .inside .isec { padding-left: 32px; padding-right: 32px; }
+  .nf4 .inside .iwarn { margin-left: 32px; }
+}
+
+/* ---------- MOBILE ---------- */
+@media (max-width: 600px) {
+  .nf4 .ticker { font-size: 10px; gap: 8px; padding: 5px 8px; }
+  .nf4 .ticker span:nth-child(3) { display: none; }
+  .nf4 .navrow { padding: 12px 8px; }
+  .nf4 .navlinks { gap: 14px; }
+  .nf4 .capf4 { gap: 12px; }
+  .nf4 .lead { padding: 32px 16px 32px; }
+  .nf4 .lead .lmove { font-size: 56px; }
+  .nf4 .story .srow4 { flex-wrap: wrap; }
+  .nf4 .crow { flex-wrap: wrap; row-gap: 2px; }
+  .nf4 .crow .nm4 { flex-basis: 100%; order: 3; white-space: normal; }
+  .nf4 .band .sumline { gap: 20px; }
+  .nf4 .entry4 .ename { font-size: 20px; }
+  .nf4 .entry4 .emetric { font-size: 20px; }
+  .nf4 .pfcount { font-size: 56px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nf4 .band { animation: nf4-unfold 0.25s ease-out; }
+  @keyframes nf4-unfold { from { opacity: 0; } to { opacity: 1; } }
+}
