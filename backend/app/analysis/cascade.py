@@ -42,7 +42,9 @@ from app.reasoning.rulebook import (
     RULEBOOK_TEXT, get_chain,
 )
 
-from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
+from app.analysis.claude_client import (
+    FALLBACK_MODEL, GROQ_TPM_CEILING, MODEL, SYSTEM_PROMPT, tier_kwargs,
+)
 from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
@@ -529,11 +531,16 @@ _COMPANY_FIELD_INSTRUCTIONS = (
     "mechanism in plain qualitative terms instead of manufacturing one."
 )
 
-# Direct-stage (stage 3) gets the full rulebook/playbook reference block --
-# it's the highest-value, lowest-cardinality call (one company list, no
-# nested per-sector grouping to also reason about) so the extra prompt
-# weight doesn't risk starving the model's attention. evidence_refs may
-# cite a rule id from this block.
+# Was wired into the direct stage's (stage 3) primary attempt as the
+# rulebook/playbook-bearing variant -- it's no longer used by
+# _identify_companies at all. Even scoped to one sector's candidates, a
+# prompt carrying this block measures 16,284-17,243 tokens (2026-08
+# measurement), over BOTH Groq models' GROQ_TPM_CEILING (claude_client.py)
+# regardless of which model serves it, so an attempt built from this constant
+# would 413 unconditionally -- see the comment at _identify_companies for
+# the full reasoning. Left defined (and still directly tested) as a record of
+# the rulebook-citing instructions and for any future caller whose prompt
+# doesn't also carry a multi-candidate grounding block.
 COMPANY_RATIONALE_INSTRUCTIONS = (
     f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
     "- evidence_refs: one entry per `reasons` item -- either a rule id from "
@@ -557,13 +564,17 @@ COMPANY_RATIONALE_INSTRUCTIONS = (
     f"SECTOR PLAYBOOKS:\n{PLAYBOOKS_TEXT}"
 )
 
-# Cascade stages (5/7) drop the rulebook/playbook block -- those calls
-# already carry a longer prompt (multiple sectors + a parent-company list +
-# the anti-division-naming rules below), and a real production test showed
-# the combined weight pushed the model to return a degenerate empty tool
-# call instead of reasoning through it. evidence_refs here is scoped to
-# what's actually available in this call (article facts + real-world
-# knowledge), not a rulebook that isn't provided.
+# The rulebook/playbook-free variant. Originally written for cascade stages
+# (5/7) only -- those calls already carry a longer prompt (multiple sectors +
+# a parent-company list + the anti-division-naming rules below), and a real
+# production test showed the combined weight pushed the model to return a
+# degenerate empty tool call instead of reasoning through it -- but now used
+# unconditionally by _identify_companies for the direct stage too (see that
+# function's own comment): even scoped to one sector, adding the rulebook
+# block back in measures over BOTH Groq models' per-minute ceilings, so no
+# _identify_companies call ever has the rulebook available to cite.
+# evidence_refs here is scoped to what's actually available in this call
+# (article facts + real-world knowledge), not a rulebook that isn't provided.
 CASCADE_COMPANY_RATIONALE_INSTRUCTIONS = (
     f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
     "- evidence_refs: one entry per `reasons` item -- either a quoted or "
@@ -687,12 +698,11 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_mode
     tool_use_failed 400 (the model's tool-call structure was unparseable).
 
     `fallback_model` defaults to FALLBACK_MODEL (gpt-oss-20b) -- the shape
-    every OTHER caller of this function wants -- but _identify_companies
-    calls this with the two arguments INVERTED (model=FALLBACK_MODEL,
-    fallback_model=MODEL). That inversion is deliberate, not a bug:
-    gpt-oss-20b is the better model for this stage's deeply-nested tool
-    schema. See the comment at that call site and FALLBACK_MODEL's own
-    docstring in claude_client.py.
+    every OTHER caller of this function wants. _identify_companies is the one
+    exception: its slim-prompt ladder passes `model`/`fallback_model` derived
+    from GROQ_TPM_CEILING (claude_client.py) instead -- see the comment at
+    that call site for why the budget map, not a hardcoded guess, decides
+    which model goes first there.
 
     Any other exception -- and a second failure on `fallback_model`, of any
     kind -- propagates untouched. This is deliberate: a malformed schema on
@@ -716,6 +726,21 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_mode
             call_name, model, fallback_model,
         )
         return call_fn(fallback_model)
+
+
+# _identify_companies' prompt is always the SLIM (no rulebook/playbook)
+# variant -- see the comment at that function for why the full variant was
+# dropped entirely. The slim prompt is measured at 10,565-11,524 tokens
+# (2026-08), which fits inside whichever Groq model has the LARGER
+# GROQ_TPM_CEILING (claude_client.py) but not the smaller one. Deriving the
+# ladder from that map (rather than hardcoding "MODEL first") means this
+# stays correct if either model's measured ceiling ever changes -- today
+# that's MODEL (llama-3.3-70b, 12,000 TPM) as the primary attempt and
+# FALLBACK_MODEL (gpt-oss-20b, 8,000 TPM) as the one-retry fallback, the
+# opposite of every other stage in this module (see FALLBACK_MODEL's own
+# comment in claude_client.py for why those stay gpt-oss-first).
+_SLIM_PROMPT_PRIMARY_MODEL = max(GROQ_TPM_CEILING, key=GROQ_TPM_CEILING.get)
+_SLIM_PROMPT_FALLBACK_MODEL = min(GROQ_TPM_CEILING, key=GROQ_TPM_CEILING.get)
 
 
 def _identify_companies(
@@ -841,17 +866,20 @@ def _identify_companies(
                 + format_candidates(candidates)
             )
 
-    rationale_instructions = COMPANY_RATIONALE_INSTRUCTIONS if parent_pool is None else CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
+    # Always the slim (no rulebook/playbook) variant, for BOTH the direct and
+    # cascade stages -- see CASCADE_COMPANY_RATIONALE_INSTRUCTIONS' own
+    # comment and the model-selection comment in _attempt below for why the
+    # rulebook-bearing COMPANY_RATIONALE_INSTRUCTIONS is never reachable here.
+    rationale_instructions = CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
 
     def _compose(instructions: str) -> str:
         """Stable prefix first, variable content last (cost-optimization
-        phase 2). `framing` and `instructions` are per-stage constants --
-        the direct stage's instructions alone carry the whole rulebook and
-        playbook block, ~5.7k tokens -- while only the facts/sectors/parents
-        block changes between calls. Leading with the constants makes the
-        cacheable prefix as long as it can be, which matters most exactly
-        where this call is repeated: EVERY company stage now runs it once
-        per sector, re-sending identical instructions every time.
+        phase 2). `framing` and `instructions` are per-stage constants, while
+        only the facts/sectors/parents block changes between calls. Leading
+        with the constants makes the cacheable prefix as long as it can be,
+        which matters most exactly where this call is repeated: EVERY
+        company stage now runs it once per sector, re-sending identical
+        instructions every time.
 
         The closing line is not filler. The old ordering put the field
         instructions immediately before the answer, and that adjacency is
@@ -879,9 +907,6 @@ def _identify_companies(
     tool = build_company_tool(parent_tickers if parent_tickers else None, valid_tickers=valid_tickers)
 
     def _attempt() -> dict:
-        # Messages are rebuilt per attempt so the slim-prompt downgrade below
-        # is scoped to the attempt that needed it: a 413 on one attempt must
-        # not silently strip the rulebook from every later attempt too.
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": _compose(rationale_instructions)},
@@ -897,71 +922,49 @@ def _identify_companies(
                 **tier_kwargs("identify_companies"),
             )
 
-        # Model order INVERTED relative to a naive "always try MODEL first":
-        # FALLBACK_MODEL (gpt-oss-20b) goes FIRST here, MODEL (llama) is the
-        # fallback.
+        # Model order INVERTED relative to a naive "always try MODEL first",
+        # and relative to every OTHER stage in this module (gpt-oss-20b
+        # first, purely on schema-quality grounds -- see FALLBACK_MODEL's
+        # comment in claude_client.py). Here the order is driven by prompt
+        # SIZE, not quality: this stage's prompt is always the slim variant
+        # (rationale_instructions above), measured at 10,565-11,524 tokens
+        # (2026-08) -- inside MODEL's (llama) 12,000 GROQ_TPM_CEILING but
+        # over FALLBACK_MODEL's (gpt-oss) 8,000, so gpt-oss would 413 on this
+        # prompt far more often than not. _SLIM_PROMPT_PRIMARY_MODEL /
+        # _SLIM_PROMPT_FALLBACK_MODEL (defined above, derived from
+        # GROQ_TPM_CEILING rather than hardcoded here) put MODEL first for
+        # exactly that reason, with FALLBACK_MODEL as the one-retry fallback
+        # for the cases the slim prompt IS small enough to fit it (few
+        # candidates) or MODEL itself is rate-limited/malformed.
         #
-        # Groq's per-minute token ceilings, both measured live (2026-08):
-        # openai/gpt-oss-20b 8,000 TPM, llama-3.3-70b-versatile 12,000 TPM.
-        # The earlier version of this comment concluded from the 12k figure
-        # that llama "can never serve this stage" while gpt-oss could -- that
-        # conclusion was wrong in both directions. gpt-oss is the SMALLER
-        # budget of the two, and the bundled prompt this stage used to send
-        # (every primary sector's candidates at once: 17,607 tokens full,
-        # 11,888 slim) fit NEITHER, which is why every article was getting
-        # zero direct companies. The fix was the prompt, not the model order:
-        # one sector per call (see _identify_companies_per_sector) puts this
-        # prompt comfortably inside 8,000 tokens, so it now fits BOTH models.
-        #
-        # gpt-oss-20b stays first on quality grounds, not size ones: it is
-        # purpose-built for reliable nested tool/function calling, which is
-        # exactly what record_sector_companies' deeply-nested schema needs
-        # (see FALLBACK_MODEL's comment in claude_client.py). MODEL is the
-        # fallback because it is a separate quota bucket that can still
-        # answer when gpt-oss's daily budget is exhausted.
-        #
-        # This is NOT a blanket "gpt-oss is just better" verdict --
-        # extract_facts/identify_sectors/generate_edges never touch MODEL at
-        # all (their prompts are small enough that FALLBACK_MODEL alone has
-        # always been enough), and verify_companies
-        # (app/analysis/verification.py) still tries MODEL first because its
-        # prompt has no rulebook/playbook/candidate block at all.
-        try:
-            response = _call_with_model_fallback(
-                _call, FALLBACK_MODEL, call_name="identify_companies", fallback_model=MODEL,
-            )
-        except Exception as exc:
-            if parent_pool is not None:
-                raise
-            # The direct-stage prompt carries the full rulebook/playbook
-            # block (~5.7k tokens measured: the full/slim production pair
-            # differed by exactly that block) on top of the sector/candidate
-            # content already counted above -- which is why the full variant
-            # is the one that can still exceed a per-minute ceiling even now
-            # that the candidate block is one sector's worth. Retry once with
-            # the slim cascade-style instructions (no rulebook/playbooks): a
-            # less-informed answer beats losing every direct company -- the
-            # alert simply gets no rule citations that run, and the slim
-            # variant is measured well inside gpt-oss-20b's 8,000 TPM at one
-            # sector per call. The retry itself still gets the
-            # RateLimitError/tool_use_failed -> fallback_model ladder,
-            # gpt-oss-20b first, llama second, same order as the primary
-            # attempt above.
-            logger.warning(
-                "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
-            )
-            messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
-            response = _call_with_model_fallback(
-                _call, FALLBACK_MODEL, call_name="identify_companies (slim retry)", fallback_model=MODEL,
-            )
+        # A full-rulebook attempt used to be tried first for the direct
+        # stage (parent_pool is None), with this slim ladder as its retry on
+        # failure. It has been removed outright, not just reordered: even
+        # scoped to one sector's candidates, a full-rulebook prompt measures
+        # 16,284-17,243 tokens -- over BOTH models' GROQ_TPM_CEILING
+        # regardless of order, so that attempt was a guaranteed wasted call
+        # and a guaranteed 413 on every single article, never once serving a
+        # real request. Swapping RULEBOOK_TEXT for the smaller RULEBOOK_
+        # DIGEST was considered and rejected: digest+playbooks still adds
+        # roughly 2.5k tokens on top of the measured slim range, landing
+        # around 13.1k-14.1k -- still over BOTH ceilings, so it would have
+        # stayed a guaranteed failure too, just a smaller one. There is
+        # currently no rulebook-bearing prompt shape for this stage that
+        # fits either model, so the direct stage runs on the same slim,
+        # rulebook-free ladder as the cascade stages (parent_pool is not
+        # None) -- see rationale_instructions above.
+        response = _call_with_model_fallback(
+            _call, _SLIM_PROMPT_PRIMARY_MODEL, call_name="identify_companies",
+            fallback_model=_SLIM_PROMPT_FALLBACK_MODEL,
+        )
 
         return _forced_tool_arguments(response, "record_sector_companies")
 
-    # This stage already had a model-fallback ladder (and, for the direct
-    # stage, a slim-prompt retry). The stochastic retry wraps BOTH rather
-    # than duplicating either: one attempt here is a full ladder, and a
-    # ladder that ends in garbage output is retried up to TOOL_CALL_ATTEMPTS
-    # times -- the same shared policy every other forced-tool-call stage gets.
+    # This stage already had a model-fallback ladder. The stochastic retry
+    # wraps it rather than duplicating it: one attempt here is a full ladder,
+    # and a ladder that ends in garbage output is retried up to
+    # TOOL_CALL_ATTEMPTS times -- the same shared policy every other
+    # forced-tool-call stage gets.
     arguments = _retry_forced_tool_call(_attempt, stage="identify_companies")
 
     # Provider-side enum enforcement is not reliable for nested array items
