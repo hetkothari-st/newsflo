@@ -17,6 +17,7 @@ import {
   type RippleLayer,
 } from '../v3/api';
 import { categoryArtUrl } from '../v3/categoryArt';
+import LogoV4 from './LogoV4';
 import { useAuth } from '../lib/auth';
 
 /* Monochrome plate with the v3 fallback chain: the story's own photo,
@@ -232,19 +233,22 @@ function RippleBand({
                   onOpenDeepDive(row.ticker, alert.id);
                 }}
               >
-                <div className="cmain">
-                  <span className="nm4">{row.name}</span>
-                  {row.is_exposure_only || row.excess_move_pct == null ? (
-                    <span className="mv4 mvx">exposure</span>
-                  ) : (
-                    <span className={`mv4 ${moveClass(row.excess_move_pct)}`}>
-                      {fmtPct(row.excess_move_pct)}
-                    </span>
-                  )}
-                </div>
-                <div className="cmeta">
-                  <span>{row.ticker}</span>
-                  {row.cap_tier !== null && <span>{row.cap_tier} cap</span>}
+                <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} />
+                <div className="cbody">
+                  <div className="cmain">
+                    <span className="nm4">{row.name}</span>
+                    {row.is_exposure_only || row.excess_move_pct == null ? (
+                      <span className="mv4 mvx">exposure</span>
+                    ) : (
+                      <span className={`mv4 ${moveClass(row.excess_move_pct)}`}>
+                        {fmtPct(row.excess_move_pct)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="cmeta">
+                    <span>{row.ticker}</span>
+                    {row.cap_tier !== null && <span>{row.cap_tier} cap</span>}
+                  </div>
                 </div>
               </div>
             ))}

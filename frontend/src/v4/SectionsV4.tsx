@@ -16,6 +16,7 @@ import {
   type DiscoveryEntry,
   type DiscoveryTab,
 } from '../v3/api';
+import LogoV4 from './LogoV4';
 import { useAuth } from '../lib/auth';
 
 function fmtPct(value: number): string {
@@ -97,6 +98,8 @@ export function DiscoverV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string
             key={`${entry.ticker}-${entry.alert_id}`}
             onClick={() => onOpenDeepDive(entry.ticker, entry.alert_id)}
           >
+            <LogoV4 logoUrl={entry.logo_url} ticker={entry.ticker} />
+            <div className="ebody">
             <div className="etop">
               <span className="ename">{entry.name}</span>
               <span className={`emetric ${metric.cls}`}>{metric.text}</span>
@@ -111,6 +114,7 @@ export function DiscoverV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string
               {warn === null && entry.materiality != null && maxMateriality > 0 && (
                 <span>materiality {Math.round((entry.materiality / maxMateriality) * 100)}</span>
               )}
+            </div>
             </div>
           </div>
         );
@@ -190,13 +194,16 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
       )}
       {filtered.map((company) => (
         <div className="entry4" key={company.ticker} onClick={() => onOpenDeepDive(company.ticker)}>
-          <div className="etop">
-            <span className="ename">{company.name}</span>
-            {company.cap_tier !== null && <span className="gtag">{company.cap_tier}</span>}
-          </div>
-          <div className="emeta">
-            <span>{company.ticker}</span>
-            <span>{company.sector.replace(/_/g, ' ')}</span>
+          <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} />
+          <div className="ebody">
+            <div className="etop">
+              <span className="ename">{company.name}</span>
+              {company.cap_tier !== null && <span className="gtag">{company.cap_tier}</span>}
+            </div>
+            <div className="emeta">
+              <span>{company.ticker}</span>
+              <span>{company.sector.replace(/_/g, ' ')}</span>
+            </div>
           </div>
         </div>
       ))}
@@ -254,13 +261,16 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
               key={holding.ticker}
               onClick={() => onOpenDeepDive(holding.ticker, holding.affected_alert_id ?? undefined)}
             >
-              <div className="etop">
-                <span className="ename">{holding.name}</span>
-                <span className="emetric">{holding.quantity} sh</span>
-              </div>
-              <p className="ewhy">{holding.affected_headline ?? 'No news today.'}</p>
-              <div className="emeta">
-                <span>{holding.ticker}</span>
+              <LogoV4 logoUrl={holding.logo_url} ticker={holding.ticker} />
+              <div className="ebody">
+                <div className="etop">
+                  <span className="ename">{holding.name}</span>
+                  <span className="emetric">{holding.quantity} sh</span>
+                </div>
+                <p className="ewhy">{holding.affected_headline ?? 'No news today.'}</p>
+                <div className="emeta">
+                  <span>{holding.ticker}</span>
+                </div>
               </div>
             </div>
           ))}

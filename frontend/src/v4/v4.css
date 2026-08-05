@@ -206,9 +206,6 @@ body:has(.nf4) { background: #fafafa; }
 
 .nf4 .up { color: var(--data-up); }
 .nf4 .down { color: var(--data-down); }
-/* Lifted variants for numerals on the ink-dark deep-dive page. */
-.nf4 .inside .up { color: var(--data-up-onink); }
-.nf4 .inside .down { color: var(--data-down-onink); }
 /* ---------- THE RIPPLE (affected companies -- full-page takeover) ---------- */
 /* Mirrors the deployed card-flip: covers the whole viewport like turning
    the card over. Same paper theme and type as the rest of the app --
@@ -223,7 +220,7 @@ body:has(.nf4) { background: #fafafa; }
   color: var(--ink);
   padding: 0 0 64px;
 }
-.nf4 .band .bandclose {
+.nf4 .bandclose {
   position: sticky;
   top: 0;
   display: block;
@@ -257,8 +254,9 @@ body:has(.nf4) { background: #fafafa; }
 }
 @media (min-width: 900px) { .nf4 .band .bandhl { padding-left: 32px; padding-right: 32px; } }
 /* Measured-numbers strip: three ruled columns, top and bottom rules --
-   a proper data strip, not floating labels. */
-.nf4 .band .sumline {
+   a proper data strip, not floating labels. Shared by the ripple page
+   and the deep-dive popup. */
+.nf4 .sumline {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   border-top: 1px solid var(--ink);
@@ -269,9 +267,9 @@ body:has(.nf4) { background: #fafafa; }
   color: var(--ash);
   padding: 0;
 }
-.nf4 .band .sumline > span { padding: 10px 16px; }
-.nf4 .band .sumline > span + span { border-left: 1px solid var(--hairline); }
-.nf4 .band .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; color: var(--ink); }
+.nf4 .sumline > span { padding: 10px 16px; }
+.nf4 .sumline > span + span { border-left: 1px solid var(--hairline); }
+.nf4 .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; color: var(--ink); }
 
 /* Cap filter inside the affected-companies page -- same text-tab
    treatment as everywhere else: active gains scale, never color. */
@@ -306,14 +304,36 @@ body:has(.nf4) { background: #fafafa; }
 /* First row after the note needs no top rule -- the note already
    separates it; rows between themselves keep hairlines. */
 .nf4 .lbody4 .crow:first-child { border-top: none; padding-top: 4px; }
-/* Company row -- a ledger line: name and numeral share the baseline,
-   ticker + cap tier run as quiet uppercase meta beneath. No pills. */
+/* Company row -- a ledger line: logo, then name and numeral on a shared
+   baseline, ticker + cap tier as quiet uppercase meta beneath. No pills. */
 .nf4 .crow {
-  padding: 14px 0 12px;
-  border-top: 1px solid var(--sepia);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0 10px;
+  border-top: 1px solid var(--hairline);
   cursor: pointer;
 }
-.nf4 .band .crow { border-top-color: var(--hairline); }
+.nf4 .crow .cbody { flex: 1; min-width: 0; }
+
+/* Company logo: Brandfetch art rendered monochrome (paper/ink identity);
+   ink-on-paper ticker initials when no art exists. */
+.nf4 .clg {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fff;
+}
+.nf4 .clg img { width: 100%; height: 100%; object-fit: contain; filter: grayscale(1); display: block; }
+.nf4 .clg.clg-fb { border-color: var(--ink); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; background: transparent; }
+.nf4 .clg.clg-md { width: 44px; height: 44px; }
+.nf4 .clg.clg-md.clg-fb { font-size: 14px; }
 .nf4 .band .lnote4 { color: var(--sepia); opacity: 1; }
 .nf4 .crow .cmain { display: flex; align-items: baseline; gap: 16px; justify-content: space-between; }
 .nf4 .crow .nm4 {
@@ -328,7 +348,6 @@ body:has(.nf4) { background: #fafafa; }
 }
 .nf4 .crow .mv4 { font-family: var(--serif); font-size: 20px; white-space: nowrap; }
 .nf4 .crow .mv4.mvx { font-style: italic; font-size: 16px; color: var(--ash); }
-.nf4 .inside .crow .mv4.mvx { color: var(--pebble); }
 .nf4 .crow .cmeta {
   display: flex;
   gap: 12px;
@@ -338,7 +357,6 @@ body:has(.nf4) { background: #fafafa; }
   color: var(--ash);
   margin-top: 2px;
 }
-.nf4 .inside .crow .cmeta { color: var(--pebble); }
 
 .nf4 .band .bandempty {
   font-family: var(--serif);
@@ -420,7 +438,9 @@ body:has(.nf4) { background: #fafafa; }
 .nf4 .texttabs button.on { font-size: 18px; color: var(--ink); }
 
 /* Ruled entry rows shared by Discover / Directory / Portfolio. */
-.nf4 .entry4 { border-top: 1px solid var(--hairline); padding: 16px 0; cursor: pointer; }
+.nf4 .entry4 { border-top: 1px solid var(--hairline); padding: 16px 0; cursor: pointer; display: flex; gap: 14px; align-items: flex-start; }
+.nf4 .entry4 .ebody { flex: 1; min-width: 0; }
+.nf4 .entry4 .clg { margin-top: 4px; }
 .nf4 .entry4:first-of-type { border-top: 1px solid var(--ink); }
 .nf4 .entry4 .etop { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 .nf4 .entry4 .ename { font-family: var(--serif); font-size: 24px; line-height: 1.2; flex: 1 1 16ch; min-width: 0; }
@@ -469,57 +489,63 @@ body:has(.nf4) { background: #fafafa; }
 .nf4 .carlbl4 { display: flex; gap: 6px; max-width: 320px; font-size: 12px; letter-spacing: -0.12px; color: var(--ash); margin-top: 4px; }
 .nf4 .carlbl4 span { flex: 1; text-align: center; }
 
-/* ---------- DEEP DIVE: the "inside page" ---------- */
-.nf4 .inside {
+/* ---------- DEEP DIVE: paper popup ---------- */
+/* Same visual language as the ripple page -- serif name, ruled stats
+   strip, ink section strips, ledger rows -- floated as a popup card
+   over whatever page opened it. */
+.nf4 .ddscrim {
   position: fixed;
   inset: 0;
-  background: var(--ink);
-  color: var(--paper);
-  overflow-y: auto;
   z-index: 40;
-  padding-bottom: 64px;
-}
-.nf4 .inside .istamp {
-  font-family: var(--condensed);
-  text-transform: uppercase;
-  font-size: clamp(48px, 11vw, 180px);
-  line-height: 0.8;
-  padding: 0.15em 16px 0.1em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.nf4 .inside .iclose {
-  position: sticky;
-  top: 0;
-  display: block;
-  margin-left: auto;
+  background: rgba(42, 39, 34, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 16px;
+}
+.nf4 .ddpop {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  width: min(560px, 100%);
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow-y: auto;
+  position: relative;
+}
+.nf4 .ddpop .bandclose { border-radius: var(--radius); }
+.nf4 .ddpop .sumline b { font-size: 20px; }
+.nf4 .ddpop .sumline > span { padding: 8px 12px; }
+.nf4 .ddhead { display: flex; align-items: center; gap: 14px; padding: 0 16px 14px; }
+.nf4 .ddname { font-family: var(--serif); font-size: clamp(24px, 4vw, 32px); line-height: 1.1; }
+.nf4 .ddmeta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); margin-top: 4px; }
+.nf4 .ddpop .layer4 { margin-top: 16px; }
+.nf4 .ddpop .lhead4, .nf4 .ddpop .lbody4 { padding-left: 16px; padding-right: 16px; }
+.nf4 .comp4 { display: flex; align-items: baseline; gap: 12px; border-top: 1px solid var(--hairline); padding: 8px 0; }
+.nf4 .comp4:first-child { border-top: none; }
+.nf4 .comp4 .cl { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; min-width: 11ch; color: var(--ash); }
+.nf4 .comp4 .cbar { flex: 1; height: 8px; background: var(--hairline); border-radius: var(--radius); overflow: hidden; }
+.nf4 .comp4 .cbar i { display: block; height: 100%; background: var(--ink); }
+.nf4 .comp4 .cv { font-family: var(--serif); font-size: 16px; }
+.nf4 .warnbox4 {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.3;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 16px;
+}
+.nf4 .ddprose { font-family: var(--serif); font-size: 16px; line-height: 1.35; margin: 0 0 8px; max-width: 60ch; }
+.nf4 .ddwhy { margin: 0; padding-left: 20px; }
+.nf4 .dddisc {
   font-size: 12px;
-  font-weight: 700;
   letter-spacing: -0.12px;
   text-transform: uppercase;
-  color: var(--paper);
-  z-index: 41;
-}
-.nf4 .inside .isub { padding: 0 16px 24px; font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; opacity: 0.75; }
-.nf4 .inside .inums { display: flex; gap: 32px; flex-wrap: wrap; padding: 0 16px 24px; border-bottom: 1px solid var(--sepia); margin: 0 0 8px; }
-.nf4 .inside .inums .l4 { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; opacity: 0.75; }
-.nf4 .inside .inums .v4 { font-family: var(--serif); font-size: 32px; line-height: 1.1; }
-.nf4 .inside .isec { padding: 24px 16px 0; }
-.nf4 .inside .isec .ilab { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; margin: 0 0 8px; opacity: 0.75; }
-.nf4 .inside .isec p, .nf4 .inside .isec li { font-family: var(--serif); font-size: 20px; line-height: 1.3; margin: 0 0 8px; max-width: 60ch; }
-.nf4 .inside .isec ul { margin: 0; padding-left: 20px; }
-.nf4 .inside .comp4 { display: flex; align-items: baseline; gap: 12px; border-top: 1px solid var(--sepia); padding: 8px 0; max-width: 480px; }
-.nf4 .inside .comp4 .cl { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; min-width: 12ch; }
-.nf4 .inside .comp4 .cbar { flex: 1; height: 8px; background: var(--sepia); border-radius: var(--radius); overflow: hidden; }
-.nf4 .inside .comp4 .cbar i { display: block; height: 100%; background: var(--paper); }
-.nf4 .inside .comp4 .cv { font-family: var(--serif); font-size: 16px; }
-.nf4 .inside .iwarn { font-family: var(--serif); font-size: 20px; line-height: 1.3; border: 1px solid var(--paper); border-radius: var(--radius); padding: 16px; margin: 24px 16px 0; max-width: 60ch; }
-@media (min-width: 900px) {
-  .nf4 .inside .istamp, .nf4 .inside .isub, .nf4 .inside .inums { padding-left: 32px; padding-right: 32px; }
-  .nf4 .inside .isec { padding-left: 32px; padding-right: 32px; }
-  .nf4 .inside .iwarn { margin-left: 32px; }
+  color: var(--ash);
+  padding: 16px;
+  margin: 0;
 }
 
 /* ---------- ARCHIVE ---------- */
