@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
 from app.companies.branding import logo_url
+from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
 from app.companies.price_series import fetch_pe_ratio
 from app.i18n import get_lang
@@ -36,9 +37,11 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "name": company.name,
         "sector": company.sector,
         "cap_tier": (resolved := resolve_cap_tier(session, company)) and resolved.tier,
-        # business_desc was LLM-invented and is no longer populated; the
-        # key stays so the frontend can migrate without a lockstep deploy.
-        "business_desc": None,
+        # Sourced descriptions only -- the legacy LLM-invented values stay
+        # withheld. The URL is the CC BY-SA attribution and must travel with
+        # the text.
+        "business_desc": (_desc := sourced_description(company))[0],
+        "business_desc_source_url": _desc[1],
         "fundamentals": fundamentals_payload(company),
         "logo_url": logo_url(company),
         "market_cap": company.market_cap,

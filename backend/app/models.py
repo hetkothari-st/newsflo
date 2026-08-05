@@ -29,6 +29,12 @@ class Company(Base):
     # suppliers/customers (spec §3.1) -- one-time LLM enrichment, see
     # backend/backfill_business_profiles.py. NULL until enriched.
     business_desc = Column(Text, nullable=True)
+    # Provenance for business_desc. NULL source_url means the text is the
+    # legacy unattributable LLM value, which every serializer withholds --
+    # see app.companies.descriptions. Only a description that can be traced
+    # to a named article is ever shown.
+    business_desc_source_url = Column(String, nullable=True)
+    business_desc_as_of = Column(Date, nullable=True)
     supply_chain_suppliers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
     supply_chain_customers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
 
