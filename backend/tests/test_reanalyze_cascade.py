@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import reanalyze_cascade
-from app.analysis.schemas import AnalysisOutput
+from app.analysis.schemas import AnalysisOutput, CompanyMention
 from app.models import (
     Alert,
     AlertCompany,
@@ -340,3 +340,92 @@ def test_alert_id_always_clears_the_cache(db_session, monkeypatch, capsys):
     assert calls == [1], "analyze_article was not called -- the stale cache was not cleared"
     captured = capsys.readouterr()
     assert "using cached analysis" not in captured.out
+
+
+def _fake_analysis_with_company(ticker: str, direction: str = "bullish") -> AnalysisOutput:
+    return AnalysisOutput(
+        category="oil_gas",
+        companies=[CompanyMention(
+            name=ticker, ticker=ticker, is_direct=True, sector=None,
+            direction=direction, magnitude_low=2.0, magnitude_high=4.0, rationale="reasoning",
+            key_points=["a point"], confidence_score=85, time_horizon="Short-Term",
+        )],
+    )
+
+
+def test_reanalysis_creates_market_move_rows_for_resolved_companies(db_session, monkeypatch):
+    """The bug this fixes: reanalyze_cascade.py deleted an alert's stale
+    MarketMove rows but never recreated them, so compute_alert_measurement
+    (app/routers/feed_v2.py) always returned None for a reanalyzed alert and
+    it silently vanished from the feed. An alert that starts with ZERO
+    MarketMove rows (the orphan-cleanup shape, or an alert from before
+    measurement existed) must end up with one per resolved company after
+    reanalysis, exactly like a brand-new alert would via _persist_alert.
+    """
+    alert, company = _make_alert_with_company(db_session, url="https://example.com/remeasure", ticker="EEE.NS")
+    alert_id = alert.id
+    assert db_session.query(MarketMove).filter_by(alert_id=alert_id).count() == 0
+
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: _fake_analysis_with_company("EEE.NS"),
+    )
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    companies_after = db_session.query(AlertCompany).filter_by(alert_id=alert_id).all()
+    assert len(companies_after) == 1
+    moves_after = db_session.query(MarketMove).filter_by(alert_id=alert_id).all()
+    assert len(moves_after) == 1
+    assert moves_after[0].company_id == company.id
+    assert moves_after[0].alert_id == alert_id
+
+
+def test_reanalysis_reconciles_direction_the_same_way_the_live_pipeline_does(db_session, monkeypatch):
+    """_persist_alert overwrites an AlertCompany's LLM-predicted `direction`
+    with the REAL measured direction whenever a real (status=="ok")
+    measurement disagrees, and clears the now-stale rationale/key_points on
+    a flip (app.pipeline.measure_and_reconcile_alert_companies). Reanalysis
+    must apply the exact same reconciliation via the shared helper, or a
+    reanalyzed alert's direction/rationale can disagree with what a
+    freshly-analyzed alert would show for the identical measured move.
+    """
+    from app.models import utcnow as _utcnow
+
+    alert, company = _make_alert_with_company(db_session, url="https://example.com/reconcile", ticker="FFF.NS")
+    alert_id = alert.id
+
+    # LLM calls it bullish; the real measured move is bearish -- must flip.
+    monkeypatch.setattr(
+        reanalyze_cascade, "analyze_article",
+        lambda client, title, content, session=None: _fake_analysis_with_company("FFF.NS", direction="bullish"),
+    )
+
+    def fake_measure_bearish(session, company_obj):
+        return MarketMove(
+            company_id=company_obj.id, benchmark_ticker="^CNXENERGY",
+            measurement_status="ok", measured_at=_utcnow(),
+            raw_move_pct=-3.0, sector_move_pct=0.1, excess_move_pct=-3.1,
+        )
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    # measure_and_reconcile_alert_companies (in app.pipeline) is where the
+    # real measure_company_move call lives -- patch it there, same as the
+    # autouse conftest stub does for the main pipeline.
+    monkeypatch.setattr("app.pipeline.measure_company_move", fake_measure_bearish)
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    ac = db_session.query(AlertCompany).filter_by(alert_id=alert_id).one()
+    assert ac.direction == "bearish"
+    assert ac.rationale is None
+    assert ac.key_points_json == "[]"
+
+    move = db_session.query(MarketMove).filter_by(alert_id=alert_id).one()
+    assert move.measurement_status == "ok"
+    assert move.excess_move_pct == -3.1

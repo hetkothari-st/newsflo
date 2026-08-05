@@ -65,11 +65,19 @@ including CalibrationSample and CarOutcome history used for confidence
 calibration -- before persisting the fresh analysis. It also deletes the
 alert's existing MarketMove rows outright (they key on alert_id/company_id
 directly, not alert_company_id, so they are not covered by
-ALERT_COMPANY_DEPENDENTS and are not replaced by this script -- it never
-re-measures). This is intentional (stale companies -- and stale
-measurements pointing at companies this alert no longer has -- must not
-linger alongside fresh ones) but there is no undo; the deleted calibration/
-outcome history and measurements are gone.
+ALERT_COMPANY_DEPENDENTS) and re-measures the fresh company set via
+app.pipeline.measure_and_reconcile_alert_companies -- the same measure +
+direction-reconciliation step _persist_alert runs for a brand new alert,
+shared rather than duplicated so this can't drift from the live pipeline.
+This is intentional (stale companies -- and stale measurements pointing at
+companies this alert no longer has -- must not linger alongside fresh
+ones) but there is no undo; the deleted calibration/outcome history is
+gone, and the old measurements are replaced by freshly measured ones
+(which can differ from the old numbers -- price data moves day to day).
+Without the re-measurement, a reanalyzed alert would have zero MarketMove
+rows, which drops it out of GET /api/feed-v2 entirely (see
+app/routers/feed_v2.py, which requires a peak MarketMove to include an
+alert in the feed) -- confirmed happening in production for alert 1447.
 """
 import argparse
 from datetime import timedelta
@@ -83,7 +91,8 @@ from app.db import SessionLocal, init_db
 from app.models import Alert, CascadeGap, Company, ImpactEdge, MarketMove, utcnow
 from app.pipeline import (
     _build_alert_company, _resolve_edge_endpoint_company_id, article_text,
-    build_anchor_sub_sectors, clear_analysis_cache, get_cached_analysis, store_analysis_cache,
+    build_anchor_sub_sectors, clear_analysis_cache, get_cached_analysis,
+    measure_and_reconcile_alert_companies, store_analysis_cache,
 )
 
 
@@ -158,15 +167,16 @@ def reanalyze_alert(session, client, alert: Alert, force: bool) -> None:
     # ever again match its company_id. Confirmed live: reanalyzing alert
     # 1447 left 53 such orphans, one of which crashed
     # compute_alert_measurement's bare next() (app.market.alert_measurement)
-    # with StopIteration -- a 500 on GET /api/feed-v2. This script does not
-    # re-measure (it never calls app.market.measure.measure_company_move),
-    # so the alert simply has no MarketMove rows -- and no headline
-    # number -- until a separate measurement pass runs; that is correct
-    # (omit rather than fabricate), unlike silently leaving stale/orphaned
-    # rows behind.
+    # with StopIteration -- a 500 on GET /api/feed-v2. Deleted here and
+    # recreated below via app.pipeline.measure_and_reconcile_alert_companies
+    # -- the same measurement call _persist_alert makes for a brand new
+    # alert -- so a reanalyzed alert isn't left with no MarketMove rows (and
+    # therefore invisible to GET /api/feed-v2, which requires a peak
+    # MarketMove to include an alert at all; see app/routers/feed_v2.py).
     session.query(MarketMove).filter_by(alert_id=alert.id).delete(synchronize_session=False)
     session.flush()
 
+    alert_companies = []
     for entry in resolved:
         # _build_alert_company now returns (alert_company,
         # pre_multiplier_score) -- see app.pipeline.CONFIDENCE_FLOOR's
@@ -176,6 +186,16 @@ def reanalyze_alert(session, client, alert: Alert, force: bool) -> None:
         # behavior of persisting every resolved entry.
         alert_company, _pre_multiplier_score = _build_alert_company(session, alert.id, article, result.category, entry)
         session.add(alert_company)
+        alert_companies.append(alert_company)
+    # Same measure + reconcile step _persist_alert runs for a brand new
+    # alert: measures each fresh company's market reaction and reconciles
+    # its `direction` to the REAL measured move (clearing rationale/
+    # key_points on a flip) -- see measure_and_reconcile_alert_companies's
+    # docstring. Without this, a reanalyzed alert's directions can disagree
+    # with a freshly-analyzed alert's, and (per the MarketMove comment
+    # above) the alert vanishes from the feed entirely.
+    session.flush()
+    measure_and_reconcile_alert_companies(session, alert.id, alert_companies)
     for edge in result.edges:
         from_company_id = _resolve_edge_endpoint_company_id(session, edge["from"]["kind"], edge["from"]["label"])
         to_company_id = _resolve_edge_endpoint_company_id(session, edge["to"]["kind"], edge["to"]["label"])

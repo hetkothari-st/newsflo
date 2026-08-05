@@ -329,6 +329,58 @@ def _resolve_edge_endpoint_company_id(session: Session, node_kind: str, label: s
     return company.id if company else None
 
 
+def measure_and_reconcile_alert_companies(session: Session, alert_id: int, alert_companies: list) -> list:
+    """Measure each AlertCompany's market reaction and reconcile its
+    `direction` against the REAL measured move, before why-text generation
+    ever reads `direction` -- the LLM's direction call happens BEFORE the
+    market has actually reacted, so it is a prediction, not a fact.
+
+    Shared by _persist_alert (fresh-analysis and dedup-reuse paths) and
+    reanalyze_cascade.py's re-analysis path so the two can't drift --
+    reanalyzing an alert must produce the same measurement/reconciliation
+    behavior a brand-new analysis would, not a cheaper approximation of it.
+
+    Returns the list of persisted MarketMove rows (added to the session but
+    not committed -- the caller commits).
+    """
+    market_moves = []
+    for alert_company in alert_companies:
+        company_obj = session.get(Company, alert_company.company_id)
+        if company_obj is not None:
+            move = measure_company_move(session, company_obj)
+            move.alert_id = alert_id
+            session.add(move)
+            market_moves.append(move)
+
+    # Reconcile each AlertCompany.direction with its own REAL measured move.
+    # Measurement is the spine (spec Ground Rules): once a real reaction
+    # exists, it must always win over a stale pre-measurement guess, or the
+    # UI ends up showing a green "bullish"/"positively impacting" narrative
+    # next to a red, negative excess-move number for the same company --
+    # confirmed happening in production (a merger-news alert called
+    # "bullish" while the stock's actual measured reaction was -3.1%). Only
+    # overwrites when a real measurement exists (measurement_status == "ok");
+    # an unmeasured/exposure-only company keeps the LLM's own call, since
+    # there is no measured reality yet to defer to.
+    moves_by_company_id = {m.company_id: m for m in market_moves}
+    for alert_company in alert_companies:
+        move = moves_by_company_id.get(alert_company.company_id)
+        if move is None or move.measurement_status != "ok" or move.excess_move_pct is None:
+            continue
+        measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+        if measured_direction != alert_company.direction:
+            # The rationale and key_points argue for the direction the LLM
+            # predicted, which the measured reaction has just contradicted.
+            # Leaving them produces a bearish badge above bullish prose for
+            # the same company. Drop the text rather than keep an argument
+            # for a call that no longer stands -- refine_alert (when called)
+            # generates a fresh, measurement-aware `why` for this company.
+            alert_company.rationale = None
+            alert_company.key_points_json = json.dumps([])
+        alert_company.direction = measured_direction
+    return market_moves
+
+
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
@@ -380,44 +432,7 @@ def _persist_alert(
         kept_entries.append(entry)
     entries = kept_entries
 
-    market_moves = []
-    for entry in entries:
-        company_obj = session.get(Company, entry["company_id"])
-        if company_obj is not None:
-            move = measure_company_move(session, company_obj)
-            move.alert_id = alert.id
-            session.add(move)
-            market_moves.append(move)
-
-    # Reconcile each AlertCompany.direction with its own REAL measured move,
-    # before why-text generation ever reads `direction` -- the LLM's
-    # direction call above happened BEFORE the market had actually reacted,
-    # so it is a prediction, not a fact. Measurement is the spine (spec
-    # Ground Rules): once a real reaction exists, it must always win over a
-    # stale pre-measurement guess, or the UI ends up showing a green
-    # "bullish"/"positively impacting" narrative next to a red, negative
-    # excess-move number for the same company -- confirmed happening in
-    # production (a merger-news alert called "bullish" while the stock's
-    # actual measured reaction was -3.1%). Only overwrites when a real
-    # measurement exists (measurement_status == "ok"); an unmeasured/
-    # exposure-only company keeps the LLM's own call, since there is no
-    # measured reality yet to defer to.
-    moves_by_company_id = {m.company_id: m for m in market_moves}
-    for alert_company in alert_companies:
-        move = moves_by_company_id.get(alert_company.company_id)
-        if move is None or move.measurement_status != "ok" or move.excess_move_pct is None:
-            continue
-        measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
-        if measured_direction != alert_company.direction:
-            # The rationale and key_points argue for the direction the LLM
-            # predicted, which the measured reaction has just contradicted.
-            # Leaving them produces a bearish badge above bullish prose for
-            # the same company. Drop the text rather than keep an argument
-            # for a call that no longer stands -- refine_alert generates a
-            # fresh, measurement-aware `why` for this company below.
-            alert_company.rationale = None
-            alert_company.key_points_json = json.dumps([])
-        alert_company.direction = measured_direction
+    market_moves = measure_and_reconcile_alert_companies(session, alert.id, alert_companies)
 
     if client is not None:
         if settings.refinement_mode == "deferred":
