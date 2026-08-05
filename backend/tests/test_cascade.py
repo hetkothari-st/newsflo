@@ -395,14 +395,19 @@ def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
     assert result[0].parent_ticker == "HDFCBANK.NS"
 
 
-def test_identify_companies_direct_stage_calls_primary_model():
-    from app.analysis.claude_client import MODEL
+def test_identify_companies_direct_stage_calls_fallback_model_first():
+    # Measured live (2026-08): MODEL (llama) has a 12k Groq tokens-per-minute
+    # ceiling this stage's 13k-19k-token prompt always exceeds -- it 413s
+    # unconditionally, so FALLBACK_MODEL (gpt-oss-20b, no comparable
+    # per-minute ceiling) is tried first here, uniquely among this module's
+    # stages. See the model-order comment at this call site in cascade.py.
+    from app.analysis.claude_client import FALLBACK_MODEL
 
     client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
 
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
-    assert client.calls == [{"name": "record_sector_companies", "model": MODEL}]
+    assert client.calls == [{"name": "record_sector_companies", "model": FALLBACK_MODEL}]
 
 
 def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
@@ -411,7 +416,7 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     class RateLimitOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == FALLBACK_MODEL:
                     from openai import RateLimitError
                     import httpx
                     request = httpx.Request("POST", "https://example.test/v1/chat/completions")
@@ -429,8 +434,8 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
         {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": MODEL},
     ]
 
 
@@ -438,14 +443,16 @@ def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
     # Live production failure: the slim retry stayed on the primary model
     # and Groq returned 400 tool_use_failed (a malformed llama-style
     # function-call blob it couldn't parse) -- distinct from a rate limit,
-    # this must ALSO trigger the FALLBACK_MODEL retry rather than losing
-    # the whole stage.
+    # this must ALSO trigger the secondary-model retry rather than losing
+    # the whole stage. Primary here is FALLBACK_MODEL (gpt-oss-20b, tried
+    # first for this stage -- see cascade.py's model-order comment);
+    # secondary is MODEL (llama).
     from app.analysis.claude_client import FALLBACK_MODEL, MODEL
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == FALLBACK_MODEL:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -466,20 +473,23 @@ def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
     assert len(result) == 1
     assert result[0].ticker == "HDFCBANK.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
         {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": MODEL},
     ]
 
 
 def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_use_failed():
-    # Same tool_use_failed -> FALLBACK_MODEL ladder must apply to a cascade
-    # stage (parent_pool set), not just the direct stage.
+    # Same tool_use_failed -> secondary-model ladder must apply to a cascade
+    # stage (parent_pool set), not just the direct stage. Primary is
+    # FALLBACK_MODEL (gpt-oss-20b), secondary is MODEL (llama) -- see
+    # cascade.py's model-order comment for why this stage's order is
+    # inverted relative to a naive "MODEL first" default.
     from app.analysis.claude_client import FALLBACK_MODEL, MODEL
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == FALLBACK_MODEL:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -506,8 +516,8 @@ def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_
 
     assert result[0].ticker == "IRCTC.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
         {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": MODEL},
     ]
 
 
@@ -559,7 +569,8 @@ def test_identify_companies_cascade_stage_raises_when_both_models_fail_tool_use_
         )
 
     # Cascade stage never gets the slim retry, so ONE stochastic attempt is
-    # exactly two calls (primary then FALLBACK_MODEL), not four. The
+    # exactly two calls (FALLBACK_MODEL then MODEL -- this stage's order is
+    # inverted, see cascade.py's model-order comment), not four. The
     # tool_use_failed that survives both models is a stochastic failure, so
     # _retry_forced_tool_call runs that whole ladder TOOL_CALL_ATTEMPTS
     # times before giving up: 3 x 2 = 6 calls, and still a raise.
@@ -568,7 +579,7 @@ def test_identify_companies_cascade_stage_raises_when_both_models_fail_tool_use_
 
 def test_identify_companies_does_not_retry_on_a_different_bad_request_error():
     # A genuinely malformed schema on our side would also 400 -- must NOT be
-    # mistaken for tool_use_failed and must NOT trigger the FALLBACK_MODEL
+    # mistaken for tool_use_failed and must NOT trigger the secondary-model
     # retry, so a real bug surfaces immediately instead of being masked.
     import httpx
     from openai import BadRequestError

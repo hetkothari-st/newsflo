@@ -680,15 +680,22 @@ def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str
     }
 
 
-def _call_with_model_fallback(call_fn, model: str, call_name: str):
-    """Try `model`; retry once on FALLBACK_MODEL, with the identical prompt,
-    on either a RateLimitError (quota/rate-limited) or a tool_use_failed 400
-    (the model's tool-call structure was unparseable -- see FALLBACK_MODEL's
-    own docstring in claude_client.py for why the fallback model, from the
-    gpt-oss family, is specifically a better fit for this app's schemas than
-    another Llama model would be).
+def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_model: str = FALLBACK_MODEL):
+    """Try `model`; retry once on `fallback_model`, with the identical
+    prompt, on either a RateLimitError (quota/rate-limited) or a
+    tool_use_failed 400 (the model's tool-call structure was unparseable).
 
-    Any other exception -- and a second failure on FALLBACK_MODEL, of any
+    `fallback_model` defaults to FALLBACK_MODEL (gpt-oss-20b) -- the shape
+    every OTHER caller of this function wants -- but _identify_companies's
+    direct-company stage calls this with the two arguments INVERTED
+    (model=FALLBACK_MODEL, fallback_model=MODEL). That inversion is
+    deliberate, not a bug: see the comment at that call site and
+    FALLBACK_MODEL's own docstring in claude_client.py for the measured
+    reason (llama-3.3-70b-versatile's Groq per-minute token ceiling cannot
+    serve that stage's prompt AT ALL, so trying it first is a guaranteed,
+    wasted 413 every time).
+
+    Any other exception -- and a second failure on `fallback_model`, of any
     kind -- propagates untouched. This is deliberate: a malformed schema on
     OUR side also raises a 400, and silently swallowing it here would let
     the caller return an empty company list indistinguishable from "no
@@ -698,18 +705,18 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str):
         return call_fn(model)
     except RateLimitError:
         logger.warning(
-            "%s: rate-limited on model=%s, retrying once on FALLBACK_MODEL=%s",
-            call_name, model, FALLBACK_MODEL,
+            "%s: rate-limited on model=%s, retrying once on fallback_model=%s",
+            call_name, model, fallback_model,
         )
-        return call_fn(FALLBACK_MODEL)
+        return call_fn(fallback_model)
     except BadRequestError as exc:
         if not _is_tool_use_failed(exc):
             raise
         logger.warning(
-            "%s: tool_use_failed on model=%s, retrying once on FALLBACK_MODEL=%s",
-            call_name, model, FALLBACK_MODEL,
+            "%s: tool_use_failed on model=%s, retrying once on fallback_model=%s",
+            call_name, model, fallback_model,
         )
-        return call_fn(FALLBACK_MODEL)
+        return call_fn(fallback_model)
 
 
 def _identify_companies(
@@ -885,28 +892,64 @@ def _identify_companies(
                 **tier_kwargs("identify_companies"),
             )
 
+        # Model order INVERTED relative to a naive "always try MODEL first":
+        # FALLBACK_MODEL (gpt-oss-20b) goes FIRST here, MODEL (llama) is the
+        # fallback. Measured live (2026-08): this stage's prompt runs
+        # 13,000-19,000 tokens depending on how many sectors it's fanning
+        # out over (SECTOR_DEFINITIONS + the full rulebook/playbook block +
+        # the grounded candidate-company list), and Groq enforces a 12,000
+        # tokens-PER-MINUTE ceiling on llama-3.3-70b-versatile specifically.
+        # That ceiling made llama return 413 "Request too large" on BOTH the
+        # full prompt AND the slim retry below -- it can never serve this
+        # call, full stop, no matter which prompt variant is sent. Calling it
+        # first was a guaranteed, wasted 413 on every single invocation of
+        # this stage before doing anything useful. gpt-oss-20b, given the
+        # identical ~14k-token prompt, returned 429 (daily token quota) not
+        # 413 -- a different, much less restrictive limit with no comparable
+        # per-minute size ceiling -- so it is the one model of the two that
+        # can actually accept this prompt, and belongs first.
+        #
+        # DO NOT "restore" llama-first here without re-measuring: it is the
+        # obvious-looking default (MODEL is the primary-quality slot
+        # everywhere else that has a choice) but it is provably unable to
+        # serve this specific stage. This is also NOT a blanket "gpt-oss is
+        # just better" verdict -- extract_facts/identify_sectors/
+        # generate_edges never touch MODEL at all (their prompts are small
+        # enough that FALLBACK_MODEL alone has always been enough), and
+        # verify_companies (app/analysis/verification.py) still tries MODEL
+        # first because its prompt has no rulebook/playbook/candidate block
+        # and is measured to stay well under the 12k-token ceiling. This
+        # inversion is specific to identify_companies's prompt size, not a
+        # general model preference.
         try:
-            response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies")
+            response = _call_with_model_fallback(
+                _call, FALLBACK_MODEL, call_name="identify_companies", fallback_model=MODEL,
+            )
         except Exception as exc:
             if parent_pool is not None:
                 raise
             # The direct-stage prompt carries the full rulebook/playbook block
-            # (~6k tokens). When the primary provider is unavailable and the
-            # call degrades to Groq, that block alone can push the request past
-            # Groq's per-request token cap (observed live: 413 "Request too
-            # large", losing the entire direct-company stage). Retry once with
-            # the slim cascade-style instructions (no rulebook/playbooks): a
-            # less-informed answer beats losing every direct company -- the
-            # alert simply gets no rule citations that run. The retry itself
-            # still gets the RateLimitError/tool_use_failed -> FALLBACK_MODEL
-            # ladder: a real production failure was full+primary 413'd, then
-            # slim+primary 400'd with tool_use_failed, and only slim+FALLBACK_MODEL
-            # actually succeeded.
+            # (~6k tokens) on top of the sector/candidate content already
+            # counted above. Retry once with the slim cascade-style
+            # instructions (no rulebook/playbooks): a less-informed answer
+            # beats losing every direct company -- the alert simply gets no
+            # rule citations that run. The retry itself still gets the
+            # RateLimitError/tool_use_failed -> fallback_model ladder,
+            # gpt-oss-20b first, llama second, same order as the primary
+            # attempt above and for the same measured reason (llama's 12k
+            # TPM ceiling can't serve this stage regardless of which prompt
+            # variant is sent) -- historically (pre-inversion, when MODEL was
+            # tried first) a real production failure was full+llama 413'd,
+            # then slim+llama 400'd with tool_use_failed, and only
+            # slim+gpt-oss actually succeeded, which is the production
+            # evidence this whole reordering is based on.
             logger.warning(
                 "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
             )
             messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
-            response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies (slim retry)")
+            response = _call_with_model_fallback(
+                _call, FALLBACK_MODEL, call_name="identify_companies (slim retry)", fallback_model=MODEL,
+            )
 
         return _forced_tool_arguments(response, "record_sector_companies")
 
