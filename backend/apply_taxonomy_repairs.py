@@ -127,19 +127,61 @@ from app.models import Company
 #   belongs (see SUB_SECTOR_TAXONOMY["railways_transport"]). Its sub_sector
 #   is NULL in both dev and production, so there is nothing for a second
 #   field-entry to fix here -- NULL sub_sector is never a violation.
+# - HAL.NS / BEL.NS / MAZDOCK.NS / GRSE.NS / BDL.NS / DATAPATTNS.NS: sector
+#   -> defense. Six Indian defence manufacturers production had classified
+#   sector="infra" -- SECTOR_DEFINITIONS defines "defense" as "defense and
+#   aerospace manufacturers", but sector='defense' held only 8 companies (all
+#   global or non-tradeable), so candidate_companies(session, ["defense"])
+#   returned 0 and a defence/aerospace story (a Boeing certification alert)
+#   could name no Indian company at all. Not a check_sub_sectors() violation
+#   (their sub_sector was NULL, and NULL is never flagged), so the derived
+#   pass below can't find or fix these -- this is a sector-only
+#   misclassification the taxonomy-coherence check has no way to see.
+#   sub_sector is set too, only where the company's actual business makes it
+#   unambiguous against SUB_SECTOR_TAXONOMY["defense"] (defense_platforms:
+#   aircraft/missile/vehicle platform manufacturers; defense_electronics:
+#   radar/avionics/defense electronics makers; shipyard: naval/commercial
+#   shipbuilders):
+#     - HAL.NS (Hindustan Aeronautics): aircraft/helicopter manufacturer -> defense_platforms.
+#     - BEL.NS (Bharat Electronics): radar/avionics/defense electronics -> defense_electronics.
+#     - MAZDOCK.NS (Mazagon Dock Shipbuilders): naval shipyard -> shipyard.
+#     - GRSE.NS (Garden Reach Shipbuilders): naval shipyard -> shipyard.
+#     - BDL.NS (Bharat Dynamics): missile manufacturer -> defense_platforms.
+#     - DATAPATTNS.NS (Data Patterns India): defense electronics / avionics
+#       test systems -> defense_electronics.
+#   NOTE: these six (and the sub_sector companions above) are reverted by
+#   the monthly universe refresh -- app.companies.universe.loader.py's
+#   _CLASSIFICATION_FIELDS includes "sector", so a refresh overwrites this
+#   repair back to the source feed's classification. Until that ownership
+#   question is resolved, this script needs re-running after every refresh.
+#   Not fixed here -- out of scope for this change.
 #
-# These four stay hardcoded even though the derived pass below (Job 2's
+# These stay hardcoded even though the derived pass below (Job 2's
 # generalisation) could reproduce ASIANPAINT.NS's sector and INDIGO.NS's
 # fix on its own -- ETERNAL.NS's and ASIANPAINT.NS's sub_sector rewrites
 # cannot be derived (they're judgment calls about which specific sub_sector
-# a company belongs to, not a sector lookup), and keeping all four together
-# in one reviewed table is clearer than splitting judgment calls from
-# lookups that happen to agree with them.
+# a company belongs to, not a sector lookup), and the six defense entries
+# above are sector-only misclassifications the derived pass structurally
+# cannot see (NULL sub_sector is never a check_sub_sectors violation).
+# Keeping them all together in one reviewed table is clearer than splitting
+# judgment calls from lookups that happen to agree with them.
 TAXONOMY_REPAIRS: tuple[tuple[str, str, str], ...] = (
     ("ETERNAL.NS", "sub_sector", "retail"),
     ("ASIANPAINT.NS", "sector", "chemicals"),
     ("ASIANPAINT.NS", "sub_sector", "paints"),
     ("INDIGO.NS", "sector", "railways_transport"),
+    ("HAL.NS", "sector", "defense"),
+    ("HAL.NS", "sub_sector", "defense_platforms"),
+    ("BEL.NS", "sector", "defense"),
+    ("BEL.NS", "sub_sector", "defense_electronics"),
+    ("MAZDOCK.NS", "sector", "defense"),
+    ("MAZDOCK.NS", "sub_sector", "shipyard"),
+    ("GRSE.NS", "sector", "defense"),
+    ("GRSE.NS", "sub_sector", "shipyard"),
+    ("BDL.NS", "sector", "defense"),
+    ("BDL.NS", "sub_sector", "defense_platforms"),
+    ("DATAPATTNS.NS", "sector", "defense"),
+    ("DATAPATTNS.NS", "sub_sector", "defense_electronics"),
 )
 
 _VALID_FIELDS = frozenset({"sector", "sub_sector"})

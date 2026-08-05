@@ -80,7 +80,13 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     excess move (measurement_status == "ok") -- an alert with nothing
     measured has no headline number to show and must be omitted from the
     Level 0 feed entirely (spec Ground Rules: never fabricate, omit
-    rather than invent).
+    rather than invent). Also returns None if a measured MarketMove exists
+    but no AlertCompany row on `alert` matches its company_id -- an orphaned
+    MarketMove (e.g. left behind by a script that deleted AlertCompany rows
+    without also deleting their MarketMove rows) is exactly as unusable as
+    no measurement at all: there is no company row to name as the peak, so
+    the peak is meaningless and this degrades the same way as the
+    `not moves` case above rather than raising.
 
     Otherwise returns a dict with: excess_move_pct, direction
     ("bullish"|"bearish"), raw_move_pct, sector_move_pct, volume_multiple
@@ -106,7 +112,9 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     excess_values = [m.excess_move_pct for m in moves]
     breadth_score = compute_breadth_score(excess_values)
 
-    peak_alert_company = next(ac for ac in alert.companies if ac.company_id == peak.company_id)
+    peak_alert_company = next((ac for ac in alert.companies if ac.company_id == peak.company_id), None)
+    if peak_alert_company is None:
+        return None
     peak_company = peak_alert_company.company
 
     intensity = _intensity_for_company_move(session, peak_company, peak, breadth_score)

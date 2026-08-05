@@ -25,7 +25,9 @@ from app.models import (
     CarOutcome,
     Company,
     EmailNotification,
+    MarketMove,
     User,
+    utcnow,
 )
 from app.pipeline import store_analysis_cache
 
@@ -155,6 +157,59 @@ def test_deletes_every_dependent_row_before_replacing_alert_companies(db_session
     assert db_session.query(CarOutcome).filter_by(alert_company_id=old_ac_id).count() == 0
     assert db_session.query(EmailNotification).filter_by(alert_company_id=old_ac_id).count() == 0
     assert db_session.query(AlertCompanyTranslation).filter_by(alert_company_id=old_ac_id).count() == 0
+
+
+def test_reanalysis_leaves_no_orphaned_market_move_rows(db_session, monkeypatch):
+    """Regression test for the root cause behind the feed-v2 500: this
+    script deleted an alert's AlertCompany rows (and their
+    ALERT_COMPANY_DEPENDENTS) but never touched MarketMove, which
+    references alert_id/company_id directly rather than
+    alert_company_id -- so it isn't covered by that dependents list at
+    all. Confirmed live: reanalyzing alert 1447 left 53 orphaned
+    MarketMove rows, one of which crashed
+    app.market.alert_measurement.compute_alert_measurement's bare next()
+    with StopIteration. Seeds one AlertCompany + matching MarketMove, runs
+    a real reanalysis that resolves to zero companies (the orphan-producing
+    shape), and asserts the MarketMove row does not survive as an orphan.
+    """
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    article = Article(source="test", url="https://example.com/orphan-market-move", title="t")
+    db_session.add(article)
+    db_session.commit()
+
+    alert = Alert(article_id=article.id, category="test")
+    db_session.add(alert)
+    db_session.commit()
+
+    db_session.add(AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=2.0, basis="direct_mention",
+    ))
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.8, sector_move_pct=-0.6, excess_move_pct=-4.2,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+    alert_id = alert.id
+
+    def fake_analyze_article(client, title, content, session=None):
+        # Fresh analysis finds nothing -- the exact shape that orphaned
+        # MarketMove rows for alert 1447 in production.
+        return AnalysisOutput(category="test", companies=[], edges=[], gaps=[])
+
+    monkeypatch.setattr(reanalyze_cascade, "init_db", lambda: None)
+    monkeypatch.setattr(reanalyze_cascade, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(reanalyze_cascade, "build_client", lambda *a, **k: object())
+    monkeypatch.setattr(reanalyze_cascade, "analyze_article", fake_analyze_article)
+
+    reanalyze_cascade.main(limit=5, days=None, force=False)
+
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert_id).count() == 0
+    assert db_session.query(MarketMove).filter_by(alert_id=alert_id).count() == 0
 
 
 def _make_alert_with_company(db_session, *, url: str, ticker: str) -> tuple[Alert, Company]:

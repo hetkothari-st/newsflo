@@ -9,6 +9,9 @@ from app.models import Company
 import pytest
 
 
+_DEFENSE_TICKERS = ("HAL.NS", "BEL.NS", "MAZDOCK.NS", "GRSE.NS", "BDL.NS", "DATAPATTNS.NS")
+
+
 def _seed_target_companies(db_session):
     # ASIANPAINT.NS seeded exactly as production carries it -- other/
     # personal_care -- not dev's other/paints, so these tests exercise the
@@ -19,6 +22,15 @@ def _seed_target_companies(db_session):
         Company(ticker="ETERNAL.NS", name="Eternal Ltd.", sector="fmcg", sub_sector="personal_care", index_tier="NIFTY50"),
         Company(ticker="ASIANPAINT.NS", name="Asian Paints Ltd.", sector="other", sub_sector="personal_care", index_tier="NIFTY50"),
         Company(ticker="INDIGO.NS", name="InterGlobe Aviation Ltd.", sector="other", index_tier="NIFTY50"),
+        # Seeded as production carries them -- sector="infra", sub_sector
+        # NULL -- the exact misclassification that made candidate_companies
+        # (session, ["defense"]) return 0 for a defence/aerospace story.
+        Company(ticker="HAL.NS", name="Hindustan Aeronautics Limited", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="BEL.NS", name="Bharat Electronics Ltd.", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="MAZDOCK.NS", name="Mazagon Dock Shipbuilders Limited", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="GRSE.NS", name="Garden Reach Shipbuilders & Engineers Limited", sector="infra", index_tier="NIFTY100"),
+        Company(ticker="BDL.NS", name="Bharat Dynamics Limited", sector="infra", index_tier="NIFTY100"),
+        Company(ticker="DATAPATTNS.NS", name="Data Patterns (India) Limited", sector="infra", index_tier="NIFTY500"),
     ])
     db_session.commit()
 
@@ -34,6 +46,8 @@ def test_applies_every_repair_in_the_table(db_session):
     assert asianpaint.sector == "chemicals"
     assert asianpaint.sub_sector == "paints"
     assert db_session.query(Company).filter_by(ticker="INDIGO.NS").one().sector == "railways_transport"
+    for ticker in _DEFENSE_TICKERS:
+        assert db_session.query(Company).filter_by(ticker=ticker).one().sector == "defense"
     # The repaired state itself must be coherent -- no leftover violation.
     assert check_sub_sectors(db_session) == []
 
@@ -50,6 +64,8 @@ def test_dry_run_reports_without_writing(db_session):
     assert asianpaint.sector == "other"
     assert asianpaint.sub_sector == "personal_care"
     assert db_session.query(Company).filter_by(ticker="INDIGO.NS").one().sector == "other"
+    for ticker in _DEFENSE_TICKERS:
+        assert db_session.query(Company).filter_by(ticker=ticker).one().sector == "infra"
 
 
 def test_idempotent_second_run_reports_already_correct_and_changes_nothing(db_session):
@@ -64,6 +80,8 @@ def test_idempotent_second_run_reports_already_correct_and_changes_nothing(db_se
     assert asianpaint.sector == "chemicals"
     assert asianpaint.sub_sector == "paints"
     assert db_session.query(Company).filter_by(ticker="INDIGO.NS").one().sector == "railways_transport"
+    for ticker in _DEFENSE_TICKERS:
+        assert db_session.query(Company).filter_by(ticker=ticker).one().sector == "defense"
 
 
 def test_safe_against_a_database_where_the_repair_was_already_applied_by_other_means(db_session):
@@ -332,6 +350,77 @@ def test_post_repair_validation_catches_a_deliberately_inconsistent_repair_entry
     company = db_session.query(Company).filter_by(ticker="TESTBADENTRY.NS").one()
     assert company.sector == "fmcg"
     assert company.sub_sector == "not_a_real_sub_sector"
+
+
+# --- defense sector repairs: six Indian defence manufacturers production
+# had classified sector="infra", making candidate_companies(session,
+# ["defense"]) return 0 for a defence/aerospace story (SECTOR_DEFINITIONS
+# describes "defense" as "defense and aerospace manufacturers", but
+# sector='defense' held only global/non-tradeable companies). Their
+# sub_sector was NULL, so check_sub_sectors() never flagged them -- the
+# derived pass structurally cannot find a sector-only misclassification with
+# a NULL sub_sector, so these must be explicit TAXONOMY_REPAIRS entries. ---
+
+def test_defense_tickers_get_sector_and_the_unambiguous_sub_sector_repaired(db_session):
+    db_session.add_all([
+        Company(ticker="HAL.NS", name="Hindustan Aeronautics Limited", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="BEL.NS", name="Bharat Electronics Ltd.", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="MAZDOCK.NS", name="Mazagon Dock Shipbuilders Limited", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="GRSE.NS", name="Garden Reach Shipbuilders & Engineers Limited", sector="infra", index_tier="NIFTY100"),
+        Company(ticker="BDL.NS", name="Bharat Dynamics Limited", sector="infra", index_tier="NIFTY100"),
+        Company(ticker="DATAPATTNS.NS", name="Data Patterns (India) Limited", sector="infra", index_tier="NIFTY500"),
+    ])
+    db_session.commit()
+
+    results = apply_taxonomy_repairs(db_session, dry_run=False)
+
+    # Only these six tickers were seeded -- every OTHER entry in
+    # TAXONOMY_REPAIRS (ETERNAL.NS, ASIANPAINT.NS, INDIGO.NS) legitimately
+    # reports "not_found" here since their Company rows don't exist in this
+    # test's session. Scope the "applied" assertion to the tickers this
+    # test actually seeded.
+    defense_results = [r for r in results if r.ticker in _DEFENSE_TICKERS]
+    assert len(defense_results) == 12  # 6 tickers x (sector + sub_sector) entries each
+    assert all(r.status == "applied" for r in defense_results)
+
+    expected_sub_sector = {
+        "HAL.NS": "defense_platforms",
+        "BEL.NS": "defense_electronics",
+        "MAZDOCK.NS": "shipyard",
+        "GRSE.NS": "shipyard",
+        "BDL.NS": "defense_platforms",
+        "DATAPATTNS.NS": "defense_electronics",
+    }
+    for ticker, sub_sector in expected_sub_sector.items():
+        company = db_session.query(Company).filter_by(ticker=ticker).one()
+        assert company.sector == "defense"
+        assert company.sub_sector == sub_sector
+
+    # The repaired state must be coherent -- every sub_sector set above
+    # actually lives in defense's own SUB_SECTOR_TAXONOMY branch.
+    assert check_sub_sectors(db_session) == []
+
+
+def test_defense_repairs_candidate_companies_now_finds_them(db_session):
+    # The actual production symptom this fix removes: a defense/aerospace
+    # story could name zero companies because candidate_companies(session,
+    # ["defense"]) returned nothing (sector='defense' held only global/
+    # non-tradeable rows). After the repair, these six are real, tradeable
+    # NSE-listed candidates under sector="defense".
+    from app.companies.candidates import candidate_companies
+
+    db_session.add_all([
+        Company(ticker="HAL.NS", name="Hindustan Aeronautics Limited", sector="infra", index_tier="NIFTY50"),
+        Company(ticker="BEL.NS", name="Bharat Electronics Ltd.", sector="infra", index_tier="NIFTY50"),
+    ])
+    db_session.commit()
+
+    assert candidate_companies(db_session, ["defense"]) == []
+
+    apply_taxonomy_repairs(db_session, dry_run=False)
+
+    tickers = {c.ticker for c in candidate_companies(db_session, ["defense"])}
+    assert {"HAL.NS", "BEL.NS"} <= tickers
 
 
 def test_post_repair_validation_guard_also_fires_under_dry_run(db_session, monkeypatch):

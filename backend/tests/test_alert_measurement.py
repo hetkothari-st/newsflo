@@ -72,6 +72,40 @@ def test_single_measured_company_is_the_peak(db_session):
     assert isinstance(result["breadth_score"], int)
 
 
+def test_returns_none_when_peak_move_has_no_matching_alert_company(db_session):
+    """Regression test for the production crash: alert_measurement.py:109
+    used a bare next() with no default to find the AlertCompany matching
+    the peak MarketMove's company_id. When alert.companies is empty (or has
+    no row for that company_id) -- e.g. an orphaned MarketMove left behind
+    by a script that deleted AlertCompany rows without deleting their
+    MarketMove rows, see reanalyze_cascade.py -- that raised StopIteration,
+    which surfaces inside an async request handler as
+    "RuntimeError: coroutine raised StopIteration", a 500 on
+    GET /api/feed-v2. 1,049 production alerts have zero companies, so this
+    is the common case, not an edge case. A MarketMove with nothing to
+    attribute it to is exactly as unusable as no measurement at all -- the
+    function must degrade to None the same way `not moves` does above, not
+    raise.
+    """
+    company = _company("A.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    # No AlertCompany row is added for this alert at all -- alert.companies
+    # is empty, yet a measured MarketMove exists (the orphan shape).
+    db_session.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^CNXENERGY",
+        raw_move_pct=-4.8, sector_move_pct=-0.6, excess_move_pct=-4.2,
+        measurement_status="ok", measured_at=utcnow(),
+    ))
+    db_session.commit()
+
+    assert compute_alert_measurement(db_session, alert) is None
+
+
 def test_picks_the_larger_magnitude_move_as_peak(db_session):
     small = _company("SMALL.NS")
     big = _company("BIG.NS")

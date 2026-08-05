@@ -62,9 +62,14 @@ nonexistent id is reported and skipped rather than raising.
 IRREVERSIBLE: reanalyzing an alert (bulk or --alert-id) deletes that
 alert's existing AlertCompany rows and everything that references them --
 including CalibrationSample and CarOutcome history used for confidence
-calibration -- before persisting the fresh analysis. This is intentional
-(stale companies must not linger alongside fresh ones) but there is no undo;
-the deleted calibration/outcome history is gone.
+calibration -- before persisting the fresh analysis. It also deletes the
+alert's existing MarketMove rows outright (they key on alert_id/company_id
+directly, not alert_company_id, so they are not covered by
+ALERT_COMPANY_DEPENDENTS and are not replaced by this script -- it never
+re-measures). This is intentional (stale companies -- and stale
+measurements pointing at companies this alert no longer has -- must not
+linger alongside fresh ones) but there is no undo; the deleted calibration/
+outcome history and measurements are gone.
 """
 import argparse
 from datetime import timedelta
@@ -75,7 +80,7 @@ from app.companies.integrity import ALERT_COMPANY_DEPENDENTS
 from app.companies.resolution import resolve_companies
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import Alert, CascadeGap, Company, ImpactEdge, utcnow
+from app.models import Alert, CascadeGap, Company, ImpactEdge, MarketMove, utcnow
 from app.pipeline import (
     _build_alert_company, _resolve_edge_endpoint_company_id, article_text,
     build_anchor_sub_sectors, clear_analysis_cache, get_cached_analysis, store_analysis_cache,
@@ -145,6 +150,21 @@ def reanalyze_alert(session, client, alert: Alert, force: bool) -> None:
     # fresh companies[] list.
     session.query(ImpactEdge).filter_by(alert_id=alert.id).delete(synchronize_session=False)
     session.query(CascadeGap).filter_by(alert_id=alert.id).delete(synchronize_session=False)
+    # MarketMove references alert_id/company_id directly, not
+    # alert_company_id -- it is NOT in ALERT_COMPANY_DEPENDENTS and is not
+    # touched by the AlertCompany delete above. Left alone, a reanalysis
+    # that drops a company (or replaces the resolved set entirely) orphans
+    # that company's MarketMove row for this alert: no AlertCompany will
+    # ever again match its company_id. Confirmed live: reanalyzing alert
+    # 1447 left 53 such orphans, one of which crashed
+    # compute_alert_measurement's bare next() (app.market.alert_measurement)
+    # with StopIteration -- a 500 on GET /api/feed-v2. This script does not
+    # re-measure (it never calls app.market.measure.measure_company_move),
+    # so the alert simply has no MarketMove rows -- and no headline
+    # number -- until a separate measurement pass runs; that is correct
+    # (omit rather than fabricate), unlike silently leaving stale/orphaned
+    # rows behind.
+    session.query(MarketMove).filter_by(alert_id=alert.id).delete(synchronize_session=False)
     session.flush()
 
     for entry in resolved:
