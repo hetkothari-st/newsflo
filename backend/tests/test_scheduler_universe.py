@@ -96,11 +96,14 @@ def test_event_volatility_refresh_never_raises_and_does_no_network(monkeypatch):
     the job body wraps everything in try/except Exception, so an
     AssertionError raised by an accidental network call would be swallowed
     right alongside a legitimate DB error, and this test would pass either
-    way. To make the no-network claim load-bearing, also monkeypatch
-    rebuild itself to record that it ran and to raise if it ever touches
-    urlopen internally -- proving the job called through to rebuild (DB-only
-    work) rather than short-circuiting into some network path, and that no
-    exception was swallowed along the way.
+    way. Stubbing rebuild() and asserting it is called exactly once proves
+    the job wrapper calls rebuild() exactly once with no network call
+    before it, and that nothing on that path swallowed an exception. It
+    does NOT prove the real rebuild() body is network-free -- fake_rebuild
+    never inspects rebuild's internals, so a stray urlopen call added AFTER
+    rebuild() returns would still be swallowed here and pass. rebuild()'s
+    network-freedom rests on it being plain SQLAlchemy ORM code (see
+    app/market/event_volatility.py), not on this test.
     """
     import urllib.request
 
