@@ -154,6 +154,7 @@ function RippleBand({
       className="band"
       role="dialog"
       aria-label="Affected companies"
+      onClick={onClose}
       onTouchStart={(event) => {
         touchX.current = event.touches[0].clientX;
       }}
@@ -186,7 +187,10 @@ function RippleBand({
           <button
             key={cap}
             className={capFilter === cap ? 'on' : ''}
-            onClick={() => setCapFilter(cap)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setCapFilter(cap);
+            }}
             aria-label={`Cap filter ${cap}`}
             title={title}
           >
@@ -221,7 +225,12 @@ function RippleBand({
                 className="crow"
                 key={row.ticker}
                 data-testid={`v4row-${row.ticker}`}
-                onClick={() => onOpenDeepDive(row.ticker, alert.id)}
+                onClick={(event) => {
+                  // The page background flips back on click -- a company
+                  // row must open its deep dive instead.
+                  event.stopPropagation();
+                  onOpenDeepDive(row.ticker, alert.id);
+                }}
               >
                 <div className="cmain">
                   <span className="nm4">{row.name}</span>
@@ -373,6 +382,7 @@ export default function FeedV4({
           <div
             className={`storycard ${index === 0 ? 'first' : ''}`}
             data-testid={`v4story-${alert.id}`}
+            onClick={() => toggle(alert.id)}
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd(alert.id)}
           >
@@ -380,7 +390,9 @@ export default function FeedV4({
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </div>
-              <h1 onClick={() => toggle(alert.id)}>{alert.article.title}</h1>
+              {/* No own handler: the whole card is clickable and this
+                  would double-toggle via bubbling. */}
+              <h1>{alert.article.title}</h1>
               <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
               <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
             </div>
