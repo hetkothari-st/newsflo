@@ -45,6 +45,10 @@
 .nf4.snap { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
 .nf4.snap .ticker { scroll-snap-align: start; }
 
+/* The Tailwind body underneath (lavender bg-page) must never show around
+   the broadsheet -- while the v4 shell is mounted, the page IS paper. */
+body:has(.nf4) { background: #fafafa; }
+
 .nf4 * { box-sizing: border-box; }
 .nf4 button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
 
@@ -123,14 +127,16 @@
   min-height: 100dvh;
   scroll-snap-align: start;
   border-top: 1px solid var(--hairline);
-  padding: 48px 16px;
+  padding: 32px 16px 48px;
   display: grid;
   grid-template-columns: 1fr;
   gap: 24px;
-  align-content: center;
+  /* Content flows from the slot's top -- centering left a viewport-tall
+     void between the masthead and the first story on load. */
+  align-content: start;
 }
 @media (min-width: 900px) {
-  .nf4 .storycard { grid-template-columns: 2fr 1fr; align-items: center; padding: 64px 32px; }
+  .nf4 .storycard { grid-template-columns: 2fr 1fr; align-items: start; padding: 48px 32px; }
 }
 .nf4 .storycard .lmove {
   font-family: var(--serif);
