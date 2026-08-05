@@ -205,7 +205,16 @@ function RippleBand({
         if (rows.length === 0) return null;
         return (
           <div className="layer4" key={`${layer.title}-${layerIndex}`}>
-            <p className="ltitle">{layer.title}</p>
+            {/* Full-bleed ink strip -- the reference's own sectioning
+                device (paper/ink inversion), so each layer reads as an
+                unmistakable section, not a floating heading. */}
+            <div className="lhead4">
+              <span className={`li4 ${layer.icon}`} aria-hidden="true">
+                {layer.icon === 'win' ? '▲' : layer.icon === 'lose' ? '▼' : '◆'}
+              </span>
+              <span>{layer.title}</span>
+            </div>
+            <div className="lbody4">
             {layer.note !== null && <p className="lnote4">{layer.note}</p>}
             {rows.map((row) => (
               <div
@@ -230,17 +239,26 @@ function RippleBand({
                 </div>
               </div>
             ))}
+            </div>
           </div>
         );
       })}
       {detail !== null && detail.timeline.length > 0 && (
-        <div className="tl4">
-          {detail.timeline.map((entry, index) => (
-            <div className="tlrow4" key={`${entry.horizon}-${index}`}>
-              <p className="tlh4">{entry.horizon.replace(/_/g, ' ')}</p>
-              <p className="tld4">{entry.description}</p>
-            </div>
-          ))}
+        <div className="layer4">
+          <div className="lhead4">
+            <span className="li4" aria-hidden="true">
+              ◆
+            </span>
+            <span>What happens next</span>
+          </div>
+          <div className="lbody4 tl4">
+            {detail.timeline.map((entry, index) => (
+              <div className="tlrow4" key={`${entry.horizon}-${index}`}>
+                <p className="tlh4">{entry.horizon.replace(/_/g, ' ')}</p>
+                <p className="tld4">{entry.description}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <button className="close4" onClick={onClose}>
