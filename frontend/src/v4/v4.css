@@ -242,8 +242,20 @@ body:has(.nf4) { background: #fafafa; }
   font-weight: 400;
   font-size: clamp(36px, 6vw, 77px);
   line-height: 0.9;
-  padding: 8px 16px 16px;
+  padding: 8px 16px 8px;
 }
+/* The story this ripple belongs to -- context right under the title. */
+.nf4 .band .bandhl {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1.3;
+  color: var(--sepia);
+  margin: 0;
+  padding: 0 16px 20px;
+  max-width: 56ch;
+}
+@media (min-width: 900px) { .nf4 .band .bandhl { padding-left: 32px; padding-right: 32px; } }
 .nf4 .band .sumline {
   display: flex;
   gap: 32px;
@@ -275,30 +287,39 @@ body:has(.nf4) { background: #fafafa; }
   font-weight: 400;
 }
 .nf4 .layer4 .lnote4 { font-family: var(--serif); font-size: 16px; line-height: 1.3; opacity: 0.75; max-width: 60ch; margin: 0 0 12px; }
+/* Company row -- a ledger line: name and numeral share the baseline,
+   ticker + cap tier run as quiet uppercase meta beneath. No pills. */
 .nf4 .crow {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  padding: 10px 0;
+  padding: 14px 0 12px;
   border-top: 1px solid var(--sepia);
   cursor: pointer;
 }
-/* Paper-context overrides for the ripple page (the same .crow renders
-   on ink inside the deep dive, which keeps the base colors). */
 .nf4 .band .crow { border-top-color: var(--hairline); }
-.nf4 .band .crow .cap4 { border-color: var(--ink); }
 .nf4 .band .lnote4 { color: var(--sepia); opacity: 1; }
-.nf4 .crow .tk4 { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; min-width: 12ch; }
-.nf4 .crow .nm4 { font-family: var(--serif); font-size: 16px; flex: 1; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nf4 .crow .cap4 {
+.nf4 .crow .cmain { display: flex; align-items: baseline; gap: 16px; justify-content: space-between; }
+.nf4 .crow .nm4 {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.2;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nf4 .crow .mv4 { font-family: var(--serif); font-size: 20px; white-space: nowrap; }
+.nf4 .crow .mv4.mvx { font-style: italic; font-size: 16px; color: var(--ash); }
+.nf4 .inside .crow .mv4.mvx { color: var(--pebble); }
+.nf4 .crow .cmeta {
+  display: flex;
+  gap: 12px;
   font-size: 12px;
   letter-spacing: -0.12px;
   text-transform: uppercase;
-  border: 1px solid var(--paper);
-  border-radius: var(--radius);
-  padding: 2px 8px;
+  color: var(--ash);
+  margin-top: 2px;
 }
-.nf4 .crow .mv4 { font-family: var(--serif); font-size: 20px; white-space: nowrap; }
+.nf4 .inside .crow .cmeta { color: var(--pebble); }
 
 .nf4 .band .bandempty {
   font-family: var(--serif);
@@ -517,8 +538,7 @@ body:has(.nf4) { background: #fafafa; }
   .nf4 .capf4 { gap: 12px; }
   .nf4 .storycard { padding: 24px 16px; gap: 16px; }
   .nf4 .storycard .lmove { font-size: 44px; }
-  .nf4 .crow { flex-wrap: wrap; row-gap: 2px; }
-  .nf4 .crow .nm4 { flex-basis: 100%; order: 3; white-space: normal; }
+  .nf4 .crow .nm4 { font-size: 18px; }
   .nf4 .band .sumline { gap: 20px; }
   .nf4 .entry4 .ename { font-size: 20px; }
   .nf4 .entry4 .emetric { font-size: 20px; }

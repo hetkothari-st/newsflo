@@ -168,6 +168,7 @@ function RippleBand({
         Back to the story ×
       </button>
       <div className="stamp">The Ripple</div>
+      <p className="bandhl">{alert.article.title}</p>
       <div className="sumline">
         <span>
           Raw <b className={moveClass(alert.raw_move_pct)}>{fmtPct(alert.raw_move_pct)}</b>
@@ -213,16 +214,20 @@ function RippleBand({
                 data-testid={`v4row-${row.ticker}`}
                 onClick={() => onOpenDeepDive(row.ticker, alert.id)}
               >
-                <span className="tk4">{row.ticker}</span>
-                <span className="nm4">{row.name}</span>
-                {row.cap_tier !== null && <span className="cap4">{row.cap_tier}</span>}
-                {row.is_exposure_only || row.excess_move_pct == null ? (
-                  <span className="mv4">exposure</span>
-                ) : (
-                  <span className={`mv4 ${moveClass(row.excess_move_pct)}`}>
-                    {fmtPct(row.excess_move_pct)}
-                  </span>
-                )}
+                <div className="cmain">
+                  <span className="nm4">{row.name}</span>
+                  {row.is_exposure_only || row.excess_move_pct == null ? (
+                    <span className="mv4 mvx">exposure</span>
+                  ) : (
+                    <span className={`mv4 ${moveClass(row.excess_move_pct)}`}>
+                      {fmtPct(row.excess_move_pct)}
+                    </span>
+                  )}
+                </div>
+                <div className="cmeta">
+                  <span>{row.ticker}</span>
+                  {row.cap_tier !== null && <span>{row.cap_tier} cap</span>}
+                </div>
               </div>
             ))}
           </div>

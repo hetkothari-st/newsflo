@@ -131,16 +131,20 @@ export default function DeepDiveV4({
                   onClick={() => onOpenPeer(peer.ticker, alertId)}
                   data-testid={`v4peer-${peer.ticker}`}
                 >
-                  <span className="tk4">{peer.ticker}</span>
-                  <span className="nm4">{peer.name}</span>
-                  {peer.cap_tier !== null && <span className="cap4">{peer.cap_tier}</span>}
-                  {peer.is_exposure_only || peer.excess_move_pct == null ? (
-                    <span className="mv4">exposure</span>
-                  ) : (
-                    <span className={`mv4 ${peer.excess_move_pct < 0 ? 'down' : 'up'}`}>
-                      {fmtPct(peer.excess_move_pct)}
-                    </span>
-                  )}
+                  <div className="cmain">
+                    <span className="nm4">{peer.name}</span>
+                    {peer.is_exposure_only || peer.excess_move_pct == null ? (
+                      <span className="mv4 mvx">exposure</span>
+                    ) : (
+                      <span className={`mv4 ${peer.excess_move_pct < 0 ? 'down' : 'up'}`}>
+                        {fmtPct(peer.excess_move_pct)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="cmeta">
+                    <span>{peer.ticker}</span>
+                    {peer.cap_tier !== null && <span>{peer.cap_tier} cap</span>}
+                  </div>
                 </div>
               ))}
             </div>
