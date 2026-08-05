@@ -1,6 +1,7 @@
 /* API client for the card-feed UI (docs/NEWS_IMPACT_APP_SPEC_V2.md).
    Fresh module for the v3 surface -- the old lib/feedV2Api.ts stays for
    the retired feed-v2 components until they are deleted. */
+import type { Fundamentals } from '../lib/api';
 
 export type CapTier = 'LARGE' | 'MID' | 'SMALL' | 'MICRO';
 export type LiquidityTier = 'LOW' | 'MODERATE' | 'HIGH';
@@ -66,7 +67,13 @@ export interface LayerRow {
   cap_tier: CapTier | null;
   liquidity_tier: LiquidityTier | null;
   delivery_pct: number | null;
+  // Superseded by `fundamentals` below -- backend now always sends null
+  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
   business_desc: string | null;
+  // Sent by app.market.ripple_layers.compute_ripple_layers (backs
+  // AlertDetail.layers[].rows) and app.market.ripple.get_sector_peers_for_alert
+  // (backs StockDeepDive.peers below) -- both already emit it (Task 7).
+  fundamentals?: Fundamentals | null;
   direction: Direction;
   excess_move_pct: number | null;
   intensity: Intensity | null;
@@ -101,7 +108,12 @@ export interface StockDeepDive {
   name: string;
   sector: string;
   cap_tier: CapTier | null;
+  // Superseded by `fundamentals` below -- backend now always sends null
+  // here (see frontend/src/lib/api.ts AlertCompany.business_desc doc).
   business_desc: string | null;
+  // Sent by app.routers.stock_deep_dive._company_facts, which already
+  // calls fundamentals_payload(company) (Task 7).
+  fundamentals?: Fundamentals | null;
   logo_url: string | null;
   market_cap: number | null;
   pe: number | null;

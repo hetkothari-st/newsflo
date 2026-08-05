@@ -4,11 +4,13 @@ from app.market.ripple import compute_ripple_companies, get_sector_peers_for_ale
 from app.models import Alert, AlertCompany, Article, Company, ImpactEdge, MarketMove, utcnow
 
 
-def test_ripple_rows_include_cap_tier_and_business_desc(db_session):
+def test_ripple_rows_include_cap_tier_and_fundamentals(db_session):
     peak = _company("PEAK.NS")
     beneficiary = Company(
         ticker="BEN.NS", name="Beneficiary Co", sector="oil_gas", index_tier="NIFTY50",
         market_cap=5000.0, business_desc="Makes beneficiary things.",
+        official_sector="Energy", eps=28.98,
+        financials_source="BSE", financials_as_of=date(2026, 8, 4),
     )
     db_session.add_all([peak, beneficiary])
     db_session.commit()
@@ -32,7 +34,11 @@ def test_ripple_rows_include_cap_tier_and_business_desc(db_session):
 
     result = compute_ripple_companies(db_session, alert, exclude_company_id=peak.id, held_company_ids=set())
 
-    assert result[0]["business_desc"] == "Makes beneficiary things."
+    # business_desc was LLM-invented and is never served now, regardless of
+    # what's stored on the row; the sourced fundamentals payload replaces it.
+    assert result[0]["business_desc"] is None
+    assert result[0]["fundamentals"]["classification"]["sector"] == "Energy"
+    assert result[0]["fundamentals"]["ratios"]["eps"] == 28.98
     assert result[0]["cap_tier"] in ("LARGE", "MID", "SMALL", None)
 
 
@@ -400,7 +406,7 @@ def test_sector_peers_row_shape_matches_ripple_row_shape(db_session):
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "direction", "excess_move_pct", "intensity",
-        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "why", "logo_url",
+        "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "fundamentals", "why", "logo_url",
     }
 
 
@@ -477,7 +483,7 @@ def test_compute_ripple_companies_still_includes_relationship_after_refactor(db_
 
     assert set(result[0].keys()) == {
         "ticker", "name", "sector", "relationship", "direction", "excess_move_pct",
-        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "why", "logo_url",
+        "intensity", "is_exposure_only", "in_my_holdings", "cap_tier", "business_desc", "fundamentals", "why", "logo_url",
     }
     assert result[0]["relationship"] == "BENEFICIARY"
 

@@ -80,6 +80,22 @@ _ADDED_COLUMNS = [
     ("companies", "amfi_rank", "INTEGER"),
     ("companies", "amfi_as_of", "DATE"),
     ("companies", "tradeability", "VARCHAR NOT NULL DEFAULT 'NORMAL'"),
+    ("companies", "eps", "FLOAT"),
+    ("companies", "ceps", "FLOAT"),
+    ("companies", "pe", "FLOAT"),
+    ("companies", "pb", "FLOAT"),
+    ("companies", "opm", "FLOAT"),
+    ("companies", "npm", "FLOAT"),
+    ("companies", "roe", "FLOAT"),
+    ("companies", "con_eps", "FLOAT"),
+    ("companies", "con_ceps", "FLOAT"),
+    ("companies", "con_pe", "FLOAT"),
+    ("companies", "con_pb", "FLOAT"),
+    ("companies", "con_opm", "FLOAT"),
+    ("companies", "con_npm", "FLOAT"),
+    ("companies", "con_roe", "FLOAT"),
+    ("companies", "financials_source", "VARCHAR"),
+    ("companies", "financials_as_of", "DATE"),
 ]
 
 

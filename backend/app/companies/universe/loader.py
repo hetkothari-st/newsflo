@@ -10,6 +10,7 @@ without losing their alert history).
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.companies.sub_sectors import is_valid_sub_sector
 from app.models import Company, Listing
 
 # Always refreshed from the masters -- cheap, fetched daily, always present.
@@ -21,6 +22,13 @@ _ALWAYS_FIELDS = ("name", "tradeability")
 _CLASSIFICATION_FIELDS = (
     "sector", "official_sector", "official_industry", "official_igroup",
     "official_isubgroup", "classification_source", "classification_as_of",
+)
+# Written only when the payload actually carried ratios, so the daily master
+# refresh (which runs with an empty bse_detail/) cannot blank them.
+_FINANCIAL_FIELDS = (
+    "eps", "ceps", "pe", "pb", "opm", "npm", "roe",
+    "con_eps", "con_ceps", "con_pe", "con_pb", "con_opm", "con_npm", "con_roe",
+    "financials_source", "financials_as_of",
 )
 
 
@@ -141,6 +149,40 @@ def upsert_records(session: Session, records: list[dict]) -> dict:
 
             if record["classification_source"]:
                 for field in _CLASSIFICATION_FIELDS:
+                    setattr(company, field, record[field])
+
+                # Spec 6.1: overwrite where we derived something, leave the legacy
+                # LLM value alone where we did not. Folding this into
+                # _CLASSIFICATION_FIELDS would null out 824 existing values the
+                # moment their ISubGroup is unmapped. Gated on
+                # classification_source (not just "sub_sector is not None"): a
+                # BSE payload can carry ISubGroup/IndustryNew with an empty
+                # Sector, in which case classification_source is falsy above and
+                # NONE of _CLASSIFICATION_FIELDS gets written -- sub_sector must
+                # not fire on its own in that case, or the company ends up
+                # half-written (sub_sector set, sector stuck at "other",
+                # official_isubgroup never persisted).
+                if record["sub_sector"] is not None:
+                    company.sub_sector = record["sub_sector"]
+
+                # Coherence guard: sector was just (re)written above, but
+                # sub_sector above was only written when derivable -- so a
+                # company whose sector moved keeps its OLD sub_sector when the
+                # new ISubGroup doesn't map to anything. That is exactly the
+                # incoherence app.companies.integrity.check_sub_sectors (master)
+                # flags, and left unguarded this loader can manufacture it at
+                # scale on every sector reclassification. This does NOT undo
+                # spec 6.1's legacy survival above: a legacy LLM sub_sector that
+                # is still a valid member of the (possibly unchanged) sector's
+                # taxonomy list is left alone; only a value that actively
+                # CONTRADICTS the sector just written is cleared. Membership is
+                # checked against SUB_SECTOR_TAXONOMY (via is_valid_sub_sector),
+                # never hardcoded.
+                if company.sub_sector is not None and not is_valid_sub_sector(company.sector, company.sub_sector):
+                    company.sub_sector = None
+
+            if record["financials_source"]:
+                for field in _FINANCIAL_FIELDS:
                     setattr(company, field, record[field])
 
             # A missing cap must never blank an exchange-published one (spec

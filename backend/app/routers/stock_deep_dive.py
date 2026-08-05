@@ -3,7 +3,7 @@
 (from a ripple/peer row tap, within one news event's context: shows that
 event's measured excess/intensity for this company plus its same-alert
 sector peers) or WITHOUT one (from the Directory, browsing with no news
-context: company facts only -- name, sector, cap tier, business_desc,
+context: company facts only -- name, sector, cap tier, fundamentals,
 market cap, PE -- no excess/intensity/peers, since none of those mean
 anything without a specific event to measure against). Never fabricates a
 number for either path (see this phase's Global Constraints).
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
 from app.companies.branding import logo_url
+from app.companies.fundamentals import fundamentals_payload
 from app.companies.price_series import fetch_pe_ratio
 from app.i18n import get_lang
 from app.market.alert_measurement import _intensity_for_company_move
@@ -35,7 +36,10 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "name": company.name,
         "sector": company.sector,
         "cap_tier": (resolved := resolve_cap_tier(session, company)) and resolved.tier,
-        "business_desc": company.business_desc,
+        # business_desc was LLM-invented and is no longer populated; the
+        # key stays so the frontend can migrate without a lockstep deploy.
+        "business_desc": None,
+        "fundamentals": fundamentals_payload(company),
         "logo_url": logo_url(company),
         "market_cap": company.market_cap,
         "pe": fetch_pe_ratio(company.ticker),

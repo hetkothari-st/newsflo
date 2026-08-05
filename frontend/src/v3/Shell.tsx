@@ -60,7 +60,7 @@ export default function Shell() {
         name: row.name,
         ticker: row.ticker,
         sector: row.sector,
-        businessDesc: row.business_desc,
+        fundamentals: row.fundamentals,
         logoUrl: row.logo_url,
       },
     });

@@ -15,10 +15,15 @@ def _override_db(db_session):
     app.dependency_overrides[get_db] = _get_db
 
 
-def _company(ticker, sector="oil_gas", business_desc=None, market_cap=None, market_cap_as_of=None):
+def _company(
+    ticker, sector="oil_gas", business_desc=None, market_cap=None, market_cap_as_of=None,
+    official_sector=None, eps=None, financials_source=None, financials_as_of=None,
+):
     return Company(
         ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier="NIFTY50",
         business_desc=business_desc, market_cap=market_cap, market_cap_as_of=market_cap_as_of,
+        official_sector=official_sector, eps=eps,
+        financials_source=financials_source, financials_as_of=financials_as_of,
     )
 
 
@@ -39,7 +44,10 @@ def _alert_company(alert_id, company_id, direction="bearish"):
 def test_stock_deep_dive_without_alert_id_returns_company_facts_only(db_session, monkeypatch):
     monkeypatch.setattr("app.routers.stock_deep_dive.fetch_pe_ratio", lambda ticker: None)
     _override_db(db_session)
-    company = _company("RELIANCE.NS", business_desc="Refines crude oil.", market_cap=1500000.0)
+    company = _company(
+        "RELIANCE.NS", business_desc="Refines crude oil.", market_cap=1500000.0,
+        official_sector="Energy", eps=28.98, financials_source="BSE", financials_as_of=TODAY,
+    )
     db_session.add(company)
     db_session.commit()
     client = TestClient(app)
@@ -49,7 +57,11 @@ def test_stock_deep_dive_without_alert_id_returns_company_facts_only(db_session,
     assert response.status_code == 200
     body = response.json()
     assert body["ticker"] == "RELIANCE.NS"
-    assert body["business_desc"] == "Refines crude oil."
+    # business_desc was LLM-invented and is never served now; the sourced
+    # fundamentals payload replaces it.
+    assert body["business_desc"] is None
+    assert body["fundamentals"]["classification"]["sector"] == "Energy"
+    assert body["fundamentals"]["ratios"]["eps"] == 28.98
     assert body["market_cap"] == 1500000.0
     assert body["pe"] is None
     assert body["excess_move_pct"] is None

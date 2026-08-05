@@ -61,3 +61,16 @@ def test_alias_rows_attach_to_company(db_session):
     ))
     db_session.commit()
     assert db_session.query(CompanyAlias).one().normalized == "test"
+
+
+def test_company_carries_financials_with_provenance(db_session):
+    company = _company(
+        eps=28.98, ceps=41.67, pe=44.95, pb=3.36, opm=14.24, npm=7.99, roe=7.48,
+        con_eps=65.15, con_pe=19.99,
+        financials_source="BSE", financials_as_of=date(2026, 8, 4),
+    )
+    db_session.add(company)
+    db_session.commit()
+    assert company.pe == 44.95
+    assert company.con_pb is None          # BSE genuinely returns None here
+    assert company.financials_source == "BSE"

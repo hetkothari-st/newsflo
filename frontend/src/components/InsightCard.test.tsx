@@ -127,26 +127,64 @@ describe('InsightCard', () => {
     expect(screen.queryByText(/directly lift Reliance earnings/)).not.toBeInTheDocument();
   });
 
-  it('builds the sector-membership line from business_desc when present', () => {
+  it('renders the sourced classification and ratios with an as-of date', () => {
     render(
       <InsightCard
-        company={{ ...company, sector: 'oil_gas', business_desc: 'Refines crude oil and produces petrochemicals.' }}
+        company={{
+          ...company,
+          business_desc: null,
+          fundamentals: {
+            classification: {
+              sector: 'Energy',
+              industry: 'Oil, Gas & Consumable Fuels',
+              group: 'Petroleum Products',
+              sub_group: 'Refineries & Marketing',
+            },
+            ratios: { pe: 44.95, opm: 14.24 },
+            source: 'BSE',
+            as_of: '2026-08-04',
+          },
+        }}
         eventType="crude_oil"
         alertCreatedAt="2026-07-17T10:00:00.000Z"
       />,
     );
-    expect(screen.getByText(/Refines crude oil and produces petrochemicals\..*sector\./)).toBeInTheDocument();
+    expect(screen.getByText(/Refineries & Marketing/)).toBeInTheDocument();
+    expect(screen.getByText('44.95')).toBeInTheDocument();
+    // The date is load-bearing, not decoration: PE is price-derived and this
+    // data refreshes monthly (spec 5.1).
+    expect(screen.getByText(/2026-08-04/)).toBeInTheDocument();
   });
 
-  it('falls back to a generic sector-membership sentence when business_desc is absent', () => {
-    render(
+  it('renders nothing when fundamentals is null', () => {
+    const { container } = render(
       <InsightCard
-        company={{ ...company, sector: 'oil_gas', business_desc: null }}
+        company={{ ...company, business_desc: null, fundamentals: null }}
         eventType="crude_oil"
         alertCreatedAt="2026-07-17T10:00:00.000Z"
       />,
     );
-    expect(screen.getByText(/Reliance Industries operates in the .* sector\./)).toBeInTheDocument();
+    expect(container.querySelector("[data-testid='fundamentals']")).toBeNull();
+  });
+
+  it('renders a real zero ratio as 0.00, not omitted', () => {
+    render(
+      <InsightCard
+        company={{
+          ...company,
+          business_desc: null,
+          fundamentals: {
+            classification: { sector: 'Energy', industry: null, group: null, sub_group: null },
+            ratios: { npm: 0.0 },
+            source: 'BSE',
+            as_of: '2026-08-04',
+          },
+        }}
+        eventType="crude_oil"
+        alertCreatedAt="2026-07-17T10:00:00.000Z"
+      />,
+    );
+    expect(screen.getByText('0.00')).toBeInTheDocument();
   });
 
   it('hides the logo/name/ticker header block when hideHeader is set, but keeps the price line', () => {
@@ -185,15 +223,15 @@ describe('InsightCard', () => {
     expect(screen.queryByText(/Linked via/)).not.toBeInTheDocument();
   });
 
-  it('renders no sector-membership line when the company has no sector', () => {
-    render(
+  it('renders no fundamentals panel when the company has no sector and no fundamentals', () => {
+    const { container } = render(
       <InsightCard
         company={{ ...company, sector: undefined, business_desc: null }}
         eventType="crude_oil"
         alertCreatedAt="2026-07-17T10:00:00.000Z"
       />,
     );
-    expect(screen.queryByText(/operates in the/)).not.toBeInTheDocument();
+    expect(container.querySelector("[data-testid='fundamentals']")).toBeNull();
   });
 
   it('fetches and renders a sparkline when a price series is available', async () => {

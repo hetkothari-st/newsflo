@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import event
@@ -258,7 +258,7 @@ def test_list_alerts_includes_company_sector(db_session):
     app.dependency_overrides.clear()
 
 
-def test_list_alerts_includes_company_why_and_business_desc(db_session):
+def test_list_alerts_includes_company_why_and_fundamentals(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)
 
@@ -273,6 +273,8 @@ def test_list_alerts_includes_company_why_and_business_desc(db_session):
         ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas",
         index_tier="NIFTY50", market_cap=1.0,
         business_desc="Refines crude oil and produces petrochemicals.",
+        official_sector="Energy", eps=28.98,
+        financials_source="BSE", financials_as_of=date(2026, 8, 4),
     )
     db_session.add(company)
     db_session.commit()
@@ -294,7 +296,11 @@ def test_list_alerts_includes_company_why_and_business_desc(db_session):
     assert response.status_code == 200
     company_json = response.json()[0]["companies"][0]
     assert company_json["why"] == "Widening refining margins directly lift Reliance's core earnings."
-    assert company_json["business_desc"] == "Refines crude oil and produces petrochemicals."
+    # business_desc was LLM-invented and is never served now; the sourced
+    # fundamentals payload replaces it.
+    assert company_json["business_desc"] is None
+    assert company_json["fundamentals"]["classification"]["sector"] == "Energy"
+    assert company_json["fundamentals"]["ratios"]["eps"] == 28.98
 
     app.dependency_overrides.clear()
 

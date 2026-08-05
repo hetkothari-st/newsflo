@@ -77,7 +77,7 @@ export default function RippleSection({ companies, alertId }: RippleSectionProps
             ticker={popupCompany.ticker}
             sector={popupCompany.sector}
             capTier={popupCompany.cap_tier}
-            businessDesc={popupCompany.business_desc}
+            fundamentals={popupCompany.fundamentals}
           />
         )}
       </AlertDetail>

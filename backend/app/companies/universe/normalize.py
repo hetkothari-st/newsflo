@@ -13,7 +13,7 @@ import json
 import math
 from datetime import date
 
-from app.companies.universe import sector_map
+from app.companies.universe import sector_map, sub_sector_map
 
 # Equity ISIN prefixes. INF* are mutual-fund/ETF units (253 on BSE) and are
 # not companies; BSE also publishes one row whose ISIN is the literal "NA".
@@ -73,7 +73,7 @@ def parse_bse_detail(json_text: str) -> dict:
     return payload or {}
 
 
-def _parse_float(value) -> float | None:
+def _parse_float(value, *, allow_non_positive: bool = False) -> float | None:
     # Indian-grouped cap strings ("1,32,904.62") are valid input; strip
     # thousands separators before parsing rather than silently failing.
     text = _clean(value).replace(",", "")
@@ -91,6 +91,12 @@ def _parse_float(value) -> float | None:
     # yfinance path.
     if not math.isfinite(parsed):
         return None
+    if allow_non_positive:
+        # Ratio fields (EPS, margins, ROE) are genuinely zero or negative for
+        # loss-making companies -- BSE really did publish ConOPM/ConNPM as
+        # "0.00" for Reliance. Only market cap/face value (the default,
+        # allow_non_positive=False) treat <=0 as absent.
+        return parsed
     return parsed if parsed > 0 else None
 
 
@@ -117,6 +123,16 @@ def _parse_float(value) -> float | None:
 #      existing display behaviour (calibrated against yfinance's scale)
 #      unchanged.
 _BSE_CRORE_TO_RUPEES = 10_000_000  # 1 crore = 1e7
+
+
+# (record key, BSE payload key). Standalone first, consolidated second.
+_RATIO_FIELDS = (
+    ("eps", "EPS"), ("ceps", "CEPS"), ("pe", "PE"), ("pb", "PB"),
+    ("opm", "OPM"), ("npm", "NPM"), ("roe", "ROE"),
+    ("con_eps", "ConEPS"), ("con_ceps", "ConCEPS"), ("con_pe", "ConPE"),
+    ("con_pb", "ConPB"), ("con_opm", "ConOPM"), ("con_npm", "ConNPM"),
+    ("con_roe", "ConROE"),
+)
 
 
 def _parse_nse_date(value: str) -> date | None:
@@ -187,6 +203,20 @@ def build_records(
                 record["classification_source"] = "BSE"
                 record["classification_as_of"] = as_of
 
+            # Ratios are non-positive-safe (allow_non_positive=True): EPS,
+            # margins and ROE are real numbers for loss-making companies --
+            # unlike market cap/face value, zero and negative are genuine
+            # published values here, not "missing".
+            got_any_ratio = False
+            for key, source_key in _RATIO_FIELDS:
+                value = _parse_float(detail.get(source_key), allow_non_positive=True)
+                record[key] = value
+                if value is not None:
+                    got_any_ratio = True
+            if got_any_ratio:
+                record["financials_source"] = "BSE"
+                record["financials_as_of"] = as_of
+
         record["listings"].append({
             "exchange": "BSE",
             "symbol": _clean(row.get("scrip_id")) or scrip_code,
@@ -217,6 +247,13 @@ def build_records(
         record["sector"] = sector_map.map_sector(
             record["official_sector"], record["official_industry"],
         )
+        # Cap tier is unknown at ingest time (it's a rank over the whole
+        # population, computed later) -- called with two args, so IT
+        # services always resolve to it_other here; a later pass with the
+        # tier can refine it.
+        record["sub_sector"] = sub_sector_map.map_sub_sector(
+            record["official_isubgroup"], record["sector"],
+        )
         record["tradeability"] = sector_map.derive_tradeability(record["listings"])
         records.append(record)
     return records
@@ -227,6 +264,7 @@ def _blank_record(isin: str, as_of: date) -> dict:
         "isin": isin,
         "name": "",
         "sector": "other",
+        "sub_sector": None,
         "official_sector": None,
         "official_industry": None,
         "official_igroup": None,
@@ -236,6 +274,12 @@ def _blank_record(isin: str, as_of: date) -> dict:
         "market_cap": None,
         "market_cap_source": None,
         "market_cap_as_of": None,
+        "eps": None, "ceps": None, "pe": None, "pb": None,
+        "opm": None, "npm": None, "roe": None,
+        "con_eps": None, "con_ceps": None, "con_pe": None,
+        "con_pb": None, "con_opm": None, "con_npm": None, "con_roe": None,
+        "financials_source": None,
+        "financials_as_of": None,
         "tradeability": "NORMAL",
         "ticker": "",
         "listings": [],
