@@ -109,3 +109,44 @@ def test_fetch_bse_details_backs_off_between_retries(tmp_path):
         opener=opener, sleep=delays.append, max_retries=3, throttle_seconds=0.0,
     )
     assert delays and delays[0] > 0
+
+
+def test_detail_pass_aborts_when_the_source_refuses_everything():
+    """BSE answers ~2 of 18 requests from Railway's egress IP (measured
+    2026-08-05). Without a breaker the monthly job walks ~4,700 scrips at
+    three 60s timeouts each -- days of wall-clock to accomplish nothing."""
+    attempts = []
+
+    def refusing(url):
+        attempts.append(url)
+        raise TimeoutError("blocked")
+
+    result = fetchers.fetch_bse_details(
+        "unused", date(2026, 8, 5), [str(500000 + i) for i in range(500)],
+        opener=refusing, sleep=lambda _s: None, throttle_seconds=0,
+        max_retries=1, abort_after_consecutive_failures=10,
+    )
+    assert result["aborted"] is True
+    assert result["fetched"] == 0
+    # 10 failures trip it, and the breaker is checked before the 11th.
+    assert len(result["failed"]) == 10
+    assert len(attempts) == 10
+
+
+def test_a_successful_scrip_resets_the_breaker(tmp_path):
+    """Intermittent failures are normal and must not abort a healthy run."""
+    calls = {"n": 0}
+
+    def flaky(url):
+        calls["n"] += 1
+        if calls["n"] % 3:
+            raise TimeoutError("transient")
+        return b'{"Table":[{"scrip_cd":"1"}]}'
+
+    result = fetchers.fetch_bse_details(
+        str(tmp_path), date(2026, 8, 5), [str(500000 + i) for i in range(9)],
+        opener=flaky, sleep=lambda _s: None, throttle_seconds=0,
+        max_retries=3, abort_after_consecutive_failures=2,
+    )
+    assert result["aborted"] is False
+    assert result["fetched"] == 9

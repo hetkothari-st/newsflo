@@ -70,6 +70,13 @@ def fetch_bse_scrip_list(root: str, day: date, opener=None) -> Path:
 
 
 _BACKOFF_BASE_SECONDS = 2.0
+# Give up on the whole pass once this many scrips in a row have failed every
+# retry. Measured 2026-08-05: BSE answers ~2 of 18 requests from Railway's
+# egress IP while answering 18 of 18 from a normal connection. Without this
+# guard the monthly job walks all ~4,700 scrips at three 60s timeouts each --
+# days of wall-clock to accomplish nothing. A blocked source must be a fast,
+# loud failure, not a slow silent one.
+_ABORT_AFTER_CONSECUTIVE_FAILURES = 50
 
 
 def fetch_bse_details(
@@ -80,6 +87,7 @@ def fetch_bse_details(
     sleep=None,
     throttle_seconds: float = 0.3,
     max_retries: int = 3,
+    abort_after_consecutive_failures: int = _ABORT_AFTER_CONSECUTIVE_FAILURES,
 ) -> dict:
     """Fetch the official 4-level classification for each scrip, one call
     each (~5,000 for a full run). Resumable: codes already on disk for
@@ -98,11 +106,20 @@ def fetch_bse_details(
     fetched = 0
     skipped = 0
     failed: list[str] = []
+    consecutive_failures = 0
+    aborted = False
 
     for scrip_code in scrip_codes:
         if scrip_code in already:
             skipped += 1
             continue
+
+        if (
+            abort_after_consecutive_failures
+            and consecutive_failures >= abort_after_consecutive_failures
+        ):
+            aborted = True
+            break
 
         payload = None
         for attempt in range(max_retries):
@@ -116,8 +133,10 @@ def fetch_bse_details(
 
         if not payload:
             failed.append(scrip_code)
+            consecutive_failures += 1
             continue
 
+        consecutive_failures = 0
         path = snapshot.detail_path(root, day, scrip_code)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
@@ -125,4 +144,14 @@ def fetch_bse_details(
         if throttle_seconds:
             pause(throttle_seconds)
 
-    return {"fetched": fetched, "skipped": skipped, "failed": failed}
+    # `aborted` means the source refused us, NOT that these scrips have no
+    # classification. The caller must not treat the run as complete: the
+    # loader's per-field write guards already leave existing classifications
+    # alone when a detail file is absent, so an aborted pass degrades to
+    # "nothing new today" rather than blanking what is already stored.
+    return {
+        "fetched": fetched,
+        "skipped": skipped,
+        "failed": failed,
+        "aborted": aborted,
+    }

@@ -294,9 +294,21 @@ def _run_universe_detail_refresh() -> None:
         # Never silent: the count of scrips whose detail fetch failed must
         # always be visible, not just buried in a list.
         logger.info(
-            "Universe detail refresh: fetched=%s skipped=%s failed=%s",
+            "Universe detail refresh: fetched=%s skipped=%s failed=%s aborted=%s",
             result["fetched"], result["skipped"], len(result["failed"]),
+            result.get("aborted", False),
         )
+        if result.get("aborted"):
+            # A blocked source, not a bad month. Distinct log level because
+            # the outcome is indistinguishable from success in the counts
+            # above when almost nothing was due to be fetched.
+            logger.error(
+                "Universe detail refresh ABORTED: BSE refused %s consecutive "
+                "scrips. Classification data is unchanged, not cleared. Run "
+                "the detail pass from a network BSE answers and ship the "
+                "snapshot to the volume.",
+                len(result["failed"]),
+            )
     except Exception:
         logger.exception("Universe detail refresh failed")
 
