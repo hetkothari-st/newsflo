@@ -138,10 +138,10 @@ body:has(.nf4) { background: #fafafa; }
 /* A card whose story has no usable image collapses to one row -- the
    1fr plate row would otherwise reintroduce the dead space. */
 .nf4 .storycard:not(:has(.lplate)) { grid-template-rows: auto; align-content: center; }
-/* The FIRST card shares the homepage with the masthead: natural height
-   with a bounded plate, so the whole card sits above the fold on load. */
-.nf4 .storycard.first { min-height: 0; }
-.nf4 .storycard.first .lplate { height: 34vh; min-height: 180px; }
+/* The FIRST card shares the homepage with the masthead: sized to exactly
+   fill the viewport below the header (--headh, measured live in ShellV4),
+   so the homepage shows one complete card and none of the next. */
+.nf4 .storycard.first { min-height: calc(100vh - var(--headh, 220px)); min-height: calc(100dvh - var(--headh, 220px)); }
 @media (min-width: 900px) {
   .nf4 .storycard {
     grid-template-columns: 2fr 1fr;
@@ -150,7 +150,6 @@ body:has(.nf4) { background: #fafafa; }
     padding: 48px 32px;
   }
   .nf4 .storycard:not(:has(.lplate)) { grid-template-columns: 1fr; align-items: center; }
-  .nf4 .storycard.first .lplate { height: 100%; min-height: 180px; }
 }
 .nf4 .storycard .lmove {
   font-family: var(--serif);

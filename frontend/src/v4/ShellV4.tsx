@@ -5,7 +5,7 @@
    Feed (front page), Discover, Directory, Portfolio, Review -- plus the
    deep dive as a full-bleed ink "inside page". English-only while the
    experiment runs. */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './v4.css';
 import ArchiveV4 from './ArchiveV4';
 import DeepDiveV4 from './DeepDiveV4';
@@ -38,6 +38,19 @@ export default function ShellV4() {
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
+  // Live header height -> --headh CSS var: the first story card is sized
+  // to exactly fill the viewport below the header, so the homepage shows
+  // one complete card and nothing of the next.
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(220);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setHeaderHeight(el.offsetHeight));
+    observer.observe(el);
+    setHeaderHeight(el.offsetHeight);
+    return () => observer.disconnect();
+  }, []);
 
   const openDeepDive = (ticker: string, alertId?: number) => setDeepDive({ ticker, alertId });
 
@@ -55,36 +68,41 @@ export default function ShellV4() {
     // and snaps per story card. Snapping is dropped while a ripple band is
     // open (mandatory snap fights scrolling through a tall band) and on
     // every non-feed section.
-    <div className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''}`}>
-      <div className="ticker">
-        <span>{IST_DATE.format(new Date()).toUpperCase()}</span>
-        <span>{editionLabel}</span>
-        <span>NSE · BSE — EXCESS MOVE VS SECTOR</span>
-      </div>
-
-      <div className="masthead">Newsflo</div>
-
-      <div className="navrow">
-        <nav className="navlinks" aria-label="Sections">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.view}
-              className={view === item.view ? 'on' : ''}
-              onClick={() => setView(item.view)}
-              aria-label={item.label}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {view === 'feed' && feedDate !== null && (
-        <div className="dateline">
-          <span>Reading the {feedDate} edition</span>
-          <button onClick={() => setFeedDate(null)}>Back to today</button>
+    <div
+      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''}`}
+      style={{ '--headh': `${headerHeight}px` } as React.CSSProperties}
+    >
+      <header ref={headerRef} className="tophead">
+        <div className="ticker">
+          <span>{IST_DATE.format(new Date()).toUpperCase()}</span>
+          <span>{editionLabel}</span>
+          <span>NSE · BSE — EXCESS MOVE VS SECTOR</span>
         </div>
-      )}
+
+        <div className="masthead">Newsflo</div>
+
+        <div className="navrow">
+          <nav className="navlinks" aria-label="Sections">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.view}
+                className={view === item.view ? 'on' : ''}
+                onClick={() => setView(item.view)}
+                aria-label={item.label}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {view === 'feed' && feedDate !== null && (
+          <div className="dateline">
+            <span>Reading the {feedDate} edition</span>
+            <button onClick={() => setFeedDate(null)}>Back to today</button>
+          </div>
+        )}
+      </header>
 
       {view === 'feed' && (
         <FeedV4
