@@ -228,3 +228,34 @@ def test_every_company_still_appears_exactly_once(db_session):
 
     tickers = [row["ticker"] for layer in layers for row in layer["rows"]]
     assert sorted(tickers) == ["ETERNAL.NS", "HPCL.NS"]
+
+
+def test_rows_carry_the_volatility_range_for_this_alerts_category(db_session):
+    from datetime import date
+
+    from app.models import EventVolatilityRange
+
+    alert = _alert_with_layers(db_session)
+    company = db_session.query(Company).filter_by(ticker="DIRECT.NS").one()
+    db_session.add(EventVolatilityRange(
+        level="COMPANY", company_id=company.id, sector=None,
+        category=alert.category, n_events=4, min_excess_move_pct=-1.8,
+        median_excess_move_pct=0.6, max_excess_move_pct=2.4,
+        as_of=date(2026, 8, 5), source="market_moves",
+    ))
+    db_session.commit()
+
+    layers = compute_ripple_layers(db_session, alert, set())
+    row = next(r for layer in layers for r in layer["rows"]
+               if r["ticker"] == company.ticker)
+    assert row["volatility_range"]["level"] == "COMPANY"
+    assert row["volatility_range"]["n_events"] == 4
+
+
+def test_rows_without_stored_ranges_carry_null_not_a_number(db_session):
+    alert = _alert_with_layers(db_session)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+    for layer in layers:
+        for row in layer["rows"]:
+            assert row["volatility_range"] is None

@@ -19,6 +19,7 @@ from app.companies.fundamentals import fundamentals_payload
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import cap_tier_map
+from app.market.event_volatility import lookup_range, ranges_for_category
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
 from app.models import Alert, AlertRippleLayer, ImpactEdge, MarketMove
@@ -106,6 +107,9 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
 
     cap_tiers = cap_tier_map(session)
 
+    # One query for the whole card back, not one per row (spec §6).
+    vol_by_company, vol_by_sector = ranges_for_category(session, alert.category)
+
     edges = session.query(ImpactEdge).filter_by(alert_id=alert.id).all()
     relation_by_company_id: dict[int, str] = {}
     for edge in edges:
@@ -169,6 +173,9 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             "business_desc": (_desc := sourced_description(company))[0],
             "business_desc_source_url": _desc[1],
             "fundamentals": fundamentals_payload(company),
+            # Empirical reaction range for this news category (subsystem D).
+            # None below the sample thresholds -- omit, never fabricate.
+            "volatility_range": lookup_range(vol_by_company, vol_by_sector, company),
             "direction": alert_company.direction,
             "excess_move_pct": None,
             "intensity": None,

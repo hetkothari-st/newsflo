@@ -20,6 +20,7 @@ from app.i18n import get_lang
 from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import cap_tier_map, resolve_cap_tier
+from app.market.event_volatility import volatility_range_payload
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple import get_sector_peers_for_alert
 from app.market.ripple_layers import compute_ripple_layers
@@ -64,6 +65,9 @@ def _company_facts(session: Session, company: Company, held_company_ids: set[int
         "rationale": None,
         "section_title": None,
         "peers": [],
+        # Subsystem D: only meaningful within an event context -- populated
+        # on the alert path below, never for Directory browsing.
+        "volatility_range": None,
     }
 
 
@@ -104,6 +108,7 @@ def get_stock_deep_dive(
     translated = bulk_alert_company_translations(db, [alert_company.id], lang).get(alert_company.id)
     result["why"] = translated_why or alert_company.why
     result["rationale"] = (translated[0] if translated and translated[0] else None) or alert_company.rationale
+    result["volatility_range"] = volatility_range_payload(db, company, alert.category)
     for layer in compute_ripple_layers(db, alert, held_company_ids):
         if any(row["ticker"] == company.ticker for row in layer["rows"]):
             result["section_title"] = layer["title"]
