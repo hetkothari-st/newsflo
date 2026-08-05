@@ -64,7 +64,7 @@ describe('Fundamentals', () => {
     ).toBeInTheDocument();
   });
 
-  it('glance variant shows only headline ratios and no consolidated block', () => {
+  it('glance variant speaks plain language, demotes abbreviations to tags', () => {
     render(
       <Fundamentals
         variant="glance"
@@ -77,14 +77,35 @@ describe('Fundamentals', () => {
         }}
       />,
     );
-    expect(screen.getByText('76.92')).toBeInTheDocument(); // P/E
-    expect(screen.getByText('8.46')).toBeInTheDocument(); // P/B
-    expect(screen.getByText('11.00')).toBeInTheDocument(); // ROE
-    expect(screen.getByText('16.68')).toBeInTheDocument(); // OPM
-    expect(screen.queryByText('52.75')).not.toBeInTheDocument(); // EPS hidden
-    expect(screen.queryByText('67.14')).not.toBeInTheDocument(); // CEPS hidden
+    expect(screen.getByText('Price vs yearly profit')).toBeInTheDocument();
+    expect(screen.getByText('76.9×')).toBeInTheDocument();
+    expect(screen.getByText('Profit kept from sales')).toBeInTheDocument();
+    expect(screen.getByText('16.7%')).toBeInTheDocument();
+    expect(screen.getByText("Return on shareholders' money")).toBeInTheDocument();
+    expect(screen.getByText('11.0%')).toBeInTheDocument();
+    // Abbreviations survive only as small tags for finance-literate readers.
+    expect(screen.getByText('P/E')).toBeInTheDocument();
+    // No raw codes as primary labels, no P/B, no EPS/CEPS, no consolidated wall.
+    expect(screen.queryByText('8.46')).not.toBeInTheDocument();
+    expect(screen.queryByText('52.75')).not.toBeInTheDocument();
+    expect(screen.queryByText('67.14')).not.toBeInTheDocument();
     expect(screen.queryByText('consolidated')).not.toBeInTheDocument();
     expect(screen.queryByText('28.44')).not.toBeInTheDocument();
+  });
+
+  it('glance variant keeps a negative margin -- loss-making is real information', () => {
+    render(
+      <Fundamentals
+        variant="glance"
+        data={{
+          classification: { sector: 'Energy', industry: null, group: null, sub_group: null },
+          ratios: { opm: -3.2 },
+          source: 'BSE',
+          as_of: '2026-08-05',
+        }}
+      />,
+    );
+    expect(screen.getByText('-3.2%')).toBeInTheDocument();
   });
 
   it('renders nothing when data is null', () => {
