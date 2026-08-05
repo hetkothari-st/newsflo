@@ -12,11 +12,16 @@ const RATIO_LABELS: Array<[RatioKey, string]> = [
   ['roe', 'ROE %'],
 ];
 
+// The glance sheet is a quick "who is this company" look, not a terminal:
+// four headline ratios, no consolidated block. The full variant (deep dive,
+// legacy popups) keeps everything BSE published.
+const GLANCE_RATIOS: RatioKey[] = ['pe', 'pb', 'roe', 'opm'];
+
 // Sourced-fact panel: BSE's official classification path plus whichever
 // ratios it actually published, each traceable to a source and an as-of
 // date. Replaces the LLM-invented business_desc paragraph (see
 // docs/superpowers/specs/2026-08-04-sourced-company-fundamentals-design.md).
-// Shared across three call sites in two different design systems --
+// Shared across call sites in two different design systems --
 // InsightCard/BusinessPopup (the Tailwind editorial tree) AND v3/Sheets.tsx
 // (its own `.nf3`-scoped stylesheet, no Tailwind classes anywhere else in
 // that tree) -- so this deliberately never forces a font-family utility:
@@ -28,29 +33,49 @@ const RATIO_LABELS: Array<[RatioKey, string]> = [
 // index.css's --color-page/ink/muted/hairline vs v3.css's --bg/ink/ink2/
 // border), and v3 already uses this exact "hairline rule above a trailing
 // note" pattern for its own `.disc` block.
-export default function Fundamentals({ data }: { data: FundamentalsData | null | undefined }) {
+//
+// Zeros never reach this component: the backend omits BSE's literal "0.00"
+// not-published sentinel at the serve layer (app.companies.fundamentals),
+// so any value present here is a real published figure (negatives included
+// -- loss-making EPS is a fact, not a sentinel).
+export default function Fundamentals({
+  data,
+  variant = 'full',
+}: {
+  data: FundamentalsData | null | undefined;
+  variant?: 'full' | 'glance';
+}) {
   if (!data) return null; // no invented filler -- ~645 companies have no classification
 
   const { classification: c, ratios, consolidated, as_of, source, financials_as_of, financials_source } = data;
-  const path = [c.sector, c.industry, c.group, c.sub_group].filter(
-    (value): value is string => Boolean(value),
-  );
+  // BSE's four levels frequently repeat verbatim ("Construction ›
+  // Construction" for L&T) -- adjacent duplicates carry no information and
+  // read as a rendering bug, so collapse them. Non-adjacent repeats are
+  // kept: they would indicate genuinely different levels sharing a name.
+  const path = [c.sector, c.industry, c.group, c.sub_group]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, all) => index === 0 || value !== all[index - 1]);
 
-  // Every ratio the payload actually carries -- a filter on `!== undefined`,
-  // never a truthiness check, so a real 0.0 (e.g. NPM) still renders as
-  // "0.00" rather than being mistaken for "not reported".
-  const shown = RATIO_LABELS.map(([key, label]) => ({ key, label, value: ratios?.[key] })).filter(
+  const ratioLabels =
+    variant === 'glance'
+      ? RATIO_LABELS.filter(([key]) => GLANCE_RATIOS.includes(key))
+      : RATIO_LABELS;
+
+  // A filter on `!== undefined`, never a truthiness check -- a real
+  // negative value (loss-making EPS) must survive.
+  const shown = ratioLabels.map(([key, label]) => ({ key, label, value: ratios?.[key] })).filter(
     (entry): entry is { key: RatioKey; label: string; value: number } => entry.value !== undefined,
   );
-  // Same omit-vs-zero contract as `shown` above, for the consolidated
-  // (group-level) figures BSE publishes alongside the standalone ones.
-  const shownConsolidated = RATIO_LABELS.map(([key, label]) => ({
-    key,
-    label,
-    value: consolidated?.[key],
-  })).filter(
-    (entry): entry is { key: RatioKey; label: string; value: number } => entry.value !== undefined,
-  );
+  const shownConsolidated =
+    variant === 'glance'
+      ? []
+      : RATIO_LABELS.map(([key, label]) => ({
+          key,
+          label,
+          value: consolidated?.[key],
+        })).filter(
+          (entry): entry is { key: RatioKey; label: string; value: number } => entry.value !== undefined,
+        );
 
   if (path.length === 0 && shown.length === 0 && shownConsolidated.length === 0) return null;
 
