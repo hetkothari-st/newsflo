@@ -201,3 +201,64 @@ def test_empty_input_never_clobbers_existing_rows(db_session):
     result = ev.apply_ranges(db_session, [], as_of=AS_OF)
     assert result == {"deleted": 0, "inserted": 0}
     assert db_session.query(EventVolatilityRange).count() == 1
+
+
+# --- range_payload / volatility_range_payload / ranges_for_category ---------
+
+def _stored(db_session, level, category="pharma", company_id=None,
+            sector=None, n=3):
+    row = EventVolatilityRange(
+        level=level, company_id=company_id, sector=sector, category=category,
+        n_events=n, min_excess_move_pct=-1.8, median_excess_move_pct=0.6,
+        max_excess_move_pct=2.4, as_of=AS_OF, source="market_moves",
+    )
+    db_session.add(row)
+    db_session.flush()
+    return row
+
+
+def test_payload_prefers_the_company_row(db_session, make_company):
+    company = make_company("CIPLA.NS", sector="pharma")
+    _stored(db_session, "COMPANY", company_id=company.id, n=9)
+    _stored(db_session, "SECTOR", sector="pharma", n=40)
+    payload = ev.volatility_range_payload(db_session, company, "pharma")
+    assert payload == {
+        "level": "COMPANY", "n_events": 9,
+        "min_excess_move_pct": -1.8, "median_excess_move_pct": 0.6,
+        "max_excess_move_pct": 2.4, "as_of": "2026-08-05",
+    }
+
+
+def test_payload_falls_back_to_the_sector_pool(db_session, make_company):
+    company = make_company("CIPLA.NS", sector="pharma")
+    _stored(db_session, "SECTOR", sector="pharma", n=12)
+    payload = ev.volatility_range_payload(db_session, company, "pharma")
+    assert payload["level"] == "SECTOR" and payload["n_events"] == 12
+
+
+def test_payload_is_none_below_every_rung(db_session, make_company):
+    company = make_company("CIPLA.NS", sector="pharma")
+    assert ev.volatility_range_payload(db_session, company, "pharma") is None
+
+
+def test_payload_is_none_for_a_different_category(db_session, make_company):
+    company = make_company("CIPLA.NS", sector="pharma")
+    _stored(db_session, "COMPANY", company_id=company.id, category="banking")
+    assert ev.volatility_range_payload(db_session, company, "pharma") is None
+
+
+def test_payload_is_none_without_a_category(db_session, make_company):
+    """Directory browsing has no event context -- a range is meaningless
+    without an event type."""
+    company = make_company("CIPLA.NS", sector="pharma")
+    _stored(db_session, "COMPANY", company_id=company.id)
+    assert ev.volatility_range_payload(db_session, company, None) is None
+
+
+def test_bulk_lookup_returns_both_maps(db_session, make_company):
+    company = make_company("CIPLA.NS", sector="pharma")
+    _stored(db_session, "COMPANY", company_id=company.id)
+    _stored(db_session, "SECTOR", sector="pharma", n=8)
+    by_company, by_sector = ev.ranges_for_category(db_session, "pharma")
+    assert company.id in by_company
+    assert by_sector["pharma"].n_events == 8

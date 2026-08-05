@@ -115,3 +115,56 @@ def rebuild(session: Session, as_of: date) -> dict:
     facts = collect_move_facts(session)
     result = apply_ranges(session, compute_ranges(facts), as_of)
     return {"facts": len(facts), **result}
+
+
+def range_payload(row: EventVolatilityRange) -> dict:
+    """Serialized shape (spec §6). level travels with the numbers so the UI
+    can label a pooled range -- a sector range dressed as stock-specific is
+    a lie about sample identity."""
+    return {
+        "level": row.level,
+        "n_events": row.n_events,
+        "min_excess_move_pct": row.min_excess_move_pct,
+        "median_excess_move_pct": row.median_excess_move_pct,
+        "max_excess_move_pct": row.max_excess_move_pct,
+        "as_of": row.as_of.isoformat(),
+    }
+
+
+def ranges_for_category(
+    session: Session, category: str,
+) -> tuple[dict[int, EventVolatilityRange], dict[str, EventVolatilityRange]]:
+    """All stored rows for one category, keyed for O(1) per-row lookup --
+    the card back iterates many companies and must not query per row."""
+    rows = (
+        session.query(EventVolatilityRange)
+        .filter(EventVolatilityRange.category == category)
+        .all()
+    )
+    by_company = {r.company_id: r for r in rows if r.level == "COMPANY"}
+    by_sector = {r.sector: r for r in rows if r.level == "SECTOR"}
+    return by_company, by_sector
+
+
+def lookup_range(
+    by_company: dict[int, EventVolatilityRange],
+    by_sector: dict[str, EventVolatilityRange],
+    company: Company,
+) -> dict | None:
+    """The fallback ladder against pre-fetched maps: COMPANY row, else the
+    company's sector pool, else None."""
+    row = by_company.get(company.id)
+    if row is None and company.sector:
+        row = by_sector.get(company.sector)
+    return range_payload(row) if row is not None else None
+
+
+def volatility_range_payload(
+    session: Session, company: Company, category: str | None,
+) -> dict | None:
+    """Single-company convenience over the same ladder. None without a
+    category -- a range is meaningless without an event type."""
+    if not category:
+        return None
+    by_company, by_sector = ranges_for_category(session, category)
+    return lookup_range(by_company, by_sector, company)
