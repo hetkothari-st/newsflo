@@ -127,16 +127,25 @@ body:has(.nf4) { background: #fafafa; }
   min-height: 100dvh;
   scroll-snap-align: start;
   border-top: 1px solid var(--hairline);
-  padding: 32px 16px 48px;
+  padding: 32px 16px;
   display: grid;
   grid-template-columns: 1fr;
+  /* Text sizes itself; the plate absorbs every remaining pixel of the
+     viewport-tall slot -- no dead paper above or below the card. */
+  grid-template-rows: auto 1fr;
   gap: 24px;
-  /* Content flows from the slot's top -- centering left a viewport-tall
-     void between the masthead and the first story on load. */
-  align-content: start;
 }
+/* A card whose story has no usable image collapses to one row -- the
+   1fr plate row would otherwise reintroduce the dead space. */
+.nf4 .storycard:not(:has(.lplate)) { grid-template-rows: auto; align-content: center; }
 @media (min-width: 900px) {
-  .nf4 .storycard { grid-template-columns: 2fr 1fr; align-items: start; padding: 48px 32px; }
+  .nf4 .storycard {
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: 1fr;
+    align-items: stretch;
+    padding: 48px 32px;
+  }
+  .nf4 .storycard:not(:has(.lplate)) { grid-template-columns: 1fr; align-items: center; }
 }
 .nf4 .storycard .lmove {
   font-family: var(--serif);
@@ -161,8 +170,8 @@ body:has(.nf4) { background: #fafafa; }
 }
 .nf4 .storycard .lplate {
   width: 100%;
-  max-height: 44vh;
-  aspect-ratio: 1 / 1;
+  height: 100%;
+  min-height: 200px;
   object-fit: cover;
   /* Monochrome halftone-plate treatment per the reference's imagery
      rules: no color photography, square corners, ink-on-paper. */
@@ -470,9 +479,8 @@ body:has(.nf4) { background: #fafafa; }
   .nf4 .navrow { padding: 12px 8px; }
   .nf4 .navlinks { gap: 14px; }
   .nf4 .capf4 { gap: 12px; }
-  .nf4 .storycard { padding: 32px 16px; gap: 16px; }
+  .nf4 .storycard { padding: 24px 16px; gap: 16px; }
   .nf4 .storycard .lmove { font-size: 56px; }
-  .nf4 .storycard .lplate { max-height: 34vh; }
   .nf4 .crow { flex-wrap: wrap; row-gap: 2px; }
   .nf4 .crow .nm4 { flex-basis: 100%; order: 3; white-space: normal; }
   .nf4 .band .sumline { gap: 20px; }
