@@ -399,6 +399,39 @@ class CarOutcome(Base):
     computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class EventVolatilityRange(Base):
+    """One empirical reaction range per (level, subject, news category) --
+    subsystem D (docs/superpowers/specs/2026-08-05-event-volatility-ranges-
+    design.md). Built nightly by app.market.event_volatility from measured
+    market_moves rows only; fully rebuilt each run (an aggregate has no
+    identity worth preserving). No LLM ever writes here.
+
+    level=COMPANY rows set company_id (sector NULL); level=SECTOR rows set
+    sector (company_id NULL) and pool every measured company in that
+    sector. The unique constraint is belt-and-braces -- the full rebuild
+    makes duplicates structurally impossible.
+    """
+    __tablename__ = "event_volatility_ranges"
+    __table_args__ = (
+        UniqueConstraint(
+            "level", "company_id", "sector", "category",
+            name="uq_event_vol_level_subject_category",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    level = Column(String, nullable=False)  # COMPANY | SECTOR
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    sector = Column(String, nullable=True)
+    category = Column(String, nullable=False)
+    n_events = Column(Integer, nullable=False)
+    min_excess_move_pct = Column(Float, nullable=False)
+    median_excess_move_pct = Column(Float, nullable=False)
+    max_excess_move_pct = Column(Float, nullable=False)
+    as_of = Column(Date, nullable=False)
+    source = Column(String, nullable=False, default="market_moves")
+
+
 class MarketMove(Base):
     """One row per (event, ticker) -- the measured facts backing every
     user-facing number (docs/NEWS_IMPACT_APP_SPEC.md §3.1, §3.2). ``event``
@@ -417,6 +450,12 @@ class MarketMove(Base):
     raw_move_pct = Column(Float, nullable=True)
     sector_move_pct = Column(Float, nullable=True)
     benchmark_ticker = Column(String, nullable=False)
+    # Alert.category copied at measurement time. Alerts can be
+    # recategorized after the fact; a live join would silently re-shuffle
+    # which range pool historical moves belong to. Same reclassification-
+    # safety pattern calibration_samples.category documents. NULL on rows
+    # that predate this column (backfill_event_volatility.py fills them).
+    category = Column(String, nullable=True)
     excess_move_pct = Column(Float, nullable=True)
     volume = Column(Float, nullable=True)
     avg_volume_20d = Column(Float, nullable=True)

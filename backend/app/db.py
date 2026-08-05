@@ -98,6 +98,7 @@ _ADDED_COLUMNS = [
     ("companies", "con_roe", "FLOAT"),
     ("companies", "financials_source", "VARCHAR"),
     ("companies", "financials_as_of", "DATE"),
+    ("market_moves", "category", "VARCHAR"),
 ]
 
 
