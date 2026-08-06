@@ -50,7 +50,11 @@ from app.analysis.schemas import (
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
 from app.analysis.verification import verify_companies
-from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
+from app.companies.candidates import (
+    MAX_CANDIDATES_PER_PROMPT, candidate_companies, candidate_tickers, format_candidates,
+)
+from app.companies.supply_links import prompting as supply_link_prompting
+from app.models import Company
 
 logger = logging.getLogger(__name__)
 
@@ -865,8 +869,29 @@ def _identify_companies(
     # is None for callers with no DB (older tests) -- those stay ungrounded.
     valid_tickers: list[str] | None = None
     candidate_block = ""
+    known_relationships = ""
     if session is not None:
         candidates = candidate_companies(session, [s.sector for s in sectors])
+
+        # Supply-links grounding (app.companies.supply_links.prompting):
+        # event_tickers = the already-identified companies this call chains
+        # from (parent_tickers is None at the direct/primary stage, where no
+        # company is known yet -- that stage stays ungrounded by links, same
+        # as before this module existed). Resolved counterparties not
+        # already in the candidate list are appended to it BEFORE the
+        # MAX_CANDIDATES_PER_PROMPT cap below, so that cap still binds.
+        known_relationships, extra_tickers = supply_link_prompting.known_relationships_block(
+            session, parent_tickers or [],
+        )
+        if extra_tickers:
+            existing_tickers = {c.ticker for c in candidates}
+            new_tickers = [t for t in extra_tickers if t not in existing_tickers]
+            if new_tickers:
+                candidates = candidates + (
+                    session.query(Company).filter(Company.ticker.in_(new_tickers)).all()
+                )
+        candidates = candidates[:MAX_CANDIDATES_PER_PROMPT]
+
         if candidates:
             valid_tickers = candidate_tickers(candidates)
             candidate_block = (
@@ -883,6 +908,13 @@ def _identify_companies(
     # comment and the model-selection comment in _attempt below for why the
     # rulebook-bearing COMPANY_RATIONALE_INSTRUCTIONS is never reachable here.
     rationale_instructions = CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
+    if known_relationships:
+        # Additive only: zero stored links means known_relationships == ""
+        # and rationale_instructions is untouched, so the composed prompt
+        # stays byte-identical to before this block existed (see
+        # tests/test_supply_links.py's byte-identical-when-empty test and
+        # tests/test_cascade.py's untouched prompt-shape tests).
+        rationale_instructions = f"{rationale_instructions}\n\n{known_relationships}"
 
     def _compose(instructions: str) -> str:
         """Stable prefix first, variable content last (cost-optimization

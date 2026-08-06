@@ -11,9 +11,11 @@ from pathlib import Path
 
 import pytest
 
+import app.pipeline as pipeline_module
 from app import config
-from app.companies.supply_links import extract, fetchers, loader, snapshot
-from app.models import Company, CompanyAlias, SupplyLink
+from app.analysis.schemas import AnalysisOutput
+from app.companies.supply_links import extract, fetchers, loader, prompting, snapshot
+from app.models import Alert, AlertCompany, Article, Company, CompanyAlias, ImpactEdge, SupplyLink
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ratings"
 
@@ -381,3 +383,88 @@ def test_rating_description_updates_an_older_rating_description(db_session):
     db_session.refresh(company)
     assert company.business_desc == "New summary."
     assert company.business_desc_as_of == AS_OF
+
+
+# --- Task 6: prompt grounding + the no-auto-attribution guarantee ---------
+
+
+def test_no_links_means_empty_block_and_no_candidates(db_session):
+    _company(db_session, "AAA.NS", "Alpha")
+    block, extras = prompting.known_relationships_block(db_session, ["AAA.NS"])
+    assert block == "" and extras == []
+
+
+def test_block_lists_links_with_agency_and_date(db_session):
+    company = _company(db_session, "AAA.NS", "Alpha")
+    buyer = _company(db_session, "BBB.NS", "Beta")
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="Beta",
+        counterparty_company_id=buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF,
+        extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.flush()
+    block, extras = prompting.known_relationships_block(db_session, ["AAA.NS"])
+    assert "AAA.NS customers: Beta (BBB.NS)" in block
+    assert "[CRISIL 2026-08-06]" in block
+    assert "ONLY if THIS news plausibly transmits" in block
+    assert extras == ["BBB.NS"]
+
+
+def test_block_respects_line_and_char_caps(db_session):
+    company = _company(db_session, "AAA.NS", "Alpha")
+    for i in range(20):
+        db_session.add(SupplyLink(
+            company_id=company.id, relation="CUSTOMER",
+            counterparty_name=f"Counterparty Number {i} With A Long Name",
+            counterparty_company_id=None, evidence="q", source_url="u",
+            source_agency="CRISIL", as_of=AS_OF,
+            extracted_at=datetime.now(timezone.utc),
+        ))
+    db_session.flush()
+    block, _extras = prompting.known_relationships_block(db_session, ["AAA.NS"])
+    from app import config
+    assert len(block) <= config.SUPPLY_PROMPT_MAX_CHARS + 200  # + fixed instruction text
+    assert block.count("\n- ") <= config.SUPPLY_PROMPT_MAX_LINES
+
+
+def test_supply_links_NEVER_create_alert_companies_without_llm_output(db_session, monkeypatch):
+    """USER-LOCKED CONSTRAINT (spec 1): links ground the prompt and do
+    nothing else. An event company with stored links plus an LLM that
+    returns zero companies must produce zero AlertCompany rows and zero
+    ImpactEdges -- the ETERNAL.NS-class fan-out failure must be
+    structurally impossible."""
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    buyer = _company(db_session, "BETA.NS", "Beta Ltd")
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="Beta Ltd",
+        counterparty_company_id=buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF,
+        extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
+    article = Article(
+        source="test", url="https://example.com/supply-links-t5",
+        title="Alpha Ltd files an update", content="c",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    # The company-identification LLM stage returns zero companies -- reuses
+    # test_pipeline.py's stub pattern of replacing analyze_article wholesale
+    # (that is the only seam every persist-path test in this codebase mocks
+    # at), so the stored SupplyLink row above is the ONLY thing that could
+    # possibly inject a company into this alert.
+    fake_output = AnalysisOutput(category="other", companies=[])
+    monkeypatch.setattr(
+        pipeline_module, "analyze_article",
+        lambda client, title, content, session=None: fake_output,
+    )
+
+    created = pipeline_module.process_new_articles(db_session, claude_client=object())
+
+    assert created == 1
+    alert = db_session.query(Alert).one()
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert.id).count() == 0
+    assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 0
