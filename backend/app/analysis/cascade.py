@@ -50,7 +50,12 @@ from app.analysis.schemas import (
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
 from app.analysis.verification import verify_companies
-from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
+from app.companies.candidates import (
+    MAX_CANDIDATES_PER_PROMPT, candidate_companies, candidate_tickers, format_candidates,
+)
+from app.companies.integrity import DEMO_TICKERS
+from app.companies.supply_links import prompting as supply_link_prompting
+from app.models import Company
 
 logger = logging.getLogger(__name__)
 
@@ -865,8 +870,60 @@ def _identify_companies(
     # is None for callers with no DB (older tests) -- those stay ungrounded.
     valid_tickers: list[str] | None = None
     candidate_block = ""
+    known_relationships = ""
     if session is not None:
         candidates = candidate_companies(session, [s.sector for s in sectors])
+
+        # Supply-links grounding (app.companies.supply_links.prompting):
+        # event_tickers = the already-CONFIRMED DIRECT companies this call
+        # chains from -- i.e. ONLY the L1 cascade stage, whose parent_pool
+        # IS the direct-company pool (spec 6's "event companies"). Restricted
+        # here, not just at the direct stage (parent_pool is None there,
+        # already excluded): grounding the L2 stage too (parent_pool =
+        # indirect_l1 companies) measured 6,657-7,165 tokens against
+        # COMPANY_PROMPT_TOKEN_BUDGET=6,500 -- see
+        # tests/test_prompt_budget.py, which is what holds this line.
+        event_tickers: list[str] = []
+        if parent_pool and all(m.impact_level == "direct" for m in parent_pool):
+            event_tickers = parent_tickers or []
+        known_relationships, extra_tickers = supply_link_prompting.known_relationships_block(
+            session, event_tickers,
+        )
+        # extras supplement a candidate list, never constitute one: when
+        # candidate_companies() found zero eligible companies for these
+        # sectors, appending extras here would make them the ENTIRE
+        # candidate list, and with `candidates` non-empty the block below
+        # sets valid_tickers to an enum containing ONLY those extras --
+        # constraining the model to select solely from the event company's
+        # already-known counterparties (measured: 10 of 18 sectors had zero
+        # eligible candidates, which would have collapsed the tool schema's
+        # ticker enum + `allowed` filter to exactly that shape on every one
+        # of them). A sector with no real candidates must stay ungrounded
+        # (valid_tickers=None, unconstrained) rather than be silently
+        # narrowed to a handful of supply-chain names.
+        if extra_tickers and candidates:
+            existing_tickers = {c.ticker for c in candidates}
+            new_tickers = [t for t in extra_tickers if t not in existing_tickers]
+            if new_tickers:
+                # Same eligibility guards candidate_companies applies (see
+                # app.companies.candidates ~110-120): a resolved counterparty
+                # is still just a ticker string here, not yet vetted as a
+                # real, currently-tradeable Indian listing -- without these
+                # filters a demo row, a foreign/global listing, or an
+                # SME/RESTRICTED/SUSPENDED ticker could reach the prompt and
+                # the tool schema's enum by a path candidate_companies itself
+                # would never allow.
+                extra_companies = (
+                    session.query(Company)
+                    .filter(Company.ticker.in_(new_tickers))
+                    .filter(Company.ticker.notin_(DEMO_TICKERS))
+                    .filter(Company.market == "INDIA")
+                    .filter(Company.tradeability == "NORMAL")
+                    .all()
+                )
+                candidates = candidates + extra_companies
+        candidates = candidates[:MAX_CANDIDATES_PER_PROMPT]
+
         if candidates:
             valid_tickers = candidate_tickers(candidates)
             candidate_block = (
@@ -883,6 +940,16 @@ def _identify_companies(
     # comment and the model-selection comment in _attempt below for why the
     # rulebook-bearing COMPANY_RATIONALE_INSTRUCTIONS is never reachable here.
     rationale_instructions = CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
+
+    # known_relationships is derived from THIS call's event tickers/stored
+    # links, not a per-stage constant -- like candidate_block, it belongs in
+    # _compose's variable tail, not spliced into `instructions` (the
+    # cacheable prefix _compose's own docstring describes below). Zero
+    # stored links means known_relationships == "" and this stays "", so the
+    # composed prompt is unaffected either way (see tests/test_supply_links.
+    # py's byte-identical-when-empty test and tests/test_cascade.py's
+    # untouched prompt-shape tests).
+    known_relationships_tail = f"\n\n{known_relationships}" if known_relationships else ""
 
     def _compose(instructions: str) -> str:
         """Stable prefix first, variable content last (cost-optimization
@@ -903,7 +970,10 @@ def _identify_companies(
         `candidate_block` (the real DB companies this call must choose from)
         rides the variable tail, not the prefix: it is derived from THIS
         call's sectors, so it is not cacheable, and it must stay adjacent to
-        the sector lines it enumerates.
+        the sector lines it enumerates. `known_relationships_tail` (this
+        event company's own stored SupplyLink rows) is the same kind of
+        per-call fact, not a per-stage constant, so it rides the tail too
+        rather than being spliced into `instructions`.
         """
         return (
             f"{framing}\n\n"
@@ -911,7 +981,8 @@ def _identify_companies(
             f"Facts: {facts}\n\n"
             f"Sectors:\n{sector_lines}"
             f"{parent_context}"
-            f"{candidate_block}\n\n"
+            f"{candidate_block}"
+            f"{known_relationships_tail}\n\n"
             "Now apply the instructions above to these facts and sectors, "
             "filling in every field exactly as they specify."
         )

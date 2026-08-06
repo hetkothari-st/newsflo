@@ -151,6 +151,37 @@ class CompanyAlias(Base):
     company = relationship("Company", back_populates="aliases")
 
 
+class SupplyLink(Base):
+    """One sourced counterparty relationship per row (docs/superpowers/
+    specs/2026-08-06-supply-links-rating-rationales-design.md §5.1),
+    extracted from a rating agency's public rationale document. `evidence`
+    is the verbatim quote that survived the extraction gate -- a row
+    without a provable quote is never written. counterparty_company_id is
+    resolved via the EXACT matching ladder only; NULL means "no exact
+    match", never "guessed". These rows feed pipeline prompts as grounding;
+    they NEVER create AlertCompany/ImpactEdge rows themselves (user-locked
+    constraint, tested by name in tests/test_supply_links.py).
+    """
+    __tablename__ = "supply_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "relation", "counterparty_name",
+            name="uq_supply_link_company_relation_counterparty",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    relation = Column(String, nullable=False)  # SUPPLIER | CUSTOMER
+    counterparty_name = Column(String, nullable=False)
+    counterparty_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    evidence = Column(Text, nullable=False)
+    source_url = Column(String, nullable=False)
+    source_agency = Column(String, nullable=False)
+    as_of = Column(Date, nullable=False)
+    extracted_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class AnalysisCache(Base):
     """Determinism cache: the same article content (title + body) always
     produces the same analyze_article() output. Keyed by a content hash,

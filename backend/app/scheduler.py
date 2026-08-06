@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -6,7 +7,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.analysis.claude_client import build_client
 from app.analysis.refinement import run_pending_refinements
 from app.companies.market_caps import alert_referenced_tickers, refresh_market_caps
+from app.companies.supply_links import snapshot as supply_snapshot
 from app.companies.universe import fetchers, snapshot
+from app import config
 from app.config import settings
 from app.db import SessionLocal
 # IndianAPI is disabled (not deleted) -- replaced by thenewsapi.com, see
@@ -353,6 +356,217 @@ def _run_event_volatility_refresh() -> None:
         session.close()
 
 
+def _run_rating_filings_poll() -> None:
+    """Daily: pages BSE's Credit Rating announcements for yesterday->today
+    and fetches every rationale PDF they name. No time budget -- a single
+    day's rating filings are dozens of rows, not thousands, so both the
+    announcements page and the document fetch comfortably finish inside one
+    tick. Extraction of the fetched PDFs is NOT done here -- that is the
+    separately-budgeted _run_supply_links_refresh, so a slow LLM pass never
+    delays tomorrow's poll. Any failure is logged, never raised, same as
+    every other scheduler job."""
+    from app.companies.supply_links import fetchers as supply_fetchers
+
+    try:
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        rows = supply_fetchers.fetch_announcements(
+            supply_snapshot.DEFAULT_ROOT, today, yesterday, today,
+        )
+        targets = supply_fetchers.parse_announcements(rows)
+        result = supply_fetchers.fetch_documents(supply_snapshot.DEFAULT_ROOT, targets)
+        logger.info(
+            "Rating filings poll: %s announcement rows, %s rating docs, "
+            "fetched=%s skipped=%s failed=%s",
+            len(rows), len(targets), result["fetched"], result["skipped"],
+            len(result["failed"]),
+        )
+    except Exception:
+        logger.exception("Rating filings poll failed")
+
+
+# BSE's LLM-as-reader call (extract.extract_profile) is the slow step here,
+# not network fetch -- 30 minutes is generous headroom for a daily backlog
+# without letting a stuck/huge backlog block the scheduler thread
+# indefinitely. Whatever is left when the budget runs out resumes on
+# tomorrow's firing, same resumability contract as
+# _run_universe_detail_refresh.
+_SUPPLY_BUDGET_SECONDS = 30 * 60
+
+
+def _run_supply_links_refresh() -> None:
+    """Daily, time-boxed: drains snapshot.pending_docs (rationale PDFs
+    fetched by _run_rating_filings_poll or backfill_supply_links.py)
+    through PDF-text extraction, the LLM-as-reader call, and loader writes.
+
+    Docs leave the queue for good (mark_extracted) three ways: scrip code
+    resolves to no Listing/Company (unmatched_scrip), the PDF has no
+    extractable text (unextractable), or extraction+load succeeded
+    (extracted). They stay pending for a retry on a later run for any of:
+    the LLM call returned nothing (llm_failed), a sidecar (.meta.json or
+    .url) was unreadable/corrupt, meta's news_date was missing or
+    unparsable, or the per-doc body raised (errored, see below) -- none of
+    these is this document's fault in a way a later run can't fix, so none
+    of them may default a fabricated value (an empty source_url, an
+    as_of=today()) just to force the write through; see I3/I4/I7/M3 in the
+    2026-08-06 review for the reproduced damage each of those defaults did.
+
+    Each doc's body (sidecar reads through mark_extracted) runs inside its
+    own try/except: one poisoned document (e.g. a duplicate-counterparty
+    IntegrityError from loader.apply_extraction pre-dating the gate() dedupe
+    fix in extract.py) must never abort the rest of the day's queue. On any
+    exception the session is rolled back (a failed flush/commit leaves the
+    session unusable for the next iteration otherwise), the doc is counted
+    "errored" and logged with its path, and the loop continues -- crucially,
+    mark_extracted is NOT called on this path, so the doc is retried
+    (genuinely, now that the loop survives it) on the next run rather than
+    being permanently skipped or permanently poisoning the same glob
+    position forever.
+
+    Circuit breaker: a rate-limited/quota-exhausted provider will not
+    un-limit within this same tick, so once SUPPLY_LLM_FAILURE_BREAKER
+    CONSECUTIVE docs come back llm_failed, the drain stops for this run
+    rather than burning two calls (primary + fallback model) against the
+    provider's daily quota for every remaining pending doc -- quota that
+    the analysis pipeline's own fallback-model bucket also depends on. Any
+    successful extraction resets the streak back to zero.
+
+    Any failure escaping the loop itself is logged, never raised, same as
+    every other scheduler job.
+    """
+    import json
+
+    from app.companies.supply_links import extract, loader
+    from app.models import Company, Listing
+
+    counts = {
+        "extracted": 0, "unmatched_scrip": 0, "unextractable": 0,
+        "llm_failed": 0, "errored": 0,
+    }
+    deadline = time.monotonic() + _SUPPLY_BUDGET_SECONDS
+    consecutive_llm_failures = 0
+
+    session = SessionLocal()
+    try:
+        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+
+        for pdf_path in supply_snapshot.pending_docs(supply_snapshot.DEFAULT_ROOT):
+            if time.monotonic() >= deadline:
+                break
+
+            try:
+                try:
+                    meta = json.loads(
+                        supply_snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
+                    )
+                except (OSError, ValueError):
+                    # Corrupt/unreadable meta -- distinct from a readable
+                    # meta whose scrip genuinely matches no company (that
+                    # stays unmatched_scrip+mark_extracted, below). Without
+                    # this, meta defaulted to {}, which resolved to no
+                    # scrip_code, which read as "genuinely unmatched" and
+                    # permanently dropped what may have been a perfectly
+                    # fine PDF.
+                    counts["errored"] += 1
+                    logger.warning(
+                        "Supply links refresh: unreadable meta sidecar, left pending: %s",
+                        pdf_path,
+                    )
+                    continue
+                try:
+                    source_url = supply_snapshot.url_sidecar_path(pdf_path).read_text(
+                        encoding="utf-8"
+                    ).strip()
+                except OSError:
+                    # An empty source_url would both permanently block future
+                    # rating-desc updates for this company (loader's
+                    # _should_write_description sees a non-AttachLive-looking
+                    # "" and treats it as foreign provenance) AND write a
+                    # provenance-free SupplyLink row -- neither is
+                    # acceptable when the sidecar might just be a transient
+                    # read failure.
+                    counts["errored"] += 1
+                    logger.warning(
+                        "Supply links refresh: unreadable .url sidecar, left pending: %s",
+                        pdf_path,
+                    )
+                    continue
+
+                scrip_code = meta.get("scrip_code")
+                listing = (
+                    session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
+                    if scrip_code else None
+                )
+                company = (
+                    session.query(Company).filter(Company.id == listing.company_id).first()
+                    if listing is not None else None
+                )
+                if company is None:
+                    supply_snapshot.mark_extracted(pdf_path)
+                    counts["unmatched_scrip"] += 1
+                    continue
+
+                text = extract.pdf_text(pdf_path)
+                if text is None:
+                    supply_snapshot.mark_extracted(pdf_path)
+                    counts["unextractable"] += 1
+                    continue
+
+                profile = extract.extract_profile(client, company.name, text)
+                if profile is None:
+                    counts["llm_failed"] += 1
+                    consecutive_llm_failures += 1
+                    if consecutive_llm_failures >= config.SUPPLY_LLM_FAILURE_BREAKER:
+                        logger.warning(
+                            "Supply links refresh: circuit breaker tripped after "
+                            "%s consecutive llm_failed docs -- stopping drain for "
+                            "this run, remaining docs stay pending.",
+                            consecutive_llm_failures,
+                        )
+                        break
+                    continue  # left pending -- retried on the next run
+
+                as_of = supply_snapshot.parse_news_date(meta.get("news_date"))
+                if as_of is None:
+                    # Missing/unparsable news_date must never default to
+                    # today() -- a stale document stamped "today" would
+                    # clobber genuinely newer stored links (reproduced: a
+                    # stale 2023 doc stamped today replaced 2026 links).
+                    counts["errored"] += 1
+                    logger.warning(
+                        "Supply links refresh: unparsable/missing news_date, "
+                        "left pending: %s",
+                        pdf_path,
+                    )
+                    continue
+
+                loader.apply_extraction(
+                    session, company, profile,
+                    source_url=source_url, source_agency=meta.get("agency") or "",
+                    as_of=as_of,
+                )
+                supply_snapshot.mark_extracted(pdf_path)
+                counts["extracted"] += 1
+                consecutive_llm_failures = 0
+            except Exception:
+                session.rollback()
+                counts["errored"] += 1
+                logger.exception("Supply links refresh: doc failed, left pending: %s", pdf_path)
+                continue
+
+        logger.info(
+            "Supply links refresh: extracted=%s unmatched_scrip=%s "
+            "unextractable=%s llm_failed=%s errored=%s",
+            counts["extracted"], counts["unmatched_scrip"],
+            counts["unextractable"], counts["llm_failed"], counts["errored"],
+        )
+    except Exception:
+        session.rollback()
+        logger.exception("Supply links refresh failed")
+    finally:
+        session.close()
+
+
 def start_scheduler() -> None:
     global _scheduler
     scheduler = BackgroundScheduler()
@@ -453,6 +667,22 @@ def start_scheduler() -> None:
         # not be re-aggregating tables.
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=30),
         id="event_volatility_refresh",
+    )
+    scheduler.add_job(
+        _run_rating_filings_poll,
+        trigger="interval",
+        hours=24,
+        # Never at boot -- give the app a chance to settle first.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=45),
+        id="rating_filings_poll",
+    )
+    scheduler.add_job(
+        _run_supply_links_refresh,
+        trigger="interval",
+        hours=24,
+        # Fires after the poll above has had a chance to land today's docs.
+        next_run_time=datetime.now(timezone.utc) + timedelta(hours=1),
+        id="supply_links_refresh",
     )
     scheduler.start()
     _scheduler = scheduler
