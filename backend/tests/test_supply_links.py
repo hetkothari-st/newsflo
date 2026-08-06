@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from app import config
-from app.companies.supply_links import fetchers, snapshot
+from app.companies.supply_links import extract, fetchers, snapshot
 from app.models import Company, SupplyLink
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ratings"
@@ -201,3 +201,64 @@ def test_pending_docs_and_mark_extracted(tmp_path):
     assert path in snapshot.pending_docs(root)
     snapshot.mark_extracted(path)
     assert path not in snapshot.pending_docs(root)
+
+
+# --- Task 4: extraction -- PDF text, LLM-as-reader, evidence gate --------
+
+
+def test_evidence_gate_is_whitespace_normalized():
+    text = "The company  derives ~60% of\nrevenue from Indian Railways."
+    assert extract._evidence_in_text("derives ~60% of revenue from Indian Railways", text)
+    assert not extract._evidence_in_text("supplies steel to Tata Motors", text)
+
+
+def test_entries_without_provable_evidence_are_discarded(monkeypatch):
+    text = "Alpha Ltd manufactures castings. It derives most revenue from Indian Railways."
+    payload = {
+        "business_summary": "Alpha Ltd manufactures castings for rail applications.",
+        "suppliers": [],
+        "customers": [
+            {"name": "Indian Railways", "evidence": "derives most revenue from Indian Railways"},
+            {"name": "Tata Motors", "evidence": "supplies castings to Tata Motors"},  # not in text
+        ],
+    }
+    monkeypatch.setattr(extract, "_call_supply_tool", lambda client, name, text: payload)
+    result = extract.extract_profile(object(), "Alpha Ltd", text)
+    assert [n for n, _e in result["customers"]] == ["Indian Railways"]
+
+
+def test_caps_are_enforced_after_gating(monkeypatch):
+    text = " ".join(f"sells to Customer{i}." for i in range(6))
+    payload = {
+        "business_summary": None,
+        "suppliers": [],
+        "customers": [{"name": f"Customer{i}", "evidence": f"sells to Customer{i}."} for i in range(6)],
+    }
+    monkeypatch.setattr(extract, "_call_supply_tool", lambda client, name, text: payload)
+    result = extract.extract_profile(object(), "X", text)
+    assert len(result["customers"]) == 3  # config.SUPPLY_LINK_MAX_PER_RELATION
+
+
+def test_advice_language_summary_is_dropped_but_links_survive(monkeypatch):
+    text = "Beta Ltd refines sugar. It sells mainly to Nestle India."
+    payload = {
+        "business_summary": "Beta Ltd is a strong buy with excellent prospects.",
+        "suppliers": [],
+        "customers": [{"name": "Nestle India", "evidence": "sells mainly to Nestle India"}],
+    }
+    monkeypatch.setattr(extract, "_call_supply_tool", lambda client, name, text: payload)
+    result = extract.extract_profile(object(), "Beta Ltd", text)
+    assert result["business_summary"] is None
+    assert result["customers"]
+
+
+def test_pdf_text_reads_the_real_fixture():
+    text = extract.pdf_text(FIXTURES / "rationale_sample.pdf")
+    assert text and len(text) > 200
+
+
+def test_client_failure_degrades_to_none(monkeypatch):
+    def boom(client, name, text):
+        raise RuntimeError("rate limited to death")
+    monkeypatch.setattr(extract, "_call_supply_tool", boom)
+    assert extract.extract_profile(object(), "X", "some text") is None
