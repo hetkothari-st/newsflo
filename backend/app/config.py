@@ -38,6 +38,11 @@ class Settings(BaseSettings):
             keys.append(self.translation_groq_api_key_2)
         return keys
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
+    # Lets a non-production deployment (e.g. a UI-preview service sharing
+    # the production database) opt back in to demo-seeded feed stories.
+    # Production leaves this unset: demo-marked articles never reach its
+    # feed regardless of what sits in the shared database.
+    allow_demo_feed: bool = os.environ.get("ALLOW_DEMO_FEED", "false").lower() == "true"
     poll_interval_minutes: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "2"))
     translation_interval_minutes: int = int(os.environ.get("TRANSLATION_INTERVAL_MINUTES", "5"))
     # DEV-ONLY default — this value is INSECURE and unsafe for production. Set

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.config import settings
 from app.companies.branding import logo_url
 from app.filtering.language_gate import is_english_text
 from app.i18n import get_lang
@@ -32,7 +33,7 @@ from app.market.discovery import (
 from app.market.cap_tier import cap_tier_map
 from app.market.ripple_layers import compute_ripple_layers
 from app.market.timeline_entries import get_timeline_entries
-from app.models import Alert, AlertCompany, Company, Holding, User
+from app.models import Alert, AlertCompany, Article, Company, Holding, User
 from app.routers.articles import get_db
 
 # -- COMMENTED OUT (superseded by compute_ripple_layers, spec v2 §5/§7's
@@ -129,13 +130,17 @@ def list_feed_v2_alerts(
     else:
         day = today_ist()
     start_utc, end_utc = day_utc_window(day)
-    alerts = (
+    query = (
         _query_with_relations(db)
         .filter(Alert.created_at >= start_utc, Alert.created_at < end_utc)
-        .order_by(Alert.created_at.desc())
-        .limit(ALERTS_LIMIT)
-        .all()
     )
+    # Demo-seeded stories (seed_feed_v2_demo.py's URL marker) never reach
+    # the production feed. ALLOW_DEMO_FEED=true opts a non-production
+    # service (e.g. a UI-preview deployment sharing this database) back
+    # in for testing.
+    if not settings.allow_demo_feed:
+        query = query.join(Alert.article).filter(~Article.url.like("https://demo.feed-v2.local/%"))
+    alerts = query.order_by(Alert.created_at.desc()).limit(ALERTS_LIMIT).all()
     held_company_ids = _held_company_ids(db, current_user)
     translations = _bulk_translations(db, alerts, lang)
 
