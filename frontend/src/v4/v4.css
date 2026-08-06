@@ -43,10 +43,11 @@
 /* Inshorts-style paging: one flick lands square on the next story card.
    Applied only on the feed with no ripple band open (see ShellV4). */
 .nf4.snap { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
-/* No snap point on the (sticky) header -- a sticky element's snap
-   position follows the scroll and would trap it at the top. The
-   homepage rest position comes from snap-stop at the first card via
-   scroll-padding instead. */
+/* Fixed zero-height sentinel at the very top of the scroll content --
+   the page-top snap point. The sticky header can't carry one (its snap
+   position follows the scroll and trapped it), and the first card
+   doesn't need one of its own. */
+.nf4 .snaptop { height: 1px; margin-bottom: -1px; scroll-snap-align: start; }
 
 /* The Tailwind body underneath (lavender bg-page) must never show around
    the broadsheet -- while the v4 shell is mounted, the page IS paper. */
@@ -67,8 +68,9 @@ body:has(.nf4) { background: #fafafa; }
 .nf4.cond .ticker { display: none; }
 .nf4.cond .masthead { font-size: 30px; padding: 6px 8px 2px; }
 .nf4.cond .navrow { padding: 4px 8px 8px; }
-/* Snapped card tops land below the pinned header. */
-.nf4.snap { scroll-padding-top: var(--headh, 0px); }
+/* Snapped card tops land below the pinned CONDENSED header -- a frozen
+   measurement, so snapping never feeds back into layout. */
+.nf4.snap { scroll-padding-top: var(--headcond, 72px); }
 
 .nf4 * { box-sizing: border-box; }
 .nf4 button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
@@ -144,10 +146,12 @@ body:has(.nf4) { background: #fafafa; }
 /* One full-viewport snap slot per card -- a flick lands square on the
    next story, Inshorts-style. Content-centered inside the slot. */
 .nf4 .storycard {
-  /* Every card fills the viewport below the (sticky, possibly condensed)
-     header -- the whole card stays visible with the header pinned above. */
-  min-height: calc(100vh - var(--headh, 220px));
-  min-height: calc(100dvh - var(--headh, 220px));
+  /* Cards after the first fill the viewport below the CONDENSED pinned
+     header (the state they are always read in); the first card, read
+     under the full masthead, uses the full measurement. Both are frozen
+     values -- see ShellV4 -- so the condense toggle can't resize them. */
+  min-height: calc(100vh - var(--headcond, 72px));
+  min-height: calc(100dvh - var(--headcond, 72px));
   scroll-snap-align: start;
   border-top: 1px solid var(--hairline);
   padding: 32px 16px;
@@ -161,9 +165,15 @@ body:has(.nf4) { background: #fafafa; }
 /* A card whose story has no usable image collapses to one row -- the
    1fr plate row would otherwise reintroduce the dead space. */
 .nf4 .storycard:not(:has(.lplate)) { grid-template-rows: auto; align-content: center; }
-/* The first card is the page-top rest position: its snap target is its
-   own top minus scroll-padding (the header height), i.e. scroll 0 with
-   the full masthead above it. */
+/* The first card shares the homepage with the full masthead (sized by
+   the frozen full-header measurement) and carries no snap point of its
+   own -- the .snaptop sentinel at scroll 0 is the homepage rest
+   position, so one flick lands square on card two. */
+.nf4 .storycard.first {
+  min-height: calc(100vh - var(--headfull, 220px));
+  min-height: calc(100dvh - var(--headfull, 220px));
+  scroll-snap-align: none;
+}
 @media (min-width: 900px) {
   .nf4 .storycard {
     grid-template-columns: 2fr 1fr;

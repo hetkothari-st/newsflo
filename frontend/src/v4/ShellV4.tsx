@@ -36,7 +36,10 @@ export default function ShellV4() {
   const [view, setView] = useState<View>('feed');
   // Condensed header once the reader scrolls past the homepage: the
   // masthead shrinks to a compact bar that stays pinned over every card.
+  // Hysteresis (condense past 80px, expand only under 8px) so the toggle
+  // can't oscillate at a boundary.
   const [condensed, setCondensed] = useState(false);
+  const condensedRef = useRef(false);
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
@@ -44,17 +47,26 @@ export default function ShellV4() {
   const [info, setInfo] = useState<InfoV4Data | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
-  // Live header height -> --headh CSS var: the first story card is sized
-  // to exactly fill the viewport below the header, so the homepage shows
-  // one complete card and nothing of the next.
+  // Two FROZEN header measurements instead of one live value: the full
+  // (homepage) height sizes the first card, the condensed height sizes
+  // every later card and the snap padding. Each updates only while the
+  // header is in that state, so a condense/expand toggle never re-sizes
+  // the layout it is scrolling over -- the live-value version fed its
+  // own scroll position back into itself and oscillated (reported on
+  // phone: header and cards contracting/expanding in a loop).
   const headerRef = useRef<HTMLElement | null>(null);
-  const [headerHeight, setHeaderHeight] = useState(220);
+  const [headFull, setHeadFull] = useState(220);
+  const [headCond, setHeadCond] = useState(72);
   useEffect(() => {
     const el = headerRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => setHeaderHeight(el.offsetHeight));
+    const measure = () => {
+      if (condensedRef.current) setHeadCond(el.offsetHeight);
+      else setHeadFull(el.offsetHeight);
+    };
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
-    setHeaderHeight(el.offsetHeight);
+    measure();
     return () => observer.disconnect();
   }, []);
 
@@ -76,9 +88,19 @@ export default function ShellV4() {
     // every non-feed section.
     <div
       className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''}`}
-      style={{ '--headh': `${headerHeight}px` } as React.CSSProperties}
-      onScroll={(event) => setCondensed(event.currentTarget.scrollTop > 24)}
+      style={{ '--headfull': `${headFull}px`, '--headcond': `${headCond}px` } as React.CSSProperties}
+      onScroll={(event) => {
+        const top = event.currentTarget.scrollTop;
+        const next = condensedRef.current ? top > 8 : top > 80;
+        if (next !== condensedRef.current) {
+          condensedRef.current = next;
+          setCondensed(next);
+        }
+      }}
     >
+      {/* Fixed page-top snap point -- the sticky header can't carry one
+          (its snap position would follow the scroll). */}
+      <div className="snaptop" aria-hidden="true" />
       <header ref={headerRef} className="tophead">
         <div className="ticker">
           <span>{IST_DATE.format(new Date()).toUpperCase()}</span>
