@@ -1347,3 +1347,73 @@ def test_a_confirmed_direction_keeps_its_rationale(db_session, monkeypatch):
     }])
 
     assert alert.companies[0].rationale == "This is clearly good news for the company."
+
+
+def test_market_moves_are_stamped_with_the_alert_category(db_session, monkeypatch):
+    """Subsystem D reads market_moves.category, never a live join to
+    alerts -- an alert recategorized later must not re-shuffle which range
+    pool its historical measurements belong to."""
+    from app.models import MarketMove
+
+    article = _article(db_session)
+    company = Company(ticker="X.NS", name="X Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    _stub_measurement(monkeypatch, excess_move_pct=2.4)
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "This is clearly good news for the company.",
+        "key_points": ["good news"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }])
+
+    moves = db_session.query(MarketMove).all()
+    assert moves, "persist path should have measured at least one company"
+    assert all(m.category == alert.category for m in moves)
+
+
+def test_a_company_with_every_optional_field_omitted_still_persists(db_session):
+    """End-to-end guard on the schema change that made evidence_refs, risks,
+    assumptions, unknowns and alternative_hypothesis OPTIONAL (see
+    app.analysis.cascade._COMPANY_ITEM_REQUIRED -- dropped so the company
+    prompt fits gpt-oss-20b's token ceiling).
+
+    The dangerous path is not a crash, it is a silent DELETE: an empty
+    evidence list used to zero both evidence-derived confidence components,
+    putting the raw score under CONFIDENCE_FLOOR so _persist_alert dropped
+    the row. Applied to every company of every alert, that is the same
+    zero-companies outage the prompt work exists to fix. No monkeypatching
+    here -- the real scorer must produce a keepable score.
+    """
+    article = _article(db_session)
+    company = Company(ticker="OPT.NS", name="Optional Ltd.", sector="other", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
+    alert = _persist_alert(db_session, article, "other", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "Cheaper input costs lift its margin.",
+        "key_points": ["It buys the thing that just got cheaper, so it keeps more of each sale."],
+        "reasons": ["Input cost falls", "Pricing held", "Volume steady"],
+        "basis": "direct_mention", "time_horizon": "Short-Term", "impact_level": "direct",
+        # evidence_refs / risks / assumptions / unknowns /
+        # alternative_hypothesis deliberately ABSENT, exactly as a model that
+        # declines the now-optional fields would leave them.
+    }])
+
+    assert len(alert.companies) == 1
+    persisted = alert.companies[0]
+    assert persisted.company_id == company.id
+    # Absent optional fields round-trip as empty, never as None-shaped JSON
+    # the API serializers would choke on.
+    import json as _json
+    assert _json.loads(persisted.evidence_refs_json) == []
+    assert _json.loads(persisted.risks_json) == []
+    assert _json.loads(persisted.unknowns_json) == []
+    assert _json.loads(persisted.assumptions_json) == []
+    assert _json.loads(persisted.rulebook_ids_json) == []
+    assert persisted.alternative_hypothesis is None

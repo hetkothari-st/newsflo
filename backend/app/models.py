@@ -29,6 +29,12 @@ class Company(Base):
     # suppliers/customers (spec §3.1) -- one-time LLM enrichment, see
     # backend/backfill_business_profiles.py. NULL until enriched.
     business_desc = Column(Text, nullable=True)
+    # Provenance for business_desc. NULL source_url means the text is the
+    # legacy unattributable LLM value, which every serializer withholds --
+    # see app.companies.descriptions. Only a description that can be traced
+    # to a named article is ever shown.
+    business_desc_source_url = Column(String, nullable=True)
+    business_desc_as_of = Column(Date, nullable=True)
     supply_chain_suppliers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
     supply_chain_customers_json = Column(Text, nullable=True)  # JSON-encoded list[str]
 
@@ -143,6 +149,37 @@ class CompanyAlias(Base):
     normalized = Column(String, nullable=False, index=True)
 
     company = relationship("Company", back_populates="aliases")
+
+
+class SupplyLink(Base):
+    """One sourced counterparty relationship per row (docs/superpowers/
+    specs/2026-08-06-supply-links-rating-rationales-design.md §5.1),
+    extracted from a rating agency's public rationale document. `evidence`
+    is the verbatim quote that survived the extraction gate -- a row
+    without a provable quote is never written. counterparty_company_id is
+    resolved via the EXACT matching ladder only; NULL means "no exact
+    match", never "guessed". These rows feed pipeline prompts as grounding;
+    they NEVER create AlertCompany/ImpactEdge rows themselves (user-locked
+    constraint, tested by name in tests/test_supply_links.py).
+    """
+    __tablename__ = "supply_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "relation", "counterparty_name",
+            name="uq_supply_link_company_relation_counterparty",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    relation = Column(String, nullable=False)  # SUPPLIER | CUSTOMER
+    counterparty_name = Column(String, nullable=False)
+    counterparty_company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    evidence = Column(Text, nullable=False)
+    source_url = Column(String, nullable=False)
+    source_agency = Column(String, nullable=False)
+    as_of = Column(Date, nullable=False)
+    extracted_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class AnalysisCache(Base):
@@ -300,7 +337,7 @@ class CascadeGap(Base):
     after a retry -- recorded instead of silently dropped, so the user can
     always see "this ripple path was considered and could not be
     resolved" rather than a difference between runs that looks like a
-    missing feature. See app.analysis.cascade._identify_cascade_companies_per_sector."""
+    missing feature. See app.analysis.cascade._identify_companies_per_sector."""
     __tablename__ = "cascade_gaps"
 
     id = Column(Integer, primary_key=True)
@@ -309,7 +346,7 @@ class CascadeGap(Base):
     impact_level = Column(String, nullable=False)
     # The per-sector cascade call chains from a POOL of parent companies,
     # not one -- null here, not misleadingly picking just the first parent.
-    # See the comment at the call site in _identify_cascade_companies_per_sector.
+    # See the comment at the call site in _identify_companies_per_sector.
     parent_ticker = Column(String, nullable=True)
     attempts = Column(Integer, nullable=False)
     last_error = Column(Text, nullable=True)
@@ -393,6 +430,39 @@ class CarOutcome(Base):
     computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class EventVolatilityRange(Base):
+    """One empirical reaction range per (level, subject, news category) --
+    subsystem D (docs/superpowers/specs/2026-08-05-event-volatility-ranges-
+    design.md). Built nightly by app.market.event_volatility from measured
+    market_moves rows only; fully rebuilt each run (an aggregate has no
+    identity worth preserving). No LLM ever writes here.
+
+    level=COMPANY rows set company_id (sector NULL); level=SECTOR rows set
+    sector (company_id NULL) and pool every measured company in that
+    sector. The unique constraint is belt-and-braces -- the full rebuild
+    makes duplicates structurally impossible.
+    """
+    __tablename__ = "event_volatility_ranges"
+    __table_args__ = (
+        UniqueConstraint(
+            "level", "company_id", "sector", "category",
+            name="uq_event_vol_level_subject_category",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    level = Column(String, nullable=False)  # COMPANY | SECTOR
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    sector = Column(String, nullable=True)
+    category = Column(String, nullable=False)
+    n_events = Column(Integer, nullable=False)
+    min_excess_move_pct = Column(Float, nullable=False)
+    median_excess_move_pct = Column(Float, nullable=False)
+    max_excess_move_pct = Column(Float, nullable=False)
+    as_of = Column(Date, nullable=False)
+    source = Column(String, nullable=False, default="market_moves")
+
+
 class MarketMove(Base):
     """One row per (event, ticker) -- the measured facts backing every
     user-facing number (docs/NEWS_IMPACT_APP_SPEC.md §3.1, §3.2). ``event``
@@ -411,6 +481,12 @@ class MarketMove(Base):
     raw_move_pct = Column(Float, nullable=True)
     sector_move_pct = Column(Float, nullable=True)
     benchmark_ticker = Column(String, nullable=False)
+    # Alert.category copied at measurement time. Alerts can be
+    # recategorized after the fact; a live join would silently re-shuffle
+    # which range pool historical moves belong to. Same reclassification-
+    # safety pattern calibration_samples.category documents. NULL on rows
+    # that predate this column (backfill_event_volatility.py fills them).
+    category = Column(String, nullable=True)
     excess_move_pct = Column(Float, nullable=True)
     volume = Column(Float, nullable=True)
     avg_volume_20d = Column(Float, nullable=True)

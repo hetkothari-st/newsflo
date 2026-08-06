@@ -20,6 +20,16 @@ def fundamentals_payload(company: Company) -> dict | None:
     global rows and NSE-only names). A NULL ratio is OMITTED rather than sent
     as 0 -- a client must not be able to read absent data as a real zero, and
     an empty ratios object invites exactly that.
+
+    An EXACT 0.0 is also omitted: BSE writes literal "0.00" into ratio slots
+    it has no figure for (verified live 2026-08-05 -- L&T's consolidated OPM/
+    NPM came back 0.00 while its standalone margins were 16.68/12.37; a
+    conglomerate with a genuinely 0.00% consolidated margin does not exist).
+    Rendering it produced exactly the fake-looking numbers this payload
+    exists to prevent. A real near-zero margin (0.004 -> "0.00" after
+    rounding) is indistinguishable from the sentinel at BSE's 2-decimal
+    precision, so omission is the honest reading either way. Negative values
+    (loss-making EPS/NPM) are real and kept.
     """
     if not company.official_sector:
         return None
@@ -35,8 +45,14 @@ def fundamentals_payload(company: Company) -> dict | None:
         "as_of": company.classification_as_of.isoformat() if company.classification_as_of else None,
     }
 
-    ratios = {k: getattr(company, k) for k in _RATIOS if getattr(company, k) is not None}
-    consolidated = {k: getattr(company, a) for k, a in _CONSOLIDATED if getattr(company, a) is not None}
+    ratios = {
+        k: v for k in _RATIOS
+        if (v := getattr(company, k)) is not None and v != 0
+    }
+    consolidated = {
+        k: v for k, a in _CONSOLIDATED
+        if (v := getattr(company, a)) is not None and v != 0
+    }
     if ratios:
         payload["ratios"] = ratios
     if consolidated:

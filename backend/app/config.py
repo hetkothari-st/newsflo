@@ -38,6 +38,11 @@ class Settings(BaseSettings):
             keys.append(self.translation_groq_api_key_2)
         return keys
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
+    # Lets a non-production deployment (e.g. a UI-preview service sharing
+    # the production database) opt back in to demo-seeded feed stories.
+    # Production leaves this unset: demo-marked articles never reach its
+    # feed regardless of what sits in the shared database.
+    allow_demo_feed: bool = os.environ.get("ALLOW_DEMO_FEED", "false").lower() == "true"
     poll_interval_minutes: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "2"))
     translation_interval_minutes: int = int(os.environ.get("TRANSLATION_INTERVAL_MINUTES", "5"))
     # DEV-ONLY default — this value is INSECURE and unsafe for production. Set
@@ -316,6 +321,50 @@ VERDICT_EXCESS_THRESHOLD_PCT = 2.0
 # CAR (Cumulative Abnormal Return, spec §4.6) review thresholds.
 CAR_FLAT_THRESHOLD_PCT = 0.5  # |car_pct| below this counts as FLAT (neither held nor reversed)
 CAR_SUMMARY_SAMPLE_THRESHOLD = 5  # matches calibration/track_record.py's WIN_RATE_SAMPLE_THRESHOLD convention
+
+# -- Event volatility ranges (subsystem D, spec 2026-08-05) --------------
+# Minimum measured events before a range is stored/shown at each level.
+# Below both: no row, nothing shown -- omit rather than fabricate.
+EVENT_VOL_COMPANY_MIN_EVENTS = 3
+EVENT_VOL_SECTOR_MIN_EVENTS = 5
+
+# -- Supply links from rating rationales (spec 2026-08-06) ---------------
+# Per-document caps: beyond three names a rationale is listing the sector,
+# not counterparties (and the user asked for brief).
+SUPPLY_LINK_MAX_PER_RELATION = 3
+# Prompt-block budget for the KNOWN RELATIONSHIPS grounding section. The
+# per-candidate description block that once measured 60.8k chars across
+# 360 candidates broke both models' TPM ceilings -- this block is capped
+# hard and covers event companies only.
+SUPPLY_PROMPT_MAX_LINES = 8
+# Trimmed 700 -> 500 (2026-08-06 review): with links present the assembled
+# cascade company prompt measured 6,657-7,165 tokens against
+# COMPANY_PROMPT_TOKEN_BUDGET=6,500 (see cascade._identify_companies and
+# tests/test_prompt_budget.py) -- gpt-oss-20b's 8,000 TPM ceiling has no
+# margin left for a full 700-char block on top of an already-tight prompt.
+SUPPLY_PROMPT_MAX_CHARS = 500
+# Ceiling on resolved counterparties appended to the candidate list (see
+# cascade._identify_companies) -- independent of the line/char caps above,
+# which bound the PROMPT TEXT; this bounds how many extra tickers get
+# pushed into the tool schema's ticker enum, which is its own token cost
+# (see app.companies.candidates' "each candidate costs TWICE" note).
+SUPPLY_PROMPT_MAX_EXTRAS = 5
+# The evidence gate (app.companies.supply_links.extract._evidence_in_text)
+# is this subsystem's entire provenance guarantee -- a supplier/customer
+# name is only ever stored because the model quoted text that provably
+# appears in the source document. A 1-character (or whitespace-only)
+# "quote" trivially substring-matches almost anything and proves nothing,
+# so it must be rejected exactly like an unprovable one.
+SUPPLY_LINK_MIN_EVIDENCE_CHARS = 40
+# A rate-limited/quota-exhausted LLM provider will not un-limit within the
+# same drain tick -- without a breaker, a drained-quota day burns TWO calls
+# (primary + fallback model) against the provider's requests-per-day limit
+# for EVERY remaining pending doc, which also eats the analysis pipeline's
+# own fallback-model bucket. Both app.scheduler._run_supply_links_refresh
+# and backfill_supply_links.py's drain_extraction_queue stop the drain loop
+# after this many CONSECUTIVE llm_failed docs; a successful extraction
+# resets the counter.
+SUPPLY_LLM_FAILURE_BREAKER = 5
 
 # AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
 # LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live

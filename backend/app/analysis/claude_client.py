@@ -36,8 +36,46 @@ MODEL = "llama-3.3-70b-versatile"
 # specifically built for reliable native tool/function calling, a much
 # better fit for this app's strict, deeply-nested tool schemas than a
 # generic small Llama model.
+#
 FALLBACK_MODEL = "openai/gpt-oss-20b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# Both models also have a hard Groq TOKENS-PER-MINUTE ceiling, separate from
+# and much tighter than the daily quotas above. Measured live (2026-08).
+# Named and mapped -- not just narrated in prose -- so any caller that has to
+# choose between MODEL and FALLBACK_MODEL under prompt-size pressure derives
+# its ordering from these numbers instead of an ordering someone has to
+# reverse-engineer. Today the only such caller is
+# app.analysis.cascade._identify_companies's slim-prompt ladder (see the
+# comment at that call site for how it's derived from this map).
+GROQ_TPM_CEILING = {
+    FALLBACK_MODEL: 8_000,   # openai/gpt-oss-20b
+    MODEL: 12_000,           # llama-3.3-70b-versatile
+}
+#
+# An earlier version of this comment recorded only llama's 12,000 and drew
+# the wrong conclusion from it -- that llama alone could not serve
+# app.analysis.cascade._identify_companies while gpt-oss could. gpt-oss is
+# in fact the SMALLER budget of the two. The direct-company stage's old
+# BUNDLED prompt (every primary sector's candidate block in one call) billed
+# 17,607 tokens full / 11,888 slim, over BOTH ceilings, so that stage 413'd
+# on every article and produced zero companies regardless of model order.
+# The remedy was the prompt, not the model: cascade.py now issues ONE CALL
+# PER SECTOR (_identify_companies_per_sector). A one-sector SLIM prompt (no
+# rulebook/playbook block) measures 10,565-11,524 tokens (2026-08
+# measurement) -- inside MODEL's 12,000 ceiling but still over FALLBACK_
+# MODEL's 8,000, so it fits only ONE of the two models, not both. A
+# one-sector FULL prompt (rulebook included) measures 16,284-17,243 tokens --
+# over BOTH ceilings regardless of scoping, so it is never attempted at all;
+# see the comment at _identify_companies in cascade.py.
+#
+# extract_facts/identify_sectors/generate_edges never touch MODEL at all --
+# their prompts are small enough that FALLBACK_MODEL alone has always fit,
+# so gpt-oss stays first there purely on quality grounds: it is built for
+# reliable nested tool/function calling, which is what this app's deeply-
+# nested tool schemas need, and MODEL is a separate quota bucket that still
+# answers when gpt-oss's daily budget is exhausted. See _GeminiCompletions.
+# _resolve_model below for a second-order consequence of that ordering.
 
 # Gemini is the analysis pipeline's primary provider (replaces the dead
 # Anthropic slot -- see docs/superpowers/specs/2026-07-27-gemini-primary-
@@ -248,7 +286,26 @@ class _GeminiCompletions:
     def _resolve_model(self, requested: str | None) -> str:
         """Callers pass Groq model names (MODEL for the hard stages,
         FALLBACK_MODEL for the cheap ones). Map that intent onto this
-        provider's own two slots rather than discarding it."""
+        provider's own two slots rather than discarding it.
+
+        CAVEAT introduced 2026-08: cascade.py's _identify_companies (the one
+        "hard stage" this was written for) now tries FALLBACK_MODEL FIRST
+        and MODEL only as its fallback (see FALLBACK_MODEL's own comment in
+        this file for the measured Groq-TPM reason -- purely a Groq-side
+        fix, nothing to do with Gemini). That means on Gemini's PRIMARY
+        attempt for that stage, `requested` is now FALLBACK_MODEL, so this
+        function returns self._model (the cheap slot), not self._strong_model
+        -- the strong slot is only reached if this first Gemini call itself
+        fails and cascade.py's ladder retries with model=MODEL. Today this is
+        a genuine no-op (GEMINI_MODEL and GEMINI_STRONG_MODEL are the same
+        literal string, "gemini-flash-latest"), so identify_companies still
+        gets full quality on Gemini regardless. The moment those two
+        constants diverge, this stops being a no-op and identify_companies's
+        NORMAL (non-retry) path silently downgrades to the cheap Gemini
+        model on Gemini. If that divergence ever happens, key this off
+        `call_name == "identify_companies"` instead of raw model-string
+        identity -- do not assume the string-equality check above still
+        means what it used to mean."""
         if requested == MODEL:
             return self._strong_model
         return self._model

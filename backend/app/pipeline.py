@@ -343,12 +343,20 @@ def measure_and_reconcile_alert_companies(session: Session, alert_id: int, alert
     Returns the list of persisted MarketMove rows (added to the session but
     not committed -- the caller commits).
     """
+    # Copied, not joined: alerts get recategorized later and the
+    # volatility-range pools must not re-shuffle when they do
+    # (spec 2026-08-05 §3.2). Stamped here so the fresh-analysis and
+    # re-analysis paths cannot drift apart on it.
+    alert_row = session.get(Alert, alert_id)
+    alert_category = alert_row.category if alert_row is not None else None
+
     market_moves = []
     for alert_company in alert_companies:
         company_obj = session.get(Company, alert_company.company_id)
         if company_obj is not None:
             move = measure_company_move(session, company_obj)
             move.alert_id = alert_id
+            move.category = alert_category
             session.add(move)
             market_moves.append(move)
 

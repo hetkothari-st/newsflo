@@ -158,7 +158,7 @@ class AnalysisOutput(BaseModel):
     # it on every real call.
     event_type: Optional[str] = None
     # Cascade sectors whose company lookup failed even after a retry (see
-    # app.analysis.cascade._identify_cascade_companies_per_sector). Each
+    # app.analysis.cascade._identify_companies_per_sector). Each
     # dict has keys: sector, impact_level, parent_ticker, attempts,
     # last_error. Defaults to [] so every existing caller (older tests,
     # the dedup-reuse path in pipeline.py) still validates without change.

@@ -36,31 +36,49 @@ REJECT = "reject"
 # routinely title-cased or shouted, and no rule here depends on case.
 _NOISE_RES = [re.compile(pattern, re.IGNORECASE) for pattern in RELEVANCE_PREFILTER_NOISE_PATTERNS]
 
-# Symbols ("₹", "%") can't take a word boundary, so they stay plain
-# substring checks. Everything else is matched on word boundaries with an
-# optional plural -- a bare substring search is far too loose to be useful
-# here: "oil" matches "boil water", "share" matches "widely shared", and a
-# veto that fires on every recipe and every viral clip vetoes the whole
-# pre-filter. Inflections a plural rule can't reach (companies, trading)
-# are listed in their own right in config.
-_SYMBOL_SIGNALS = [s.lower() for s in RELEVANCE_PREFILTER_MARKET_SIGNALS if not s[:1].isalnum()]
-_WORD_SIGNALS = [s.lower() for s in RELEVANCE_PREFILTER_MARKET_SIGNALS if s[:1].isalnum()]
-_WORD_SIGNAL_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(s) for s in sorted(_WORD_SIGNALS, key=len, reverse=True)) + r")(?:s|es)?\b",
-    re.IGNORECASE,
-)
+def compile_signal_matcher(signals):
+    """Build a ``(text) -> first matching signal or None`` matcher over
+    ``signals``.
+
+    Symbols ("₹", "%") can't take a word boundary, so they stay plain
+    substring checks. Everything else is matched on word boundaries with an
+    optional plural -- a bare substring search is far too loose to be useful
+    here: "oil" matches "boil water", "share" matches "widely shared", and a
+    veto that fires on every recipe and every viral clip vetoes the whole
+    pre-filter. Inflections a plural rule can't reach (companies, trading)
+    have to be listed in their own right.
+
+    Factored out of ``market_signal_in`` so app.filtering.junk can build a
+    veto over a DIFFERENT signal list without re-deriving this boundary and
+    plural handling -- two copies of subtle matching logic drifting apart is
+    exactly how a veto quietly stops vetoing.
+    """
+    symbol_signals = [s.lower() for s in signals if s and not s[:1].isalnum()]
+    word_signals = [s.lower() for s in signals if s and s[:1].isalnum()]
+    word_re = re.compile(
+        r"\b(?:" + "|".join(re.escape(s) for s in sorted(word_signals, key=len, reverse=True)) + r")(?:s|es)?\b",
+        re.IGNORECASE,
+    ) if word_signals else None
+
+    def match(text: str) -> str | None:
+        lowered = (text or "").lower()
+        for symbol in symbol_signals:
+            if symbol in lowered:
+                return symbol
+        found = word_re.search(lowered) if word_re is not None else None
+        return found.group(0) if found else None
+
+    return match
+
+
+_market_signal_matcher = compile_signal_matcher(RELEVANCE_PREFILTER_MARKET_SIGNALS)
 
 
 def market_signal_in(text: str) -> str | None:
     """The first market signal found in ``text``, or None. Returned rather
     than a bool so a shadow-mode log line can say WHICH signal admitted an
     article -- that is what makes a shadow review reviewable."""
-    lowered = (text or "").lower()
-    for symbol in _SYMBOL_SIGNALS:
-        if symbol in lowered:
-            return symbol
-    match = _WORD_SIGNAL_RE.search(lowered)
-    return match.group(0) if match else None
+    return _market_signal_matcher(text)
 
 
 def noise_pattern_in(title: str) -> str | None:

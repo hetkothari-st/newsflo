@@ -59,14 +59,31 @@ def test_no_classification_yields_none():
     assert fundamentals_payload(_co()) is None
 
 
-def test_real_zero_ratio_is_included_not_dropped():
-    """BSE sends "0.00" for some margins -- a real published 0.0 is a value
-    and must survive, unlike an omitted-because-None ratio. `if value` would
-    wrongly treat 0.0 as falsy and drop it; the filter must check `is not
-    None`."""
+def test_exact_zero_is_treated_as_bses_not_published_sentinel():
+    """Reverses an earlier decision that kept published 0.00 values. BSE
+    writes literal "0.00" into slots it has no figure for -- verified live
+    2026-08-05: L&T's consolidated OPM/NPM came back 0.00 next to standalone
+    margins of 16.68/12.37, and rendering them produced exactly the
+    fake-looking numbers this payload exists to prevent. At BSE's 2-decimal
+    precision a genuine break-even 0.00 is indistinguishable from the
+    sentinel, so omission is the honest reading either way."""
     p = fundamentals_payload(_co(
-        official_sector="Energy", npm=0.0, eps=28.98,
+        official_sector="Energy", npm=0.0, con_opm=0.0, con_npm=0.0,
+        eps=28.98, con_eps=142.64,
         financials_source="BSE", financials_as_of=date(2026, 8, 4),
     ))
-    assert p["ratios"]["npm"] == 0.0
-    assert "npm" in p["ratios"]
+    assert "npm" not in p["ratios"]
+    assert p["ratios"]["eps"] == 28.98
+    assert p["consolidated"] == {"eps": 142.64}
+
+
+def test_negative_ratios_are_real_and_kept():
+    """Loss-making companies exist; a negative EPS or margin is a fact, not
+    a sentinel, and dropping it would hide exactly the companies where the
+    number matters most."""
+    p = fundamentals_payload(_co(
+        official_sector="Energy", eps=-4.31, npm=-2.05,
+        financials_source="BSE", financials_as_of=date(2026, 8, 4),
+    ))
+    assert p["ratios"]["eps"] == -4.31
+    assert p["ratios"]["npm"] == -2.05

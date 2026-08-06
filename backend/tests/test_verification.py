@@ -2,7 +2,9 @@ import json
 from types import SimpleNamespace
 
 from app.analysis.schemas import CompanyMention
-from app.analysis.verification import build_verification_tool, verify_companies
+from app.analysis.verification import (
+    VERIFICATION_FRAMING, build_verification_tool, verify_companies,
+)
 
 
 class _FakeClient:
@@ -25,11 +27,11 @@ class _FakeClient:
         ))])
 
 
-def _mention(ticker, name="X Ltd."):
+def _mention(ticker, name="X Ltd.", rationale="Refines crude oil, so a lower crude price cuts its input cost."):
     return CompanyMention(
         name=name, ticker=ticker, is_direct=True, sector="oil_gas",
         direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
-        rationale="r", time_horizon="Short-Term",
+        rationale=rationale, time_horizon="Short-Term",
     )
 
 
@@ -152,3 +154,107 @@ def test_a_non_string_ticker_is_ignored_not_a_crash():
     kept = verify_companies(client, "facts", "title", [_mention("A.NS")])
 
     assert [m.ticker for m in kept] == ["A.NS"]
+
+
+# -- the concrete rejection bar -------------------------------------------
+# Verification is the pipeline's only precision stage now that the
+# generative stages upstream are tuned for breadth, so the three rejection
+# categories are load-bearing prompt text, not commentary.
+
+def test_framing_states_a_concrete_channel_bar():
+    for phrase in ["cost line", "revenue line", "customer/supplier/competitor", "regulatory exposure"]:
+        assert phrase in VERIFICATION_FRAMING
+
+
+def test_framing_rejects_vague_or_hedged_mechanisms():
+    lowered = VERIFICATION_FRAMING.lower()
+    for phrase in ["may benefit", "could see", "potentially", "is exposed to", "sentiment", "broader theme"]:
+        assert phrase in lowered
+    # ... but explicitly allows a hedge that DOES name a channel, so the
+    # instruction cannot be read as "reject every sentence containing 'may'".
+    assert "margins may compress" in lowered
+
+
+def test_framing_rejects_a_factually_unsupported_premise_with_the_indigo_example():
+    assert "737 MAX 7" in VERIFICATION_FRAMING
+    assert "IndiGo" in VERIFICATION_FRAMING
+    assert "all-Airbus" in VERIFICATION_FRAMING
+
+
+def test_framing_rejects_generic_size_or_prominence_reasoning():
+    assert "major player in this sector" in VERIFICATION_FRAMING
+    assert "Size is not a mechanism" in VERIFICATION_FRAMING
+
+
+def test_each_rejection_category_drops_its_company_and_a_grounded_one_survives():
+    grounded = _mention(
+        "HAL.NS", "Hindustan Aeronautics",
+        rationale="Supplies structural aero components under a named Boeing work package, "
+                  "so certification unblocks that revenue line.",
+    )
+    hedged = _mention("VAGUE.NS", "Vague Ltd.", rationale="Sits in a related space.")
+    false_premise = _mention("INDIGO.NS", "InterGlobe Aviation", rationale="Runs a fleet.")
+    prominence = _mention("BIG.NS", "Big Ltd.", rationale="Runs a large plant.")
+    client = _FakeClient({"verdicts": [
+        {"ticker": "HAL.NS", "belongs": True, "reason": "named work package"},
+        {"ticker": "VAGUE.NS", "belongs": False, "reason": "hedged, no concrete channel"},
+        {"ticker": "INDIGO.NS", "belongs": False, "reason": "all-Airbus fleet; premise is false"},
+        {"ticker": "BIG.NS", "belongs": False, "reason": "generic size reasoning"},
+    ]})
+
+    kept = verify_companies(client, "facts", "title", [grounded, hedged, false_premise, prominence])
+
+    assert [m.ticker for m in kept] == ["HAL.NS"]
+
+
+# -- deterministic vagueness guard ----------------------------------------
+
+def test_a_pure_hedge_rationale_is_dropped_even_when_the_llm_approves_it():
+    hedged = _mention("B.NS", rationale="May benefit from the broader theme here.")
+    client = _FakeClient({"verdicts": [
+        {"ticker": "A.NS", "belongs": True},
+        {"ticker": "B.NS", "belongs": True},
+    ]})
+
+    kept = verify_companies(client, "facts", "title", [_mention("A.NS"), hedged])
+
+    assert [m.ticker for m in kept] == ["A.NS"]
+
+
+def test_a_hedged_rationale_that_names_a_channel_survives():
+    # The false-positive boundary, asserted at the integration level too.
+    hedged_but_concrete = _mention(
+        "B.NS", rationale="Margins may compress because jet fuel is its largest operating cost.",
+    )
+    client = _FakeClient({"verdicts": [{"ticker": "B.NS", "belongs": True}]})
+
+    kept = verify_companies(client, "facts", "title", [hedged_but_concrete])
+
+    assert [m.ticker for m in kept] == ["B.NS"]
+
+
+def test_the_vagueness_guard_still_applies_when_the_llm_call_fails():
+    # It is deterministic and cannot fail, so a provider outage must not
+    # restore content-free analysis to the alert.
+    hedged = _mention("B.NS", rationale="Could see some impact from this.")
+    client = _FakeClient(None, raises=RuntimeError("provider down"))
+
+    kept = verify_companies(client, "facts", "title", [_mention("A.NS"), hedged])
+
+    assert [m.ticker for m in kept] == ["A.NS"]
+
+
+def test_the_vagueness_guard_never_drops_a_tickerless_sector_mention():
+    # cascade._sector_fanout_mentions writes "Sector-wide exposure via ..." --
+    # hedge-shaped programmatic text this guard was never meant to judge.
+    tickerless = CompanyMention(
+        name="fmcg sector", ticker=None, is_direct=False, sector="fmcg",
+        direction="bullish", magnitude_low=1.0, magnitude_high=3.0,
+        rationale="Sector-wide exposure via fmcg: may be affected.", time_horizon="Short-Term",
+    )
+    client = _FakeClient({"verdicts": []})
+
+    kept = verify_companies(client, "facts", "title", [tickerless])
+
+    assert [m.name for m in kept] == ["fmcg sector"]
+    assert client.calls == 0

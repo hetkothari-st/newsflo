@@ -5,22 +5,31 @@ companies L1 -> cascade sectors L2 -> cascade companies L2). See
 docs/superpowers/specs/2026-07-20-sector-cascade-reasoning-design.md.
 
 Originally a fixed 7 calls total. Confirmed in production that bundling
-every cascade sector's company lookup into one call degrades to an empty
-response once there are several sectors (each company's required fields
-are verbose enough that 5-7 sectors' worth doesn't fit one tool call's
-token budget, and the model returns nothing rather than a partial result)
--- so cascade company identification (stages 5/7) now makes one call PER
-cascade sector via _identify_cascade_companies_per_sector, making the
-total call count scale with how many cascade sectors are actually found
-(typically 1 for facts + 1-2 for primary sectors/companies + N for each
-cascade level's sectors and companies), not a fixed 7.
+several sectors' company lookup into one call degrades to an empty
+response (each company's required fields are verbose enough that 5-7
+sectors' worth doesn't fit one tool call's token budget, and the model
+returns nothing rather than a partial result) and, worse, overflows the
+providers' per-minute token ceilings outright (a 413, i.e. zero companies)
+-- so EVERY company-identification stage, direct (3) and cascade (5/7)
+alike, now makes one call PER SECTOR via _identify_companies_per_sector.
+The total call count therefore scales with how many sectors are actually
+found (1 for facts + 1 for primary sectors + N per sector at each company
+stage + 1 per cascade sector level), not a fixed 7.
 
 All three stage functions below (_extract_facts, _identify_sectors,
-_identify_companies) are pure: given a client and inputs, they make exactly
-one LLM call and return parsed, validated output, raising on a genuinely
-malformed response (no tool_use block). The orchestrator (analyze_article)
-is responsible for sequencing them and for the truncate-on-failure
-behavior described in the design spec.
+_identify_companies) are pure: given a client and inputs, they issue one
+logical LLM call and return parsed, validated output, raising on a
+genuinely malformed response (no tool_use block). The orchestrator
+(analyze_article) is responsible for sequencing them and for the
+truncate-on-failure behavior described in the design spec.
+
+"One logical call" now means up to TOOL_CALL_ATTEMPTS physical attempts:
+every forced tool call in this module goes through _retry_forced_tool_call,
+which retries the identical request when the model returns garbage instead
+of a usable tool call (no tool_use block / 400 tool_use_failed /
+unparseable arguments JSON). See that helper and
+_is_stochastic_tool_failure for the exact allow-list and for why rate
+limits, auth failures, and 413s are deliberately NOT retried there.
 """
 import json
 import logging
@@ -33,15 +42,147 @@ from app.reasoning.rulebook import (
     RULEBOOK_TEXT, get_chain,
 )
 
-from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
+from app.analysis.claude_client import (
+    FALLBACK_MODEL, GROQ_TPM_CEILING, MODEL, SYSTEM_PROMPT, tier_kwargs,
+)
 from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
 from app.analysis.verification import verify_companies
-from app.companies.candidates import candidate_companies, candidate_tickers, format_candidates
+from app.companies.candidates import (
+    MAX_CANDIDATES_PER_PROMPT, candidate_companies, candidate_tickers, format_candidates,
+)
+from app.companies.integrity import DEMO_TICKERS
+from app.companies.supply_links import prompting as supply_link_prompting
+from app.models import Company
 
 logger = logging.getLogger(__name__)
+
+# Every forced tool call in this module (tool_choice pinned to one function)
+# gets this many attempts before it gives up and raises. Confirmed repeatedly
+# in production: the SAME article, minutes apart, produced "no record_sectors
+# tool_use block" (model answered in prose), a 400 tool_use_failed with a
+# trailing `"}` artifact, a 400 tool_use_failed with an empty generation
+# ("Tool choice is required, but model did not call a tool"), and once a valid
+# payload wrapped in a ```json fence instead of a tool call -- and the
+# identical prompt succeeded on a later attempt. These are stochastic
+# small-model failures (openai/gpt-oss-20b, llama-3.3-70b-versatile on Groq),
+# not deterministic ones, so a bounded retry of the identical request is the
+# correct remedy. 3 keeps the worst case bounded (and, in _identify_companies,
+# multiplies with the model-fallback ladder rather than replacing it).
+TOOL_CALL_ATTEMPTS = 3
+
+
+class MissingToolCallError(ValueError):
+    """A 200 OK response that carried no tool_use block for the forced tool
+    -- the model answered in prose (or in a markdown ```json fence) despite
+    tool_choice pinning it to exactly one function.
+
+    A distinct type rather than a bare ValueError so _is_stochastic_tool_failure
+    can retry THIS and nothing else that happens to be a ValueError: pydantic's
+    ValidationError is a ValueError subclass too, and a schema our own code
+    can no longer satisfy is a real bug that must surface immediately, not be
+    retried three times and then re-raised. Still subclasses ValueError so
+    existing callers/tests that catch ValueError keep working."""
+
+
+def _is_tool_use_failed(exc: Exception) -> bool:
+    """True only for Groq's 400 `code: "tool_use_failed"` -- the model
+    emitted a malformed tool-call blob (confirmed live: a llama-style
+    `<function=record_sector_companies>{...}` string with unbalanced
+    brackets, and separately an empty generation reported as "Tool choice is
+    required, but model did not call a tool") that Groq's parser could not
+    turn into a tool call at all.
+
+    Matches structurally on BadRequestError.code, never on the exception's
+    message text: that message embeds the model's entire failed generation
+    verbatim, which is long and unstable content to substring-match against.
+    A BadRequestError with any OTHER code (e.g. a genuinely malformed schema
+    on our side) must NOT match here -- see _call_with_model_fallback's own
+    docstring for why that distinction matters."""
+    return isinstance(exc, BadRequestError) and exc.code == "tool_use_failed"
+
+
+def _is_stochastic_tool_failure(exc: Exception) -> bool:
+    """True for the three ways a forced tool call comes back as garbage the
+    model could plausibly get right on an identical retry:
+
+      1. MissingToolCallError -- 200 OK, no tool_use block (prose, or a
+         ```json fence, instead of a tool call).
+      2. A 400 `tool_use_failed` -- the provider itself could not parse the
+         model's tool-call blob.
+      3. json.JSONDecodeError on the tool arguments -- a tool call came back
+         but its `arguments` string is not valid JSON (confirmed live: a
+         trailing `"}` artifact).
+
+    This is a strict ALLOW-list, not a deny-list, and that is deliberate.
+    Everything else propagates on the first failure:
+
+      - RateLimitError -- already handled by model/key rotation
+        (_call_with_model_fallback, and the key rotation in claude_client);
+        hammering a rate-limited endpoint two more times makes it worse.
+      - AuthenticationError / any other 4xx -- a bad key or a malformed
+        schema on OUR side is deterministic; retrying only delays the loud
+        failure that should surface it.
+      - 413 "Request too large" -- retrying the IDENTICAL oversized prompt
+        cannot succeed. The direct-company stage's existing slim-prompt retry
+        (a genuinely DIFFERENT, shorter prompt) is the right remedy there.
+
+    A deny-list would have quietly swept all of those in as new failure modes
+    appear, which is exactly the drift this helper exists to prevent."""
+    if isinstance(exc, MissingToolCallError):
+        return True
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    return _is_tool_use_failed(exc)
+
+
+def _retry_forced_tool_call(attempt_fn, *, stage: str, attempts: int = TOOL_CALL_ATTEMPTS):
+    """Run `attempt_fn` up to `attempts` times, retrying ONLY the stochastic
+    garbage-output failures `_is_stochastic_tool_failure` recognises.
+
+    `attempt_fn` must perform the whole forced-tool-call round trip -- issue
+    the request AND extract/parse the tool arguments -- because two of the
+    three retryable failures (no tool_use block, unparseable arguments)
+    happen after the HTTP call returns 200. Anything it raises that is not a
+    stochastic failure propagates immediately, untouched; so does the final
+    attempt's failure, which callers already handle (analyze_article
+    truncates the pipeline at the failed stage).
+
+    The single shared implementation is the point: every forced-tool-call
+    stage in this module routes through here, so the retry policy cannot
+    drift between stages the way four pasted try/excepts would.
+
+    Each retry logs at WARNING with the stage name and attempt number, so the
+    real production failure rate of these calls is measurable from logs
+    rather than invisible behind a silent recovery."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return attempt_fn()
+        except Exception as exc:
+            if attempt >= attempts or not _is_stochastic_tool_failure(exc):
+                raise
+            logger.warning(
+                "%s: malformed forced tool call on attempt %d/%d, retrying: %s",
+                stage, attempt, attempts, exc,
+            )
+    raise AssertionError("unreachable: the loop above either returns or raises")
+
+
+def _forced_tool_arguments(response, tool_name: str, context: str = "") -> dict:
+    """Pull the forced tool call out of `response` and parse its JSON
+    arguments. Raises MissingToolCallError when the model returned no such
+    tool call, or json.JSONDecodeError when the arguments blob is malformed
+    -- both retryable classes, raised identically for every stage so
+    _retry_forced_tool_call sees one consistent shape."""
+    message = response.choices[0].message
+    tool_calls = message.tool_calls or []
+    tool_call = next((tc for tc in tool_calls if tc.function.name == tool_name), None)
+    if tool_call is None:
+        raise MissingToolCallError(f"No {tool_name} tool_use block{context}")
+    return json.loads(tool_call.function.arguments)
+
 
 FACTS_INSTRUCTIONS = (
     "Read this news article closely and extract its core facts and economic "
@@ -113,20 +254,22 @@ def _extract_facts(client, title: str, content: str) -> FactsResult:
             ),
         },
     ]
-    response = client.chat.completions.create(
-        model=FALLBACK_MODEL,
-        max_tokens=1024,
-        tools=[build_facts_tool()],
-        tool_choice={"type": "function", "function": {"name": "record_facts"}},
-        messages=messages,
-        **tier_kwargs("extract_facts"),
-    )
-    message = response.choices[0].message
-    tool_calls = message.tool_calls or []
-    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_facts"), None)
-    if tool_call is None:
-        raise ValueError(f"No record_facts tool_use block for article: {title!r}")
-    arguments = json.loads(tool_call.function.arguments)
+
+    def _attempt() -> dict:
+        response = client.chat.completions.create(
+            model=FALLBACK_MODEL,
+            max_tokens=1024,
+            tools=[build_facts_tool()],
+            tool_choice={"type": "function", "function": {"name": "record_facts"}},
+            messages=messages,
+            **tier_kwargs("extract_facts"),
+        )
+        return _forced_tool_arguments(response, "record_facts", f" for article: {title!r}")
+
+    arguments = _retry_forced_tool_call(_attempt, stage="extract_facts")
+    # Validation stays OUTSIDE the retry on purpose: a ValidationError here
+    # means well-formed JSON that our schema rejects, which is not the
+    # stochastic garbage class -- see _is_stochastic_tool_failure.
     return FactsResult.model_validate(arguments)
 
 
@@ -184,9 +327,24 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "stumble -- usually affects ONLY that company's own sector, and "
             "often not even that: it is NOT evidence about its industry, its "
             "theme, or companies that merely share a buzzword with it.\n\n"
-            "THEN identify every financial, business, or economic "
-            "sector DIRECTLY affected by this news -- the sectors the news is "
-            "actually about, not knock-on effects. For each, give its direction "
+            "THEN identify EVERY financial, business, or economic sector this "
+            "news directly reaches -- not just the single most obvious one. A "
+            "real event almost always lands on several sectors at once: the "
+            "one the story is literally about, plus every other sector whose "
+            "own economics the SAME event touches directly. Work through the "
+            "transmission channels deliberately, one at a time, before you "
+            "stop: who manufactures the thing involved, who supplies its "
+            "components and raw materials, who buys or operates it, who "
+            "maintains and services it, who builds or runs the infrastructure "
+            "it depends on, who finances or insures it, who regulates it, and "
+            "who competes with it. Include a sector whenever you can state a "
+            "specific channel like that for it. Stopping at the headline "
+            "sector while three or four others have a genuine, statable "
+            "channel is a failure of thoroughness, not caution -- a later "
+            "step re-reads every company you surface and removes the ones "
+            "that do not hold up, so a sector with a real channel is not "
+            "risky to name; a sector with no channel is.\n\n"
+            "For each, give its direction "
             "(bullish/bearish) and a one-line mechanism explaining WHY that "
             "sector is affected. Zero sectors is a correct answer when nothing "
             "in the facts genuinely supports one -- this is common and "
@@ -197,7 +355,12 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
             "insurance/supply-chain effect). Do not manufacture a mechanism "
             "just to have something to report -- 'this could affect "
             "sentiment', 'this relates to the broader economy', or 'this is "
-            "part of the AI/EV/green-energy theme' is not a real mechanism."
+            "part of the AI/EV/green-energy theme' is not a real mechanism. "
+            "The instruction above to be thorough does NOT weaken this: "
+            "breadth means not missing a sector that has a real channel, "
+            "never inventing a channel so that a sector can be listed. A "
+            "story with no economic mechanism at all still returns zero "
+            "sectors, however thorough you are being."
         )
         framing += (
             "\n\nConsult the KNOWN TRANSMISSION CHAINS reference below. When a "
@@ -283,20 +446,19 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
         },
     ]
     tool = build_sector_tool(cascade=parent_sectors is not None, valid_parents=valid_parents)
-    response = client.chat.completions.create(
-        model=FALLBACK_MODEL,
-        max_tokens=2048,
-        tools=[tool],
-        tool_choice={"type": "function", "function": {"name": "record_sectors"}},
-        messages=messages,
-        **tier_kwargs("identify_sectors"),
-    )
-    message = response.choices[0].message
-    tool_calls = message.tool_calls or []
-    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_sectors"), None)
-    if tool_call is None:
-        raise ValueError("No record_sectors tool_use block")
-    arguments = json.loads(tool_call.function.arguments)
+
+    def _attempt() -> dict:
+        response = client.chat.completions.create(
+            model=FALLBACK_MODEL,
+            max_tokens=2048,
+            tools=[tool],
+            tool_choice={"type": "function", "function": {"name": "record_sectors"}},
+            messages=messages,
+            **tier_kwargs("identify_sectors"),
+        )
+        return _forced_tool_arguments(response, "record_sectors")
+
+    arguments = _retry_forced_tool_call(_attempt, stage="identify_sectors")
     findings = [SectorFinding.model_validate(s) for s in arguments.get("sectors", [])]
     # Defensive filter: the tool schema enum-constrains `sector` to SECTORS,
     # but that constraint isn't always strictly enforced server-side for a
@@ -321,64 +483,58 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
 # now-deleted, instructions) that app.pipeline._persist_alert's
 # rulebook_ids_json extraction depends on -- both are load-bearing, not
 # cosmetic prompt text.
+#
+# COMPRESSED HARD (2026-08) and it must STAY compressed. Every rule that was
+# here is still here; only the wording is shorter. What was deliberately
+# removed is the EXPLANATION of the schema's optional fields (risks,
+# assumptions, unknowns, alternative_hypothesis, evidence_refs) -- they now
+# cost one clause instead of six lines, because they are no longer required
+# (see _COMPANY_ITEM_REQUIRED) and a 20B model fills them poorly anyway.
+# The reason for all of this is a hard token budget, not taste: see
+# tests/test_prompt_budget.py and GROQ_TPM_CEILING. Adding prose back here
+# is the single easiest way to break company identification in production
+# again, which is exactly how it broke.
 _COMPANY_FIELD_INSTRUCTIONS = (
-    "- ticker: write the EXACT ticker symbol as it trades, including the "
-    "exchange suffix -- Indian companies almost always end in \".NS\" (NSE, "
-    "e.g. \"MARUTI.NS\", \"RELIANCE.NS\", \"HINDUNILVR.NS\") or occasionally "
-    "\".BO\" (BSE); global companies typically have no suffix (e.g. \"BP\", "
-    "\"AAPL\"). This match must be exact -- a ticker off by the suffix alone "
-    "(e.g. \"MARUTI\" instead of \"MARUTI.NS\") will fail to resolve to a "
-    "real record and the company will be silently dropped. If you are not "
-    "confident of the exact ticker, set it to null rather than guessing a "
-    "close-but-wrong symbol.\n"
-    "- name: the company's real, commonly-used legal name (e.g. \"Maruti "
-    "Suzuki India Ltd.\", not an invented or shortened variant) -- if the "
-    "ticker above is null or turns out wrong, this name is the only other "
-    "way the company can be matched to a real record.\n"
-    "For each company:\n"
-    "- rationale: name the specific mechanism for THAT company -- its "
-    "specific role (upstream producer vs refiner vs distributor vs miner: "
-    "never assume every company in a sector plays the same role), its "
-    "market position, and a real precedent if you know one. Never restate a "
-    "price/number the article already reports as if it were analysis -- "
-    "explain WHY this specific news moves this specific company, and HOW.\n"
-    "- key_points: 1-4 plain-language sentences (full sentences, no word "
-    "cap, typically 15-30 words) a reader with ZERO finance background can "
-    "read once and immediately understand WHY this affects this company and "
-    "HOW. Spell out the causal chain: [what happened] -> [what that changes "
-    "for this company -- its costs, sales, profit, what its customers do] "
-    "-> [why that's good or bad]. Replace or immediately unpack finance "
-    "jargon (never leave \"margin compression\", \"deal pipeline "
-    "pressure\", or similar unexplained). Never: (a) restating a "
-    "price/number the article already reports; (b) a vague sentiment line "
-    "with no mechanism; (c) a generic, always-true company fact untied to "
-    "this specific news; (d) a jargon-dense sentence an ordinary reader "
-    "would have to look up. Fewer, clearer sentences beat more, vaguer "
-    "ones -- 1-2 entries is correct when that's all the genuine mechanism "
-    "supports.\n"
-    "- reasons: 1-4 short, distinct, individually-citable reasons "
-    "supporting the direction call.\n"
-    "- risks: 0-3 specific risks that could invalidate this call. "
-    "assumptions: 0-3 things assumed true that, if wrong, change the call. "
-    "unknowns: 0-3 pieces of missing information that would make this call "
-    "more reliable.\n"
-    "- alternative_hypothesis: one sentence describing a plausible "
-    "competing interpretation, or why none is credible.\n"
+    "- ticker: the EXACT symbol as traded, suffix included (\"MARUTI.NS\", "
+    "not \"MARUTI\"). A wrong suffix fails to resolve and the company is "
+    "silently dropped, so use null rather than a close-but-wrong guess.\n"
+    "- name: the real legal name (\"Maruti Suzuki India Ltd.\") -- the only "
+    "fallback when the ticker is null or wrong.\n"
+    "- rationale: the mechanism for THAT company -- its specific role "
+    "(producer vs refiner vs distributor; never assume one role per "
+    "sector), its market position, and a real precedent if you know one. "
+    "Explain WHY this news moves THIS company and HOW; never restate a "
+    "price or number the article already reports as if it were analysis.\n"
+    "- key_points: 1-2 plain sentences (15-30 words each) a reader with "
+    "ZERO finance background understands on one read. Spell out the chain: "
+    "[what happened] -> [what it changes for this company: costs, sales, "
+    "profit, what its customers do] -> [why that is good or bad]. Unpack "
+    "any jargon you use (never leave \"margin compression\" bare). "
+    "Forbidden: restating the article's own numbers; vague sentiment with "
+    "no mechanism; a generic, always-true company fact; a sentence an "
+    "ordinary reader would have to look up.\n"
+    "- reasons: 1-4 short, distinct, individually-citable reasons for the "
+    "direction call.\n"
     "- time_horizon: exactly one of Immediate, Short-Term, Medium-Term, "
-    "Long-Term, based on when the mechanism actually plays out.\n\n"
-    "Never invent a specific-sounding number, study, or historical case "
-    "(e.g. \"UK data from 2018-2020 showed X% decline\") that you are not "
-    "genuinely confident is real -- a fabricated statistic dressed up as "
-    "evidence is worse than an honest qualitative statement with no number "
-    "at all. If you don't have a real, specific precedent, describe the "
-    "mechanism in plain qualitative terms instead of manufacturing one."
+    "Long-Term -- when the mechanism actually plays out.\n"
+    "- risks, assumptions, unknowns, alternative_hypothesis and "
+    "evidence_refs are OPTIONAL: fill them only when you have something "
+    "specific and real.\n\n"
+    "Never invent a number, study or historical case you are not genuinely "
+    "confident is real -- an honest qualitative statement beats a "
+    "fabricated statistic every time."
 )
 
-# Direct-stage (stage 3) gets the full rulebook/playbook reference block --
-# it's the highest-value, lowest-cardinality call (one company list, no
-# nested per-sector grouping to also reason about) so the extra prompt
-# weight doesn't risk starving the model's attention. evidence_refs may
-# cite a rule id from this block.
+# Was wired into the direct stage's (stage 3) primary attempt as the
+# rulebook/playbook-bearing variant -- it's no longer used by
+# _identify_companies at all. Even scoped to one sector's candidates, a
+# prompt carrying this block measures 16,284-17,243 tokens (2026-08
+# measurement), over BOTH Groq models' GROQ_TPM_CEILING (claude_client.py)
+# regardless of which model serves it, so an attempt built from this constant
+# would 413 unconditionally -- see the comment at _identify_companies for
+# the full reasoning. Left defined (and still directly tested) as a record of
+# the rulebook-citing instructions and for any future caller whose prompt
+# doesn't also carry a multi-candidate grounding block.
 COMPANY_RATIONALE_INSTRUCTIONS = (
     f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
     "- evidence_refs: one entry per `reasons` item -- either a rule id from "
@@ -402,19 +558,50 @@ COMPANY_RATIONALE_INSTRUCTIONS = (
     f"SECTOR PLAYBOOKS:\n{PLAYBOOKS_TEXT}"
 )
 
-# Cascade stages (5/7) drop the rulebook/playbook block -- those calls
-# already carry a longer prompt (multiple sectors + a parent-company list +
-# the anti-division-naming rules below), and a real production test showed
-# the combined weight pushed the model to return a degenerate empty tool
-# call instead of reasoning through it. evidence_refs here is scoped to
-# what's actually available in this call (article facts + real-world
-# knowledge), not a rulebook that isn't provided.
+# The rulebook/playbook-free variant. Originally written for cascade stages
+# (5/7) only -- those calls already carry a longer prompt (multiple sectors +
+# a parent-company list + the anti-division-naming rules below), and a real
+# production test showed the combined weight pushed the model to return a
+# degenerate empty tool call instead of reasoning through it -- but now used
+# unconditionally by _identify_companies for the direct stage too (see that
+# function's own comment): even scoped to one sector, adding the rulebook
+# block back in measures over BOTH Groq models' per-minute ceilings, so no
+# _identify_companies call ever has the rulebook available to cite.
+# evidence_refs here is scoped to what's actually available in this call
+# (article facts + real-world knowledge), not a rulebook that isn't provided.
 CASCADE_COMPANY_RATIONALE_INSTRUCTIONS = (
     f"{_COMPANY_FIELD_INSTRUCTIONS}\n"
-    "- evidence_refs: one entry per `reasons` item -- either a quoted or "
-    "closely paraphrased fact from the article (prefix \"article: \"), or "
-    "a specific historical precedent you actually know (prefix "
-    "\"historical: \")."
+    "- evidence_refs (optional): up to one entry per `reasons` item -- an "
+    "article fact (prefix \"article: \") or a precedent you actually know "
+    "(prefix \"historical: \")."
+)
+
+# Shared by both company stages (direct and cascade). The breadth this asks
+# for is safe ONLY because of the two rails that bracket it: the model can
+# select nothing outside the CANDIDATE COMPANIES block (real DB rows,
+# enum-constrained, see app.companies.candidates), and everything it does
+# select is re-read by app.analysis.verification, which is the pipeline's
+# precision stage. The failure this replaces was the opposite of noise: a
+# 737 MAX certification story returning three companies because the framing
+# told the model that naming "1-3 real companies per sector" was the normal
+# outcome. Breadth here must always come from selecting more REAL candidates,
+# never from ranking a sector's constituents by size -- that is what put a
+# food-delivery company on a crude-oil story, and it stays disabled.
+_BREADTH_INSTRUCTION = (
+    "BE THOROUGH, NOT REPRESENTATIVE. Work down the candidate list and name "
+    "EVERY company the mechanism genuinely reaches, not a sample of the "
+    "obvious ones. Five, ten or more is correct whenever the candidates "
+    "support it; stopping at two or three while a sixth qualifies is a "
+    "failure, not restraint. Look past the largest names to the component "
+    "suppliers, materials makers, operators, service providers and smaller "
+    "specialists -- those are most often missed. Selecting more is safe: "
+    "every entry is a real, tradeable company and a later step removes any "
+    "whose mechanism does not hold up.\n\n"
+    "What is forbidden is inventing or stretching. Each company you include "
+    "needs a specific channel stated for THAT company -- a cost line, a "
+    "revenue line, a customer/supplier/competitor relationship, or a "
+    "regulatory exposure. \"It is a major player in this sector\" is not a "
+    "channel."
 )
 
 _COMPANY_ITEM_PROPERTIES = {
@@ -433,10 +620,27 @@ _COMPANY_ITEM_PROPERTIES = {
     "unknowns": {"type": "array", "items": {"type": "string"}},
     "alternative_hypothesis": {"type": "string"},
 }
+# risks / assumptions / unknowns / alternative_hypothesis / evidence_refs are
+# deliberately NOT required (2026-08). They cost tokens twice -- input tokens
+# to explain in _COMPANY_FIELD_INSTRUCTIONS, output tokens to generate -- and
+# a 20B model produces them poorly. Dropping them from `required` is what
+# bought the prompt back under openai/gpt-oss-20b's 8,000 TPM ceiling, which
+# is what lets the reliable-tool-calling model serve this stage at all (see
+# tests/test_prompt_budget.py). The properties stay in the schema, so a model
+# that has something real to say still may -- they are optional, not gone.
+#
+# Everything downstream already tolerates their absence: schemas.
+# CompanyMention defaults them to []/None, app.companies.resolution passes
+# whatever it got, app.pipeline._build_alert_company reads them with
+# `.get(...) or []`, and the API serializers decode a missing column to [].
+# The ONE place absence was NOT tolerated was scoring -- an empty
+# evidence_refs used to drive app.reasoning.confidence's evidence AND
+# rulebook components to a hard 0.0 and put every company under
+# app.pipeline.CONFIDENCE_FLOOR. Fixed there, in compute_confidence; see its
+# comment before changing either end.
 _COMPANY_ITEM_REQUIRED = [
     "name", "direction", "magnitude_low", "magnitude_high", "rationale", "key_points",
-    "time_horizon", "reasons", "evidence_refs", "risks", "assumptions", "unknowns",
-    "alternative_hypothesis",
+    "time_horizon", "reasons",
 ]
 
 
@@ -490,30 +694,19 @@ def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str
     }
 
 
-def _is_tool_use_failed(exc: Exception) -> bool:
-    """True only for Groq's 400 `code: "tool_use_failed"` -- the model
-    emitted a malformed tool-call blob (confirmed live: a llama-style
-    `<function=record_sector_companies>{...}` string with unbalanced
-    brackets) that Groq's parser could not turn into a tool call at all.
+def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_model: str = FALLBACK_MODEL):
+    """Try `model`; retry once on `fallback_model`, with the identical
+    prompt, on either a RateLimitError (quota/rate-limited) or a
+    tool_use_failed 400 (the model's tool-call structure was unparseable).
 
-    Matches structurally on BadRequestError.code, never on the exception's
-    message text: that message embeds the model's entire failed generation
-    verbatim, which is long and unstable content to substring-match against.
-    A BadRequestError with any OTHER code (e.g. a genuinely malformed schema
-    on our side) must NOT match here -- see _call_with_model_fallback's own
-    docstring for why that distinction matters."""
-    return isinstance(exc, BadRequestError) and exc.code == "tool_use_failed"
+    `fallback_model` defaults to FALLBACK_MODEL (gpt-oss-20b) -- the shape
+    every OTHER caller of this function wants. _identify_companies is the one
+    exception: its slim-prompt ladder passes `model`/`fallback_model` derived
+    from GROQ_TPM_CEILING (claude_client.py) instead -- see the comment at
+    that call site for why the budget map, not a hardcoded guess, decides
+    which model goes first there.
 
-
-def _call_with_model_fallback(call_fn, model: str, call_name: str):
-    """Try `model`; retry once on FALLBACK_MODEL, with the identical prompt,
-    on either a RateLimitError (quota/rate-limited) or a tool_use_failed 400
-    (the model's tool-call structure was unparseable -- see FALLBACK_MODEL's
-    own docstring in claude_client.py for why the fallback model, from the
-    gpt-oss family, is specifically a better fit for this app's schemas than
-    another Llama model would be).
-
-    Any other exception -- and a second failure on FALLBACK_MODEL, of any
+    Any other exception -- and a second failure on `fallback_model`, of any
     kind -- propagates untouched. This is deliberate: a malformed schema on
     OUR side also raises a 400, and silently swallowing it here would let
     the caller return an empty company list indistinguishable from "no
@@ -523,18 +716,69 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str):
         return call_fn(model)
     except RateLimitError:
         logger.warning(
-            "%s: rate-limited on model=%s, retrying once on FALLBACK_MODEL=%s",
-            call_name, model, FALLBACK_MODEL,
+            "%s: rate-limited on model=%s, retrying once on fallback_model=%s",
+            call_name, model, fallback_model,
         )
-        return call_fn(FALLBACK_MODEL)
+        return call_fn(fallback_model)
     except BadRequestError as exc:
         if not _is_tool_use_failed(exc):
             raise
         logger.warning(
-            "%s: tool_use_failed on model=%s, retrying once on FALLBACK_MODEL=%s",
-            call_name, model, FALLBACK_MODEL,
+            "%s: tool_use_failed on model=%s, retrying once on fallback_model=%s",
+            call_name, model, fallback_model,
         )
-        return call_fn(FALLBACK_MODEL)
+        return call_fn(fallback_model)
+
+
+# Ceiling on the whole assembled company-stage request -- system + user
+# message + serialized tool schema. Lives here, next to the prompt it
+# constrains, and is imported by tests/test_prompt_budget.py, which measures
+# a real assembled prompt against it. It must stay under the SMALLEST
+# GROQ_TPM_CEILING (openai/gpt-oss-20b's 8,000), with the margin absorbing
+# the response tokens Groq bills against the same per-minute budget.
+COMPANY_PROMPT_TOKEN_BUDGET = 6_500
+
+# _identify_companies' prompt is always the SLIM (no rulebook/playbook)
+# variant -- see the comment at that function for why the full variant was
+# dropped entirely.
+#
+# This ladder was INVERTED (llama first) and is now back the right way up.
+# The reason for the inversion was purely SIZE: the slim prompt measured
+# 10,565-11,524 tokens, inside MODEL's (llama) 12,000 GROQ_TPM_CEILING but
+# over FALLBACK_MODEL's (gpt-oss) 8,000, so gpt-oss 413'd on nearly every
+# article. But llama fails record_sector_companies' nested tool schema
+# constantly, so putting it first traded a 413 for a tool_use_failed and
+# produced the same ZERO companies either way -- measured in production at 47
+# of the last 48 alerts.
+#
+# The prompt has since been cut under COMPANY_PROMPT_TOKEN_BUDGET, which is
+# under EVERY ceiling in GROQ_TPM_CEILING, so size no longer picks the model.
+# Schema quality does, and the ladder is now the same one every other stage
+# in this module uses: FALLBACK_MODEL (openai/gpt-oss-20b) is built for
+# reliable nested tool/function calling and actually satisfies this schema,
+# so it is PRIMARY; MODEL (llama-3.3-70b) is the one-retry FALLBACK, useful
+# because it is a separate quota bucket that still answers when gpt-oss is
+# rate-limited. See FALLBACK_MODEL's own comment in claude_client.py.
+#
+# The guard on all of this is tests/test_prompt_budget.py: it fails if the
+# prompt outgrows the budget, or if the budget outgrows the smallest ceiling.
+# Without it there is nothing to stop the next paragraph of prompt prose from
+# quietly putting this stage back over gpt-oss's ceiling -- which is exactly
+# how it broke, so do not reorder this ladder to "fix" a size problem. Fix
+# the size.
+_SLIM_PROMPT_PRIMARY_MODEL = FALLBACK_MODEL
+_SLIM_PROMPT_FALLBACK_MODEL = MODEL
+
+# Ceiling on how many already-identified companies a CASCADE-stage prompt
+# lists as chainable parents (and enum-constrains parent_ticker to). Each
+# entry costs a prompt line AND a tool-schema enum entry, and the pool is the
+# entire previous company stage's output across every sector -- so it grows
+# with exactly the breadth _BREADTH_INSTRUCTION asks for. Uncapped, a good
+# primary stage produces a cascade prompt that exceeds the token ceiling and
+# returns ZERO cascade companies, which is the failure this whole module was
+# just repaired for. 20 is well above the number of distinct parents any real
+# cascade link actually chains from.
+MAX_PARENT_POOL = 20
 
 
 def _identify_companies(
@@ -546,25 +790,28 @@ def _identify_companies(
     CompanyMention programmatically (never asked of the LLM). parent_pool:
     for a cascade stage, the companies (from the previous company-stage)
     each returned company must chain from via parent_ticker; None for the
-    direct/primary stage (stage 3)."""
+    direct/primary stage (stage 3).
+
+    Every pipeline caller now reaches this through
+    _identify_companies_per_sector and passes exactly ONE sector -- a
+    multi-sector list still works (older tests use one), but it rebuilds the
+    prompt-size problem that made this stage fail outright, so do not call it
+    that way from the pipeline."""
     sector_lines = "\n".join(f"- {s.sector} ({s.direction}): {s.mechanism}" for s in sectors)
     if parent_pool is None:
         framing = (
-            "For each sector below, name the specific companies genuinely, "
-            "directly affected -- both winners and losers where applicable (a "
-            "single sector can have companies benefiting AND companies hurt by "
-            "the same news, e.g. importers vs exporters on a currency move). "
-            "Reason from the event company's actual business-relationship "
-            "graph -- its direct suppliers, direct customers, competitors, "
-            "substitutes, distribution partners, infrastructure/utility "
-            "providers, financing partners -- never from theme or keyword "
-            "similarity. Use your own knowledge of real companies and their "
-            "actual business models; do not force-fit a company that doesn't "
-            "genuinely fit. Final reality check per company: would a "
-            "professional equity analyst include it in a SAME-DAY research "
-            "note about THIS event? If the link is thematic, speculative, or "
-            "merely being in the same industry/buzzword universe, exclude it. "
-            "Zero companies for a sector is correct when none genuinely fit."
+            "For each sector below, name the companies genuinely, directly "
+            "affected -- both winners and losers (one sector can hold both, "
+            "e.g. importers vs exporters on a currency move). Reason from "
+            "the event company's real business-relationship graph -- its "
+            "suppliers, customers, competitors, substitutes, distribution "
+            "partners, infrastructure and financing partners -- never from "
+            "theme or keyword similarity, and never force-fit. Reality check "
+            "per company: would a professional equity analyst put it in a "
+            "SAME-DAY research note on THIS event? If the link is thematic, "
+            "speculative, or merely same-industry, exclude it. Zero "
+            "companies for a sector is correct when none genuinely fit."
+            f"\n\n{_BREADTH_INSTRUCTION}"
         )
         parent_context = ""
         parent_tickers = None
@@ -574,67 +821,47 @@ def _identify_companies(
         # separately-filtered lists and zip() them; a parent_pool entry
         # with no ticker would then pair the wrong name with the wrong
         # ticker.
-        parent_tickers = [c.ticker for c in parent_pool if c.ticker]
-        parent_lines = "\n".join(f"- {c.ticker} ({c.name})" for c in parent_pool if c.ticker)
+        # Capped (see MAX_PARENT_POOL): parent_pool is the WHOLE previous
+        # company stage's output, which the breadth instruction actively
+        # pushes upward -- an uncapped pool is a prompt term that grows with
+        # our own success and silently re-breaks the token budget
+        # tests/test_prompt_budget.py defends. Truncation keeps the earliest
+        # entries, which are the previous stage's own sector-by-sector order,
+        # not an arbitrary reshuffle.
+        with_tickers = [c for c in parent_pool if c.ticker][:MAX_PARENT_POOL]
+        parent_tickers = [c.ticker for c in with_tickers]
+        parent_lines = "\n".join(f"- {c.ticker} ({c.name})" for c in with_tickers)
         framing = (
-            "For each sector below, name the specific companies affected as a "
-            "ripple from the already-identified companies listed. Every "
-            "company you name MUST chain from one of those via parent_ticker "
-            "(the exact ticker string) -- a real, specific economic link "
-            "(supplier, customer, or close competitor), not merely being in "
-            "the same sector.\n\n"
-            "A sector reaching this stage already has a stated, genuine "
-            "mechanism (see its one-line reason below) -- that mechanism is "
-            "real, but it is SECTOR-level, not yet company-level. Your job "
-            "has two parts, both required: (1) name real companies the "
-            "mechanism genuinely reaches, and (2) for each one, state HOW "
-            "that specific mechanism actually hits THAT company's own "
-            "business (its own revenue exposure, cost structure, or "
-            "customer base) -- not a copy of the sector's one-line reason, "
-            "and not a generic description of what the company does. Being "
-            "a large, well-known name in the sector is NOT by itself a "
-            "reason to include a company -- you still need a genuine, "
-            "specific reason the mechanism reaches that company's own "
-            "business, not just its sector membership. A cascade sector "
-            "caused by rising import/freight costs genuinely reaching an "
-            "import-dependent manufacturer in that sector is a real link; "
-            "the same sector reaching an unrelated company merely because "
-            "it's also big and well-known in that sector is NOT -- if you "
-            "cannot state the specific mechanism for a company beyond "
-            "\"it's a major player in this sector,\" leave it out. Naming "
-            "1-3 real companies per sector with a genuine mechanism each is "
-            "the normal, expected outcome for a sector whose own mechanism is "
-            "genuinely broad (a rate/policy/commodity/currency move reaching "
-            "costs or spending economy-wide) -- reach for that before "
-            "concluding there is nothing to name. But do not force it: if "
-            "the sector's mechanism only plausibly reaches through vague "
-            "language like \"changing consumer spending\" or \"increased "
-            "engagement\" rather than something concrete (a specific cost, "
-            "a specific revenue line, a specific customer relationship), "
-            "that is not a real company-level link -- zero companies for "
-            "that sector is the correct, honest answer, not a shortfall. "
-            "Never invent a precise-sounding statistic, study, or "
-            "historical case you are not genuinely confident is real to "
-            "make a weak connection sound stronger -- an honest \"this link "
-            "is real but modest\" beats a fabricated data point every "
-            "time. Final reality check per company: would a professional "
-            "equity analyst include it in a SAME-DAY research note about "
-            "THIS event? A single company's own temporary stumble (its "
-            "earnings miss, its stock drop, its CEO's commentary) does NOT "
-            "ripple to companies that merely share its theme or industry -- "
-            "for such events, few or zero cascade companies is the correct "
-            "answer.\n\n"
-            "Each company you name MUST be a real, separate, independently "
-            "publicly-traded company with its own ticker -- NEVER a division, "
-            "segment, subsidiary, or business unit of a company you (or the "
-            "parent list above) already named. Do not write a name like "
-            "\"[Company] - [Segment] Division\" or \"[Company]'s [Segment] "
-            "arm\" -- that is the SAME company again, not a genuine cascade "
-            "link, and it cannot be resolved to a real database row. If your "
-            "first instinct is a division/segment of an already-named "
-            "company, name a genuinely different, separate company in that "
-            "sector instead -- do not omit the sector just because your "
-            "first instinct was a segment name."
+            "For each sector below, name the companies affected as a ripple "
+            "from the already-identified companies listed. Every company "
+            "MUST chain from one of those via parent_ticker (the exact "
+            "ticker string) through a real economic link -- supplier, "
+            "customer, or close competitor -- not shared sector "
+            "membership.\n\n"
+            "The sector's one-line reason below is real but SECTOR-level. "
+            "Both halves of your job are required: (1) name companies the "
+            "mechanism genuinely reaches, and (2) for each, state HOW it "
+            "hits THAT company's own business -- its revenue exposure, cost "
+            "structure or customer base -- not a copy of the sector reason "
+            "and not a description of what the company does.\n\n"
+            f"{_BREADTH_INSTRUCTION}\n\n"
+            "But do not force it. If the mechanism only reaches through "
+            "vague language (\"changing consumer spending\", \"increased "
+            "engagement\") rather than a specific cost, revenue line or "
+            "customer relationship, that is not a company-level link -- zero "
+            "companies is then the honest answer. Reality check per company: "
+            "would a professional equity analyst put it in a SAME-DAY "
+            "research note on THIS event? One company's own temporary "
+            "stumble (an earnings miss, a stock drop, CEO commentary) does "
+            "NOT ripple to companies that merely share its theme -- for "
+            "those, few or zero is correct.\n\n"
+            "Each company MUST be a separate, independently listed company "
+            "with its own ticker -- NEVER a division, segment, subsidiary or "
+            "business unit of a company already named above. \"[Company] - "
+            "[Segment] Division\" is the SAME company again, cannot resolve "
+            "to a real record, and is not a cascade link; name a genuinely "
+            "different company in that sector instead of dropping the "
+            "sector."
         )
         parent_context = f"\n\nMust chain from one of these companies:\n{parent_lines}"
 
@@ -643,8 +870,60 @@ def _identify_companies(
     # is None for callers with no DB (older tests) -- those stay ungrounded.
     valid_tickers: list[str] | None = None
     candidate_block = ""
+    known_relationships = ""
     if session is not None:
         candidates = candidate_companies(session, [s.sector for s in sectors])
+
+        # Supply-links grounding (app.companies.supply_links.prompting):
+        # event_tickers = the already-CONFIRMED DIRECT companies this call
+        # chains from -- i.e. ONLY the L1 cascade stage, whose parent_pool
+        # IS the direct-company pool (spec 6's "event companies"). Restricted
+        # here, not just at the direct stage (parent_pool is None there,
+        # already excluded): grounding the L2 stage too (parent_pool =
+        # indirect_l1 companies) measured 6,657-7,165 tokens against
+        # COMPANY_PROMPT_TOKEN_BUDGET=6,500 -- see
+        # tests/test_prompt_budget.py, which is what holds this line.
+        event_tickers: list[str] = []
+        if parent_pool and all(m.impact_level == "direct" for m in parent_pool):
+            event_tickers = parent_tickers or []
+        known_relationships, extra_tickers = supply_link_prompting.known_relationships_block(
+            session, event_tickers,
+        )
+        # extras supplement a candidate list, never constitute one: when
+        # candidate_companies() found zero eligible companies for these
+        # sectors, appending extras here would make them the ENTIRE
+        # candidate list, and with `candidates` non-empty the block below
+        # sets valid_tickers to an enum containing ONLY those extras --
+        # constraining the model to select solely from the event company's
+        # already-known counterparties (measured: 10 of 18 sectors had zero
+        # eligible candidates, which would have collapsed the tool schema's
+        # ticker enum + `allowed` filter to exactly that shape on every one
+        # of them). A sector with no real candidates must stay ungrounded
+        # (valid_tickers=None, unconstrained) rather than be silently
+        # narrowed to a handful of supply-chain names.
+        if extra_tickers and candidates:
+            existing_tickers = {c.ticker for c in candidates}
+            new_tickers = [t for t in extra_tickers if t not in existing_tickers]
+            if new_tickers:
+                # Same eligibility guards candidate_companies applies (see
+                # app.companies.candidates ~110-120): a resolved counterparty
+                # is still just a ticker string here, not yet vetted as a
+                # real, currently-tradeable Indian listing -- without these
+                # filters a demo row, a foreign/global listing, or an
+                # SME/RESTRICTED/SUSPENDED ticker could reach the prompt and
+                # the tool schema's enum by a path candidate_companies itself
+                # would never allow.
+                extra_companies = (
+                    session.query(Company)
+                    .filter(Company.ticker.in_(new_tickers))
+                    .filter(Company.ticker.notin_(DEMO_TICKERS))
+                    .filter(Company.market == "INDIA")
+                    .filter(Company.tradeability == "NORMAL")
+                    .all()
+                )
+                candidates = candidates + extra_companies
+        candidates = candidates[:MAX_CANDIDATES_PER_PROMPT]
+
         if candidates:
             valid_tickers = candidate_tickers(candidates)
             candidate_block = (
@@ -656,17 +935,30 @@ def _identify_companies(
                 + format_candidates(candidates)
             )
 
-    rationale_instructions = COMPANY_RATIONALE_INSTRUCTIONS if parent_pool is None else CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
+    # Always the slim (no rulebook/playbook) variant, for BOTH the direct and
+    # cascade stages -- see CASCADE_COMPANY_RATIONALE_INSTRUCTIONS' own
+    # comment and the model-selection comment in _attempt below for why the
+    # rulebook-bearing COMPANY_RATIONALE_INSTRUCTIONS is never reachable here.
+    rationale_instructions = CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
+
+    # known_relationships is derived from THIS call's event tickers/stored
+    # links, not a per-stage constant -- like candidate_block, it belongs in
+    # _compose's variable tail, not spliced into `instructions` (the
+    # cacheable prefix _compose's own docstring describes below). Zero
+    # stored links means known_relationships == "" and this stays "", so the
+    # composed prompt is unaffected either way (see tests/test_supply_links.
+    # py's byte-identical-when-empty test and tests/test_cascade.py's
+    # untouched prompt-shape tests).
+    known_relationships_tail = f"\n\n{known_relationships}" if known_relationships else ""
 
     def _compose(instructions: str) -> str:
         """Stable prefix first, variable content last (cost-optimization
-        phase 2). `framing` and `instructions` are per-stage constants --
-        the direct stage's instructions alone carry the whole rulebook and
-        playbook block, ~6k tokens -- while only the facts/sectors/parents
-        block changes between calls. Leading with the constants makes the
-        cacheable prefix as long as it can be, which matters most exactly
-        where this call is repeated: the cascade stages run it once per
-        sector, re-sending identical instructions every time.
+        phase 2). `framing` and `instructions` are per-stage constants, while
+        only the facts/sectors/parents block changes between calls. Leading
+        with the constants makes the cacheable prefix as long as it can be,
+        which matters most exactly where this call is repeated: EVERY
+        company stage now runs it once per sector, re-sending identical
+        instructions every time.
 
         The closing line is not filler. The old ordering put the field
         instructions immediately before the answer, and that adjacency is
@@ -678,7 +970,10 @@ def _identify_companies(
         `candidate_block` (the real DB companies this call must choose from)
         rides the variable tail, not the prefix: it is derived from THIS
         call's sectors, so it is not cacheable, and it must stay adjacent to
-        the sector lines it enumerates.
+        the sector lines it enumerates. `known_relationships_tail` (this
+        event company's own stored SupplyLink rows) is the same kind of
+        per-call fact, not a per-stage constant, so it rides the tail too
+        rather than being spliced into `instructions`.
         """
         return (
             f"{framing}\n\n"
@@ -686,56 +981,64 @@ def _identify_companies(
             f"Facts: {facts}\n\n"
             f"Sectors:\n{sector_lines}"
             f"{parent_context}"
-            f"{candidate_block}\n\n"
+            f"{candidate_block}"
+            f"{known_relationships_tail}\n\n"
             "Now apply the instructions above to these facts and sectors, "
             "filling in every field exactly as they specify."
         )
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": _compose(rationale_instructions)},
-    ]
     tool = build_company_tool(parent_tickers if parent_tickers else None, valid_tickers=valid_tickers)
 
-    def _call(model: str):
-        return client.chat.completions.create(
-            model=model,
-            max_tokens=8192,
-            tools=[tool],
-            tool_choice={"type": "function", "function": {"name": "record_sector_companies"}},
-            messages=messages,
-            **tier_kwargs("identify_companies"),
+    def _attempt() -> dict:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": _compose(rationale_instructions)},
+        ]
+
+        def _call(model: str):
+            return client.chat.completions.create(
+                model=model,
+                max_tokens=8192,
+                tools=[tool],
+                tool_choice={"type": "function", "function": {"name": "record_sector_companies"}},
+                messages=messages,
+                **tier_kwargs("identify_companies"),
+            )
+
+        # Ladder order (gpt-oss primary, llama fallback) and the reasoning
+        # behind it live with _SLIM_PROMPT_PRIMARY_MODEL above -- it is now
+        # the SAME ordering every other stage in this module uses, because
+        # the prompt fits every GROQ_TPM_CEILING and size no longer decides.
+        #
+        # A full-rulebook attempt used to be tried first for the direct
+        # stage (parent_pool is None), with this slim ladder as its retry on
+        # failure. It has been removed outright, not just reordered: even
+        # scoped to one sector's candidates, a full-rulebook prompt measures
+        # 16,284-17,243 tokens -- over BOTH models' GROQ_TPM_CEILING
+        # regardless of order, so that attempt was a guaranteed wasted call
+        # and a guaranteed 413 on every single article, never once serving a
+        # real request. Swapping RULEBOOK_TEXT for the smaller RULEBOOK_
+        # DIGEST was considered and rejected: digest+playbooks still adds
+        # roughly 2.5k tokens on top of the measured slim range, landing
+        # around 13.1k-14.1k -- still over BOTH ceilings, so it would have
+        # stayed a guaranteed failure too, just a smaller one. There is
+        # currently no rulebook-bearing prompt shape for this stage that
+        # fits either model, so the direct stage runs on the same slim,
+        # rulebook-free ladder as the cascade stages (parent_pool is not
+        # None) -- see rationale_instructions above.
+        response = _call_with_model_fallback(
+            _call, _SLIM_PROMPT_PRIMARY_MODEL, call_name="identify_companies",
+            fallback_model=_SLIM_PROMPT_FALLBACK_MODEL,
         )
 
-    try:
-        response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies")
-    except Exception as exc:
-        if parent_pool is not None:
-            raise
-        # The direct-stage prompt carries the full rulebook/playbook block
-        # (~6k tokens). When the primary provider is unavailable and the
-        # call degrades to Groq, that block alone can push the request past
-        # Groq's per-request token cap (observed live: 413 "Request too
-        # large", losing the entire direct-company stage). Retry once with
-        # the slim cascade-style instructions (no rulebook/playbooks): a
-        # less-informed answer beats losing every direct company -- the
-        # alert simply gets no rule citations that run. The retry itself
-        # still gets the RateLimitError/tool_use_failed -> FALLBACK_MODEL
-        # ladder: a real production failure was full+primary 413'd, then
-        # slim+primary 400'd with tool_use_failed, and only slim+FALLBACK_MODEL
-        # actually succeeded.
-        logger.warning(
-            "direct-company call failed with full rulebook prompt (%s); retrying slim", exc
-        )
-        messages[1]["content"] = _compose(CASCADE_COMPANY_RATIONALE_INSTRUCTIONS)
-        response = _call_with_model_fallback(_call, MODEL, call_name="identify_companies (slim retry)")
+        return _forced_tool_arguments(response, "record_sector_companies")
 
-    message = response.choices[0].message
-    tool_calls = message.tool_calls or []
-    tool_call = next((tc for tc in tool_calls if tc.function.name == "record_sector_companies"), None)
-    if tool_call is None:
-        raise ValueError("No record_sector_companies tool_use block")
-    arguments = json.loads(tool_call.function.arguments)
+    # This stage already had a model-fallback ladder. The stochastic retry
+    # wraps it rather than duplicating it: one attempt here is a full ladder,
+    # and a ladder that ends in garbage output is retried up to
+    # TOOL_CALL_ATTEMPTS times -- the same shared policy every other
+    # forced-tool-call stage gets.
+    arguments = _retry_forced_tool_call(_attempt, stage="identify_companies")
 
     # Provider-side enum enforcement is not reliable for nested array items
     # (see the SECTORS filter at the end of _identify_sectors for the same
@@ -768,28 +1071,52 @@ def _identify_companies(
     return mentions
 
 
-def _identify_cascade_companies_per_sector(
-    client, facts: str, sectors: list[SectorFinding], impact_level: str, parent_pool: list[CompanyMention],
-    session=None,
+def _identify_companies_per_sector(
+    client, facts: str, sectors: list[SectorFinding], impact_level: str,
+    parent_pool: list[CompanyMention] | None, session=None,
 ) -> tuple[list[CompanyMention], list[dict]]:
     """Calls _identify_companies ONCE PER SECTOR rather than bundling every
-    cascade sector into one call. Confirmed in production: bundling 5-7
+    sector into one call. Serves BOTH company stages: the direct/primary
+    stage (stage 3, parent_pool=None) and the cascade stages (5/7, with a
+    parent_pool) -- one implementation, so the per-sector call shape, the
+    retry, and the gap recording cannot drift between them.
+
+    Confirmed in production for the cascade stages first: bundling 5-7
     cascade sectors (each company requires a long rationale/key_points/
     reasons/evidence_refs/risks/assumptions/unknowns block, easily 500+
     tokens) into a single max_tokens=8192 tool call made the model return a
     degenerate empty response (no exception, just `{}` -- silently zero
     companies) even though every sector had a genuine, findable answer. The
     SAME sectors, called one at a time, reliably produced rich, correct,
-    multi-company results. Direct/primary companies (stage 3) do not use
-    this -- that stage empirically has few enough sectors (the article's
-    own direct subject, not a wide cascade fan-out) that bundling is fine.
+    multi-company results.
+
+    The direct stage was exempted from this on the theory that it has few
+    enough sectors for bundling to be safe. Measured in production (2026-08)
+    that was wrong, and in a harder way than a degraded answer: its bundled
+    prompt carried EVERY primary sector's candidate block at once and billed
+    17,607 tokens (11,888 with the rulebook dropped), over the per-minute
+    token ceiling of BOTH available models -- openai/gpt-oss-20b at 8,000 TPM
+    and llama-3.3-70b-versatile at 12,000 -- so every article 413'd here and
+    got ZERO direct companies. One sector per call carries one sector's
+    candidates, which fits both ceilings with room to spare (see
+    app.companies.candidates for the measured budget).
 
     A failure on one sector is retried once (2 attempts total) before being
     recorded as a gap dict in the returned gaps list -- never silently
     dropped, so a genuine transient failure (rate limit, malformed
     response) is distinguishable from "this sector genuinely has no
-    cascade companies" (which returns normally with an empty list, not a
-    gap). A gap on one sector does not lose another sector's results.
+    companies" (which returns normally with an empty list, not a gap). A gap
+    on one sector does not lose another sector's results -- which is the
+    other half of what the direct stage gains here: it used to be one call
+    whose single failure cost the article every direct company at once.
+
+    This 2-attempt loop sits OUTSIDE _identify_companies' own
+    _retry_forced_tool_call, and the two are complementary rather than
+    redundant: this one catches every exception (a rate limit that outlived
+    the key/model rotation reaches here and becomes a gap), while the inner
+    one retries only the stochastic garbage-output classes. The `attempts: 2`
+    recorded on the gap counts THIS loop's sector-level attempts, which is
+    what the gap is about.
     """
     mentions: list[CompanyMention] = []
     gaps: list[dict] = []
@@ -807,16 +1134,19 @@ def _identify_cascade_companies_per_sector(
             except Exception as exc:
                 last_error = str(exc)
         if not succeeded:
-            logger.warning("cascade company lookup for sector %r failed after retry, recording gap: %s", sector.sector, last_error)
+            logger.warning(
+                "%s company lookup for sector %r failed after retry, recording gap: %s",
+                impact_level, sector.sector, last_error,
+            )
             gaps.append({
                 "sector": sector.sector,
                 "impact_level": impact_level,
                 # parent_pool is a POOL of companies this sector's lookup
-                # chains from, not a single one -- there is no single
-                # correct parent_ticker to attribute a whole-sector
-                # failure to, so this is intentionally left None rather
-                # than picking (and thereby misrepresenting) just the
-                # first entry.
+                # chains from, not a single one (and None entirely on the
+                # direct stage) -- there is no single correct parent_ticker
+                # to attribute a whole-sector failure to, so this is
+                # intentionally left None rather than picking (and thereby
+                # misrepresenting) just the first entry.
                 "parent_ticker": None,
                 "attempts": 2,
                 "last_error": last_error,
@@ -981,18 +1311,22 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
                 ),
             },
         ]
-        try:
+
+        def _attempt() -> dict:
             response = client.chat.completions.create(
                 model=FALLBACK_MODEL, max_tokens=2048, tools=[tool],
                 tool_choice={"type": "function", "function": {"name": "record_edge_verification"}},
                 messages=messages,
                 **tier_kwargs("generate_edges"),
             )
-            message = response.choices[0].message
-            tool_call = next((tc for tc in (message.tool_calls or []) if tc.function.name == "record_edge_verification"), None)
-            if tool_call is None:
-                raise ValueError("No record_edge_verification tool_use block")
-            arguments = json.loads(tool_call.function.arguments)
+            return _forced_tool_arguments(response, "record_edge_verification")
+
+        try:
+            # Retried on the stochastic garbage classes before the fallback
+            # below fires: dropping (or leaving unverified) a whole proposed
+            # chain because one small-model call answered in prose is exactly
+            # the avoidable loss TOOL_CALL_ATTEMPTS exists for.
+            arguments = _retry_forced_tool_call(_attempt, stage="generate_edges")
             verifications = {v["index"]: v for v in arguments.get("verifications", [])}
 
             for i, proposed_edge in enumerate(proposed):
@@ -1105,10 +1439,10 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
     failure propagates, failing the whole article -- identical to the old
     single-call analyze_article's behavior. A failure at any later stage
     truncates the pipeline there: everything produced by stages that
-    already succeeded is still returned. Per-sector cascade-company
-    failures (stages 5/7) are retried and, if still unresolved, recorded
-    as gaps rather than truncating the pipeline (see
-    _identify_cascade_companies_per_sector).
+    already succeeded is still returned. Per-sector company failures --
+    now at EVERY company stage, direct (3) and cascade (5/7) alike -- are
+    retried and, if still unresolved, recorded as gaps rather than
+    truncating the pipeline (see _identify_companies_per_sector).
     """
     facts_result = _extract_facts(client, title, content)
     primary_sectors = _identify_sectors(client, facts_result.facts, parent_sectors=None)
@@ -1126,15 +1460,18 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
             companies=all_companies, gaps=all_gaps, facts=facts_result.facts,
         )
 
-    try:
-        primary_companies = _identify_companies(
-            client, facts_result.facts, primary_sectors, impact_level="direct",
-            parent_pool=None, session=session,
-        )
-    except Exception as exc:
-        logger.warning("cascade stage 3 (primary companies) failed, truncating: %s", exc)
-        primary_companies = []
+    # One call per primary sector, same as the cascade stages -- a bundled
+    # call carried every sector's candidate block at once and exceeded both
+    # models' per-minute token ceilings, costing the article every direct
+    # company (see _identify_companies_per_sector). A sector that still fails
+    # after its retry becomes a gap and no longer takes the other sectors'
+    # companies down with it, so there is nothing left to "truncate" here.
+    primary_companies, primary_gaps = _identify_companies_per_sector(
+        client, facts_result.facts, primary_sectors, impact_level="direct",
+        parent_pool=None, session=session,
+    )
     all_companies.extend(primary_companies)
+    all_gaps.extend(primary_gaps)
 
     # Fan-out only for genuinely broad events, and only at the primary level.
     # A cascade sector is already one hop from the news; fanning it out to
@@ -1154,7 +1491,7 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
             l1_sectors = []
         all_sectors.extend(l1_sectors)
         if l1_sectors:
-            l1_companies, l1_gaps = _identify_cascade_companies_per_sector(
+            l1_companies, l1_gaps = _identify_companies_per_sector(
                 client, facts_result.facts, l1_sectors, impact_level="indirect_l1",
                 parent_pool=l1_parent_tickers_present, session=session,
             )
@@ -1172,7 +1509,7 @@ def analyze_article(client, title: str, content: str, session=None) -> AnalysisO
                 l2_sectors = []
             all_sectors.extend(l2_sectors)
             if l2_sectors:
-                l2_companies, l2_gaps = _identify_cascade_companies_per_sector(
+                l2_companies, l2_gaps = _identify_companies_per_sector(
                     client, facts_result.facts, l2_sectors, impact_level="indirect_l2",
                     parent_pool=l2_parent_tickers_present, session=session,
                 )

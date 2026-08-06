@@ -339,3 +339,48 @@ def test_deep_dive_carries_per_story_reasoning_and_section(db_session):
     assert no_context["why"] is None
     assert no_context["section_title"] is None
     app.dependency_overrides.clear()
+
+
+def test_no_alert_deep_dive_has_null_volatility_range(db_session, monkeypatch):
+    # Directory path: no alert_id -> no category -> null, key present.
+    monkeypatch.setattr("app.routers.stock_deep_dive.fetch_pe_ratio", lambda ticker: None)
+    _override_db(db_session)
+    company = _company("RELIANCE.NS")
+    db_session.add(company)
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2/stock/RELIANCE.NS")
+
+    assert response.status_code == 200
+    assert response.json()["volatility_range"] is None
+    app.dependency_overrides.clear()
+
+
+def test_alert_deep_dive_serves_the_range_for_that_alerts_category(db_session, monkeypatch):
+    from app.models import EventVolatilityRange
+
+    monkeypatch.setattr("app.routers.stock_deep_dive.fetch_pe_ratio", lambda ticker: None)
+    _override_db(db_session)
+    company = _company("RELIANCE.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    db_session.add(_alert_company(alert.id, company.id))
+    db_session.add(EventVolatilityRange(
+        level="COMPANY", company_id=company.id, sector=None,
+        category=alert.category, n_events=4, min_excess_move_pct=-1.8,
+        median_excess_move_pct=0.6, max_excess_move_pct=2.4,
+        as_of=TODAY, source="market_moves",
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get(f"/api/feed-v2/stock/RELIANCE.NS?alert_id={alert.id}")
+
+    assert response.status_code == 200
+    assert response.json()["volatility_range"]["level"] == "COMPANY"
+    app.dependency_overrides.clear()

@@ -1,10 +1,61 @@
 import json
+import logging
 import time
 
+from openai import RateLimitError
 from sqlalchemy.orm import Session
 
 from app.analysis.claude_client import FALLBACK_MODEL, tier_kwargs
 from app.models import Article
+
+logger = logging.getLogger(__name__)
+
+
+class RelevanceRateLimited(Exception):
+    """The relevance call failed because the provider is rate-limited or out
+    of quota -- as opposed to any other failure.
+
+    This distinction exists because the two failure modes want opposite
+    handling. For a genuine error (a malformed response, a transient 500)
+    admitting the article is right: the article is probably fine and one
+    wasted analysis is cheap. For a rate limit it is actively harmful --
+    admitting sends the article on to full analysis, which is ~7 more calls
+    against the very quota that just ran out, so they fail too and the
+    article lands in ANALYSIS_FAILED, which nothing revisits. Measured in
+    production: 31 of 117 articles in one day were lost exactly this way.
+    Leaving the article NEW instead costs nothing and lets the next
+    scheduler tick classify it once quota returns.
+    """
+
+
+# Substrings that identify a rate-limit/quota failure in a provider error
+# whose TYPE we can't match on. Necessary because this client layer talks to
+# three providers through adapters (see app.analysis.claude_client): Groq
+# raises openai.RateLimitError, but AnthropicAPIError and GeminiAPIError are
+# both flat exception types that cover every provider-level failure --
+# 429s included -- and carry the distinction only in their message. Matching
+# the message is the only signal available for those two.
+_RATE_LIMIT_MARKERS = (
+    "rate limit", "rate_limit", "ratelimit", "too many requests",
+    "quota", "resource_exhausted", "resource exhausted", "insufficient_quota",
+    "429",
+)
+
+
+def is_rate_limit_error(exc: BaseException) -> bool:
+    """True when ``exc`` represents a provider rate limit / exhausted quota.
+
+    Errs toward False on purpose: a misread here sends the article down the
+    fail-open path, which admits it. Reading a rate limit as an ordinary
+    error costs LLM calls; reading an ordinary error as a rate limit would
+    delay a real article, so False is the safer default when unsure.
+    """
+    if isinstance(exc, RateLimitError):
+        return True
+    if getattr(exc, "status_code", None) == 429 or getattr(exc, "code", None) == 429:
+        return True
+    message = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in message for marker in _RATE_LIMIT_MARKERS)
 
 _PROMPT_TEMPLATE = (
     "Does this news have a SPECIFIC, STATED economic mechanism that would "
@@ -72,9 +123,12 @@ def classify_relevance(client, title: str, content: str) -> bool:
     reasoning tokens before the final answer -- a too-small budget starves
     the answer itself, producing an empty response (also confirmed live:
     max_tokens=5 reliably returned '' even for an unambiguous headline).
-    Never raises -- any failure (API error, unparseable response) fails
-    OPEN (returns True, admit the article): silently dropping a real story
-    is worse than one wasted downstream analysis call on a false positive.
+    Raises exactly one exception, RelevanceRateLimited, and only when the
+    provider is rate-limited or out of quota -- see that class for why that
+    single case must not be admitted. EVERY other failure (API error,
+    unparseable response, missing tool call) still fails OPEN (returns True,
+    admit the article): silently dropping a real story is worse than one
+    wasted downstream analysis call on a false positive.
     """
     tool = build_relevance_tool()
     try:
@@ -92,7 +146,9 @@ def classify_relevance(client, title: str, content: str) -> bool:
             return True
         arguments = json.loads(tool_call.function.arguments)
         return bool(arguments.get("relevant", True))
-    except Exception:
+    except Exception as exc:
+        if is_rate_limit_error(exc):
+            raise RelevanceRateLimited(str(exc)) from exc
         return True
 
 
@@ -106,29 +162,69 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
     call -- the feed is English-only by default; other languages come from
     the user's translation picker, never from the source mix.
 
-    A second deterministic gate (app.filtering.prefilter) runs after the
-    language one: it short-circuits articles that are unambiguously not
-    market news, so they never cost a classification call. It defaults to
-    shadow mode, where it only reports what it would have rejected and
-    every article still reaches the LLM -- see that module for why the
-    rules are built to err only toward admitting.
+    Two further deterministic gates run after the language one, both free:
+
+    * app.filtering.junk -- recognises a narrow set of mechanically produced
+      non-news document formats (UK Takeover Code Rule 8 dealing
+      disclosures, award/recognition PR) and FILTERS them outright. Always
+      enforcing, because each pattern is anchored to a document shape rather
+      than a topic.
+    * app.filtering.prefilter -- short-circuits articles that are
+      unambiguously not market news. Defaults to shadow mode, where it only
+      reports what it would have rejected and every article still reaches
+      the LLM.
+
+    See both modules for why their rules are built to err only toward
+    admitting.
+
+    A rate-limited relevance call leaves the article in NEW rather than
+    admitting or filtering it, and stops this run from making any further
+    relevance calls: once the provider's quota is gone every subsequent call
+    in the same run would fail too, and each admitted article would go on to
+    burn ~7 more analysis calls before landing in ANALYSIS_FAILED. The
+    remaining articles keep their NEW status and are picked up by the next
+    scheduler tick, which is the retry. The loop still runs the free
+    deterministic gates over them -- those cost nothing and their verdicts
+    do not depend on the provider being up.
     """
+    from app.filtering.junk import is_junk
     from app.filtering.language_gate import is_english_text
     from app.filtering.prefilter import PrefilterCounters, apply_prefilter
     from app.pipeline import article_text
 
     counters = PrefilterCounters()
+    rate_limited = False
+    deferred = 0
+    # .all() materialises the NEW rows once, up front. An article left as
+    # NEW below is therefore never revisited within this run -- the loop is
+    # iterating a fixed snapshot, not a live query.
     for article in session.query(Article).filter_by(status="NEW").all():
         if not is_english_text(article.title, article_text(article)):
+            article.status = "FILTERED"
+            continue  # deterministic gate -- no LLM call, no throttle needed
+        if is_junk(article.title, article_text(article)):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed
         if apply_prefilter(article.title, article_text(article), counters):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed
-        if classify_relevance(client, article.title, article_text(article)):
-            article.status = "CATEGORIZED"
-        else:
-            article.status = "FILTERED"
+        if rate_limited:
+            deferred += 1
+            continue  # left NEW on purpose -- the next tick retries it
+        try:
+            relevant = classify_relevance(client, article.title, article_text(article))
+        except RelevanceRateLimited as exc:
+            rate_limited = True
+            deferred += 1
+            logger.warning(
+                "relevance classification rate-limited on article_id=%s (%s) -- "
+                "leaving it and the rest of this run's articles in NEW for the next tick",
+                article.id, exc,
+            )
+            continue  # left NEW on purpose -- neither filtered nor admitted
+        article.status = "CATEGORIZED" if relevant else "FILTERED"
         time.sleep(throttle_seconds)
     counters.log_summary()
+    if deferred:
+        logger.warning("relevance: %s article(s) left in NEW for a later tick (provider rate limit)", deferred)
     session.commit()

@@ -399,3 +399,24 @@ def test_list_feed_v2_serves_translations_for_lang(db_session):
     assert hindi["summary_short"] == "हिंदी सार"
     assert hindi["category_label"] == "तेल और गैस"
     app.dependency_overrides.clear()
+
+
+def test_demo_marked_articles_never_reach_the_production_feed(db_session, monkeypatch):
+    """seed_feed_v2_demo rows share the production database when a preview
+    service is attached to it -- the production feed must exclude them
+    unconditionally (ALLOW_DEMO_FEED opts a preview service back in)."""
+    _override_db(db_session)
+    real = _measured_alert(db_session)
+    demo = _measured_alert(db_session, ticker="DEMOCO.NS")
+    demo.article.url = "https://demo.feed-v2.local/0"
+    db_session.commit()
+    client = TestClient(app)
+
+    body = client.get("/api/feed-v2").json()
+    assert [row["id"] for row in body] == [real.id]
+
+    from app.config import settings
+    monkeypatch.setattr(settings, "allow_demo_feed", True)
+    body = client.get("/api/feed-v2").json()
+    assert {row["id"] for row in body} == {real.id, demo.id}
+    app.dependency_overrides.clear()

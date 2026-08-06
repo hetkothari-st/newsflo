@@ -1,11 +1,14 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 from app.analysis.cascade import (
-    BROAD_EVENT_TYPES, analyze_article, _extract_facts, _generate_edges, _identify_cascade_companies_per_sector,
-    _identify_companies, _identify_sectors, _sector_fanout_mentions, _sector_mechanism_edges,
+    BROAD_EVENT_TYPES, TOOL_CALL_ATTEMPTS, MissingToolCallError, analyze_article, _extract_facts,
+    _forced_tool_arguments, _generate_edges, _identify_companies_per_sector,
+    _identify_companies, _identify_sectors, _is_stochastic_tool_failure,
+    _retry_forced_tool_call, _sector_fanout_mentions, _sector_mechanism_edges,
     build_company_tool, build_sector_tool,
 )
 from app.analysis.schemas import CompanyMention, SectorFinding
@@ -210,6 +213,42 @@ def test_cascade_sector_prompt_has_no_rulebook_digest():
     assert "KNOWN TRANSMISSION CHAINS" not in prompt
 
 
+def test_primary_sector_framing_asks_for_every_sector_with_a_real_channel():
+    # The Boeing 737 MAX 7 regression: _identify_sectors returned only
+    # `defense`, so airlines/airports, aerospace components, forgings and
+    # infra had no candidate list to be selected from at all. Breadth has to
+    # start here -- no later stage can recover a sector never named.
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+    _identify_sectors(client, "some facts", None)
+    prompt = client.last_messages[-1]["content"]
+
+    assert "EVERY financial, business, or economic sector" in prompt
+    assert "not just the single most obvious one" in prompt
+    # Names the transmission channels to walk, rather than leaving "directly
+    # affected" to be read as "the sector the headline is about".
+    for channel in ["supplies its components", "who buys or operates it",
+                    "maintains and services it", "who regulates it"]:
+        assert channel in prompt
+    assert "failure of thoroughness" in prompt
+
+
+def test_primary_sector_framing_keeps_the_zero_sector_guard_intact():
+    # The hard guard that a story with no economic mechanism correctly
+    # returns nothing. Broadening the framing above must not erode it: an
+    # accident/crime/human-interest story still yields zero sectors.
+    client = ScriptedClient({"record_sectors": {"sectors": []}})
+    _identify_sectors(client, "some facts", None)
+    prompt = client.last_messages[-1]["content"]
+
+    assert "Zero sectors is a correct answer" in prompt
+    assert "accident, disaster, crime, or human-interest story has zero real sectors" in prompt
+    assert "Do not manufacture a mechanism" in prompt
+    # And the breadth instruction is explicitly scoped so it cannot be read
+    # as licence to invent a channel.
+    assert "does NOT weaken this" in prompt
+    assert "never inventing a channel" in prompt
+
+
 def test_company_rationale_instructions_forbid_verbatim_echo():
     from app.analysis.cascade import COMPANY_RATIONALE_INSTRUCTIONS
     assert "verbatim" in COMPANY_RATIONALE_INSTRUCTIONS.lower()
@@ -269,6 +308,72 @@ def test_identify_companies_direct_stage_sets_impact_level_and_sector():
     assert company.alternative_hypothesis == _FULL_COMPANY_FIELDS["alternative_hypothesis"]
 
 
+def test_company_framings_ask_for_breadth_and_no_longer_cap_at_three():
+    # The correction that overshot: the cascade framing used to tell the
+    # model that naming "1-3 real companies per sector" was the normal,
+    # expected outcome, which capped a 737 MAX story at three companies
+    # total. Both stages now carry the same breadth instruction.
+    from app.analysis.cascade import _BREADTH_INSTRUCTION
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+    _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
+    direct_prompt = client.last_messages[1]["content"]
+
+    parent_pool = [CompanyMention(
+        name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
+        magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
+        impact_level="direct",
+    )]
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
+    _identify_companies(
+        client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+    )
+    cascade_prompt = client.last_messages[1]["content"]
+
+    for prompt in (direct_prompt, cascade_prompt):
+        assert _BREADTH_INSTRUCTION in prompt
+        assert "1-3 real companies per sector" not in prompt
+    assert "Five, ten or more" in _BREADTH_INSTRUCTION
+    assert "component suppliers" in _BREADTH_INSTRUCTION
+
+
+def test_breadth_instruction_still_forbids_inventing_and_size_reasoning():
+    # Breadth must come from selecting more REAL candidates, never from
+    # size-ranked fan-out -- that is what put a food-delivery company on a
+    # crude-oil story.
+    from app.analysis.cascade import _BREADTH_INSTRUCTION
+
+    assert "a later step removes any whose mechanism does not hold up" in _BREADTH_INSTRUCTION
+    assert "forbidden is inventing" in _BREADTH_INSTRUCTION
+    assert "major player in this sector" in _BREADTH_INSTRUCTION
+
+
+def test_identify_companies_returns_many_companies_for_one_sector(db_session):
+    # The product requirement, asserted end-to-end on the stage: nothing in
+    # parsing, grounding, or the post-filter caps how many companies come
+    # back from a single sector.
+    tickers = [f"AERO{i:02d}.NS" for i in range(12)]
+    for ticker in tickers:
+        db_session.add(Company(
+            ticker=ticker, name=f"Aero Supplier {ticker}", sector="defense", index_tier="OTHER",
+        ))
+    db_session.commit()
+
+    client = ScriptedClient({"record_sector_companies": {"sector_companies": [{
+        "sector": "defense",
+        "companies": [_full_company(f"Aero Supplier {t}", t) for t in tickers],
+    }]}})
+
+    mentions = _identify_companies(
+        client, facts="facts",
+        sectors=[SectorFinding(sector="defense", direction="bullish", mechanism="m")],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    assert [m.ticker for m in mentions] == tickers
+    assert all(m.impact_level == "direct" for m in mentions)
+
+
 def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
     parent_pool = [CompanyMention(
         name="HDFC Bank", ticker="HDFCBANK.NS", is_direct=True, direction="bearish",
@@ -290,23 +395,50 @@ def test_identify_companies_cascade_stage_requires_and_sets_parent_ticker():
     assert result[0].parent_ticker == "HDFCBANK.NS"
 
 
-def test_identify_companies_direct_stage_calls_primary_model():
-    from app.analysis.claude_client import MODEL
+def test_identify_companies_direct_stage_calls_the_schema_reliable_model_first():
+    # This stage used to try MODEL (llama) first, and ONLY because the prompt
+    # did not fit gpt-oss's tokens-per-minute ceiling. llama fails this
+    # nested tool schema constantly, so that ordering produced zero companies
+    # on 47 of 48 production alerts. The prompt now fits every ceiling in
+    # GROQ_TPM_CEILING (guarded by tests/test_prompt_budget.py), so the stage
+    # leads with the model that can actually satisfy the schema.
+    from app.analysis.claude_client import FALLBACK_MODEL
 
     client = ScriptedClient({"record_sector_companies": {"sector_companies": []}})
 
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
-    assert client.calls == [{"name": "record_sector_companies", "model": MODEL}]
+    assert client.calls == [{"name": "record_sector_companies", "model": FALLBACK_MODEL}]
+
+
+def test_identify_companies_ladder_leads_with_the_tool_schema_reliable_model():
+    # Both models must appear in the ladder (llama is a separate quota bucket
+    # and a genuinely useful retry when gpt-oss is rate-limited) -- but
+    # gpt-oss leads, because it is the one built for reliable nested
+    # tool/function calling. Ordering by TPM ceiling instead, as this stage
+    # once did, puts llama first and reintroduces the tool_use_failed storm.
+    from app.analysis.cascade import _SLIM_PROMPT_FALLBACK_MODEL, _SLIM_PROMPT_PRIMARY_MODEL
+    from app.analysis.claude_client import FALLBACK_MODEL, GROQ_TPM_CEILING
+
+    assert _SLIM_PROMPT_PRIMARY_MODEL == FALLBACK_MODEL
+    assert {_SLIM_PROMPT_PRIMARY_MODEL, _SLIM_PROMPT_FALLBACK_MODEL} == set(GROQ_TPM_CEILING)
+    # ...and leading with it is only SAFE because the prompt fits its ceiling,
+    # which is the smaller of the two.
+    assert GROQ_TPM_CEILING[_SLIM_PROMPT_PRIMARY_MODEL] == min(GROQ_TPM_CEILING.values())
 
 
 def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+    # Named by ROLE, not by concrete model: this test asserts the ladder
+    # RETRIES, which must stay true whichever model currently leads it.
+    from app.analysis.cascade import (
+        _SLIM_PROMPT_FALLBACK_MODEL as SECONDARY,
+        _SLIM_PROMPT_PRIMARY_MODEL as PRIMARY,
+    )
 
     class RateLimitOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == PRIMARY:
                     from openai import RateLimitError
                     import httpx
                     request = httpx.Request("POST", "https://example.test/v1/chat/completions")
@@ -324,23 +456,27 @@ def test_identify_companies_falls_back_to_secondary_model_on_rate_limit():
     _identify_companies(client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None)
 
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": PRIMARY},
+        {"name": "record_sector_companies", "model": SECONDARY},
     ]
 
 
 def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
-    # Live production failure: the slim retry stayed on the primary model
-    # and Groq returned 400 tool_use_failed (a malformed llama-style
-    # function-call blob it couldn't parse) -- distinct from a rate limit,
-    # this must ALSO trigger the FALLBACK_MODEL retry rather than losing
-    # the whole stage.
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+    # Live production failure: the primary model stayed on Groq returned 400
+    # tool_use_failed (a malformed function-call blob it couldn't parse) --
+    # distinct from a rate limit, this must ALSO trigger the secondary-model
+    # retry rather than losing the whole stage. Named by ROLE -- see
+    # _SLIM_PROMPT_PRIMARY_MODEL in cascade.py for which model leads today
+    # and why.
+    from app.analysis.cascade import (
+        _SLIM_PROMPT_FALLBACK_MODEL as SECONDARY,
+        _SLIM_PROMPT_PRIMARY_MODEL as PRIMARY,
+    )
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == PRIMARY:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -361,20 +497,25 @@ def test_identify_companies_falls_back_to_secondary_model_on_tool_use_failed():
     assert len(result) == 1
     assert result[0].ticker == "HDFCBANK.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": PRIMARY},
+        {"name": "record_sector_companies", "model": SECONDARY},
     ]
 
 
 def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_use_failed():
-    # Same tool_use_failed -> FALLBACK_MODEL ladder must apply to a cascade
-    # stage (parent_pool set), not just the direct stage.
-    from app.analysis.claude_client import FALLBACK_MODEL, MODEL
+    # Same tool_use_failed -> secondary-model ladder must apply to a cascade
+    # stage (parent_pool set), not just the direct stage: the cascade
+    # prompt is the same slim shape as the direct one, so it rides the same
+    # ladder. Named by ROLE -- see _SLIM_PROMPT_PRIMARY_MODEL in cascade.py.
+    from app.analysis.cascade import (
+        _SLIM_PROMPT_FALLBACK_MODEL as SECONDARY,
+        _SLIM_PROMPT_PRIMARY_MODEL as PRIMARY,
+    )
 
     class ToolUseFailedOnceThenScripted(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
-                if kwargs["model"] == MODEL:
+                if kwargs["model"] == PRIMARY:
                     self._outer.calls.append({"name": kwargs["tool_choice"]["function"]["name"], "model": kwargs["model"]})
                     raise _tool_use_failed_error()
                 return super().create(**kwargs)
@@ -401,8 +542,8 @@ def test_identify_companies_cascade_stage_falls_back_to_secondary_model_on_tool_
 
     assert result[0].ticker == "IRCTC.NS"
     assert client.calls == [
-        {"name": "record_sector_companies", "model": MODEL},
-        {"name": "record_sector_companies", "model": FALLBACK_MODEL},
+        {"name": "record_sector_companies", "model": PRIMARY},
+        {"name": "record_sector_companies", "model": SECONDARY},
     ]
 
 
@@ -453,14 +594,18 @@ def test_identify_companies_cascade_stage_raises_when_both_models_fail_tool_use_
             client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
         )
 
-    # Cascade stage never gets the slim retry -- exactly two calls (primary
-    # then FALLBACK_MODEL), not four.
-    assert len(client.calls) == 2
+    # This stage's prompt is always the one slim variant now (see cascade.py's
+    # model-order comment), so ONE stochastic attempt is exactly two calls
+    # (MODEL then FALLBACK_MODEL), not four. The tool_use_failed that
+    # survives both models is a stochastic failure, so _retry_forced_tool_call
+    # runs that whole ladder TOOL_CALL_ATTEMPTS times before giving up:
+    # 3 x 2 = 6 calls, and still a raise.
+    assert len(client.calls) == 2 * TOOL_CALL_ATTEMPTS
 
 
 def test_identify_companies_does_not_retry_on_a_different_bad_request_error():
     # A genuinely malformed schema on our side would also 400 -- must NOT be
-    # mistaken for tool_use_failed and must NOT trigger the FALLBACK_MODEL
+    # mistaken for tool_use_failed and must NOT trigger the secondary-model
     # retry, so a real bug surfaces immediately instead of being masked.
     import httpx
     from openai import BadRequestError
@@ -496,29 +641,17 @@ def test_identify_companies_does_not_retry_on_a_different_bad_request_error():
     assert len(client.calls) == 1
 
 
-def test_identify_companies_direct_stage_retries_slim_on_oversize_rejection():
-    # Simulates Groq's per-request token cap (observed live as 413 "Request
-    # too large"): any prompt carrying the full rulebook block is rejected,
-    # the slim retry (no rulebook) succeeds. The direct stage must recover
-    # instead of losing every direct company.
-    class OversizeRejectingClient(ScriptedClient):
-        class _Completions(ScriptedClient._Completions):
-            def create(self, **kwargs):
-                content = kwargs["messages"][1]["content"]
-                if "ECONOMIC REASONING RULES" in content:
-                    self._outer.calls.append({
-                        "name": kwargs["tool_choice"]["function"]["name"],
-                        "model": kwargs["model"],
-                    })
-                    raise RuntimeError("Request too large (simulated 413)")
-                return super().create(**kwargs)
-
-        @property
-        def chat(self):
-            return SimpleNamespace(completions=self._Completions(self))
-
+def test_identify_companies_direct_stage_never_sends_the_rulebook_block():
+    # The always-413 rung is gone entirely, not just reordered: the direct
+    # stage's prompt never carries the full rulebook/playbook block
+    # (COMPANY_RATIONALE_INSTRUCTIONS). Even scoped to one sector's
+    # candidates that variant measures 16,284-17,243 tokens, over BOTH
+    # models' GROQ_TPM_CEILING regardless of order, so an attempt built from
+    # it could only ever 413. The direct stage now runs the same slim,
+    # rulebook-free prompt as the cascade stages, in ONE physical call on
+    # the happy path (no retry needed).
     company_fields = dict(_FULL_COMPANY_FIELDS, name="HDFC Bank", ticker="HDFCBANK.NS")
-    client = OversizeRejectingClient({
+    client = ScriptedClient({
         "record_sector_companies": {"sector_companies": [
             {"sector": "banking", "companies": [company_fields]},
         ]},
@@ -528,15 +661,15 @@ def test_identify_companies_direct_stage_retries_slim_on_oversize_rejection():
 
     assert len(result) == 1
     assert result[0].ticker == "HDFCBANK.NS"
-    # First call carried the rulebook and was rejected; the retry was slim.
-    assert len(client.calls) == 2
+    assert len(client.calls) == 1
     assert "ECONOMIC REASONING RULES" not in client.last_messages[1]["content"]
 
 
-def test_identify_companies_cascade_stage_does_not_retry_slim():
-    # The slim retry exists only for the direct stage's oversized prompt --
-    # a cascade-stage failure must propagate to analyze_article's own
-    # truncation handling, not silently re-call the model.
+def test_identify_companies_propagates_a_non_retryable_exception_immediately():
+    # Neither stage retries a generic (non-rate-limit, non-tool_use_failed)
+    # exception -- it propagates straight out of _identify_companies' single
+    # physical call, to analyze_article's own truncation handling. Direct and
+    # cascade behave identically here now that both run the same slim ladder.
     class AlwaysFailingClient(ScriptedClient):
         class _Completions(ScriptedClient._Completions):
             def create(self, **kwargs):
@@ -551,11 +684,17 @@ def test_identify_companies_cascade_stage_does_not_retry_slim():
         magnitude_low=1.0, magnitude_high=2.0, rationale="r", time_horizon="Short-Term",
         impact_level="direct",
     )]
-    client = AlwaysFailingClient({})
 
     with pytest.raises(RuntimeError, match="provider down"):
         _identify_companies(
-            client, facts="f", sectors=[_BANKING_SECTOR], impact_level="indirect_l1", parent_pool=parent_pool,
+            AlwaysFailingClient({}), facts="f", sectors=[_BANKING_SECTOR],
+            impact_level="indirect_l1", parent_pool=parent_pool,
+        )
+
+    with pytest.raises(RuntimeError, match="provider down"):
+        _identify_companies(
+            AlwaysFailingClient({}), facts="f", sectors=[_BANKING_SECTOR],
+            impact_level="direct", parent_pool=None,
         )
 
 
@@ -591,12 +730,16 @@ class PerSectorScriptedClient:
     """Returns one scripted response per call, keyed by call order --
     unlike ScriptedClient (one fixed response per tool name), this lets a
     test give each of several same-tool-name calls its own distinct
-    response, proving _identify_cascade_companies_per_sector makes one
+    response, proving _identify_companies_per_sector makes one
     real call per sector rather than bundling them."""
 
     def __init__(self, responses: list):
         self._responses = list(responses)
         self.calls = []
+        # One entry per call, so a test can assert what EACH call carried --
+        # which is the whole point of a per-sector stage.
+        self.prompts = []
+        self.ticker_enums = []
 
     class _Completions:
         def __init__(self, outer):
@@ -605,6 +748,10 @@ class PerSectorScriptedClient:
         def create(self, **kwargs):
             name = kwargs["tool_choice"]["function"]["name"]
             self._outer.calls.append(name)
+            self._outer.prompts.append(kwargs["messages"][1]["content"])
+            item_props = (kwargs["tools"][0]["function"]["parameters"]["properties"]
+                          ["sector_companies"]["items"]["properties"]["companies"]["items"]["properties"])
+            self._outer.ticker_enums.append(item_props["ticker"].get("enum"))
             response = self._outer._responses.pop(0)
             if isinstance(response, Exception):
                 raise response
@@ -616,7 +763,7 @@ class PerSectorScriptedClient:
         return SimpleNamespace(completions=self._Completions(self))
 
 
-def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
+def test_identify_companies_per_sector_makes_one_call_per_sector():
     banking = SectorFinding(sector="banking", direction="bearish", mechanism="m", parent_sector="oil_gas")
     auto = SectorFinding(sector="auto", direction="bearish", mechanism="m", parent_sector="oil_gas")
     parent_pool = [CompanyMention(
@@ -629,7 +776,7 @@ def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
     ])
 
-    result, gaps = _identify_cascade_companies_per_sector(
+    result, gaps = _identify_companies_per_sector(
         client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
@@ -639,7 +786,7 @@ def test_identify_cascade_companies_per_sector_makes_one_call_per_sector():
     assert gaps == []
 
 
-def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_others():
+def test_identify_companies_per_sector_skips_a_failing_sector_not_the_others():
     banking = SectorFinding(sector="banking", direction="bearish", mechanism="m", parent_sector="oil_gas")
     auto = SectorFinding(sector="auto", direction="bearish", mechanism="m", parent_sector="oil_gas")
     parent_pool = [CompanyMention(
@@ -653,7 +800,7 @@ def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_ot
         {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS", parent_ticker="RELIANCE.NS")]}]},
     ])
 
-    result, gaps = _identify_cascade_companies_per_sector(
+    result, gaps = _identify_companies_per_sector(
         client, facts="f", sectors=[banking, auto], impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
@@ -663,7 +810,7 @@ def test_identify_cascade_companies_per_sector_skips_a_failing_sector_not_the_ot
     assert gaps[0]["attempts"] == 2
 
 
-def test_identify_cascade_companies_per_sector_retries_then_records_gap():
+def test_identify_companies_per_sector_retries_then_records_gap():
     sectors = [
         SectorFinding(sector="banking", direction="bullish", mechanism="m1", parent_sector="oil_gas"),
         SectorFinding(sector="auto", direction="bullish", mechanism="m2", parent_sector="oil_gas"),
@@ -702,7 +849,7 @@ def test_identify_cascade_companies_per_sector_retries_then_records_gap():
                 ]})],
             ))])
 
-    mentions, gaps = _identify_cascade_companies_per_sector(
+    mentions, gaps = _identify_companies_per_sector(
         FlakyThenGoodClient(), facts="f", sectors=sectors, impact_level="indirect_l1", parent_pool=parent_pool,
     )
 
@@ -713,6 +860,101 @@ def test_identify_cascade_companies_per_sector_retries_then_records_gap():
     assert gaps[0]["last_error"]
     assert len(mentions) == 1
     assert mentions[0].ticker == "MARUTI.NS"  # the "auto" sector still succeeded
+
+
+def test_identify_companies_per_sector_direct_stage_makes_one_call_per_sector():
+    # The prompt-size fix: the direct stage used to bundle every primary
+    # sector into ONE call, so the candidate block carried 60 candidates x N
+    # sectors and the request measured past the per-minute token ceiling of
+    # both models (gpt-oss-20b 8,000, llama 12,000) -- a 413, i.e. zero
+    # companies for the article. One call per sector, same helper the cascade
+    # stages use, keeps each prompt to one sector's candidates.
+    sectors = [
+        SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
+        SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
+        SectorFinding(sector="oil_gas", direction="bullish", mechanism="m3"),
+    ]
+    client = PerSectorScriptedClient([
+        {"sector_companies": [{"sector": "banking", "companies": [_full_company("HDFC Bank", "HDFCBANK.NS")]}]},
+        {"sector_companies": [{"sector": "auto", "companies": [
+            _full_company("Maruti", "MARUTI.NS"), _full_company("Tata Motors", "TATAMOTORS.NS"),
+        ]}]},
+        {"sector_companies": [{"sector": "oil_gas", "companies": [_full_company("Reliance", "RELIANCE.NS")]}]},
+    ])
+
+    result, gaps = _identify_companies_per_sector(
+        client, facts="f", sectors=sectors, impact_level="direct", parent_pool=None,
+    )
+
+    assert client.calls == ["record_sector_companies"] * 3
+    # Every sector's companies come back, not just the last call's.
+    assert [c.ticker for c in result] == [
+        "HDFCBANK.NS", "MARUTI.NS", "TATAMOTORS.NS", "RELIANCE.NS",
+    ]
+    assert all(c.impact_level == "direct" for c in result)
+    assert all(c.parent_ticker is None for c in result)
+    assert gaps == []
+
+
+def test_identify_companies_per_sector_direct_stage_gap_on_one_sector_keeps_the_others():
+    # A single sector's failure must not cost the article every direct
+    # company, which is exactly what the old one-bundled-call shape did.
+    sectors = [
+        SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
+        SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
+    ]
+    # TWO failures for banking, one per sector-level attempt: the direct
+    # stage's prompt is always the one slim variant now (no separate
+    # full-rulebook attempt to also fail), and a plain ValueError isn't a
+    # RateLimitError/tool_use_failed, so _call_with_model_fallback doesn't
+    # retry it on the fallback model either -- one physical call per
+    # sector-level attempt.
+    client = PerSectorScriptedClient([
+        ValueError("boom"), ValueError("boom again"),
+        {"sector_companies": [{"sector": "auto", "companies": [_full_company("Maruti", "MARUTI.NS")]}]},
+    ])
+
+    result, gaps = _identify_companies_per_sector(
+        client, facts="f", sectors=sectors, impact_level="direct", parent_pool=None,
+    )
+
+    assert [c.ticker for c in result] == ["MARUTI.NS"]
+    assert len(gaps) == 1
+    assert gaps[0]["sector"] == "banking"
+    assert gaps[0]["impact_level"] == "direct"
+    assert gaps[0]["parent_ticker"] is None
+    assert gaps[0]["attempts"] == 2
+    assert gaps[0]["last_error"]
+
+
+def test_direct_stage_prompt_and_enum_carry_only_that_sectors_candidates(db_session):
+    # The actual mechanism of the size fix: each call's grounding block (and
+    # its ticker enum) is ONE sector's candidates, not every sector's.
+    for i in range(3):
+        db_session.add(Company(ticker=f"BANK{i}.NS", name=f"Bank {i}", sector="banking", index_tier="OTHER"))
+        db_session.add(Company(ticker=f"AUTO{i}.NS", name=f"Auto {i}", sector="auto", index_tier="OTHER"))
+    db_session.commit()
+
+    client = PerSectorScriptedClient([
+        {"sector_companies": []},
+        {"sector_companies": []},
+    ])
+
+    _identify_companies_per_sector(
+        client, facts="f",
+        sectors=[
+            SectorFinding(sector="banking", direction="bearish", mechanism="m1"),
+            SectorFinding(sector="auto", direction="bearish", mechanism="m2"),
+        ],
+        impact_level="direct", parent_pool=None, session=db_session,
+    )
+
+    banking_prompt, auto_prompt = client.prompts
+    banking_enum, auto_enum = client.ticker_enums
+    assert "BANK0.NS" in banking_prompt and "AUTO0.NS" not in banking_prompt
+    assert "AUTO0.NS" in auto_prompt and "BANK0.NS" not in auto_prompt
+    assert set(banking_enum) == {"BANK0.NS", "BANK1.NS", "BANK2.NS"}
+    assert set(auto_enum) == {"AUTO0.NS", "AUTO1.NS", "AUTO2.NS"}
 
 
 def test_analyze_article_composes_all_seven_stages_end_to_end():
@@ -851,7 +1093,7 @@ def test_analyze_article_propagates_primary_sector_stage_failure():
         analyze_article(client, title="t", content="c")
 
 
-def test_analyze_article_truncates_and_returns_direct_companies_when_primary_company_stage_fails():
+def test_analyze_article_records_a_gap_when_the_primary_company_stage_fails():
     # event_type must be a BROAD_EVENT_TYPES member for the deterministic
     # fan-out to fire at all (see test_broad_event_types_include_rate_and_
     # commodity_moves) -- "repo_rate_change" here, not "other".
@@ -871,6 +1113,13 @@ def test_analyze_article_truncates_and_returns_direct_companies_when_primary_com
     assert len(result.companies) == 1
     assert result.companies[0].is_direct is False
     assert result.companies[0].sector == "banking"
+    # And the failure is RECORDED, not silently swallowed: the direct stage
+    # goes through the same per-sector retry-then-gap path as the cascade
+    # stages, so a sector whose company lookup never succeeded is visible
+    # as a gap rather than indistinguishable from "no companies here".
+    assert [(g["sector"], g["impact_level"], g["attempts"]) for g in result.gaps] == [
+        ("banking", "direct", 2),
+    ]
 
 
 def test_sector_fanout_mentions_builds_one_per_sector_with_impact_level():
@@ -925,13 +1174,45 @@ def test_analyze_article_adds_one_sector_wide_mention_per_primary_sector():
 
     named = [c for c in result.companies if c.name == "HDFC Bank"]
     sector_wide = [c for c in result.companies if c.is_direct is False]
-    assert len(named) == 1
+    # Two named mentions, not one: the direct stage now makes ONE CALL PER
+    # PRIMARY SECTOR (two sectors here), and ScriptedClient replays its one
+    # canned record_sector_companies response for each of them. What this
+    # test is about is the sector-wide fan-out below -- one per primary
+    # sector regardless of what the LLM named.
+    assert len(named) == 2
     assert len(sector_wide) == 2
     by_sector = {c.sector: c for c in sector_wide}
     assert by_sector["banking"].direction == "bearish"
     assert by_sector["oil_gas"].direction == "bullish"
     assert all(c.impact_level == "direct" for c in sector_wide)
     assert all(c.ticker is None for c in sector_wide)
+
+
+def test_analyze_article_calls_the_direct_company_stage_once_per_primary_sector():
+    # Orchestrator-level guard on the size fix: three primary sectors must
+    # produce THREE direct-company calls, each carrying its own sector, not
+    # one call carrying all three (which measured over both models'
+    # per-minute token ceilings and returned zero companies).
+    client = ScriptedClient({
+        "record_facts": {"facts": "f", "category": "other", "event_type": "other"},
+        "record_sectors": {"sectors": [
+            {"sector": "banking", "direction": "bearish", "mechanism": "m1"},
+            {"sector": "auto", "direction": "bearish", "mechanism": "m2"},
+            {"sector": "oil_gas", "direction": "bullish", "mechanism": "m3"},
+        ]},
+        # No ticker on the named company, so the L1/L2 cascade stages never
+        # run and every record_sector_companies call below is a DIRECT one.
+        "record_sector_companies": {"sector_companies": [
+            {"sector": "banking", "companies": [_full_company("HDFC Bank", None)]},
+        ]},
+    })
+
+    result = analyze_article(client, title="t", content="c")
+
+    company_calls = [c for c in client.calls if c["name"] == "record_sector_companies"]
+    assert len(company_calls) == 3
+    assert len([c for c in result.companies if c.impact_level == "direct"]) == 3
+    assert result.gaps == []
 
 
 def test_analyze_article_skips_fanout_for_a_narrow_event_type():
@@ -959,7 +1240,9 @@ def test_analyze_article_skips_fanout_for_a_narrow_event_type():
 
     named = [c for c in result.companies if c.name == "HDFC Bank"]
     sector_wide = [c for c in result.companies if c.is_direct is False]
-    assert len(named) == 1
+    # One named mention per primary sector -- see the sibling test above for
+    # why the per-sector direct stage makes this 2 with ScriptedClient.
+    assert len(named) == 2
     assert sector_wide == []
 
 
@@ -1309,3 +1592,288 @@ def test_narrow_event_types_are_excluded():
     assert "earnings" not in BROAD_EVENT_TYPES
     assert "merger_acquisition" not in BROAD_EVENT_TYPES
     assert "order_win_contract" not in BROAD_EVENT_TYPES
+
+
+# ---------------------------------------------------------------------------
+# _retry_forced_tool_call -- the shared bounded retry around every forced
+# tool call in this module. Confirmed in production on the SAME article,
+# minutes apart: no tool_use block, a 400 tool_use_failed with a trailing
+# `"}` artifact, a 400 tool_use_failed with an empty generation, and a valid
+# payload wrapped in a ```json fence. All stochastic; all retryable.
+# ---------------------------------------------------------------------------
+
+
+def _rate_limit_error():
+    import httpx
+    from openai import RateLimitError
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(status_code=429, request=request)
+    return RateLimitError("rate limited", response=response, body=None)
+
+
+def _oversize_error():
+    """Groq's 413 "Request too large" -- the openai SDK has no dedicated
+    subclass for 413, so it surfaces as a plain APIStatusError."""
+    import httpx
+    from openai import APIStatusError
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(status_code=413, request=request)
+    return APIStatusError("Request too large", response=response, body=None)
+
+
+def _no_tool_call_response():
+    """A 200 OK whose message carries prose (or a ```json fence) but no
+    tool_use block, despite tool_choice forcing one."""
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=None))])
+
+
+def _bad_json_response(tool_name):
+    """A tool call whose `arguments` blob is not valid JSON -- the live
+    failure had a trailing `"}` artifact past the end of the object."""
+    tool_call = SimpleNamespace(
+        function=SimpleNamespace(name=tool_name, arguments='{"sectors": []}"}'),
+    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))])
+
+
+def _raise_tool_use_failed():
+    raise _tool_use_failed_error()
+
+
+@pytest.mark.parametrize("failure", [
+    pytest.param(_no_tool_call_response, id="no_tool_use_block"),
+    pytest.param(lambda: _bad_json_response("record_sectors"), id="unparseable_arguments"),
+    pytest.param(_raise_tool_use_failed, id="tool_use_failed_400"),
+])
+def test_retry_helper_retries_every_stochastic_failure_class_then_succeeds(failure):
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        if len(attempts) == 1:
+            return _forced_tool_arguments(failure(), "record_sectors")
+        return {"sectors": ["ok"]}
+
+    assert _retry_forced_tool_call(attempt, stage="identify_sectors") == {"sectors": ["ok"]}
+    assert len(attempts) == 2
+
+
+@pytest.mark.parametrize("exc_factory, label", [
+    (_rate_limit_error, "rate limit -- model/key rotation already handles it"),
+    (_oversize_error, "413 -- an identical oversized prompt cannot fit on a retry"),
+    (lambda: RuntimeError("provider down"), "unknown failure -- must surface loudly"),
+])
+def test_retry_helper_does_not_retry_non_stochastic_failures(exc_factory, label):
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        raise exc_factory()
+
+    with pytest.raises(Exception):
+        _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    assert len(attempts) == 1, "must not retry: " + label
+
+
+def test_retry_helper_does_not_retry_a_validation_error_despite_it_being_a_valueerror():
+    # pydantic's ValidationError subclasses ValueError, and so does the
+    # MissingToolCallError this helper DOES retry. A schema our own code can
+    # no longer satisfy is a real bug -- it must surface on attempt 1, not
+    # after three identical failures. This is why _is_stochastic_tool_failure
+    # matches MissingToolCallError by type rather than catching ValueError.
+    from app.analysis.schemas import FactsResult
+
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        return FactsResult.model_validate({"facts": "f"})  # missing required fields
+
+    with pytest.raises(Exception):
+        _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    assert len(attempts) == 1
+
+
+def test_retry_helper_gives_up_after_three_attempts_and_raises():
+    attempts = []
+
+    def attempt():
+        attempts.append(1)
+        return _forced_tool_arguments(_no_tool_call_response(), "record_facts")
+
+    with pytest.raises(MissingToolCallError):
+        _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    assert len(attempts) == TOOL_CALL_ATTEMPTS == 3
+
+
+def test_retry_helper_logs_each_retry_with_stage_and_attempt_number(caplog):
+    # The whole point of logging these: the real stochastic failure rate of
+    # these calls is otherwise invisible in production behind a silent
+    # recovery.
+    def attempt():
+        return _forced_tool_arguments(_no_tool_call_response(), "record_facts")
+
+    with caplog.at_level(logging.WARNING, logger="app.analysis.cascade"):
+        with pytest.raises(MissingToolCallError):
+            _retry_forced_tool_call(attempt, stage="extract_facts")
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    # 3 attempts -> 2 retry warnings (the final failure raises, it does not log).
+    assert len(warnings) == TOOL_CALL_ATTEMPTS - 1
+    messages = [r.getMessage() for r in warnings]
+    assert all("extract_facts" in m for m in messages)
+    assert "attempt 1/3" in messages[0]
+    assert "attempt 2/3" in messages[1]
+
+
+def test_is_stochastic_tool_failure_classification():
+    assert _is_stochastic_tool_failure(MissingToolCallError("no block")) is True
+    assert _is_stochastic_tool_failure(_tool_use_failed_error()) is True
+    try:
+        json.loads('{"a": 1}"}')
+    except json.JSONDecodeError as exc:
+        assert _is_stochastic_tool_failure(exc) is True
+    else:
+        pytest.fail("expected a JSONDecodeError")
+
+    assert _is_stochastic_tool_failure(_rate_limit_error()) is False
+    assert _is_stochastic_tool_failure(_oversize_error()) is False
+    assert _is_stochastic_tool_failure(ValueError("a plain ValueError")) is False
+
+
+def test_extract_facts_retries_a_missing_tool_use_block_and_succeeds():
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        class _Completions:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def create(self, **kwargs):
+                self._outer.calls += 1
+                if self._outer.calls == 1:
+                    return _no_tool_call_response()
+                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+                    tool_calls=[FakeToolCall("record_facts", {
+                        "facts": "x", "category": "other", "event_type": "other",
+                    })],
+                ))])
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = FlakyClient()
+    result = _extract_facts(client, title="t", content="c")
+
+    assert result.facts == "x"
+    assert client.calls == 2
+
+
+def test_identify_sectors_retries_a_tool_use_failed_400_and_succeeds():
+    class FlakyClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.attempts = getattr(self._outer, "attempts", 0) + 1
+                if self._outer.attempts == 1:
+                    raise _tool_use_failed_error()
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = FlakyClient({"record_sectors": {"sectors": [
+        {"sector": "banking", "direction": "bearish", "mechanism": "m"},
+    ]}})
+
+    result = _identify_sectors(client, facts="f", parent_sectors=None)
+
+    assert [s.sector for s in result] == ["banking"]
+    assert client.attempts == 2
+
+
+def test_identify_sectors_gives_up_after_three_attempts():
+    class AlwaysNoToolCallClient:
+        def __init__(self):
+            self.calls = 0
+
+        class _Completions:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def create(self, **kwargs):
+                self._outer.calls += 1
+                return _no_tool_call_response()
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = AlwaysNoToolCallClient()
+
+    with pytest.raises(MissingToolCallError, match="record_sectors"):
+        _identify_sectors(client, facts="f", parent_sectors=None)
+
+    assert client.calls == TOOL_CALL_ATTEMPTS
+
+
+def test_identify_companies_retries_an_unparseable_arguments_blob_and_succeeds():
+    # The stochastic retry wraps the EXISTING model-fallback ladder rather
+    # than duplicating it: this failure is not a tool_use_failed 400, so the
+    # ladder does nothing and only the outer retry recovers the stage.
+    class BadJsonOnceClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.attempts = getattr(self._outer, "attempts", 0) + 1
+                if self._outer.attempts == 1:
+                    return _bad_json_response("record_sector_companies")
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = BadJsonOnceClient({"record_sector_companies": {"sector_companies": [
+        {"sector": "banking", "companies": [_FULL_COMPANY_FIELDS]},
+    ]}})
+
+    result = _identify_companies(
+        client, facts="f", sectors=[_BANKING_SECTOR], impact_level="direct", parent_pool=None,
+    )
+
+    assert [c.ticker for c in result] == ["HDFCBANK.NS"]
+    assert client.attempts == 2
+
+
+def test_edge_verification_retries_before_falling_back_to_the_unverified_chain():
+    # Without the retry, one prose answer from a small model threw away a
+    # whole verified chain (or kept it unverified). The retry must run first.
+    event_type = next(iter(CHAINS))
+
+    class FlakyClient(ScriptedClient):
+        class _Completions(ScriptedClient._Completions):
+            def create(self, **kwargs):
+                self._outer.attempts = getattr(self._outer, "attempts", 0) + 1
+                if self._outer.attempts == 1:
+                    return _no_tool_call_response()
+                return super().create(**kwargs)
+
+        @property
+        def chat(self):
+            return SimpleNamespace(completions=self._Completions(self))
+
+    client = FlakyClient({"record_edge_verification": {"verifications": [], "llm_only_edges": []}})
+
+    edges = _generate_edges(client, facts="f", event_type=event_type, companies=[])
+
+    assert client.attempts == 2
+    # Retry succeeded, so the chain went through real verification -- no
+    # "verification call failed" fallback marker anywhere.
+    assert not any("verification call failed" in e.get("note", "") for e in edges)

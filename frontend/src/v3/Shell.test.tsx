@@ -295,7 +295,10 @@ describe('Shell card feed', () => {
     // Sourced classification/ratio/date replace the old business_desc
     // paragraph in the deep-dive's own "What they do" section too.
     expect(sheet.getByText(/Refineries & Marketing/)).toBeInTheDocument();
-    expect(sheet.getByText('6.40')).toBeInTheDocument();
+    // Deep dive speaks the same plain language as the glance now -- "6.4×"
+    // under "Price vs yearly profit", not a bare "P/E 6.40" code.
+    expect(sheet.getByText('Price vs yearly profit')).toBeInTheDocument();
+    expect(sheet.getByText('6.4×')).toBeInTheDocument();
     expect(sheet.getByText(/2026-08-04/)).toBeInTheDocument();
     expect(sheet.getByText(/how this score is built/i)).toBeInTheDocument();
     expect(sheet.getByText('Materiality')).toBeInTheDocument();
@@ -322,7 +325,10 @@ describe('Shell card feed', () => {
     // fundamentals-design.md. The date is load-bearing (spec 5.1), not
     // decoration: PE is price-derived and this data refreshes monthly.
     expect(screen.getByText(/Oil Exploration & Production/)).toBeInTheDocument();
-    expect(screen.getByText('9.50')).toBeInTheDocument();
+    // Glance speaks plain language ("Price vs yearly profit 9.5×"), not
+    // ratio codes -- laypeople don't know what P/E means.
+    expect(screen.getByText('Price vs yearly profit')).toBeInTheDocument();
+    expect(screen.getByText('9.5×')).toBeInTheDocument();
     expect(screen.getByText(/2026-08-04/)).toBeInTheDocument();
     expect(screen.getByText(/glance view/i)).toBeInTheDocument();
     // Deep-dive-only content must NOT be present -- (i) = glance and stay.
