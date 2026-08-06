@@ -146,13 +146,18 @@ body:has(.nf4) { background: #fafafa; }
 /* One full-viewport snap slot per card -- a flick lands square on the
    next story, Inshorts-style. Content-centered inside the slot. */
 .nf4 .storycard {
-  /* Cards after the first fill the viewport below the CONDENSED pinned
-     header (the state they are always read in); the first card, read
-     under the full masthead, uses the full measurement. Both are frozen
-     values -- see ShellV4 -- so the condense toggle can't resize them. */
-  min-height: calc(100vh - var(--headcond, 72px));
-  min-height: calc(100dvh - var(--headcond, 72px));
+  /* Cards after the first fill EXACTLY the viewport below the CONDENSED
+     pinned header (the state they are always read in); the first card,
+     read under the full masthead, uses the full measurement. Exact
+     heights, not minimums: a card taller than the snapport lets
+     mandatory snapping legally rest between cards ("stuck between two
+     stories" on phone). Text clamps below keep content inside. */
+  height: calc(100vh - var(--headcond, 72px));
+  height: calc(100dvh - var(--headcond, 72px));
+  overflow: hidden;
   scroll-snap-align: start;
+  /* A flick always lands on the very next card -- never skips past it. */
+  scroll-snap-stop: always;
   border-top: 1px solid var(--hairline);
   padding: 32px 16px;
   display: grid;
@@ -170,8 +175,8 @@ body:has(.nf4) { background: #fafafa; }
    own -- the .snaptop sentinel at scroll 0 is the homepage rest
    position, so one flick lands square on card two. */
 .nf4 .storycard.first {
-  min-height: calc(100vh - var(--headfull, 220px));
-  min-height: calc(100dvh - var(--headfull, 220px));
+  height: calc(100vh - var(--headfull, 220px));
+  height: calc(100dvh - var(--headfull, 220px));
   scroll-snap-align: none;
 }
 @media (min-width: 900px) {
@@ -197,17 +202,28 @@ body:has(.nf4) { background: #fafafa; }
   margin: 12px 0 16px;
   cursor: pointer;
 }
+.nf4 .storycard h1 {
+  /* Bounded: exact-height cards must never push the plate/meta out. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .nf4 .storycard .lgist {
   font-family: var(--serif);
   font-size: 20px;
   line-height: 1.3;
   letter-spacing: -0.2px;
   max-width: 56ch;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .nf4 .storycard .lplate {
   width: 100%;
   height: 100%;
-  min-height: 200px;
+  min-height: 0;
   object-fit: cover;
   /* Monochrome halftone-plate treatment per the reference's imagery
      rules: no color photography, square corners, ink-on-paper. */
