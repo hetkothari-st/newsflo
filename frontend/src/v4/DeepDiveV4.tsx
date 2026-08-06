@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { getStockDeepDive, type StockDeepDive } from '../v3/api';
 import { isLowDelivery, isThinTrading } from '../v3/format';
+import type { InfoV4Data } from './InfoV4';
 import LogoV4 from './LogoV4';
 import { useAuth } from '../lib/auth';
 
@@ -18,11 +19,13 @@ export default function DeepDiveV4({
   ticker,
   alertId,
   onOpenPeer,
+  onOpenInfo,
   onClose,
 }: {
   ticker: string;
   alertId?: number;
   onOpenPeer: (ticker: string, alertId?: number) => void;
+  onOpenInfo: (info: InfoV4Data) => void;
   onClose: () => void;
 }) {
   const { token } = useAuth();
@@ -168,6 +171,24 @@ export default function DeepDiveV4({
                           {peer.cap_tier !== null && <span>{peer.cap_tier} cap</span>}
                         </div>
                       </div>
+                      {/* (i) = glance and stay; the row itself hops the
+                          deep dive to this peer. */}
+                      <button
+                        className="ib4"
+                        aria-label={`About ${peer.ticker}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenInfo({
+                            name: peer.name,
+                            ticker: peer.ticker,
+                            sector: peer.sector,
+                            logoUrl: peer.logo_url,
+                            fundamentals: peer.fundamentals,
+                          });
+                        }}
+                      >
+                        i
+                      </button>
                     </div>
                   ))}
                 </div>

@@ -134,6 +134,7 @@ export default function ShellV4() {
           ticker={deepDive.ticker}
           alertId={deepDive.alertId}
           onOpenPeer={openDeepDive}
+          onOpenInfo={setInfo}
           onClose={() => setDeepDive(null)}
         />
       )}
