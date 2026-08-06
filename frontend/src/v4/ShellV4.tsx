@@ -34,6 +34,9 @@ const IST_DATE = new Intl.DateTimeFormat('en-IN', {
 
 export default function ShellV4() {
   const [view, setView] = useState<View>('feed');
+  // Condensed header once the reader scrolls past the homepage: the
+  // masthead shrinks to a compact bar that stays pinned over every card.
+  const [condensed, setCondensed] = useState(false);
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
@@ -72,8 +75,9 @@ export default function ShellV4() {
     // open (mandatory snap fights scrolling through a tall band) and on
     // every non-feed section.
     <div
-      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''}`}
+      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''}`}
       style={{ '--headh': `${headerHeight}px` } as React.CSSProperties}
+      onScroll={(event) => setCondensed(event.currentTarget.scrollTop > 24)}
     >
       <header ref={headerRef} className="tophead">
         <div className="ticker">

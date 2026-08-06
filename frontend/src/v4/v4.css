@@ -43,11 +43,32 @@
 /* Inshorts-style paging: one flick lands square on the next story card.
    Applied only on the feed with no ripple band open (see ShellV4). */
 .nf4.snap { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
-.nf4.snap .ticker { scroll-snap-align: start; }
+/* No snap point on the (sticky) header -- a sticky element's snap
+   position follows the scroll and would trap it at the top. The
+   homepage rest position comes from snap-stop at the first card via
+   scroll-padding instead. */
 
 /* The Tailwind body underneath (lavender bg-page) must never show around
    the broadsheet -- while the v4 shell is mounted, the page IS paper. */
 body:has(.nf4) { background: #fafafa; }
+
+/* The header rides sticky over the feed: full masthead on the homepage,
+   condensed (.cond, set on scroll) after it -- the top section stays
+   visible over every news card instead of scrolling away. */
+.nf4 .tophead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--paper);
+  border-bottom: 1px solid var(--ink);
+}
+.nf4 .masthead { transition: font-size 0.25s ease, padding 0.25s ease; }
+.nf4 .navrow { transition: padding 0.25s ease; }
+.nf4.cond .ticker { display: none; }
+.nf4.cond .masthead { font-size: 30px; padding: 6px 8px 2px; }
+.nf4.cond .navrow { padding: 4px 8px 8px; }
+/* Snapped card tops land below the pinned header. */
+.nf4.snap { scroll-padding-top: var(--headh, 0px); }
 
 .nf4 * { box-sizing: border-box; }
 .nf4 button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
@@ -89,10 +110,10 @@ body:has(.nf4) { background: #fafafa; }
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
+  /* Centered with equal breathing room both sides. */
+  justify-content: center;
   gap: 12px 24px;
   padding: 16px;
-  border-bottom: 1px solid var(--ink);
 }
 .nf4 .navlinks { display: flex; gap: 20px; align-items: baseline; flex-wrap: wrap; }
 .nf4 .navlinks a,
@@ -123,8 +144,10 @@ body:has(.nf4) { background: #fafafa; }
 /* One full-viewport snap slot per card -- a flick lands square on the
    next story, Inshorts-style. Content-centered inside the slot. */
 .nf4 .storycard {
-  min-height: 100vh;
-  min-height: 100dvh;
+  /* Every card fills the viewport below the (sticky, possibly condensed)
+     header -- the whole card stays visible with the header pinned above. */
+  min-height: calc(100vh - var(--headh, 220px));
+  min-height: calc(100dvh - var(--headh, 220px));
   scroll-snap-align: start;
   border-top: 1px solid var(--hairline);
   padding: 32px 16px;
@@ -138,15 +161,9 @@ body:has(.nf4) { background: #fafafa; }
 /* A card whose story has no usable image collapses to one row -- the
    1fr plate row would otherwise reintroduce the dead space. */
 .nf4 .storycard:not(:has(.lplate)) { grid-template-rows: auto; align-content: center; }
-/* The FIRST card shares the homepage with the masthead: sized to exactly
-   fill the viewport below the header (--headh, measured live in ShellV4),
-   so the homepage shows one complete card and none of the next. */
-.nf4 .storycard.first { min-height: calc(100vh - var(--headh, 220px)); min-height: calc(100dvh - var(--headh, 220px)); }
-/* No standalone snap point for the first card: it is already fully
-   visible at the page-top snap (with the masthead). One swipe from the
-   homepage therefore lands square on card two -- no intermediate stop
-   that just realigns card one. */
-.nf4 .storycard.first { scroll-snap-align: none; }
+/* The first card is the page-top rest position: its snap target is its
+   own top minus scroll-padding (the header height), i.e. scroll 0 with
+   the full masthead above it. */
 @media (min-width: 900px) {
   .nf4 .storycard {
     grid-template-columns: 2fr 1fr;
