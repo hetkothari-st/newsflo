@@ -37,6 +37,12 @@ ANNOUNCEMENTS_URL_TEMPLATE = (
     "&strPrevDate={from_date}&strToDate={to_date}&strScrip=&strSearch=P&strType=C"
 )
 ATTACHMENT_URL_TEMPLATE = "https://www.bseindia.com/xml-data/corpfiling/AttachLive/{name}"
+# BSE moves attachments older than roughly six months out of AttachLive into
+# an archive path. Probed live 2026-08-06 on a 2025-03 rationale: AttachLive
+# 404s, AttachHis serves the identical PDF. Without this fallback every
+# window older than ~6 months failed wholesale (fetched=0) in the bootstrap.
+ARCHIVE_URL_MARKER = "/AttachLive/"
+ARCHIVE_URL_REPLACEMENT = "/AttachHis/"
 
 # Observed rows-per-page on this endpoint (fixtures/ratings/README.md,
 # probed 2026-08-06): a page short of this count is the last page.
@@ -237,8 +243,19 @@ def fetch_documents(
         try:
             payload = fetch(url)
         except Exception:
-            failed.append(url)
-            continue
+            # Older attachments live in BSE's archive path (see
+            # ARCHIVE_URL_MARKER above). The doc keeps its ORIGINAL url as
+            # its identity (sidecar/resume key); only the transport retries
+            # the archive location.
+            payload = None
+            if ARCHIVE_URL_MARKER in url:
+                try:
+                    payload = fetch(url.replace(ARCHIVE_URL_MARKER, ARCHIVE_URL_REPLACEMENT))
+                except Exception:
+                    payload = None
+            if payload is None:
+                failed.append(url)
+                continue
 
         if not payload:
             failed.append(url)

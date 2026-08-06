@@ -909,3 +909,46 @@ def test_evidence_minimum_length_boundary():
     assert len(exactly_at) == config.SUPPLY_LINK_MIN_EVIDENCE_CHARS
     assert not extract._evidence_in_text(just_under, text)
     assert extract._evidence_in_text(exactly_at, text)
+
+
+def test_archived_attachment_falls_back_to_attachhis(tmp_path):
+    """BSE moves ~6-month-old attachments from AttachLive to AttachHis
+    (probed live 2026-08-06: AttachLive 404s, AttachHis serves the PDF).
+    The doc's identity stays its original URL -- only transport retries."""
+    calls = []
+
+    def opener(url, timeout=60):
+        calls.append(url)
+        if "/AttachLive/" in url:
+            raise OSError("404")
+        return b"%PDF-1.4 archived"
+
+    targets = [{
+        "scrip_code": "500325", "company_name": "X", "agency": "CRISIL",
+        "news_date": "2026-08-01T10:00:00",
+        "attachment_url": "https://www.bseindia.com/xml-data/corpfiling/AttachLive/old.pdf",
+    }]
+    result = fetchers.fetch_documents(str(tmp_path), targets, opener=opener,
+                                      sleep=lambda _s: None, throttle_seconds=0)
+    assert result["fetched"] == 1 and result["failed"] == []
+    assert calls == [
+        "https://www.bseindia.com/xml-data/corpfiling/AttachLive/old.pdf",
+        "https://www.bseindia.com/xml-data/corpfiling/AttachHis/old.pdf",
+    ]
+    # resume key is the ORIGINAL url
+    assert targets[0]["attachment_url"] in fetchers.snapshot.fetched_doc_urls(str(tmp_path))
+
+
+def test_archive_fallback_failure_still_degrades_to_failed(tmp_path):
+    def opener(url, timeout=60):
+        raise OSError("404 everywhere")
+
+    targets = [{
+        "scrip_code": "1", "company_name": "X", "agency": "CRISIL",
+        "news_date": "2026-08-01T10:00:00",
+        "attachment_url": "https://www.bseindia.com/xml-data/corpfiling/AttachLive/gone.pdf",
+    }]
+    result = fetchers.fetch_documents(str(tmp_path), targets, opener=opener,
+                                      sleep=lambda _s: None, throttle_seconds=0)
+    assert result["fetched"] == 0
+    assert len(result["failed"]) == 1
