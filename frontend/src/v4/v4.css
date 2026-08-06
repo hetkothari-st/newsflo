@@ -316,8 +316,9 @@ body:has(.nf4) { background: #fafafa; }
 }
 .nf4 .crow .cbody { flex: 1; min-width: 0; }
 
-/* Company logo: Brandfetch art rendered monochrome (paper/ink identity);
-   ink-on-paper ticker initials when no art exists. */
+/* Company logo: Brandfetch art in full color and its natural shape --
+   no mask, no tint (user decision). Ticker initials in an ink-bordered
+   box only when no art exists. */
 .nf4 .clg {
   width: 28px;
   height: 28px;
@@ -325,13 +326,9 @@ body:has(.nf4) { background: #fafafa; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: #fff;
 }
-.nf4 .clg img { width: 100%; height: 100%; object-fit: contain; filter: grayscale(1); display: block; }
-.nf4 .clg.clg-fb { border-color: var(--ink); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; background: transparent; }
+.nf4 .clg img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.nf4 .clg.clg-fb { border: 1px solid var(--ink); border-radius: var(--radius); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
 .nf4 .clg.clg-md { width: 44px; height: 44px; }
 .nf4 .clg.clg-md.clg-fb { font-size: 14px; }
 .nf4 .band .lnote4 { color: var(--sepia); opacity: 1; }
