@@ -21,13 +21,36 @@ websockets
 psycopg2-binary
 pypdf
 
-# Self-hosted translation (see app/translation/nllb_translator.py). torch is
-# CPU-only -- pulled from PyTorch's own CPU wheel index (the default PyPI
-# wheel is CUDA-bundled and multiple GB larger for no benefit on a server
-# with no GPU).
+# Self-hosted translation (see app/translation/nllb_translator.py and
+# indictrans2_translator.py). torch is CPU-only -- pulled from PyTorch's own
+# CPU wheel index (the default PyPI wheel is CUDA-bundled and multiple GB
+# larger for no benefit on a server with no GPU).
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.13.0
-transformers==5.13.1
+# PINNED TO 4.x, NOT 5.13.1, for IndicTrans2. IndicTrans2 ships a *slow*
+# (pure-Python) tokenizer through trust_remote_code, and transformers 5.x
+# removed slow tokenizers entirely -- loading the model under 5.x fails with
+# "Couldn't instantiate the backend tokenizer". CTranslate2 is not an escape
+# hatch here the way it is for NLLB: CT2 4.8.1 has no loader registered for
+# IndicTransConfig, so those weights cannot be converted without writing a
+# custom converter.
+#
+# Safe because transformers is used in exactly two places in this codebase --
+# nllb_translator.py's AutoTokenizer.from_pretrained and
+# indictrans2_translator.py's -- and that API is unchanged across 4.x/5.x.
+# Verified: full backend suite passes, and IndicTrans2 loads and translates
+# correctly on torch 2.13.0 + transformers 4.46.3.
+transformers==4.46.3
 ctranslate2==4.8.1
 sentencepiece==0.2.2
+
+# IndicProcessor dependencies (app/translation/_indic_processor.py, vendored
+# from IndicTransToolkit). The upstream package itself is NOT installable
+# here: its only PyPI release builds a Cython extension, which needs MSVC on
+# Windows and a full toolchain in the image -- hence the vendored pure-Python
+# copy, which needs these four at runtime.
+regex
+tqdm
+sacremoses
+indic-nlp-library-itt
 curl_cffi

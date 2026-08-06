@@ -49,6 +49,19 @@ _lock = threading.Lock()
 # unreasonably long.
 if TRANSLATION_PROVIDER == "nllb":
     ON_DEMAND_ALERT_LIMIT = 150
+elif TRANSLATION_PROVIDER == "indictrans2":
+    # Local, no quota to conserve, but every alert is a real CPU forward
+    # pass over all its sentences at beam=5 -- so the bound here is compute,
+    # not budget. Lower than NLLB's despite the smaller model because there
+    # is a single lane (torch already uses every core, see
+    # build_translation_clients) rather than CTranslate2's internal
+    # parallelism across inter_threads.
+    ON_DEMAND_ALERT_LIMIT = 50
+elif TRANSLATION_PROVIDER == "bhashini":
+    # Network-bound and batched -- one request per (alert, language)
+    # regardless of how many fields it carries -- so a viewer switching
+    # language can drain a large slice without waiting on local compute.
+    ON_DEMAND_ALERT_LIMIT = 100
 elif TRANSLATION_PROVIDER == "groq":
     # Translation now runs on its own per-model Groq bucket with a light
     # throttle (see RECOMMENDED_THROTTLE_SECONDS) -- ~25 alerts drain in

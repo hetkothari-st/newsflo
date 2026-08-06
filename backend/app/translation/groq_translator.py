@@ -4,7 +4,7 @@ import os
 from openai import OpenAI
 
 from app.analysis.claude_client import MODEL, GROQ_BASE_URL, AnthropicAdapter, RotatingClient
-from app.translation import nllb_translator
+from app.translation import bhashini_translator, indictrans2_translator, nllb_translator
 from app.translation.languages import LANG_NAMES, TARGET_LANGS
 
 # Self-hosted (NLLB via CTranslate2, see nllb_translator.py) is the
@@ -27,8 +27,29 @@ from app.translation.languages import LANG_NAMES, TARGET_LANGS
 # Translation now runs on openai/gpt-oss-120b -- its own per-model quota
 # bucket (no contention with analysis), verified live to produce clean
 # native-script output through this exact tool schema. Override with the
-# TRANSLATION_PROVIDER env var ("nllb" | "anthropic" | "groq").
+# TRANSLATION_PROVIDER env var:
+#
+#   "groq"        (default) LLM via forced tool call -- see notes above
+#   "anthropic"   LLM, Haiku; real concurrency, no per-minute wall
+#   "nllb"        self-hosted NLLB-200 1.3B via CTranslate2
+#   "indictrans2" self-hosted AI4Bharat IndicTrans2 200M (indic-specialised,
+#                 ~1/6th NLLB-1.3B's resident footprint; needs transformers 4.x)
+#   "bhashini"    hosted MeitY/ULCA service; no model in process, no version
+#                 pin, but a network dependency on a free public service
+#
+# The last three are non-LLM machine translation. They cannot be INSTRUCTED
+# -- SYSTEM_PROMPT below (never translate company names, tickers, figures)
+# simply does not apply to them, since there is no prompt. That is a real
+# behavioural difference, not just an implementation detail: entity and
+# number preservation becomes a property of the model rather than something
+# we can ask for.
 TRANSLATION_PROVIDER = os.environ.get("TRANSLATION_PROVIDER", "groq").strip().lower()
+
+# Providers that run a local model or a hosted MT pipeline rather than an
+# LLM behind an OpenAI-compatible client. They need no `client` object at
+# all, so build_translation_client(s) hand back None for them and their
+# translate_* functions ignore the argument.
+NON_LLM_PROVIDERS = {"nllb", "indictrans2", "bhashini"}
 TRANSLATION_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 # openai/gpt-oss-120b, deliberately NOT the analysis pipeline's MODEL
@@ -49,7 +70,16 @@ TRANSLATION_MODEL = "openai/gpt-oss-120b"
 # without making the progress bar look frozen. Anthropic has no such
 # per-minute wall at this account's scale, so it runs several calls at
 # once with no artificial delay. See job.py's MAX_CONCURRENT_TRANSLATIONS.
-RECOMMENDED_THROTTLE_SECONDS = 3.0 if TRANSLATION_PROVIDER == "groq" else 0.0
+# Bhashini gets a small deliberate delay: it is a free public service with
+# undocumented rate limits, and hammering it is both impolite and the
+# fastest way to get throttled. The local models get none -- there is no
+# budget to conserve, only CPU, which the batch already saturates.
+if TRANSLATION_PROVIDER == "groq":
+    RECOMMENDED_THROTTLE_SECONDS = 3.0
+elif TRANSLATION_PROVIDER == "bhashini":
+    RECOMMENDED_THROTTLE_SECONDS = 0.5
+else:
+    RECOMMENDED_THROTTLE_SECONDS = 0.0
 
 SYSTEM_PROMPT = (
     "You are a professional financial-news translator working across English "
@@ -76,9 +106,10 @@ def build_translation_client(
 ) -> RotatingClient | OpenAI | AnthropicAdapter | None:
     """A single client -- used for the low-volume category-translation path,
     which doesn't need per-lane parallelism (see build_translation_clients
-    for the alert-translation path, which does). NLLB needs no client at
-    all (no API key, local model) -- translate_categories ignores it."""
-    if TRANSLATION_PROVIDER == "nllb":
+    for the alert-translation path, which does). The non-LLM providers need
+    no client at all (local model, or a hosted pipeline that carries its own
+    auth) -- translate_categories ignores it for those."""
+    if TRANSLATION_PROVIDER in NON_LLM_PROVIDERS:
         return None
     if TRANSLATION_PROVIDER == "anthropic":
         if not anthropic_api_key:
@@ -94,6 +125,11 @@ def build_translation_client(
 # account, so "lanes" don't map to distinct quota buckets the way they do
 # on Groq.
 ANTHROPIC_CONCURRENCY = 6
+
+# Deliberately modest -- see build_translation_clients. Bhashini is free and
+# public; two lanes is enough to overlap network latency without behaving
+# like a load test.
+BHASHINI_CONCURRENCY = 2
 
 
 def build_translation_clients(
@@ -113,7 +149,20 @@ def build_translation_clients(
     already parallelizes internally (nllb_translator.py's inter_threads),
     so extra Python-level lanes would just have threads fight over the same
     CPU cores and model handle for no real throughput gain.
+
+    IndicTrans2 gets a single lane for the same reason as NLLB, and one more
+    besides: torch already uses every core for a batched forward pass, so a
+    second lane would halve each one's threads rather than double throughput.
+
+    Bhashini is the opposite case -- lanes are network-bound, not CPU-bound,
+    so concurrency is real. Kept deliberately low anyway: it is a free
+    public service with undocumented limits, and the pending queue is
+    latency-tolerant background work that nothing user-facing blocks on.
     """
+    if TRANSLATION_PROVIDER == "indictrans2":
+        return [None]
+    if TRANSLATION_PROVIDER == "bhashini":
+        return [None] * BHASHINI_CONCURRENCY
     if TRANSLATION_PROVIDER == "nllb":
         return [None]
     if TRANSLATION_PROVIDER == "anthropic":
@@ -202,8 +251,21 @@ def translate_alert(
     Returns `{"title": ..., "content": ..., "summary_short": ...,
     "summary_long": ..., "companies": [...]}` for the requested language.
     """
+    # The non-LLM providers take the same keyword arguments and return the
+    # same dict shape, so this is a straight hand-off -- `client` is unused
+    # for all three (they hold their own model or carry their own auth).
     if TRANSLATION_PROVIDER == "nllb":
         return nllb_translator.translate_alert(
+            lang=lang, title=title, content=content, companies=companies,
+            summary_short=summary_short, summary_long=summary_long,
+        )
+    if TRANSLATION_PROVIDER == "indictrans2":
+        return indictrans2_translator.translate_alert(
+            lang=lang, title=title, content=content, companies=companies,
+            summary_short=summary_short, summary_long=summary_long,
+        )
+    if TRANSLATION_PROVIDER == "bhashini":
+        return bhashini_translator.translate_alert(
             lang=lang, title=title, content=content, companies=companies,
             summary_short=summary_short, summary_long=summary_long,
         )
@@ -285,6 +347,13 @@ def translate_categories(client, lang: str, categories: list[str]) -> list[str]:
         # prompt spells out in words for itself below.
         phrases = [c.replace("_", " ").title() for c in categories]
         return nllb_translator.translate_categories(phrases, lang)
+    # indictrans2 / bhashini perform the same underscore-to-phrase
+    # substitution internally (each documents why), so they take the raw
+    # category strings rather than pre-substituted phrases.
+    if TRANSLATION_PROVIDER == "indictrans2":
+        return indictrans2_translator.translate_categories(categories, lang)
+    if TRANSLATION_PROVIDER == "bhashini":
+        return bhashini_translator.translate_categories(categories, lang)
     numbered = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(categories))
     response = client.chat.completions.create(
         model=TRANSLATION_MODEL,
