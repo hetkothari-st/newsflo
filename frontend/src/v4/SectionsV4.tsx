@@ -98,7 +98,7 @@ export function DiscoverV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string
             key={`${entry.ticker}-${entry.alert_id}`}
             onClick={() => onOpenDeepDive(entry.ticker, entry.alert_id)}
           >
-            <LogoV4 logoUrl={entry.logo_url} ticker={entry.ticker} />
+            <LogoV4 logoUrl={entry.logo_url} ticker={entry.ticker} name={entry.name} />
             <div className="ebody">
             <div className="etop">
               <span className="ename">{entry.name}</span>
@@ -194,7 +194,7 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
       )}
       {filtered.map((company) => (
         <div className="entry4" key={company.ticker} onClick={() => onOpenDeepDive(company.ticker)}>
-          <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} />
+          <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
           <div className="ebody">
             <div className="etop">
               <span className="ename">{company.name}</span>
@@ -261,7 +261,7 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
               key={holding.ticker}
               onClick={() => onOpenDeepDive(holding.ticker, holding.affected_alert_id ?? undefined)}
             >
-              <LogoV4 logoUrl={holding.logo_url} ticker={holding.ticker} />
+              <LogoV4 logoUrl={holding.logo_url} ticker={holding.ticker} name={holding.name} />
               <div className="ebody">
                 <div className="etop">
                   <span className="ename">{holding.name}</span>

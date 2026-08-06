@@ -267,7 +267,7 @@ function RippleBand({
                   onOpenDeepDive(row.ticker, alert.id);
                 }}
               >
-                <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} />
+                <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                 <div className="cbody">
                   <div className="cmain">
                     <span className="nm4">{row.name}</span>

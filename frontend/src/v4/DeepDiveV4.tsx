@@ -71,7 +71,7 @@ export default function DeepDiveV4({
         {data !== null && (
           <>
             <div className="ddhead">
-              <LogoV4 logoUrl={data.logo_url} ticker={data.ticker} size="md" />
+              <LogoV4 logoUrl={data.logo_url} ticker={data.ticker} name={data.name} size="md" />
               <div>
                 <div className="ddname">{data.name}</div>
                 <div className="ddmeta">
@@ -151,7 +151,7 @@ export default function DeepDiveV4({
                       onClick={() => onOpenPeer(peer.ticker, alertId)}
                       data-testid={`v4peer-${peer.ticker}`}
                     >
-                      <LogoV4 logoUrl={peer.logo_url} ticker={peer.ticker} />
+                      <LogoV4 logoUrl={peer.logo_url} ticker={peer.ticker} name={peer.name} />
                       <div className="cbody">
                         <div className="cmain">
                           <span className="nm4">{peer.name}</span>
