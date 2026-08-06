@@ -213,37 +213,70 @@ def test_cascade_stage_prompt_fits_the_smallest_groq_token_ceiling(db_session):
 
 
 def test_cascade_stage_prompt_fits_budget_with_supply_links(db_session):
-    """Regression guard (2026-08-06 review): grounding the L1 cascade stage
-    with the KNOWN RELATIONSHIPS block (app.companies.supply_links.
-    prompting) is additive prompt content the two tests above cannot see --
-    they seed no SupplyLink rows. Before the block's caps were tightened
-    (app.config's SUPPLY_PROMPT_MAX_CHARS 700->500, SUPPLY_PROMPT_MAX_EXTRAS
-    added, and grounding restricted to the L1 stage only -- see
-    cascade._identify_companies), the assembled prompt measured 6,657-7,165
-    tokens against this file's PROMPT_TOKEN_BUDGET=6,500.
+    """Regression guard (2026-08-06 review, round 2): grounding the L1
+    cascade stage with the KNOWN RELATIONSHIPS block (app.companies.
+    supply_links.prompting) is additive prompt content the two tests above
+    cannot see -- they seed no SupplyLink rows.
+
+    FIXTURE WARNING, read before touching this test: _seed_full_sector's
+    idempotency guard (`if session.query(Company).filter_by(sector=
+    sector).count(): return`) checks the "oil_gas" sector BEFORE seeding.
+    An earlier version of this test added the parent Company rows into
+    "oil_gas" BEFORE calling _assemble (which calls _seed_full_sector
+    internally) -- that trips the guard and SILENTLY SKIPS seeding the
+    50-company candidate block entirely, understating the prompt by
+    roughly 1,200-1,400 tokens and making the test pass regardless of the
+    caps under test (caught on re-review: that broken version measured
+    5,055 tokens post-fix and 5,144 pre-fix -- neither anywhere near
+    PROMPT_TOKEN_BUDGET, i.e. a false safety net that could never fail).
+    Fixed by seeding the real candidate block FIRST via an explicit
+    _seed_full_sector(db_session) call, then giving the parent companies an
+    UNRELATED sector ("oil_gas_parents") so adding them can never trip that
+    guard again -- their own Company.sector is irrelevant here anyway:
+    parent_lines are built straight from the parent_pool CompanyMention
+    list, never looked up by sector; only their ticker needs to resolve to
+    a company_id for known_relationships_block.
+
+    Mutation-verified (2026-08-06) with the fixture fixed: current shipped
+    config (SUPPLY_PROMPT_MAX_CHARS=500, SUPPLY_PROMPT_MAX_EXTRAS=5)
+    measures 6,490 tokens -- under PROMPT_TOKEN_BUDGET=6,500, test passes.
+    Reverting to the pre-review config (SUPPLY_PROMPT_MAX_CHARS=700,
+    extras slice removed / uncapped) on this EXACT scenario measures 6,579
+    tokens -- over budget, test FAILS. That is the regression this test
+    exists to catch; do not raise PROMPT_TOKEN_BUDGET to make a future
+    failure here go away -- shrink the prompt instead (see the other
+    tests' assertion messages).
 
     Reuses test_cascade_stage_prompt_fits_the_smallest_groq_token_ceiling's
     OVERSUBSCRIBED pool (MAX_PARENT_POOL * 2, truncated to MAX_PARENT_POOL)
-    -- that scenario is ALREADY close to budget without links (~6,283
-    tokens measured), which is exactly why adding the block on top is where
-    a regression would actually surface; the isolated case with only a
-    couple of parent companies and no oversubscription has too much slack
-    to ever catch it (measured ~5,050 tokens either way -- nowhere near
-    budget regardless of the caps, because too few parents have stored
-    links for the block to actually reach its own cap).
-
-    5 of the (already-capped) MAX_PARENT_POOL parent companies get stored
-    links -- 3 customer + 3 supplier each, long names -- enough groups (10)
-    to exceed SUPPLY_PROMPT_MAX_LINES (8) and actually saturate the block's
-    own caps, which is what makes this measure the real worst case rather
-    than an under-filled one: measured BEFORE this review's fix (char cap
-    700, no extras cap) this exact scenario is 6,579 tokens, already over
-    PROMPT_TOKEN_BUDGET=6,500 on its own -- confirming this is a genuine
-    regression guard, not a test that would pass regardless of the caps.
+    -- that scenario is already close to budget without links (measured
+    6,278 tokens), which is exactly why adding the block on top is where a
+    regression actually surfaces; an isolated case with only a couple of
+    parent companies and no oversubscription has too much slack to ever
+    catch it. 5 of the (already-capped) MAX_PARENT_POOL parent companies
+    get stored links -- 3 customer + 3 supplier each, long names -- enough
+    groups (10) to exceed SUPPLY_PROMPT_MAX_LINES (8) and actually
+    saturate the block's own caps, which is what makes this the real worst
+    case rather than an under-filled one.
     """
     from datetime import date, datetime, timezone
 
     from app.models import SupplyLink
+
+    # _seed_full_sector's idempotency guard (`if ... .filter_by(sector=
+    # sector).count(): return`) checks the "oil_gas" sector BEFORE it seeds
+    # -- adding the parent Company rows into "oil_gas" first (as an earlier
+    # version of this test did) trips that guard and SILENTLY SKIPS seeding
+    # the 50-company candidate block entirely, understating the prompt by
+    # ~1,200 tokens and making this test pass regardless of the caps under
+    # test (caught by review: measured 5,055/5,144 tokens post/pre-fix,
+    # neither anywhere near PROMPT_TOKEN_BUDGET). Seeding the real candidate
+    # block FIRST, then giving the parent companies an unrelated sector
+    # (their own Company.sector is irrelevant here -- parent_lines are
+    # built straight from the parent_pool CompanyMention list, never looked
+    # up by sector; only their ticker needs to resolve to a company_id for
+    # known_relationships_block) keeps both pools honest and independent.
+    _seed_full_sector(db_session)
 
     parents = _parent_pool(MAX_PARENT_POOL * 2)
     # Only the first MAX_PARENT_POOL survive _identify_companies' own
@@ -254,8 +287,8 @@ def test_cascade_stage_prompt_fits_budget_with_supply_links(db_session):
     surviving = parents[:MAX_PARENT_POOL]
     for mention in surviving:
         db_session.add(Company(
-            ticker=mention.ticker, name=mention.name, sector="oil_gas", index_tier="OTHER",
-            market="INDIA", tradeability="NORMAL",
+            ticker=mention.ticker, name=mention.name, sector="oil_gas_parents",
+            index_tier="OTHER", market="INDIA", tradeability="NORMAL",
         ))
     db_session.commit()
 
