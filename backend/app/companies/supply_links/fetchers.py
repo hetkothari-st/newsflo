@@ -44,6 +44,13 @@ _PAGE_SIZE = 50
 # BSE's undocumented cap is ~30 days; 28 keeps every window comfortably
 # under it even if the real threshold is inclusive/exclusive off-by-one.
 _MAX_WINDOW_DAYS = 28
+# Hard stop on pages-per-window: 40 x 50 rows/page = 2,000 rows for a
+# single <=28-day window -- far above the observed 279 rows across the
+# full 30-day fixture window. A real BSE pagination bug (repeating the
+# last full page for every pageno forever) is a documented, common class
+# of upstream bug; this caps the damage to one loud failure instead of an
+# unbounded loop.
+_MAX_PAGES = 40
 
 # Canonical agency name -> case-insensitive pattern. Checked against
 # HEADLINE first (that's where filers actually name the agency), then
@@ -123,13 +130,20 @@ def fetch_announcements(root, day: date, from_date: date, to_date: date, opener=
     RAISES (does not degrade) on any BSE rejection, including the
     Status:false date-range-exceeded shape -- this is the master index for
     the day; a truncated or misread page must fail loudly rather than
-    silently under-report rating actions.
+    silently under-report rating actions. Also raises if a single window's
+    pager runs past ``_MAX_PAGES`` without reaching a short page or its own
+    ``Table1[0].ROWCNT`` total -- a real class of upstream pagination bug
+    is the server repeating the last full page for every pageno forever,
+    and a runaway pager is a source problem deserving the same loud-failure
+    treatment as Status:false, not a silent truncation.
     """
     fetch = opener or fetch_bytes
     rows: list[dict] = []
 
     for window_start, window_end in _date_windows(from_date, to_date):
         pageno = 1
+        window_rows: list[dict] = []
+        row_count_target = None
         while True:
             url = ANNOUNCEMENTS_URL_TEMPLATE.format(
                 pageno=pageno,
@@ -139,10 +153,28 @@ def fetch_announcements(root, day: date, from_date: date, to_date: date, opener=
             payload = json.loads(fetch(url).decode("utf-8"))
             _raise_if_rejected(payload)
             page_rows = payload.get("Table") or []
-            rows.extend(page_rows)
+            window_rows.extend(page_rows)
+
+            table1 = payload.get("Table1") or []
+            if table1 and isinstance(table1[0], dict):
+                rowcnt = table1[0].get("ROWCNT")
+                if isinstance(rowcnt, (int, float)) and not isinstance(rowcnt, bool):
+                    row_count_target = rowcnt
+
             if len(page_rows) < _PAGE_SIZE:
                 break
+            # Cheaper stop than waiting for a short page: BSE's own
+            # reported total for this window has already been reached.
+            if row_count_target is not None and len(window_rows) >= row_count_target:
+                break
+
             pageno += 1
+            if pageno > _MAX_PAGES:
+                raise ValueError(
+                    "pagination exceeded _MAX_PAGES; BSE paging likely broken"
+                )
+
+        rows.extend(window_rows)
 
     path = snapshot.index_path(root, day)
     path.parent.mkdir(parents=True, exist_ok=True)

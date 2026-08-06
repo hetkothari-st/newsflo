@@ -117,6 +117,28 @@ def test_fetch_announcements_splits_wide_ranges_into_windows(tmp_path):
     assert snapshot.index_path(root, day).exists()
 
 
+def test_fetch_announcements_pagination_hard_cap_prevents_infinite_loop(tmp_path):
+    # A real class of upstream pagination bug: BSE repeats the last full
+    # page for every pageno instead of ever returning a short page. With
+    # no ROWCNT to use as a cheaper stop, the pager must hit _MAX_PAGES and
+    # raise rather than loop forever.
+    calls = {"n": 0}
+
+    def opener(url, timeout=60):
+        calls["n"] += 1
+        if calls["n"] > 45:
+            # Test-side guard: if the fix regresses, fail fast and loud
+            # instead of hanging the test run.
+            raise AssertionError("loop ran away")
+        return json.dumps({"Table": [{"NEWSID": "x"}] * 50}).encode("utf-8")
+
+    with pytest.raises(ValueError):
+        fetchers.fetch_announcements(
+            str(tmp_path), date(2026, 8, 6),
+            date(2026, 8, 1), date(2026, 8, 6), opener=opener,
+        )
+
+
 def test_fetch_announcements_raises_on_status_false(tmp_path):
     # HTTP 200 with Status:false is BSE's "date range rejected" shape --
     # must never be silently read as "zero rows this period".
