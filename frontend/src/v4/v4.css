@@ -185,10 +185,25 @@ body:has(.nf4) { background: #fafafa; }
   padding: 24px 16px;
   display: grid;
   grid-template-columns: 1fr;
-  /* Inshorts-format tile: image first (fixed share of the card), body
-     beneath -- headline, byline, summary, read-more. */
-  grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+  /* MOBILE keeps the original card arrangement (user decision): text
+     block first, plate filling the bottom, no read-more line. The
+     Inshorts tile format applies from 900px up. */
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
+}
+.nf4 .storycard .sbody4 { order: 1; }
+.nf4 .storycard .lplate { order: 2; }
+.nf4 .storycard .sbody4 .metaline { order: 3; }
+.nf4 .storycard .sbody4 .lgist { order: 2; }
+.nf4 .storycard .sbody4 h1 { order: 1; }
+.nf4 .storycard .sbody4 .lmove { order: 0; }
+.nf4 .storycard .readmore { display: none; }
+@media (min-width: 900px) {
+  .nf4 .storycard .sbody4 { order: 2; }
+  .nf4 .storycard .lplate { order: 1; }
+  .nf4 .storycard .sbody4 .metaline { order: 2; }
+  .nf4 .storycard .sbody4 .lgist { order: 3; }
+  .nf4 .storycard .readmore { display: block; order: 4; }
 }
 .nf4 .storycard .sbody4 { display: flex; flex-direction: column; min-height: 0; }
 .nf4 .storycard .readmore {
@@ -377,7 +392,7 @@ body:has(.nf4) { background: #fafafa; }
    the top. Selection is lifted state, persisting across stories. */
 .nf4 .caprail {
   position: fixed;
-  right: 8px;
+  right: 16px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 32;
@@ -421,6 +436,10 @@ body:has(.nf4) { background: #fafafa; }
 }
 .nf4 .lhead4 .li4 { font-size: 10px; }
 .nf4 .lbody4 { padding: 12px 16px 8px; }
+/* On the ripple page, keep the rows (and their (i) buttons) clear of
+   the floating cap-tier rail hugging the right edge. */
+.nf4 .band .lbody4 { padding-right: 60px; }
+@media (min-width: 900px) { .nf4 .band .lbody4 { padding-right: 72px; } }
 @media (min-width: 900px) {
   .nf4 .lhead4 { padding-left: 32px; padding-right: 32px; }
   .nf4 .lbody4, .nf4 .band .stamp { padding-left: 32px; padding-right: 32px; }
