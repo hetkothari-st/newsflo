@@ -323,6 +323,17 @@ CAR_SUMMARY_SAMPLE_THRESHOLD = 5  # matches calibration/track_record.py's WIN_RA
 EVENT_VOL_COMPANY_MIN_EVENTS = 3
 EVENT_VOL_SECTOR_MIN_EVENTS = 5
 
+# -- Supply links from rating rationales (spec 2026-08-06) ---------------
+# Per-document caps: beyond three names a rationale is listing the sector,
+# not counterparties (and the user asked for brief).
+SUPPLY_LINK_MAX_PER_RELATION = 3
+# Prompt-block budget for the KNOWN RELATIONSHIPS grounding section. The
+# per-candidate description block that once measured 60.8k chars across
+# 360 candidates broke both models' TPM ceilings -- this block is capped
+# hard and covers event companies only.
+SUPPLY_PROMPT_MAX_LINES = 8
+SUPPLY_PROMPT_MAX_CHARS = 700
+
 # AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
 # LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live
 # Company.market_cap every call -- never a hardcoded company list.
