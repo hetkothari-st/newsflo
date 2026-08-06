@@ -9,6 +9,7 @@ from app.analysis.refinement import run_pending_refinements
 from app.companies.market_caps import alert_referenced_tickers, refresh_market_caps
 from app.companies.supply_links import snapshot as supply_snapshot
 from app.companies.universe import fetchers, snapshot
+from app import config
 from app.config import settings
 from app.db import SessionLocal
 # IndianAPI is disabled (not deleted) -- replaced by thenewsapi.com, see
@@ -384,21 +385,6 @@ def _run_rating_filings_poll() -> None:
         logger.exception("Rating filings poll failed")
 
 
-def _parse_news_date(value) -> date | None:
-    """meta.json's news_date is BSE's raw NEWS_DT string (an ISO-ish
-    datetime, e.g. "2026-08-04T17:47:01.793"). Best-effort parse to a date
-    for loader.apply_extraction's recency gate -- a missing or unparsable
-    value must never crash the extraction drain, just fall back to
-    "today" (the caller's responsibility) so the document is still
-    processed."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value)).date()
-    except ValueError:
-        return None
-
-
 # BSE's LLM-as-reader call (extract.extract_profile) is the slow step here,
 # not network fetch -- 30 minutes is generous headroom for a daily backlog
 # without letting a stuck/huge backlog block the scheduler thread
@@ -413,13 +399,17 @@ def _run_supply_links_refresh() -> None:
     fetched by _run_rating_filings_poll or backfill_supply_links.py)
     through PDF-text extraction, the LLM-as-reader call, and loader writes.
 
-    Three ways a doc leaves the queue for good (mark_extracted): its scrip
-    code resolves to no Listing/Company (unmatched_scrip), its PDF has no
+    Docs leave the queue for good (mark_extracted) three ways: scrip code
+    resolves to no Listing/Company (unmatched_scrip), the PDF has no
     extractable text (unextractable), or extraction+load succeeded
-    (extracted). Two ways it stays pending for a retry on a later run: the
-    LLM call returned nothing (llm_failed) -- a transient provider failure
-    should not permanently drop a document that a later run might extract
-    successfully -- or the per-doc body raised (errored, see below).
+    (extracted). They stay pending for a retry on a later run for any of:
+    the LLM call returned nothing (llm_failed), a sidecar (.meta.json or
+    .url) was unreadable/corrupt, meta's news_date was missing or
+    unparsable, or the per-doc body raised (errored, see below) -- none of
+    these is this document's fault in a way a later run can't fix, so none
+    of them may default a fabricated value (an empty source_url, an
+    as_of=today()) just to force the write through; see I3/I4/I7/M3 in the
+    2026-08-06 review for the reproduced damage each of those defaults did.
 
     Each doc's body (sidecar reads through mark_extracted) runs inside its
     own try/except: one poisoned document (e.g. a duplicate-counterparty
@@ -432,6 +422,14 @@ def _run_supply_links_refresh() -> None:
     (genuinely, now that the loop survives it) on the next run rather than
     being permanently skipped or permanently poisoning the same glob
     position forever.
+
+    Circuit breaker: a rate-limited/quota-exhausted provider will not
+    un-limit within this same tick, so once SUPPLY_LLM_FAILURE_BREAKER
+    CONSECUTIVE docs come back llm_failed, the drain stops for this run
+    rather than burning two calls (primary + fallback model) against the
+    provider's daily quota for every remaining pending doc -- quota that
+    the analysis pipeline's own fallback-model bucket also depends on. Any
+    successful extraction resets the streak back to zero.
 
     Any failure escaping the loop itself is logged, never raised, same as
     every other scheduler job.
@@ -446,6 +444,7 @@ def _run_supply_links_refresh() -> None:
         "llm_failed": 0, "errored": 0,
     }
     deadline = time.monotonic() + _SUPPLY_BUDGET_SECONDS
+    consecutive_llm_failures = 0
 
     session = SessionLocal()
     try:
@@ -461,13 +460,37 @@ def _run_supply_links_refresh() -> None:
                         supply_snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
                     )
                 except (OSError, ValueError):
-                    meta = {}
+                    # Corrupt/unreadable meta -- distinct from a readable
+                    # meta whose scrip genuinely matches no company (that
+                    # stays unmatched_scrip+mark_extracted, below). Without
+                    # this, meta defaulted to {}, which resolved to no
+                    # scrip_code, which read as "genuinely unmatched" and
+                    # permanently dropped what may have been a perfectly
+                    # fine PDF.
+                    counts["errored"] += 1
+                    logger.warning(
+                        "Supply links refresh: unreadable meta sidecar, left pending: %s",
+                        pdf_path,
+                    )
+                    continue
                 try:
                     source_url = supply_snapshot.url_sidecar_path(pdf_path).read_text(
                         encoding="utf-8"
                     ).strip()
                 except OSError:
-                    source_url = ""
+                    # An empty source_url would both permanently block future
+                    # rating-desc updates for this company (loader's
+                    # _should_write_description sees a non-AttachLive-looking
+                    # "" and treats it as foreign provenance) AND write a
+                    # provenance-free SupplyLink row -- neither is
+                    # acceptable when the sidecar might just be a transient
+                    # read failure.
+                    counts["errored"] += 1
+                    logger.warning(
+                        "Supply links refresh: unreadable .url sidecar, left pending: %s",
+                        pdf_path,
+                    )
+                    continue
 
                 scrip_code = meta.get("scrip_code")
                 listing = (
@@ -492,9 +515,31 @@ def _run_supply_links_refresh() -> None:
                 profile = extract.extract_profile(client, company.name, text)
                 if profile is None:
                     counts["llm_failed"] += 1
+                    consecutive_llm_failures += 1
+                    if consecutive_llm_failures >= config.SUPPLY_LLM_FAILURE_BREAKER:
+                        logger.warning(
+                            "Supply links refresh: circuit breaker tripped after "
+                            "%s consecutive llm_failed docs -- stopping drain for "
+                            "this run, remaining docs stay pending.",
+                            consecutive_llm_failures,
+                        )
+                        break
                     continue  # left pending -- retried on the next run
 
-                as_of = _parse_news_date(meta.get("news_date")) or date.today()
+                as_of = supply_snapshot.parse_news_date(meta.get("news_date"))
+                if as_of is None:
+                    # Missing/unparsable news_date must never default to
+                    # today() -- a stale document stamped "today" would
+                    # clobber genuinely newer stored links (reproduced: a
+                    # stale 2023 doc stamped today replaced 2026 links).
+                    counts["errored"] += 1
+                    logger.warning(
+                        "Supply links refresh: unparsable/missing news_date, "
+                        "left pending: %s",
+                        pdf_path,
+                    )
+                    continue
+
                 loader.apply_extraction(
                     session, company, profile,
                     source_url=source_url, source_agency=meta.get("agency") or "",
@@ -502,6 +547,7 @@ def _run_supply_links_refresh() -> None:
                 )
                 supply_snapshot.mark_extracted(pdf_path)
                 counts["extracted"] += 1
+                consecutive_llm_failures = 0
             except Exception:
                 session.rollback()
                 counts["errored"] += 1

@@ -14,7 +14,7 @@ Layout::
     <root>/docs/<scrip_code>/<sha16>.done -- written once extract.py has processed the pdf
 """
 import hashlib
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 DEFAULT_ROOT = "data/ratings"
@@ -76,3 +76,25 @@ def pending_docs(root: str) -> list[Path]:
 
 def mark_extracted(pdf_path: Path) -> None:
     done_marker_path(pdf_path).write_text("", encoding="utf-8")
+
+
+def parse_news_date(value) -> date | None:
+    """meta.json's news_date is BSE's raw NEWS_DT string (an ISO-ish
+    datetime, e.g. "2026-08-04T17:47:01.793"). Best-effort parse to a date
+    for loader.apply_extraction's recency gate -- returns None on a
+    missing or unparsable value.
+
+    Callers MUST treat None as a genuine failure (count "errored", skip the
+    doc, leave it pending for a retry) rather than defaulting to
+    date.today(): a stale document whose news_date is missing or garbage
+    would otherwise be stamped with today's date and permanently clobber
+    genuinely newer stored links (reproduced: a stale 2023 doc stamped
+    today replaced 2026 links). Previously duplicated in app.scheduler and
+    backfill_supply_links.py as ``_parse_news_date``; both now import this
+    one copy."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except ValueError:
+        return None

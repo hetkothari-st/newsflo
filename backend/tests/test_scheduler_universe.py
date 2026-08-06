@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import app.scheduler as scheduler
+from app import config
 
 
 def test_master_refresh_never_raises(monkeypatch):
@@ -255,3 +256,187 @@ def test_supply_links_refresh_isolates_a_poisoned_doc(monkeypatch, tmp_path, db_
     # Poisoned doc: left pending (no .done marker) for a genuine retry.
     assert not scheduler.supply_snapshot.done_marker_path(poisoned_pdf).exists()
     assert db_session.query(SupplyLink).filter_by(company_id=poisoned_id).count() == 0
+
+
+# --- 2026-08-06 review, round 2: C2 circuit breaker + I3/I7/M3 honest ------
+# --- provenance (never default a fabricated value just to force a write) --
+
+
+def _write_supply_doc(tmp_path, scrip_code, meta=None, write_url=True):
+    """Shared fixture writer for the tests below: a fetched PDF plus
+    whichever sidecars the caller wants present. ``meta=None`` writes valid
+    JSON with a resolvable scrip_code and a parseable news_date -- callers
+    override individual keys (or pass a raw string to simulate corruption)."""
+    import json as json_module
+
+    url = f"https://x/AttachLive/{scrip_code}.pdf"
+    pdf_path = scheduler.supply_snapshot.doc_path(str(tmp_path), scrip_code, url)
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+    if write_url:
+        scheduler.supply_snapshot.url_sidecar_path(pdf_path).write_text(url, encoding="utf-8")
+    if meta is None:
+        meta = {
+            "scrip_code": scrip_code, "company_name": "x", "agency": "CRISIL",
+            "news_date": "2026-08-06T00:00:00",
+        }
+    if isinstance(meta, str):
+        scheduler.supply_snapshot.meta_sidecar_path(pdf_path).write_text(meta, encoding="utf-8")
+    else:
+        scheduler.supply_snapshot.meta_sidecar_path(pdf_path).write_text(
+            json_module.dumps(meta), encoding="utf-8",
+        )
+    return pdf_path
+
+
+def test_supply_links_refresh_circuit_breaker_stops_after_consecutive_llm_failures(
+    monkeypatch, tmp_path, db_session,
+):
+    """C2: a rate-limited/quota-exhausted provider will not un-limit within
+    the same tick -- 6 pending docs that all come back llm_failed must stop
+    the drain after SUPPLY_LLM_FAILURE_BREAKER (5) consecutive failures,
+    leaving the 6th doc's extract_profile call never even attempted this
+    run (not just "also counted llm_failed")."""
+    from datetime import date as date_cls
+
+    from app.companies.supply_links import extract as supply_extract
+    from app.models import Company, Listing
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
+    monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+
+    for i in range(6):
+        company = Company(ticker=f"FAIL{i}.NS", name=f"Fail {i} Ltd", sector="other", index_tier="OTHER")
+        db_session.add(company)
+        db_session.flush()
+        db_session.add(Listing(
+            company_id=company.id, exchange="BSE", symbol=f"FAIL{i}", scrip_code=str(900 + i),
+            source="test", as_of=date_cls(2026, 1, 1),
+        ))
+        _write_supply_doc(tmp_path, str(900 + i))
+    db_session.commit()
+
+    monkeypatch.setattr(supply_extract, "pdf_text", lambda _p: "some rationale text")
+    calls = []
+
+    def always_fail(client, name, text):
+        calls.append(name)
+        return None
+
+    monkeypatch.setattr(supply_extract, "extract_profile", always_fail)
+
+    scheduler._run_supply_links_refresh()
+
+    assert len(calls) == config.SUPPLY_LLM_FAILURE_BREAKER  # the 6th doc is never attempted
+    pending = scheduler.supply_snapshot.pending_docs(str(tmp_path))
+    assert len(pending) == 6  # nothing marked extracted -- all still pending, breaker or not
+
+
+def test_supply_links_refresh_unparsable_news_date_never_stamped_today(monkeypatch, tmp_path, db_session):
+    """I3: a missing/unparsable news_date must count "errored" and leave the
+    doc pending -- never default to date.today(), which would let a stale
+    document silently clobber genuinely newer stored links."""
+    from datetime import date as date_cls
+
+    from app.companies.supply_links import extract as supply_extract, loader as supply_loader
+    from app.models import Company, Listing
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
+    monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+
+    company = Company(ticker="STALE.NS", name="Stale Ltd", sector="other", index_tier="OTHER")
+    db_session.add(company)
+    db_session.flush()
+    db_session.add(Listing(
+        company_id=company.id, exchange="BSE", symbol="STALE", scrip_code="950",
+        source="test", as_of=date_cls(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    pdf_path = _write_supply_doc(tmp_path, "950", meta={
+        "scrip_code": "950", "company_name": "Stale Ltd", "agency": "CRISIL",
+        "news_date": "not-a-real-date",
+    })
+
+    monkeypatch.setattr(supply_extract, "pdf_text", lambda _p: "some rationale text")
+    monkeypatch.setattr(
+        supply_extract, "extract_profile",
+        lambda client, name, text: {"business_summary": None, "suppliers": [], "customers": []},
+    )
+    apply_calls = []
+    monkeypatch.setattr(
+        supply_loader, "apply_extraction",
+        lambda *a, **kw: apply_calls.append(kw) or {"links_written": 0},
+    )
+
+    scheduler._run_supply_links_refresh()
+
+    assert apply_calls == []  # never reached -- as_of never defaulted to today()
+    assert not scheduler.supply_snapshot.done_marker_path(pdf_path).exists()
+
+
+def test_supply_links_refresh_unreadable_url_sidecar_stays_pending(monkeypatch, tmp_path, db_session):
+    """I7: an unreadable .url sidecar must count "errored" and leave the doc
+    pending -- an empty source_url would both permanently block future
+    rating-desc updates for the company and write a provenance-free
+    SupplyLink row."""
+    from datetime import date as date_cls
+
+    from app.companies.supply_links import extract as supply_extract, loader as supply_loader
+    from app.models import Company, Listing
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
+    monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+
+    company = Company(ticker="NOURL.NS", name="No URL Ltd", sector="other", index_tier="OTHER")
+    db_session.add(company)
+    db_session.flush()
+    db_session.add(Listing(
+        company_id=company.id, exchange="BSE", symbol="NOURL", scrip_code="951",
+        source="test", as_of=date_cls(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    # write_url=False -- the .url sidecar is simply never written, so
+    # reading it raises FileNotFoundError (an OSError subclass).
+    pdf_path = _write_supply_doc(tmp_path, "951", write_url=False)
+
+    extract_calls = []
+    monkeypatch.setattr(supply_extract, "pdf_text", lambda _p: extract_calls.append(1) or "text")
+    apply_calls = []
+    monkeypatch.setattr(supply_loader, "apply_extraction", lambda *a, **kw: apply_calls.append(kw))
+
+    scheduler._run_supply_links_refresh()
+
+    assert extract_calls == []  # never got past the sidecar read
+    assert apply_calls == []
+    assert not scheduler.supply_snapshot.done_marker_path(pdf_path).exists()
+
+
+def test_supply_links_refresh_corrupt_meta_sidecar_stays_pending_not_unmatched(
+    monkeypatch, tmp_path, db_session,
+):
+    """M3: a corrupt/unreadable meta.json must count "errored" and leave the
+    doc pending, NOT fall through to meta={} -> unmatched_scrip ->
+    mark_extracted, which would permanently drop what may be a perfectly
+    fine PDF. A readable meta whose scrip genuinely matches no company is
+    the distinct, still-correct unmatched_scrip case (untouched by this
+    fix, see the poisoned-doc test above for that path)."""
+    from app.companies.supply_links import extract as supply_extract
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
+    monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+
+    pdf_path = _write_supply_doc(tmp_path, "952", meta="{not valid json")
+
+    extract_calls = []
+    monkeypatch.setattr(supply_extract, "pdf_text", lambda _p: extract_calls.append(1) or "text")
+
+    scheduler._run_supply_links_refresh()
+
+    assert extract_calls == []  # never reached scrip resolution/pdf_text at all
+    assert not scheduler.supply_snapshot.done_marker_path(pdf_path).exists()

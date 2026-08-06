@@ -889,7 +889,19 @@ def _identify_companies(
         known_relationships, extra_tickers = supply_link_prompting.known_relationships_block(
             session, event_tickers,
         )
-        if extra_tickers:
+        # extras supplement a candidate list, never constitute one: when
+        # candidate_companies() found zero eligible companies for these
+        # sectors, appending extras here would make them the ENTIRE
+        # candidate list, and with `candidates` non-empty the block below
+        # sets valid_tickers to an enum containing ONLY those extras --
+        # constraining the model to select solely from the event company's
+        # already-known counterparties (measured: 10 of 18 sectors had zero
+        # eligible candidates, which would have collapsed the tool schema's
+        # ticker enum + `allowed` filter to exactly that shape on every one
+        # of them). A sector with no real candidates must stay ungrounded
+        # (valid_tickers=None, unconstrained) rather than be silently
+        # narrowed to a handful of supply-chain names.
+        if extra_tickers and candidates:
             existing_tickers = {c.ticker for c in candidates}
             new_tickers = [t for t in extra_tickers if t not in existing_tickers]
             if new_tickers:
@@ -928,13 +940,16 @@ def _identify_companies(
     # comment and the model-selection comment in _attempt below for why the
     # rulebook-bearing COMPANY_RATIONALE_INSTRUCTIONS is never reachable here.
     rationale_instructions = CASCADE_COMPANY_RATIONALE_INSTRUCTIONS
-    if known_relationships:
-        # Additive only: zero stored links means known_relationships == ""
-        # and rationale_instructions is untouched, so the composed prompt
-        # stays byte-identical to before this block existed (see
-        # tests/test_supply_links.py's byte-identical-when-empty test and
-        # tests/test_cascade.py's untouched prompt-shape tests).
-        rationale_instructions = f"{rationale_instructions}\n\n{known_relationships}"
+
+    # known_relationships is derived from THIS call's event tickers/stored
+    # links, not a per-stage constant -- like candidate_block, it belongs in
+    # _compose's variable tail, not spliced into `instructions` (the
+    # cacheable prefix _compose's own docstring describes below). Zero
+    # stored links means known_relationships == "" and this stays "", so the
+    # composed prompt is unaffected either way (see tests/test_supply_links.
+    # py's byte-identical-when-empty test and tests/test_cascade.py's
+    # untouched prompt-shape tests).
+    known_relationships_tail = f"\n\n{known_relationships}" if known_relationships else ""
 
     def _compose(instructions: str) -> str:
         """Stable prefix first, variable content last (cost-optimization
@@ -955,7 +970,10 @@ def _identify_companies(
         `candidate_block` (the real DB companies this call must choose from)
         rides the variable tail, not the prefix: it is derived from THIS
         call's sectors, so it is not cacheable, and it must stay adjacent to
-        the sector lines it enumerates.
+        the sector lines it enumerates. `known_relationships_tail` (this
+        event company's own stored SupplyLink rows) is the same kind of
+        per-call fact, not a per-stage constant, so it rides the tail too
+        rather than being spliced into `instructions`.
         """
         return (
             f"{framing}\n\n"
@@ -963,7 +981,8 @@ def _identify_companies(
             f"Facts: {facts}\n\n"
             f"Sectors:\n{sector_lines}"
             f"{parent_context}"
-            f"{candidate_block}\n\n"
+            f"{candidate_block}"
+            f"{known_relationships_tail}\n\n"
             "Now apply the instructions above to these facts and sectors, "
             "filling in every field exactly as they specify."
         )

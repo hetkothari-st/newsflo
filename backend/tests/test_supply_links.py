@@ -60,10 +60,18 @@ def test_supply_caps_live_in_config():
 # Reality correction (Task 1's fixtures README, 2026-08-06): the rating
 # agency name lives in HEADLINE, not NEWSSUB -- NEWSSUB is always generic
 # LODR boilerplate ("<Company> - <code> - Announcement under Regulation 30
-# (LODR)-Credit Rating"). parse_announcements must check HEADLINE first,
-# falling back to NEWSSUB (belt and braces -- some filers do restate the
-# agency there too). Row 4 below has the agency ONLY in NEWSSUB and must
-# still match.
+# (LODR)-Credit Rating") that names the COMPANY, not the agency.
+#
+# I4 (2026-08-06 review, round 2): parse_announcements USED to check
+# HEADLINE first, falling back to NEWSSUB "as a harmless belt-and-braces
+# fallback" -- that fallback matched company NAMES against agency patterns
+# (row 5 below: "Amrutanjan Health Care Ltd" trips the CARE pattern via
+# "Care" in "Health Care", reproduced on the shipped fixture) and
+# fabricated a source_agency that was never actually in the document. The
+# fix drops the NEWSSUB fallback entirely -- agency detection is HEADLINE
+# ONLY now. Row 4 (agency string present ONLY in NEWSSUB) is the inverted
+# case this test now enshrines: it must NOT match. The ~18/50 acceptance
+# rate on the real fixture (agency actually named in HEADLINE) stands.
 
 
 def test_parse_announcements_keeps_only_agency_rows_with_attachments():
@@ -80,15 +88,27 @@ def test_parse_announcements_keeps_only_agency_rows_with_attachments():
         {"SCRIP_CD": "500004", "SLONGNAME": "NewsSubOnly", "NEWS_DT": "2026-08-01T10:00:00",
          "NEWSSUB": "NewsSubOnly - 500004 - ICRA assigns rating AA to facility",
          "HEADLINE": "as per enclosed letter.", "ATTACHMENTNAME": "ghi.pdf"},
+        {"SCRIP_CD": "500005", "SLONGNAME": "Amrutanjan Health Care Ltd",
+         "NEWS_DT": "2026-08-01T10:00:00",
+         "NEWSSUB": "Amrutanjan Health Care Ltd - 500005 - Announcement under "
+                    "Regulation 30 (LODR)-Credit Rating",
+         "HEADLINE": "as per enclosed letter.", "ATTACHMENTNAME": "jkl.pdf"},
     ]
     parsed = fetchers.parse_announcements(rows)
-    assert len(parsed) == 2
+    # Only the row whose HEADLINE actually names an agency survives.
+    assert len(parsed) == 1
     assert parsed[0]["scrip_code"] == "500325"
     assert parsed[0]["agency"] == "CRISIL"
     assert parsed[0]["attachment_url"].endswith("/AttachLive/abc.pdf")
-    # NEWSSUB-only match (row 4) still counts -- belt and braces.
-    assert parsed[1]["scrip_code"] == "500004"
-    assert parsed[1]["agency"] == "ICRA"
+
+    scrip_codes = {p["scrip_code"] for p in parsed}
+    # Row 4: "ICRA" appears ONLY in NEWSSUB, not HEADLINE -- must NOT match
+    # now that the NEWSSUB fallback is gone.
+    assert "500004" not in scrip_codes
+    # Row 5: a company literally named "...Health Care Ltd" in NEWSSUB must
+    # never be mistaken for the CARE rating agency -- the fabrication I4
+    # closes.
+    assert "500005" not in scrip_codes
 
 
 def test_parse_announcements_handles_the_real_fixture_page():
@@ -256,11 +276,19 @@ def test_entries_without_provable_evidence_are_discarded(monkeypatch):
 
 
 def test_caps_are_enforced_after_gating(monkeypatch):
-    text = " ".join(f"sells to Customer{i}." for i in range(6))
+    # Evidence quotes lengthened past config.SUPPLY_LINK_MIN_EVIDENCE_CHARS
+    # (I5) -- the original one-line "sells to CustomerN." quotes were well
+    # under the 40-char floor and would now be rejected outright, which
+    # would make this test exercise the evidence gate instead of the cap
+    # it's actually named for.
+    def _evidence(i):
+        return f"the company sells its entire annual output to Customer{i} under a long-term contract."
+
+    text = " ".join(_evidence(i) for i in range(6))
     payload = {
         "business_summary": None,
         "suppliers": [],
-        "customers": [{"name": f"Customer{i}", "evidence": f"sells to Customer{i}."} for i in range(6)],
+        "customers": [{"name": f"Customer{i}", "evidence": _evidence(i)} for i in range(6)],
     }
     monkeypatch.setattr(extract, "_call_supply_tool", lambda client, name, text: payload)
     result = extract.extract_profile(object(), "X", text)
@@ -268,11 +296,19 @@ def test_caps_are_enforced_after_gating(monkeypatch):
 
 
 def test_advice_language_summary_is_dropped_but_links_survive(monkeypatch):
-    text = "Beta Ltd refines sugar. It sells mainly to Nestle India."
+    # Evidence quote lengthened past config.SUPPLY_LINK_MIN_EVIDENCE_CHARS
+    # (I5) -- see test_caps_are_enforced_after_gating's comment.
+    text = (
+        "Beta Ltd refines sugar. It sells the bulk of its refined sugar "
+        "output mainly to Nestle India every year."
+    )
     payload = {
         "business_summary": "Beta Ltd is a strong buy with excellent prospects.",
         "suppliers": [],
-        "customers": [{"name": "Nestle India", "evidence": "sells mainly to Nestle India"}],
+        "customers": [{
+            "name": "Nestle India",
+            "evidence": "sells the bulk of its refined sugar output mainly to Nestle India",
+        }],
     }
     monkeypatch.setattr(extract, "_call_supply_tool", lambda client, name, text: payload)
     result = extract.extract_profile(object(), "Beta Ltd", text)
@@ -350,7 +386,12 @@ def test_older_empty_extraction_never_clobbers_newer_links(db_session):
                             source_url="u1", source_agency="CRISIL", as_of=AS_OF)
     result = loader.apply_extraction(db_session, company, _profile(),
                                      source_url="u2", source_agency="ICRA", as_of=date(2025, 1, 1))
-    assert result["links_kept_older"] == 1 or db_session.query(SupplyLink).count() == 1
+    # M2 (2026-08-06 review): was `or`, which is vacuous -- links_kept_older
+    # is always 1 here (see apply_extraction's `len(entries) if entries else
+    # 1`), regardless of whether the older doc actually clobbered anything,
+    # so the `or` made this assert unconditionally true. `and` requires the
+    # DB to genuinely still hold exactly the one row from the NEWER document.
+    assert result["links_kept_older"] == 1 and db_session.query(SupplyLink).count() == 1
 
 
 def test_newer_empty_extraction_replaces_aged_out_links(db_session):
@@ -662,8 +703,18 @@ def test_extras_are_excluded_when_ineligible_as_ordinary_candidates(db_session):
     assert "SME Buyer Ltd" in prompt and "SMEBUYER.NS" in prompt
 
     # But never promoted to a selectable candidate or ticker-enum entry.
+    # candidate_block now sits BEFORE known_relationships_tail in the
+    # composed prompt (M1, 2026-08-06 review round 2 -- both ride the
+    # variable tail, but candidate_block is adjacent to the sector lines it
+    # enumerates and known_relationships comes after it), so the candidate
+    # section must be bounded on the KNOWN RELATIONSHIPS side too -- without
+    # that, this split would capture the KNOWN RELATIONSHIPS text (which
+    # legitimately names SMEBUYER.NS) as if it were part of the candidate
+    # list.
     if "CANDIDATE COMPANIES" in prompt:
         candidate_section = prompt.split("CANDIDATE COMPANIES", 1)[1]
+        if "KNOWN RELATIONSHIPS" in candidate_section:
+            candidate_section = candidate_section.split("KNOWN RELATIONSHIPS", 1)[0]
         assert "SMEBUYER.NS" not in candidate_section
     ticker_schema = (
         client.tools[0]["function"]["parameters"]["properties"]["sector_companies"]
@@ -706,6 +757,58 @@ def test_extras_still_respect_the_global_max_candidates_per_prompt_cap(db_sessio
     # 2 ordinary sector candidates + 3 extras = 5 total, uncapped -- must be
     # sliced down to the patched cap of 3.
     assert len(ticker_schema["enum"]) == 3
+
+
+def test_extras_never_constitute_the_candidate_list_for_a_zero_candidate_sector(db_session):
+    """C1 (2026-08-06 review, round 2): extras SUPPLEMENT a candidate list,
+    they never CONSTITUTE one. Before this fix, when candidate_companies()
+    found zero eligible companies for a sector, the resolved counterparties
+    from known_relationships_block were appended anyway and became the
+    ENTIRE candidate list -- with `candidates` non-empty, the tool schema's
+    ticker enum + the `allowed` filter then constrained the model to select
+    ONLY from the event company's already-known counterparties (measured:
+    10 of 18 sectors had zero eligible candidates in production, which
+    would have collapsed to exactly this shape on every one of them).
+
+    Here the cascade sector ("textiles") has ZERO companies in the DB at
+    all -- candidate_companies() must return []. The event company (ALPHA.
+    NS, sector "oil_gas") has a stored SupplyLink to a real, eligible
+    counterparty (BETA.NS) -- so extra_tickers is non-empty and the bug, if
+    present, would inject BETA.NS as the entire candidate list. The fix
+    requires the sector to stay fully ungrounded instead: no candidate
+    block, no ticker enum, valid_tickers unconstrained (None) so the
+    `allowed` filter in _identify_companies never binds.
+    """
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd", sector="oil_gas")
+    buyer = _company(db_session, "BETA.NS", "Beta Ltd", sector="oil_gas")
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="Beta Ltd",
+        counterparty_company_id=buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF, extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
+    client = _CapturingClient()
+    _identify_companies(
+        client, facts="f",
+        # "textiles" has no seeded companies at all -- candidate_companies()
+        # must return [] for it, distinct from ALPHA/BETA's own "oil_gas".
+        sectors=[SectorFinding(sector="textiles", direction="bullish", mechanism="m")],
+        impact_level="indirect_l1", parent_pool=[_direct_mention("ALPHA.NS", "Alpha Ltd", "oil_gas")],
+        session=db_session,
+    )
+    prompt = client.messages[1]["content"]
+    # The KNOWN RELATIONSHIPS block itself is still allowed to fire (it is
+    # historical context, not a candidate list) -- what must NOT happen is
+    # BETA.NS being promoted into a selectable candidate or ticker enum.
+    assert "CANDIDATE COMPANIES" not in prompt
+
+    ticker_schema = (
+        client.tools[0]["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert "enum" not in ticker_schema
+    assert "BETA.NS" not in ticker_schema.get("enum", [])
 
 
 def test_supply_links_never_create_companies_via_the_real_grounded_identify_companies_call(db_session, monkeypatch):

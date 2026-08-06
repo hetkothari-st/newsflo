@@ -53,10 +53,10 @@ _MAX_WINDOW_DAYS = 28
 _MAX_PAGES = 40
 
 # Canonical agency name -> case-insensitive pattern. Checked against
-# HEADLINE first (that's where filers actually name the agency), then
-# against NEWSSUB as a harmless fallback (NEWSSUB is normally generic LODR
-# boilerplate that never names an agency, but nothing stops a filer from
-# restating it there too).
+# HEADLINE ONLY (that's where filers actually name the agency) -- see
+# _detect_agency/parse_announcements' own comment for why a NEWSSUB
+# fallback is not safe here (it fabricated agencies from company names,
+# e.g. "Amrutanjan Health Care Ltd" -> CARE).
 _AGENCY_PATTERNS = [
     ("CRISIL", re.compile(r"crisil", re.IGNORECASE)),
     ("ICRA", re.compile(r"icra", re.IGNORECASE)),
@@ -68,28 +68,34 @@ _AGENCY_PATTERNS = [
 ]
 
 
-def _detect_agency(headline: str, newssub: str) -> str | None:
+def _detect_agency(headline: str) -> str | None:
     for canonical, pattern in _AGENCY_PATTERNS:
         if pattern.search(headline or ""):
-            return canonical
-    for canonical, pattern in _AGENCY_PATTERNS:
-        if pattern.search(newssub or ""):
             return canonical
     return None
 
 
 def parse_announcements(rows: list[dict]) -> list[dict]:
-    """Pure. Keeps rows that (a) name a known rating agency in HEADLINE or
-    NEWSSUB and (b) carry an attachment. Rows failing either check are
-    dropped -- there is nothing useful to extract from a rating
-    announcement with no document, and an unnamed agency can't be
-    attributed as the source."""
+    """Pure. Keeps rows that (a) name a known rating agency in HEADLINE and
+    (b) carry an attachment. Rows failing either check are dropped -- there
+    is nothing useful to extract from a rating announcement with no
+    document, and an unnamed agency can't be attributed as the source.
+
+    HEADLINE only, deliberately -- NEWSSUB is generic LODR boilerplate
+    ("<Company> - <code> - Announcement under Regulation 30 (LODR)-Credit
+    Rating") that names the COMPANY, not the rating agency. A NEWSSUB
+    fallback here previously matched company names against agency patterns
+    (e.g. "Amrutanjan Health Care Ltd" tripped the CARE pattern via "Care"
+    in "Health Care", reproduced on the shipped fixture) and fabricated a
+    source_agency that was never actually in the document. Checked against
+    HEADLINE only, where filers actually name the agency.
+    """
     parsed = []
     for row in rows:
         attachment = (row.get("ATTACHMENTNAME") or "").strip()
         if not attachment:
             continue
-        agency = _detect_agency(row.get("HEADLINE", ""), row.get("NEWSSUB", ""))
+        agency = _detect_agency(row.get("HEADLINE", ""))
         if not agency:
             continue
         parsed.append({

@@ -344,6 +344,22 @@ SUPPLY_PROMPT_MAX_CHARS = 500
 # pushed into the tool schema's ticker enum, which is its own token cost
 # (see app.companies.candidates' "each candidate costs TWICE" note).
 SUPPLY_PROMPT_MAX_EXTRAS = 5
+# The evidence gate (app.companies.supply_links.extract._evidence_in_text)
+# is this subsystem's entire provenance guarantee -- a supplier/customer
+# name is only ever stored because the model quoted text that provably
+# appears in the source document. A 1-character (or whitespace-only)
+# "quote" trivially substring-matches almost anything and proves nothing,
+# so it must be rejected exactly like an unprovable one.
+SUPPLY_LINK_MIN_EVIDENCE_CHARS = 40
+# A rate-limited/quota-exhausted LLM provider will not un-limit within the
+# same drain tick -- without a breaker, a drained-quota day burns TWO calls
+# (primary + fallback model) against the provider's requests-per-day limit
+# for EVERY remaining pending doc, which also eats the analysis pipeline's
+# own fallback-model bucket. Both app.scheduler._run_supply_links_refresh
+# and backfill_supply_links.py's drain_extraction_queue stop the drain loop
+# after this many CONSECUTIVE llm_failed docs; a successful extraction
+# resets the counter.
+SUPPLY_LLM_FAILURE_BREAKER = 5
 
 # AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
 # LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live

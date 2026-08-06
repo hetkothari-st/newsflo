@@ -15,10 +15,11 @@ pick up wherever the previous extraction pass stopped.
 """
 import argparse
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
+from app import config
 from app.analysis.claude_client import build_client
 from app.companies.market_caps import alert_referenced_tickers
 from app.companies.supply_links import extract, fetchers, loader, snapshot
@@ -31,19 +32,6 @@ _PROGRESS_EVERY = 25
 # BSE's own cap is ~30 days (fetchers.py); 28 keeps every window comfortably
 # under it, same margin fetchers._MAX_WINDOW_DAYS uses for a single call.
 _WINDOW_DAYS = 28
-
-
-def _parse_news_date(value) -> date | None:
-    """meta.json's news_date is BSE's raw NEWS_DT string (an ISO-ish
-    datetime). Best-effort parse for loader.apply_extraction's recency
-    gate -- a missing or unparsable value must never crash the drain, the
-    caller falls back to today() instead."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value)).date()
-    except ValueError:
-        return None
 
 
 def _month_windows(months: int, today: date | None = None) -> list[tuple[date, date]]:
@@ -129,64 +117,109 @@ def drain_extraction_queue(session: Session) -> None:
     continues to the next document -- mark_extracted is deliberately NOT
     called on this path, so the doc is retried on the next run instead of
     being silently skipped forever or permanently re-poisoning the same
-    glob position."""
+    glob position.
+
+    A corrupt/unreadable meta sidecar, an unreadable .url sidecar, and a
+    missing/unparsable news_date are ALSO left pending (counted "errored",
+    no mark_extracted) rather than defaulted through -- see
+    app.scheduler._run_supply_links_refresh's docstring for the reproduced
+    damage each of those defaults did (I3/I7/M3, 2026-08-06 review). A
+    readable meta whose scrip genuinely matches no company is a different,
+    correct case: unmatched_scrip + mark_extracted, unchanged.
+
+    Circuit breaker: same discipline as
+    app.scheduler._run_supply_links_refresh -- SUPPLY_LLM_FAILURE_BREAKER
+    CONSECUTIVE llm_failed docs stops the drain for this run (a
+    rate-limited/quota-exhausted provider will not un-limit mid-run), reset
+    by any successful extraction.
+    """
     client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
     counts = {
         "extracted": 0, "unmatched_scrip": 0, "unextractable": 0,
         "llm_failed": 0, "errored": 0,
     }
+    consecutive_llm_failures = 0
 
     docs = snapshot.pending_docs(snapshot.DEFAULT_ROOT)
     total = len(docs)
     print(f"draining {total} pending documents")
 
     for i, pdf_path in enumerate(docs, start=1):
+        breaker_tripped = False
         try:
             try:
                 meta = json.loads(
                     snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
                 )
             except (OSError, ValueError):
-                meta = {}
-            try:
-                source_url = (
-                    snapshot.url_sidecar_path(pdf_path).read_text(encoding="utf-8").strip()
-                )
-            except OSError:
-                source_url = ""
+                meta = None
 
-            scrip_code = meta.get("scrip_code")
-            listing = (
-                session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
-                if scrip_code else None
-            )
-            company = (
-                session.query(Company).filter(Company.id == listing.company_id).first()
-                if listing is not None else None
-            )
-
-            if company is None:
-                snapshot.mark_extracted(pdf_path)
-                counts["unmatched_scrip"] += 1
+            if meta is None:
+                counts["errored"] += 1
+                print(f"  [{i}/{total}] unreadable meta sidecar, left pending: {pdf_path}")
             else:
-                text = extract.pdf_text(pdf_path)
-                if text is None:
-                    snapshot.mark_extracted(pdf_path)
-                    counts["unextractable"] += 1
+                try:
+                    source_url = (
+                        snapshot.url_sidecar_path(pdf_path).read_text(encoding="utf-8").strip()
+                    )
+                except OSError:
+                    source_url = None
+
+                if source_url is None:
+                    counts["errored"] += 1
+                    print(f"  [{i}/{total}] unreadable .url sidecar, left pending: {pdf_path}")
                 else:
-                    profile = extract.extract_profile(client, company.name, text)
-                    if profile is None:
-                        # Left pending -- retried the next time this drain runs.
-                        counts["llm_failed"] += 1
-                    else:
-                        as_of = _parse_news_date(meta.get("news_date")) or date.today()
-                        loader.apply_extraction(
-                            session, company, profile,
-                            source_url=source_url, source_agency=meta.get("agency") or "",
-                            as_of=as_of,
-                        )
+                    scrip_code = meta.get("scrip_code")
+                    listing = (
+                        session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
+                        if scrip_code else None
+                    )
+                    company = (
+                        session.query(Company).filter(Company.id == listing.company_id).first()
+                        if listing is not None else None
+                    )
+
+                    if company is None:
                         snapshot.mark_extracted(pdf_path)
-                        counts["extracted"] += 1
+                        counts["unmatched_scrip"] += 1
+                    else:
+                        text = extract.pdf_text(pdf_path)
+                        if text is None:
+                            snapshot.mark_extracted(pdf_path)
+                            counts["unextractable"] += 1
+                        else:
+                            profile = extract.extract_profile(client, company.name, text)
+                            if profile is None:
+                                # Left pending -- retried the next time this drain runs.
+                                counts["llm_failed"] += 1
+                                consecutive_llm_failures += 1
+                                if consecutive_llm_failures >= config.SUPPLY_LLM_FAILURE_BREAKER:
+                                    breaker_tripped = True
+                                    print(
+                                        f"  [{i}/{total}] circuit breaker tripped after "
+                                        f"{consecutive_llm_failures} consecutive llm_failed "
+                                        "docs -- stopping drain, remaining docs stay pending."
+                                    )
+                            else:
+                                as_of = snapshot.parse_news_date(meta.get("news_date"))
+                                if as_of is None:
+                                    # Never default to date.today() -- see the
+                                    # docstring above (I3).
+                                    counts["errored"] += 1
+                                    print(
+                                        f"  [{i}/{total}] unparsable/missing news_date, "
+                                        f"left pending: {pdf_path}"
+                                    )
+                                else:
+                                    loader.apply_extraction(
+                                        session, company, profile,
+                                        source_url=source_url,
+                                        source_agency=meta.get("agency") or "",
+                                        as_of=as_of,
+                                    )
+                                    snapshot.mark_extracted(pdf_path)
+                                    counts["extracted"] += 1
+                                    consecutive_llm_failures = 0
         except Exception as exc:
             session.rollback()
             counts["errored"] += 1
@@ -199,6 +232,9 @@ def drain_extraction_queue(session: Session) -> None:
                 f"unextractable={counts['unextractable']} llm_failed={counts['llm_failed']} "
                 f"errored={counts['errored']}"
             )
+
+        if breaker_tripped:
+            break
 
     print(f"done: {counts}")
 

@@ -47,7 +47,14 @@ def _normalize_ws(value: str) -> str:
 def _evidence_in_text(evidence: str, text: str) -> bool:
     if not evidence or not text:
         return False
-    return _normalize_ws(evidence) in _normalize_ws(text)
+    normalized = _normalize_ws(evidence)
+    # The gate is this subsystem's entire provenance guarantee -- a 1-char
+    # (or whitespace-only, which normalizes to "") "quote" trivially
+    # substring-matches almost any document and proves nothing. See
+    # config.SUPPLY_LINK_MIN_EVIDENCE_CHARS's own comment.
+    if len(normalized) < config.SUPPLY_LINK_MIN_EVIDENCE_CHARS:
+        return False
+    return normalized in _normalize_ws(text)
 
 
 def build_supply_tool() -> dict:
@@ -96,7 +103,14 @@ def _call_supply_tool(client, company_name: str, text: str) -> dict:
     to {} rather than raising, same discipline as
     business_profile._call_business_profile_tool. The entire attempt (both
     model attempts, response parsing, and json.loads) is wrapped in one
-    outer try/except so nothing here can ever propagate."""
+    outer try/except so nothing here can ever propagate.
+
+    Runs on LLM_TIER_CHEAP unconditionally (not gated behind the settings-
+    driven resolve_tier ladder every other tierable call uses): this is
+    structured extraction of a document the model is handed verbatim, not
+    open-ended reasoning, so it is always a cheap-tier fit -- see
+    app.analysis.claude_client's provider adapters for what a cheap-tier
+    call actually resolves to per provider."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"{SUPPLY_FRAMING}\n\nCompany: {company_name}\n\nDocument text:\n{text}"},
@@ -108,6 +122,7 @@ def _call_supply_tool(client, company_name: str, text: str) -> dict:
             model=model, max_tokens=2048, tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_supply_profile"}},
             messages=messages,
+            tier=config.LLM_TIER_CHEAP, call_name="supply_link_extract",
         )
 
     try:
