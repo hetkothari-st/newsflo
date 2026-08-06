@@ -67,22 +67,6 @@ body:has(.nf4) { background: #fafafa; }
   background: var(--paper);
   border-bottom: 1px solid var(--ink);
 }
-.nf4 .barrow { display: flex; align-items: center; gap: 12px; padding: 9px 12px; }
-.nf4 .minimast {
-  font-family: var(--condensed);
-  font-weight: 400;
-  text-transform: uppercase;
-  font-size: 22px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  flex-shrink: 0;
-}
-.nf4.cond .minimast { opacity: 1; }
-.nf4 .barrow .navlinks { flex: 1; justify-content: center; min-width: 0; }
-/* Invisible right-side twin keeps the nav optically centered. */
-.nf4 .minibal { visibility: hidden; }
-.nf4.cond .minibal { visibility: hidden; opacity: 0; }
 /* Snapped card tops land below the constant sticky bar. */
 .nf4.snap { scroll-padding-top: var(--barh, 56px); }
 
@@ -713,14 +697,14 @@ body:has(.nf4) { background: #fafafa; }
   /* Six section labels must hold one line -- tighter type and, as the
      last resort on very narrow screens, sideways scroll instead of a
      wrapped second row. */
-  .nf4 .navlinks { gap: 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .nf4 .navlinks { gap: 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; justify-content: flex-start; }
   .nf4 .navlinks::-webkit-scrollbar { display: none; }
+  /* Center-when-fits, scroll-from-start-when-not: plain justify-content
+     center on a scrollable row clips its left edge (FEED became "D"). */
+  .nf4 .navlinks > :first-child { margin-left: auto; }
+  .nf4 .navlinks > :last-child { margin-right: auto; }
   .nf4 .navlinks button { font-size: 11px; white-space: nowrap; }
   .nf4 .navlinks button.on { font-size: 15px; }
-  /* Phone bar: drop the invisible balance twin and shrink the mini
-     wordmark so all six labels keep room. */
-  .nf4 .minibal { display: none; }
-  .nf4 .minimast { font-size: 18px; }
   .nf4 .capf4 { gap: 12px; }
   .nf4 .storycard { padding: 24px 16px; gap: 16px; }
   .nf4 .storycard .lmove { font-size: 44px; }

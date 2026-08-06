@@ -34,12 +34,10 @@ const IST_DATE = new Intl.DateTimeFormat('en-IN', {
 
 export default function ShellV4() {
   const [view, setView] = useState<View>('feed');
-  // Condensed header once the reader scrolls past the homepage: the
-  // masthead shrinks to a compact bar that stays pinned over every card.
-  // Hysteresis (condense past 80px, expand only under 8px) so the toggle
-  // can't oscillate at a boundary.
-  const [condensed, setCondensed] = useState(false);
-  const condensedRef = useRef(false);
+  // Scroll settle-assist: iOS sometimes rests between the homepage and
+  // card two (half of card one visible) despite mandatory snapping --
+  // after the scroll goes idle in that dead zone, finish the trip home.
+  const settleTimer = useRef<number | null>(null);
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
@@ -91,15 +89,18 @@ export default function ShellV4() {
     // open (mandatory snap fights scrolling through a tall band) and on
     // every non-feed section.
     <div
-      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''}`}
+      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''}`}
       style={{ '--barh': `${barHeight}px`, '--stackh': `${stackHeight}px` } as React.CSSProperties}
       onScroll={(event) => {
-        const top = event.currentTarget.scrollTop;
-        const next = condensedRef.current ? top > 8 : top > 80;
-        if (next !== condensedRef.current) {
-          condensedRef.current = next;
-          setCondensed(next);
-        }
+        if (view !== 'feed' || bandOpen) return;
+        const el = event.currentTarget;
+        if (settleTimer.current !== null) window.clearTimeout(settleTimer.current);
+        settleTimer.current = window.setTimeout(() => {
+          const top = el.scrollTop;
+          if (top > 4 && top < el.clientHeight * 0.8) {
+            el.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }, 160);
       }}
     >
       {/* Fixed page-top snap point -- the sticky bar can't carry one
@@ -116,13 +117,11 @@ export default function ShellV4() {
         <div className="masthead">Newsflo</div>
       </div>
 
-      {/* Constant-height sticky bar: mini wordmark (opacity-only fade,
-          zero layout impact) + the section nav. */}
+      {/* Constant-height sticky nav row -- the same centered nav strip
+          as before (no mini wordmark; user decision), pinned so it stays
+          available over every card. Layout never changes on scroll. */}
       <header ref={barRef} className="topbar">
-        <div className="barrow">
-          <span className="minimast" aria-hidden="true">
-            Newsflo
-          </span>
+        <div className="navrow">
           <nav className="navlinks" aria-label="Sections">
             {NAV_ITEMS.map((item) => (
               <button
@@ -135,9 +134,6 @@ export default function ShellV4() {
               </button>
             ))}
           </nav>
-          <span className="minimast minibal" aria-hidden="true">
-            Newsflo
-          </span>
         </div>
         {view === 'feed' && feedDate !== null && (
           <div className="dateline">
