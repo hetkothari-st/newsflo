@@ -149,8 +149,8 @@ function RippleBand({
   const visibleRows = (layer: RippleLayer) =>
     capFilter === 'ALL' ? layer.rows : layer.rows.filter((row) => row.cap_tier === capFilter);
   const anyRows = detail !== null && detail.layers.some((layer) => visibleRows(layer).length > 0);
-  // Gesture chain (user decision): swipe RIGHT moves forward
-  // (companies -> timeline), swipe LEFT moves back (timeline ->
+  // Gesture chain (user decision): a leftward drag moves forward
+  // (companies -> timeline), a rightward drag moves back (timeline ->
   // companies, then companies -> the news card). Clicks never flip;
   // the buttons remain for mouse users.
   const touchX = useRef<number | null>(null);
@@ -166,9 +166,9 @@ function RippleBand({
         if (touchX.current === null) return;
         const dx = event.changedTouches[0].clientX - touchX.current;
         touchX.current = null;
-        if (dx > 55 && tab === 'companies') setTab('timeline');
-        else if (dx < -55 && tab === 'timeline') setTab('companies');
-        else if (dx < -55) onClose();
+        if (dx < -55 && tab === 'companies') setTab('timeline');
+        else if (dx > 55 && tab === 'timeline') setTab('companies');
+        else if (dx > 55) onClose();
       }}
     >
       <button className="bandclose" onClick={onClose}>
@@ -393,7 +393,7 @@ export default function FeedV4({
     onBandOpenChange(false);
   }, [onBandOpenChange]);
 
-  // Swipe RIGHT on a card -> its affected-companies page (user
+  // Leftward drag on a card -> its affected-companies page (user
   // decision; the "See who's affected" tap remains for mouse users).
   const cardTouchX = useRef<number | null>(null);
   const onCardTouchStart = (event: React.TouchEvent) => {
@@ -403,7 +403,7 @@ export default function FeedV4({
     if (cardTouchX.current === null) return;
     const dx = event.changedTouches[0].clientX - cardTouchX.current;
     cardTouchX.current = null;
-    if (dx > 55 && openId !== alertId) toggle(alertId);
+    if (dx < -55 && openId !== alertId) toggle(alertId);
   };
 
   if (error !== null) return <p className="empty4">{error}</p>;
