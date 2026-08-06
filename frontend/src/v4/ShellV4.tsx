@@ -10,6 +10,7 @@ import './v4.css';
 import ArchiveV4 from './ArchiveV4';
 import DeepDiveV4 from './DeepDiveV4';
 import FeedV4 from './FeedV4';
+import InfoV4, { type InfoV4Data } from './InfoV4';
 import { DirectoryV4, DiscoverV4, PortfolioV4, ReviewV4 } from './SectionsV4';
 
 type View = 'feed' | 'disc' | 'dir' | 'pf' | 'car' | 'arch';
@@ -36,6 +37,8 @@ export default function ShellV4() {
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
+  // The (i) glance popup -- separate from the deep dive: glance and stay.
+  const [info, setInfo] = useState<InfoV4Data | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
   // Live header height -> --headh CSS var: the first story card is sized
@@ -109,6 +112,7 @@ export default function ShellV4() {
           date={feedDate}
           onEdition={setEdition}
           onOpenDeepDive={openDeepDive}
+          onOpenInfo={setInfo}
           onBandOpenChange={setBandOpen}
         />
       )}
@@ -133,6 +137,7 @@ export default function ShellV4() {
           onClose={() => setDeepDive(null)}
         />
       )}
+      {info !== null && <InfoV4 info={info} onClose={() => setInfo(null)} />}
 
       <div className="foot4">
         <span>Newsflo — measured market reactions to the day's news</span>

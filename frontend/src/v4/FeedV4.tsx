@@ -17,6 +17,7 @@ import {
   type RippleLayer,
 } from '../v3/api';
 import { categoryArtUrl } from '../v3/categoryArt';
+import type { InfoV4Data } from './InfoV4';
 import LogoV4 from './LogoV4';
 import { useAuth } from '../lib/auth';
 
@@ -135,11 +136,13 @@ function RippleBand({
   detail,
   onClose,
   onOpenDeepDive,
+  onOpenInfo,
 }: {
   alert: FeedAlert;
   detail: AlertDetail | null;
   onClose: () => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
+  onOpenInfo: (info: InfoV4Data) => void;
 }) {
   // The cap filter lives inside each story's affected-companies section
   // (user decision) -- per-card state, narrowing only this ripple's rows.
@@ -284,6 +287,24 @@ function RippleBand({
                     {row.cap_tier !== null && <span>{row.cap_tier} cap</span>}
                   </div>
                 </div>
+                {/* (i) = glance and stay; the row itself = go deep --
+                    same split as the deployed shell. */}
+                <button
+                  className="ib4"
+                  aria-label={`About ${row.ticker}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenInfo({
+                      name: row.name,
+                      ticker: row.ticker,
+                      sector: row.sector,
+                      logoUrl: row.logo_url,
+                      fundamentals: row.fundamentals,
+                    });
+                  }}
+                >
+                  i
+                </button>
               </div>
             ))}
             </div>
@@ -322,6 +343,7 @@ export default function FeedV4({
   date,
   onEdition,
   onOpenDeepDive,
+  onOpenInfo,
   onBandOpenChange,
 }: {
   // null = today (with latest-edition fallback); YYYY-MM-DD = a back
@@ -329,6 +351,7 @@ export default function FeedV4({
   date: string | null;
   onEdition: (edition: { count: number; date: string | null }) => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
+  onOpenInfo: (info: InfoV4Data) => void;
   // Lets the shell drop scroll-snapping while a ripple band is open --
   // mandatory snap would fight scrolling through a tall band.
   onBandOpenChange: (open: boolean) => void;
@@ -442,6 +465,7 @@ export default function FeedV4({
               detail={details[alert.id] ?? null}
               onClose={closeBand}
               onOpenDeepDive={onOpenDeepDive}
+              onOpenInfo={onOpenInfo}
             />
           )}
         </div>

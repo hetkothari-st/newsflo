@@ -349,6 +349,23 @@ body:has(.nf4) { background: #fafafa; }
   cursor: pointer;
 }
 .nf4 .crow .cbody { flex: 1; min-width: 0; }
+/* (i) glance button on a company row -- ghost circle in the row's own
+   quiet gray so it never competes with the numeral. */
+.nf4 .ib4 {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--midstone);
+  border-radius: var(--radius);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ash);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* Company logo: Brandfetch art in full color and its natural shape --
    no mask, no tint (user decision). Ticker initials in an ink-bordered
@@ -551,6 +568,7 @@ body:has(.nf4) { background: #fafafa; }
 .nf4 .ddpop .bandclose { border-radius: var(--radius); }
 .nf4 .ddpop .sumline b { font-size: 20px; }
 .nf4 .ddpop .sumline > span { padding: 8px 12px; }
+.nf4 .ddpop .sumline.infosum { margin-top: 16px; }
 .nf4 .ddhead { display: flex; align-items: center; gap: 14px; padding: 0 16px 14px; }
 .nf4 .ddname { font-family: var(--serif); font-size: clamp(24px, 4vw, 32px); line-height: 1.1; }
 .nf4 .ddmeta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); margin-top: 4px; }
