@@ -68,8 +68,19 @@ def apply_extraction(
 
     if is_newer_or_equal:
         session.query(SupplyLink).filter(SupplyLink.company_id == company.id).delete()
+        written = 0
         for relation, name, evidence in entries:
             match = matcher.resolve(session, ticker=None, name=name)
+            if match is not None and match.company_id == company.id:
+                # Group-company disclosure / extraction slip: the rated
+                # company names its own legal name (or a listed sibling
+                # sharing an alias) as its own counterparty. Storing that
+                # with counterparty_company_id=NULL would still leave the
+                # self-name sitting in the JSON caches and later render as
+                # nonsense in the cascade prompt block ("ALPHA.NS
+                # customers: Alpha Ltd") -- so the entry is dropped
+                # entirely, not stored with a NULL match.
+                continue
             session.add(SupplyLink(
                 company_id=company.id, relation=relation,
                 counterparty_name=name,
@@ -77,7 +88,8 @@ def apply_extraction(
                 evidence=evidence, source_url=source_url,
                 source_agency=source_agency, as_of=as_of,
             ))
-        counts["links_written"] = len(entries)
+            written += 1
+        counts["links_written"] = written
     else:
         # Older document. If it has nothing new to report, the existing
         # (newer) rows stand untouched -- an old rationale never clobbers

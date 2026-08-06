@@ -385,6 +385,34 @@ def test_rating_description_updates_an_older_rating_description(db_session):
     assert company.business_desc_as_of == AS_OF
 
 
+def test_self_referential_counterparty_is_skipped_not_stored(db_session):
+    """Group-company disclosure / extraction slip: the rationale names the
+    rated company's own legal name as its own customer or supplier. That
+    must resolve to the company itself via the alias table and then be
+    dropped entirely -- not stored with counterparty_company_id == the
+    company's own id, and not stored with a NULL match either, since the
+    self-name would still pollute the JSON caches and later render as
+    nonsense in the cascade prompt block ("ALPHA.NS customers: Alpha
+    Ltd"). A legitimate second counterparty in the same extraction must
+    still land normally."""
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    beta = _company(db_session, "BETA.NS", "Beta Ltd")
+    db_session.add(CompanyAlias(company_id=company.id, alias="Alpha Ltd",
+                                alias_type="LEGAL", normalized="alpha ltd"))
+    db_session.flush()
+    result = loader.apply_extraction(
+        db_session, company,
+        _profile(customers=[("Alpha Ltd", "q1"), ("Beta Ltd", "q2")]),
+        source_url="u", source_agency="CRISIL", as_of=AS_OF,
+    )
+    assert result["links_written"] == 1
+    links = db_session.query(SupplyLink).all()
+    assert [l.counterparty_name for l in links] == ["Beta Ltd"]
+    assert links[0].counterparty_company_id == beta.id
+    db_session.refresh(company)
+    assert json.loads(company.supply_chain_customers_json) == ["Beta Ltd"]
+
+
 # --- Task 6: prompt grounding + the no-auto-attribution guarantee ---------
 
 
