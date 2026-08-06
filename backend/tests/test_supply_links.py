@@ -894,3 +894,18 @@ def test_gate_dedupes_repeated_counterparty_name_before_capping(monkeypatch):
     assert name == "Indian Railways"
     # First surviving entry wins.
     assert evidence == "derives a large share of revenue from Indian Railways"
+
+
+def test_evidence_minimum_length_boundary():
+    """Pins SUPPLY_LINK_MIN_EVIDENCE_CHARS at its exact edge: 39 normalized
+    chars rejected, 40 accepted -- the gate is the subsystem's entire
+    provenance guarantee, so its boundary must not drift silently."""
+    from app.companies.supply_links import extract
+
+    text = "x" * 39 + " and " + "y" * 40
+    just_under = "x" * 39            # 39 chars, provable substring
+    exactly_at = "y" * 40            # 40 chars, provable substring
+    assert len(just_under) == config.SUPPLY_LINK_MIN_EVIDENCE_CHARS - 1
+    assert len(exactly_at) == config.SUPPLY_LINK_MIN_EVIDENCE_CHARS
+    assert not extract._evidence_in_text(just_under, text)
+    assert extract._evidence_in_text(exactly_at, text)
