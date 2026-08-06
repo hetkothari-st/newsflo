@@ -7,22 +7,21 @@ export default defineConfig({
   server: {
     // Dev-time proxy so the browser talks to the FastAPI backend on :8000
     // through the Vite dev server on :5173 (same-origin fetch + WebSocket).
-    // NEWSFLO_API_PORT lets a worktree run its own backend beside the main
-    // checkout's :8000 (parallel-session isolation). globalThis-cast keeps
-    // tsconfig node-types-free (config runs under Node, app code doesn't).
-    proxy: {
-      '/api': `http://127.0.0.1:${
-        (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env
-          .NEWSFLO_API_PORT ?? '8000'
-      }`,
-      '/ws': {
-        target: `ws://127.0.0.1:${
-          (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env
-            .NEWSFLO_API_PORT ?? '8000'
-        }`,
-        ws: true,
-      },
-    },
+    // NEWSFLO_API_TARGET points the dev proxy at any backend origin
+    // (e.g. the Railway preview service, for real data). NEWSFLO_API_PORT
+    // keeps the older local-port override (worktree backend beside the
+    // main checkout's :8000). globalThis-cast keeps tsconfig
+    // node-types-free (config runs under Node, app code doesn't).
+    proxy: (() => {
+      const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process
+        ?.env;
+      const target = env?.NEWSFLO_API_TARGET ?? `http://127.0.0.1:${env?.NEWSFLO_API_PORT ?? '8000'}`;
+      const wsTarget = target.replace(/^http/, 'ws');
+      return {
+        '/api': { target, changeOrigin: true },
+        '/ws': { target: wsTarget, ws: true, changeOrigin: true },
+      };
+    })(),
   },
   test: {
     globals: true,

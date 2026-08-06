@@ -329,4 +329,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Demo seeding disabled (user decision, 2026-08-06): the dev feed now
+    # runs on real data. The demo rows were removed from the dev DB; the
+    # seeding code above is kept intact -- uncomment main() to restore
+    # the demo edition.
+    # main()
+    print("seed_feed_v2_demo: seeding disabled; uncomment main() in __main__ to re-enable.")
