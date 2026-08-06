@@ -271,6 +271,13 @@ body:has(.nf4) { background: #fafafa; }
 .nf4 .sumline > span + span { border-left: 1px solid var(--hairline); }
 .nf4 .sumline b { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: 0; text-transform: none; display: block; color: var(--ink); }
 
+/* Sub-section tabs (Affected companies / Timeline) -- swipeable; active
+   gains scale, never color. */
+.nf4 .bandtabs { display: flex; gap: 24px; align-items: baseline; padding: 10px 16px; border-bottom: 1px solid var(--ink); }
+.nf4 .bandtabs button { font-size: 12px; font-weight: 700; letter-spacing: -0.12px; text-transform: uppercase; color: var(--pebble); }
+.nf4 .bandtabs button.on { font-size: 18px; color: var(--ink); }
+@media (min-width: 900px) { .nf4 .bandtabs { padding-left: 32px; padding-right: 32px; } }
+
 /* Cap filter inside the affected-companies page -- same text-tab
    treatment as everywhere else: active gains scale, never color. */
 .nf4 .bandfilters { display: flex; gap: 16px; align-items: baseline; padding: 10px 16px; border-bottom: 1px solid var(--ink); flex-wrap: wrap; }

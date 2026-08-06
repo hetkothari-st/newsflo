@@ -144,11 +144,14 @@ function RippleBand({
   // The cap filter lives inside each story's affected-companies section
   // (user decision) -- per-card state, narrowing only this ripple's rows.
   const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
+  // Two swipeable sub-sections: Affected companies / Timeline.
+  const [tab, setTab] = useState<'companies' | 'timeline'>('companies');
   const visibleRows = (layer: RippleLayer) =>
     capFilter === 'ALL' ? layer.rows : layer.rows.filter((row) => row.cap_tier === capFilter);
   const anyRows = detail !== null && detail.layers.some((layer) => visibleRows(layer).length > 0);
-  // Swipe right anywhere on the ripple page -> back to the story, the
-  // same gesture the deployed card-flip uses.
+  // Swipe left: companies -> timeline. Swipe right: timeline ->
+  // companies, or (already on companies) flip back to the story --
+  // the deployed card-flip gesture.
   const touchX = useRef<number | null>(null);
   return (
     <div
@@ -163,7 +166,9 @@ function RippleBand({
         if (touchX.current === null) return;
         const dx = event.changedTouches[0].clientX - touchX.current;
         touchX.current = null;
-        if (dx > 55) onClose();
+        if (dx < -55 && tab === 'companies') setTab('timeline');
+        else if (dx > 55 && tab === 'timeline') setTab('companies');
+        else if (dx > 55) onClose();
       }}
     >
       <button className="bandclose" onClick={onClose}>
@@ -182,30 +187,59 @@ function RippleBand({
           Volume <b>{alert.volume_multiple === null ? '—' : `${alert.volume_multiple.toFixed(1)}×`}</b>
         </span>
       </div>
-      <div className="bandfilters" role="group" aria-label="Cap tier filter">
-        <span className="bflab">Cap tier</span>
-        {BAND_CAP_FILTERS.map(({ cap, label, title }) => (
-          <button
-            key={cap}
-            className={capFilter === cap ? 'on' : ''}
-            onClick={(event) => {
-              event.stopPropagation();
-              setCapFilter(cap);
-            }}
-            aria-label={`Cap filter ${cap}`}
-            title={title}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Sub-section tabs -- also swipeable (left/right). Active gains
+          scale, never color, like every other tab in the app. */}
+      <div className="bandtabs" role="tablist" aria-label="Ripple sections">
+        <button
+          role="tab"
+          aria-selected={tab === 'companies'}
+          className={tab === 'companies' ? 'on' : ''}
+          onClick={(event) => {
+            event.stopPropagation();
+            setTab('companies');
+          }}
+        >
+          Affected companies
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'timeline'}
+          className={tab === 'timeline' ? 'on' : ''}
+          onClick={(event) => {
+            event.stopPropagation();
+            setTab('timeline');
+          }}
+        >
+          Timeline
+        </button>
       </div>
+      {tab === 'companies' && (
+        <div className="bandfilters" role="group" aria-label="Cap tier filter">
+          <span className="bflab">Cap tier</span>
+          {BAND_CAP_FILTERS.map(({ cap, label, title }) => (
+            <button
+              key={cap}
+              className={capFilter === cap ? 'on' : ''}
+              onClick={(event) => {
+                event.stopPropagation();
+                setCapFilter(cap);
+              }}
+              aria-label={`Cap filter ${cap}`}
+              title={title}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {detail === null && <p className="bandempty">Setting the type…</p>}
-      {detail !== null && !anyRows && (
+      {tab === 'companies' && detail !== null && !anyRows && (
         <p className="bandempty">
           No companies in this cap tier for this story. Tap “All” to see everyone affected.
         </p>
       )}
-      {detail?.layers.map((layer, layerIndex) => {
+      {tab === 'companies' &&
+        detail?.layers.map((layer, layerIndex) => {
         const rows = visibleRows(layer);
         if (rows.length === 0) return null;
         return (
@@ -255,8 +289,11 @@ function RippleBand({
             </div>
           </div>
         );
-      })}
-      {detail !== null && detail.timeline.length > 0 && (
+        })}
+      {tab === 'timeline' && detail !== null && detail.timeline.length === 0 && (
+        <p className="bandempty">No timeline analysis for this story yet.</p>
+      )}
+      {tab === 'timeline' && detail !== null && detail.timeline.length > 0 && (
         <div className="layer4">
           <div className="lhead4">
             <span className="li4" aria-hidden="true">
