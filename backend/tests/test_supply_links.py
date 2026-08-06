@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from app import config
-from app.companies.supply_links import extract, fetchers, snapshot
-from app.models import Company, SupplyLink
+from app.companies.supply_links import extract, fetchers, loader, snapshot
+from app.models import Company, CompanyAlias, SupplyLink
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ratings"
 
@@ -284,3 +284,100 @@ def test_client_failure_degrades_to_none(monkeypatch):
         raise RuntimeError("rate limited to death")
     monkeypatch.setattr(extract, "_call_supply_tool", boom)
     assert extract.extract_profile(object(), "X", "some text") is None
+
+
+# --- Task 5: loader -- supply_links rows, caches, description fill -------
+
+
+def _profile(customers=(), suppliers=(), summary=None):
+    return {"business_summary": summary, "suppliers": list(suppliers), "customers": list(customers)}
+
+
+def test_links_are_written_with_provenance_and_caches_refreshed(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    counters = loader.apply_extraction(
+        db_session, company,
+        _profile(customers=[("Indian Railways", "derives most revenue from Indian Railways")],
+                 summary="Alpha Ltd manufactures castings."),
+        source_url="https://x/AttachLive/a.pdf", source_agency="CRISIL", as_of=AS_OF,
+    )
+    assert counters["links_written"] == 1
+    link = db_session.query(SupplyLink).one()
+    assert link.source_agency == "CRISIL" and link.evidence.startswith("derives")
+    db_session.refresh(company)
+    assert json.loads(company.supply_chain_customers_json) == ["Indian Railways"]
+    assert company.business_desc == "Alpha Ltd manufactures castings."
+    assert company.business_desc_source_url == "https://x/AttachLive/a.pdf"
+    assert company.business_desc_as_of == AS_OF
+
+
+def test_counterparty_resolves_via_the_exact_ladder_only(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    target = _company(db_session, "IRFC.NS", "Indian Railway Finance Corporation")
+    db_session.add(CompanyAlias(company_id=target.id, alias="Indian Railway Finance Corporation",
+                                alias_type="LEGAL", normalized="indian railway finance corporation"))
+    db_session.flush()
+    loader.apply_extraction(
+        db_session, company,
+        _profile(customers=[("Indian Railway Finance Corporation", "q1"),
+                            ("Some Unlisted Trading House", "q2")]),
+        source_url="u", source_agency="ICRA", as_of=AS_OF,
+    )
+    links = {l.counterparty_name: l for l in db_session.query(SupplyLink).all()}
+    assert links["Indian Railway Finance Corporation"].counterparty_company_id == target.id
+    assert links["Some Unlisted Trading House"].counterparty_company_id is None
+
+
+def test_newer_document_replaces_older_links(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    loader.apply_extraction(db_session, company, _profile(customers=[("Old Buyer", "q")]),
+                            source_url="u1", source_agency="CRISIL", as_of=date(2025, 1, 1))
+    loader.apply_extraction(db_session, company, _profile(customers=[("New Buyer", "q")]),
+                            source_url="u2", source_agency="CRISIL", as_of=AS_OF)
+    names = [l.counterparty_name for l in db_session.query(SupplyLink).all()]
+    assert names == ["New Buyer"]
+
+
+def test_older_empty_extraction_never_clobbers_newer_links(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    loader.apply_extraction(db_session, company, _profile(customers=[("Buyer", "q")]),
+                            source_url="u1", source_agency="CRISIL", as_of=AS_OF)
+    result = loader.apply_extraction(db_session, company, _profile(),
+                                     source_url="u2", source_agency="ICRA", as_of=date(2025, 1, 1))
+    assert result["links_kept_older"] == 1 or db_session.query(SupplyLink).count() == 1
+
+
+def test_newer_empty_extraction_replaces_aged_out_links(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    loader.apply_extraction(db_session, company, _profile(customers=[("Buyer", "q")]),
+                            source_url="u1", source_agency="CRISIL", as_of=date(2025, 1, 1))
+    loader.apply_extraction(db_session, company, _profile(),
+                            source_url="u2", source_agency="CRISIL", as_of=AS_OF)
+    assert db_session.query(SupplyLink).count() == 0
+    db_session.refresh(company)
+    assert company.supply_chain_customers_json == "[]"
+
+
+def test_wikipedia_description_is_never_overwritten(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    company.business_desc = "Wikipedia text."
+    company.business_desc_source_url = "https://en.wikipedia.org/wiki/Alpha"
+    db_session.flush()
+    result = loader.apply_extraction(db_session, company, _profile(summary="Rating summary."),
+                                     source_url="u", source_agency="CARE", as_of=AS_OF)
+    assert result["desc_kept"] == 1
+    db_session.refresh(company)
+    assert company.business_desc == "Wikipedia text."
+
+
+def test_rating_description_updates_an_older_rating_description(db_session):
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd")
+    loader.apply_extraction(db_session, company, _profile(summary="Old summary."),
+                            source_url="https://x/AttachLive/old.pdf", source_agency="CRISIL",
+                            as_of=date(2025, 1, 1))
+    loader.apply_extraction(db_session, company, _profile(summary="New summary."),
+                            source_url="https://x/AttachLive/new.pdf", source_agency="CRISIL",
+                            as_of=AS_OF)
+    db_session.refresh(company)
+    assert company.business_desc == "New summary."
+    assert company.business_desc_as_of == AS_OF
