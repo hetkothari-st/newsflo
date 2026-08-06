@@ -36,19 +36,19 @@ function RequireAuth({ children }: { children: ReactElement }) {
 export default function App() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const location = useLocation();
+  // ON THIS BRANCH (worktree-ui-v4 -> the newsflo-v2 preview service) the
+  // v4 broadsheet IS the app: it owns the root path. The v3 card shell
+  // stays fully intact one path over at /v3 for comparison. Master still
+  // serves the v3 shell at / -- this swap ships only to the preview.
+  if (location.pathname === '/' || location.pathname === '/v4') {
+    return <ShellV4 />;
+  }
+
   // The card-feed shell owns the whole viewport (its own top bar + bottom
   // nav, spec v2 §7) -- the legacy NavBar/BottomNav chrome only wraps the
   // remaining auth/account/holdings pages.
-  const isShell = location.pathname === '/';
-
-  if (isShell) {
+  if (location.pathname === '/v3') {
     return <Shell />;
-  }
-
-  // v4 broadsheet experiment (DESIGN.md "Henry" editorial direction) --
-  // owns the whole viewport like the v3 shell; reachable only at /v4.
-  if (location.pathname === '/v4') {
-    return <ShellV4 />;
   }
 
   // The charts deck (features/visualize/deck, chart-spec Doc-1/Doc-2 +
