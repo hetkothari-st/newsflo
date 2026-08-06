@@ -70,7 +70,13 @@ export default function DeepDiveV4({
           Close ×
         </button>
         {error !== null && <p className="bandempty">{error}</p>}
-        {data === null && error === null && <p className="bandempty">Setting the type…</p>}
+        {data === null && error === null && (
+          <div className="ddloading" aria-busy="true" aria-label="Loading">
+            <span className="ddload-rule" />
+            <p>Setting the type…</p>
+            <span className="ddload-rule" />
+          </div>
+        )}
         {data !== null && (
           <>
             <div className="ddhead">
