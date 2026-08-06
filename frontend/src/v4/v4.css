@@ -52,6 +52,40 @@
 /* The Tailwind body underneath (lavender bg-page) must never show around
    the broadsheet -- while the v4 shell is mounted, the page IS paper. */
 body:has(.nf4) { background: #fafafa; }
+body:has(.nf4.dark) { background: #2a2722; }
+
+/* Dark mode: a straight paper<->ink inversion of the warm monochrome
+   system -- ink type becomes paper type on ink ground; the gray ramp
+   flips to match, and the data reds/greens use their lifted on-ink
+   variants as the base. Everything else derives from the vars. */
+.nf4.dark {
+  --paper: #2a2722;
+  --hairline: #3b372f;
+  --midstone: #6f6a60;
+  --ash: #a49d90;
+  --pebble: #5f5a51;
+  --sepia: #d9d3c6;
+  --ink: #fafafa;
+  --data-up: #7fc9a0;
+  --data-down: #e29a8d;
+  --data-up-onink: #1f7a4d;
+  --data-down-onink: #b3362a;
+}
+.nf4.dark .ddscrim { background: rgba(0, 0, 0, 0.6); }
+.nf4.dark .clg { background: #fff; border: 1px solid var(--hairline); border-radius: var(--radius); }
+.nf4.dark .clg.clg-fb { background: transparent; }
+
+/* Theme toggle in the nav row. */
+.nf4 .navrow { position: relative; }
+.nf4 .themebtn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  color: var(--ink);
+  line-height: 1;
+}
 
 /* Top structure -- LAYOUT NEVER CHANGES ON SCROLL. The big masthead
    (.bighead: ticker + wordmark) is ordinary content that scrolls away;

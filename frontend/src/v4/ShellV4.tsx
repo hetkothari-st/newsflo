@@ -43,6 +43,15 @@ export default function ShellV4() {
   // change layout (the old height-animating header glitched).
   const [condensed, setCondensed] = useState(false);
   const condensedRef = useRef(false);
+  // Broadsheet dark mode: a straight paper<->ink inversion (user
+  // decision), persisted separately from the v3 shell's theme.
+  const [dark, setDark] = useState(() => localStorage.getItem('newsflo.v4.theme') === 'dark');
+  const toggleDark = () => {
+    setDark((prev) => {
+      localStorage.setItem('newsflo.v4.theme', prev ? 'light' : 'dark');
+      return !prev;
+    });
+  };
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
@@ -94,7 +103,7 @@ export default function ShellV4() {
     // open (mandatory snap fights scrolling through a tall band) and on
     // every non-feed section.
     <div
-      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''}`}
+      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''} ${dark ? 'dark' : ''}`}
       style={{ '--barh': `${barHeight}px`, '--stackh': `${stackHeight}px` } as React.CSSProperties}
       onScroll={(event) => {
         const el = event.currentTarget;
@@ -156,6 +165,9 @@ export default function ShellV4() {
               </button>
             ))}
           </nav>
+          <button className="themebtn" onClick={toggleDark} aria-label="Toggle theme" title="Light / dark">
+            ◐
+          </button>
         </div>
         {view === 'feed' && feedDate !== null && (
           <div className="dateline">
