@@ -125,6 +125,24 @@ def test_event_volatility_refresh_never_raises_and_does_no_network(monkeypatch):
     assert len(calls) == 1
 
 
+def test_supply_link_jobs_are_registered_daily(monkeypatch):
+    monkeypatch.setattr(scheduler.BackgroundScheduler, "start", lambda self: None)
+    try:
+        scheduler.start_scheduler()
+        jobs = {job.id: job for job in scheduler._scheduler.get_jobs()}
+        assert "rating_filings_poll" in jobs
+        assert jobs["rating_filings_poll"].trigger.interval == timedelta(hours=24)
+        assert "supply_links_refresh" in jobs
+        assert jobs["supply_links_refresh"].trigger.interval == timedelta(hours=24)
+    finally:
+        scheduler._scheduler = None
+
+
+def test_supply_links_refresh_never_raises_without_snapshots(monkeypatch, tmp_path):
+    monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
+    scheduler._run_supply_links_refresh()  # empty root: no docs, no crash
+
+
 def test_registered_job_ids_do_not_include_the_profile_refresh(monkeypatch):
     # Assert on the scheduler's own registry, not on source text -- a prior
     # review found a getsource-based assertion hid a real defect for 20 tasks.
