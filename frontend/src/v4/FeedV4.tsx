@@ -155,23 +155,28 @@ function RippleBand({
   // Gesture chain (user decision): a leftward drag moves forward
   // (companies -> timeline), a rightward drag moves back (timeline ->
   // companies, then companies -> the news card). Clicks never flip;
-  // the buttons remain for mouse users.
-  const touchX = useRef<number | null>(null);
+  // the buttons remain for mouse users. A gesture only counts as a
+  // horizontal swipe when the horizontal travel clearly dominates the
+  // vertical -- otherwise scrolling a long company list with a little
+  // sideways drift would fling the reader back to the news page.
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
   return (
     <div
       className="band"
       role="dialog"
       aria-label="Affected companies"
       onTouchStart={(event) => {
-        touchX.current = event.touches[0].clientX;
+        touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
       }}
       onTouchEnd={(event) => {
-        if (touchX.current === null) return;
-        const dx = event.changedTouches[0].clientX - touchX.current;
-        touchX.current = null;
-        if (dx < -55 && tab === 'companies') setTab('timeline');
-        else if (dx > 55 && tab === 'timeline') setTab('companies');
-        else if (dx > 55) onClose();
+        if (touchStart.current === null) return;
+        const dx = event.changedTouches[0].clientX - touchStart.current.x;
+        const dy = event.changedTouches[0].clientY - touchStart.current.y;
+        touchStart.current = null;
+        if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        if (dx < 0 && tab === 'companies') setTab('timeline');
+        else if (dx > 0 && tab === 'timeline') setTab('companies');
+        else if (dx > 0) onClose();
       }}
     >
       <button className="bandclose" onClick={onClose}>
@@ -418,15 +423,19 @@ export default function FeedV4({
 
   // Leftward drag on a card -> its affected-companies page (user
   // decision; the "See who's affected" tap remains for mouse users).
-  const cardTouchX = useRef<number | null>(null);
+  // Horizontal travel must clearly dominate vertical, so feed scrolling
+  // between cards never opens a ripple by accident.
+  const cardTouch = useRef<{ x: number; y: number } | null>(null);
   const onCardTouchStart = (event: React.TouchEvent) => {
-    cardTouchX.current = event.touches[0].clientX;
+    cardTouch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
   };
   const onCardTouchEnd = (alertId: number) => (event: React.TouchEvent) => {
-    if (cardTouchX.current === null) return;
-    const dx = event.changedTouches[0].clientX - cardTouchX.current;
-    cardTouchX.current = null;
-    if (dx < -55 && openId !== alertId) toggle(alertId);
+    if (cardTouch.current === null) return;
+    const dx = event.changedTouches[0].clientX - cardTouch.current.x;
+    const dy = event.changedTouches[0].clientY - cardTouch.current.y;
+    cardTouch.current = null;
+    if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dx < 0 && openId !== alertId) toggle(alertId);
   };
 
   if (error !== null) return <p className="empty4">{error}</p>;
