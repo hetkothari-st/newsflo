@@ -149,16 +149,16 @@ function RippleBand({
   const visibleRows = (layer: RippleLayer) =>
     capFilter === 'ALL' ? layer.rows : layer.rows.filter((row) => row.cap_tier === capFilter);
   const anyRows = detail !== null && detail.layers.some((layer) => visibleRows(layer).length > 0);
-  // Swipe left: companies -> timeline. Swipe right: timeline ->
-  // companies, or (already on companies) flip back to the story --
-  // the deployed card-flip gesture.
+  // Gesture chain (user decision): swipe RIGHT moves forward
+  // (companies -> timeline), swipe LEFT moves back (timeline ->
+  // companies, then companies -> the news card). Clicks never flip;
+  // the buttons remain for mouse users.
   const touchX = useRef<number | null>(null);
   return (
     <div
       className="band"
       role="dialog"
       aria-label="Affected companies"
-      onClick={onClose}
       onTouchStart={(event) => {
         touchX.current = event.touches[0].clientX;
       }}
@@ -166,9 +166,9 @@ function RippleBand({
         if (touchX.current === null) return;
         const dx = event.changedTouches[0].clientX - touchX.current;
         touchX.current = null;
-        if (dx < -55 && tab === 'companies') setTab('timeline');
-        else if (dx > 55 && tab === 'timeline') setTab('companies');
-        else if (dx > 55) onClose();
+        if (dx > 55 && tab === 'companies') setTab('timeline');
+        else if (dx < -55 && tab === 'timeline') setTab('companies');
+        else if (dx < -55) onClose();
       }}
     >
       <button className="bandclose" onClick={onClose}>
@@ -393,8 +393,8 @@ export default function FeedV4({
     onBandOpenChange(false);
   }, [onBandOpenChange]);
 
-  // Swipe left on a card -> its ripple page (mirrors the deployed
-  // card-flip gesture; tap on the headline/CTA still works everywhere).
+  // Swipe RIGHT on a card -> its affected-companies page (user
+  // decision; the "See who's affected" tap remains for mouse users).
   const cardTouchX = useRef<number | null>(null);
   const onCardTouchStart = (event: React.TouchEvent) => {
     cardTouchX.current = event.touches[0].clientX;
@@ -403,7 +403,7 @@ export default function FeedV4({
     if (cardTouchX.current === null) return;
     const dx = event.changedTouches[0].clientX - cardTouchX.current;
     cardTouchX.current = null;
-    if (dx < -55 && openId !== alertId) toggle(alertId);
+    if (dx > 55 && openId !== alertId) toggle(alertId);
   };
 
   if (error !== null) return <p className="empty4">{error}</p>;
@@ -423,7 +423,6 @@ export default function FeedV4({
           <div
             className={`storycard ${index === 0 ? 'first' : ''}`}
             data-testid={`v4story-${alert.id}`}
-            onClick={() => toggle(alert.id)}
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd(alert.id)}
           >
@@ -431,8 +430,6 @@ export default function FeedV4({
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </div>
-              {/* No own handler: the whole card is clickable and this
-                  would double-toggle via bubbling. */}
               <h1>{alert.article.title}</h1>
               <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
               <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
