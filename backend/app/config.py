@@ -332,7 +332,18 @@ SUPPLY_LINK_MAX_PER_RELATION = 3
 # 360 candidates broke both models' TPM ceilings -- this block is capped
 # hard and covers event companies only.
 SUPPLY_PROMPT_MAX_LINES = 8
-SUPPLY_PROMPT_MAX_CHARS = 700
+# Trimmed 700 -> 500 (2026-08-06 review): with links present the assembled
+# cascade company prompt measured 6,657-7,165 tokens against
+# COMPANY_PROMPT_TOKEN_BUDGET=6,500 (see cascade._identify_companies and
+# tests/test_prompt_budget.py) -- gpt-oss-20b's 8,000 TPM ceiling has no
+# margin left for a full 700-char block on top of an already-tight prompt.
+SUPPLY_PROMPT_MAX_CHARS = 500
+# Ceiling on resolved counterparties appended to the candidate list (see
+# cascade._identify_companies) -- independent of the line/char caps above,
+# which bound the PROMPT TEXT; this bounds how many extra tickers get
+# pushed into the tool schema's ticker enum, which is its own token cost
+# (see app.companies.candidates' "each candidate costs TWICE" note).
+SUPPLY_PROMPT_MAX_EXTRAS = 5
 
 # AMFI-style cap-tier rank cutoffs (spec §4.5): rank 1-100 by market cap ->
 # LARGE, 101-250 -> MID, rest -> SMALL. Ranks are recomputed from live

@@ -128,4 +128,8 @@ def known_relationships_block(session, event_tickers: list[str]) -> tuple[str, l
         return "", []
 
     block = _INSTRUCTION.format(lines="\n".join(line_texts))
-    return block, extras
+    # Independent of the char/line caps above (which bound the PROMPT TEXT):
+    # a resolved counterparty also costs a candidate-list line AND a tool
+    # schema ticker-enum entry once the caller appends it, so it gets its
+    # own, separate cap.
+    return block, extras[:config.SUPPLY_PROMPT_MAX_EXTRAS]

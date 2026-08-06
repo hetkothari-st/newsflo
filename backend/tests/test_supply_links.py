@@ -8,12 +8,15 @@ links -> byte-identical prompt; LLM returns nothing -> zero ripple rows.
 import json
 from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import app.analysis.cascade as cascade_module
 import app.pipeline as pipeline_module
 from app import config
-from app.analysis.schemas import AnalysisOutput
+from app.analysis.cascade import _identify_companies, _identify_companies_per_sector
+from app.analysis.schemas import AnalysisOutput, CompanyMention, SectorFinding
 from app.companies.supply_links import extract, fetchers, loader, prompting, snapshot
 from app.models import Alert, AlertCompany, Article, Company, CompanyAlias, ImpactEdge, SupplyLink
 
@@ -48,7 +51,8 @@ def test_supply_link_table_exists(db_session):
 def test_supply_caps_live_in_config():
     assert config.SUPPLY_LINK_MAX_PER_RELATION == 3
     assert config.SUPPLY_PROMPT_MAX_LINES == 8
-    assert config.SUPPLY_PROMPT_MAX_CHARS == 700
+    assert config.SUPPLY_PROMPT_MAX_CHARS == 500
+    assert config.SUPPLY_PROMPT_MAX_EXTRAS == 5
 
 
 # --- Task 3: announcements index + rationale document fetchers -----------
@@ -490,6 +494,263 @@ def test_supply_links_NEVER_create_alert_companies_without_llm_output(db_session
         lambda client, title, content, session=None: fake_output,
     )
 
+    created = pipeline_module.process_new_articles(db_session, claude_client=object())
+
+    assert created == 1
+    alert = db_session.query(Alert).one()
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert.id).count() == 0
+    assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 0
+
+
+# --- Task 6 review fixes (2026-08-06): L1-only grounding, filtered      --
+# --- extras, cascade wiring tests, real-path constraint supplement      --
+
+
+class _CapturingClient:
+    """Captures the assembled request (messages + tool schema) and returns
+    an empty-but-valid record_sector_companies response, so
+    _identify_companies runs its real prompt-assembly path end to end --
+    same pattern as tests/test_prompt_budget.py's _CapturingClient, kept
+    local here rather than imported since it is intentionally tiny and this
+    file already has its own fixtures/helpers."""
+
+    def __init__(self):
+        self.messages = None
+        self.tools = None
+
+    class _Completions:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def create(self, **kwargs):
+            self._outer.messages = kwargs["messages"]
+            self._outer.tools = kwargs["tools"]
+            message = SimpleNamespace(tool_calls=[SimpleNamespace(
+                function=SimpleNamespace(
+                    name="record_sector_companies",
+                    arguments=json.dumps({"sector_companies": []}),
+                ),
+            )])
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    @property
+    def chat(self):
+        return SimpleNamespace(completions=self._Completions(self))
+
+
+def _direct_mention(ticker, name, sector):
+    """A parent_pool entry shaped like the CONFIRMED direct company a real
+    L1 cascade call would chain from -- impact_level defaults to "direct",
+    which is exactly the condition cascade._identify_companies now gates
+    supply-links grounding on."""
+    return CompanyMention(
+        name=name, ticker=ticker, is_direct=True, sector=sector,
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0,
+        rationale="r", time_horizon="Short-Term", impact_level="direct",
+    )
+
+
+def test_grounding_only_fires_at_the_l1_stage_not_l2(db_session):
+    """Review finding 1a: grounding the L2 stage too (parent_pool = the L1
+    stage's OWN output, impact_level="indirect_l1") measured over
+    COMPANY_PROMPT_TOKEN_BUDGET in production. event_tickers must come from
+    ONLY a parent_pool whose mentions are all impact_level="direct" -- L2's
+    parent_pool never qualifies."""
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd", sector="oil_gas")
+    buyer = _company(db_session, "BETA.NS", "Beta Ltd", sector="oil_gas")
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="Beta Ltd",
+        counterparty_company_id=buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF, extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
+    # L1 call: parent_pool IS the direct-company pool -- grounding fires.
+    l1_client = _CapturingClient()
+    _identify_companies(
+        l1_client, facts="f",
+        sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="indirect_l1", parent_pool=[_direct_mention("ALPHA.NS", "Alpha Ltd", "oil_gas")],
+        session=db_session,
+    )
+    assert "KNOWN RELATIONSHIPS" in l1_client.messages[1]["content"]
+
+    # L2 call: parent_pool is the L1 stage's OWN output (impact_level=
+    # "indirect_l1", NOT "direct") -- grounding must NOT fire even though
+    # the same ALPHA.NS ticker (with the same stored links) is the parent.
+    l2_parent = CompanyMention(
+        name="Alpha Ltd", ticker="ALPHA.NS", is_direct=False, sector="oil_gas",
+        direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="r",
+        time_horizon="Short-Term", impact_level="indirect_l1",
+    )
+    l2_client = _CapturingClient()
+    _identify_companies(
+        l2_client, facts="f",
+        sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="indirect_l2", parent_pool=[l2_parent], session=db_session,
+    )
+    assert "KNOWN RELATIONSHIPS" not in l2_client.messages[1]["content"]
+
+
+def test_extras_appear_in_candidate_list_and_the_tool_schema_ticker_enum(db_session):
+    """Review finding 3(b): a resolved counterparty must reach BOTH the
+    CANDIDATE COMPANIES prose block AND the tool schema's ticker enum
+    (build_company_tool's valid_tickers) -- appearing in only one would let
+    the model either never see it, or see it but have the provider reject
+    the tool call for naming a ticker outside the enum."""
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd", sector="oil_gas")
+    buyer = _company(db_session, "BETA.NS", "Beta Ltd", sector="oil_gas")
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="Beta Ltd",
+        counterparty_company_id=buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF, extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
+    client = _CapturingClient()
+    _identify_companies(
+        client, facts="f",
+        sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="indirect_l1", parent_pool=[_direct_mention("ALPHA.NS", "Alpha Ltd", "oil_gas")],
+        session=db_session,
+    )
+    prompt = client.messages[1]["content"]
+    assert "CANDIDATE COMPANIES" in prompt and "BETA.NS" in prompt
+
+    ticker_schema = (
+        client.tools[0]["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert "BETA.NS" in ticker_schema["enum"]
+
+
+def test_extras_are_excluded_when_ineligible_as_ordinary_candidates(db_session):
+    """Review finding 2: a resolved counterparty must pass the SAME
+    eligibility guards app.companies.candidates.candidate_companies applies
+    to every other candidate (DEMO_TICKERS excluded, market == "INDIA",
+    tradeability == "NORMAL") before it is promoted into the candidate
+    list / ticker enum -- prompting.known_relationships_block itself has no
+    way to know a ticker's tradeability, so this guard lives in cascade.py
+    where the extras Company rows are actually queried. An SME-tier
+    counterparty must never reach the enum, even though it is still named
+    (with its sourced relationship) in the KNOWN RELATIONSHIPS text -- the
+    text is historical context, the candidate list is what the model may
+    actually select."""
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd", sector="oil_gas")
+    sme_buyer = Company(
+        ticker="SMEBUYER.NS", name="SME Buyer Ltd", sector="oil_gas", index_tier="OTHER",
+        market="INDIA", tradeability="SME",
+    )
+    db_session.add(sme_buyer)
+    db_session.flush()
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="SME Buyer Ltd",
+        counterparty_company_id=sme_buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF, extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
+    client = _CapturingClient()
+    _identify_companies(
+        client, facts="f",
+        sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="indirect_l1", parent_pool=[_direct_mention("ALPHA.NS", "Alpha Ltd", "oil_gas")],
+        session=db_session,
+    )
+    prompt = client.messages[1]["content"]
+    # Still named in the KNOWN RELATIONSHIPS text (sourced, historical fact).
+    assert "SME Buyer Ltd" in prompt and "SMEBUYER.NS" in prompt
+
+    # But never promoted to a selectable candidate or ticker-enum entry.
+    if "CANDIDATE COMPANIES" in prompt:
+        candidate_section = prompt.split("CANDIDATE COMPANIES", 1)[1]
+        assert "SMEBUYER.NS" not in candidate_section
+    ticker_schema = (
+        client.tools[0]["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    assert "SMEBUYER.NS" not in ticker_schema.get("enum", [])
+
+
+def test_extras_still_respect_the_global_max_candidates_per_prompt_cap(db_session, monkeypatch):
+    """Review finding 3(c) / spec 8.T4 clause 4: extras are appended BEFORE
+    MAX_CANDIDATES_PER_PROMPT is applied, so the cap still binds even when
+    sector candidates + resolved counterparties together exceed it. Patches
+    the cap down to a small number so the test doesn't need to seed
+    hundreds of rows to exercise it."""
+    monkeypatch.setattr(cascade_module, "MAX_CANDIDATES_PER_PROMPT", 3)
+
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd", sector="oil_gas")
+    _company(db_session, "CAND1.NS", "Candidate One", sector="oil_gas")
+    _company(db_session, "CAND2.NS", "Candidate Two", sector="oil_gas")
+    for i in range(3):
+        buyer = _company(db_session, f"EXTRA{i}.NS", f"Extra {i}", sector="oil_gas")
+        db_session.add(SupplyLink(
+            company_id=company.id, relation="CUSTOMER", counterparty_name=f"Extra {i}",
+            counterparty_company_id=buyer.id, evidence="q", source_url="u",
+            source_agency="CRISIL", as_of=AS_OF, extracted_at=datetime.now(timezone.utc),
+        ))
+    db_session.commit()
+
+    client = _CapturingClient()
+    _identify_companies(
+        client, facts="f",
+        sectors=[SectorFinding(sector="oil_gas", direction="bullish", mechanism="m")],
+        impact_level="indirect_l1", parent_pool=[_direct_mention("ALPHA.NS", "Alpha Ltd", "oil_gas")],
+        session=db_session,
+    )
+    ticker_schema = (
+        client.tools[0]["function"]["parameters"]["properties"]["sector_companies"]
+        ["items"]["properties"]["companies"]["items"]["properties"]["ticker"]
+    )
+    # 2 ordinary sector candidates + 3 extras = 5 total, uncapped -- must be
+    # sliced down to the patched cap of 3.
+    assert len(ticker_schema["enum"]) == 3
+
+
+def test_supply_links_never_create_companies_via_the_real_grounded_identify_companies_call(db_session, monkeypatch):
+    """Supplement to test_supply_links_NEVER_create_alert_companies_
+    without_llm_output above: that test stubs analyze_article WHOLESALE,
+    so it never actually executes cascade._identify_companies (where
+    supply-links grounding is wired) at all -- it only proves the
+    constraint at the persist layer. This one runs the REAL
+    _identify_companies_per_sector call -- grounding code included, using
+    _CapturingClient rather than a hand-typed empty result -- against the
+    event company's genuinely stored SupplyLink rows, confirms the block
+    actually reached the prompt (so this is proven to exercise the wired
+    path, not a no-op), confirms the real call returns zero companies, and
+    then re-runs the same persist-path assertion as the test above on that
+    real (empty) result."""
+    company = _company(db_session, "ALPHA.NS", "Alpha Ltd", sector="oil_gas")
+    buyer = _company(db_session, "BETA.NS", "Beta Ltd", sector="oil_gas")
+    db_session.add(SupplyLink(
+        company_id=company.id, relation="CUSTOMER", counterparty_name="Beta Ltd",
+        counterparty_company_id=buyer.id, evidence="q", source_url="u",
+        source_agency="CRISIL", as_of=AS_OF, extracted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
+    client = _CapturingClient()
+    mentions, gaps = _identify_companies_per_sector(
+        client, facts="f",
+        sectors=[SectorFinding(sector="oil_gas", direction="bearish", mechanism="m")],
+        impact_level="indirect_l1", parent_pool=[_direct_mention("ALPHA.NS", "Alpha Ltd", "oil_gas")],
+        session=db_session,
+    )
+    assert "KNOWN RELATIONSHIPS" in client.messages[1]["content"]  # real grounding fired
+    assert mentions == [] and gaps == []
+
+    article = Article(
+        source="test", url="https://example.com/supply-links-t5-real", title="t", content="c",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_output = AnalysisOutput(category="other", companies=mentions)
+    monkeypatch.setattr(
+        pipeline_module, "analyze_article",
+        lambda client, title, content, session=None: fake_output,
+    )
     created = pipeline_module.process_new_articles(db_session, claude_client=object())
 
     assert created == 1

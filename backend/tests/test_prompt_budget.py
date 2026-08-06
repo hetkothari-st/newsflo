@@ -212,6 +212,80 @@ def test_cascade_stage_prompt_fits_the_smallest_groq_token_ceiling(db_session):
     )
 
 
+def test_cascade_stage_prompt_fits_budget_with_supply_links(db_session):
+    """Regression guard (2026-08-06 review): grounding the L1 cascade stage
+    with the KNOWN RELATIONSHIPS block (app.companies.supply_links.
+    prompting) is additive prompt content the two tests above cannot see --
+    they seed no SupplyLink rows. Before the block's caps were tightened
+    (app.config's SUPPLY_PROMPT_MAX_CHARS 700->500, SUPPLY_PROMPT_MAX_EXTRAS
+    added, and grounding restricted to the L1 stage only -- see
+    cascade._identify_companies), the assembled prompt measured 6,657-7,165
+    tokens against this file's PROMPT_TOKEN_BUDGET=6,500.
+
+    Reuses test_cascade_stage_prompt_fits_the_smallest_groq_token_ceiling's
+    OVERSUBSCRIBED pool (MAX_PARENT_POOL * 2, truncated to MAX_PARENT_POOL)
+    -- that scenario is ALREADY close to budget without links (~6,283
+    tokens measured), which is exactly why adding the block on top is where
+    a regression would actually surface; the isolated case with only a
+    couple of parent companies and no oversubscription has too much slack
+    to ever catch it (measured ~5,050 tokens either way -- nowhere near
+    budget regardless of the caps, because too few parents have stored
+    links for the block to actually reach its own cap).
+
+    5 of the (already-capped) MAX_PARENT_POOL parent companies get stored
+    links -- 3 customer + 3 supplier each, long names -- enough groups (10)
+    to exceed SUPPLY_PROMPT_MAX_LINES (8) and actually saturate the block's
+    own caps, which is what makes this measure the real worst case rather
+    than an under-filled one: measured BEFORE this review's fix (char cap
+    700, no extras cap) this exact scenario is 6,579 tokens, already over
+    PROMPT_TOKEN_BUDGET=6,500 on its own -- confirming this is a genuine
+    regression guard, not a test that would pass regardless of the caps.
+    """
+    from datetime import date, datetime, timezone
+
+    from app.models import SupplyLink
+
+    parents = _parent_pool(MAX_PARENT_POOL * 2)
+    # Only the first MAX_PARENT_POOL survive _identify_companies' own
+    # truncation (see cascade.py's MAX_PARENT_POOL comment) -- real Company
+    # rows (needed for known_relationships_block to resolve a ticker to a
+    # company_id) are seeded for exactly that many, matching production
+    # (every parent the LLM actually sees resolves to a real company).
+    surviving = parents[:MAX_PARENT_POOL]
+    for mention in surviving:
+        db_session.add(Company(
+            ticker=mention.ticker, name=mention.name, sector="oil_gas", index_tier="OTHER",
+            market="INDIA", tradeability="NORMAL",
+        ))
+    db_session.commit()
+
+    for mention in surviving[:5]:
+        parent_company = db_session.query(Company).filter_by(ticker=mention.ticker).one()
+        for relation in ("CUSTOMER", "SUPPLIER"):
+            for j in range(3):
+                db_session.add(SupplyLink(
+                    company_id=parent_company.id, relation=relation,
+                    counterparty_name=(
+                        f"{relation.title()} Industries & Trading Company "
+                        f"Number {mention.ticker}{j} Limited"
+                    ),
+                    counterparty_company_id=None,
+                    evidence="q", source_url="u", source_agency="CRISIL",
+                    as_of=date(2026, 8, 6), extracted_at=datetime.now(timezone.utc),
+                ))
+    db_session.commit()
+
+    request_text = _assemble(db_session, parent_pool=parents)
+    tokens = estimate_tokens(request_text)
+
+    assert tokens < PROMPT_TOKEN_BUDGET, (
+        f"cascade company prompt WITH supply links is {tokens} tokens over "
+        f"the {PROMPT_TOKEN_BUDGET} budget -- shrink the KNOWN RELATIONSHIPS "
+        "block (app.companies.supply_links.prompting / app.config's "
+        "SUPPLY_PROMPT_* caps), not the budget."
+    )
+
+
 def test_cascade_prompt_size_does_not_grow_with_the_parent_pool(db_session):
     """The cap must actually bind: doubling the parent pool past
     MAX_PARENT_POOL must not add a single character to the prompt."""

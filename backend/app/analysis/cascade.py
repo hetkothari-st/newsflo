@@ -53,6 +53,7 @@ from app.analysis.verification import verify_companies
 from app.companies.candidates import (
     MAX_CANDIDATES_PER_PROMPT, candidate_companies, candidate_tickers, format_candidates,
 )
+from app.companies.integrity import DEMO_TICKERS
 from app.companies.supply_links import prompting as supply_link_prompting
 from app.models import Company
 
@@ -874,22 +875,41 @@ def _identify_companies(
         candidates = candidate_companies(session, [s.sector for s in sectors])
 
         # Supply-links grounding (app.companies.supply_links.prompting):
-        # event_tickers = the already-identified companies this call chains
-        # from (parent_tickers is None at the direct/primary stage, where no
-        # company is known yet -- that stage stays ungrounded by links, same
-        # as before this module existed). Resolved counterparties not
-        # already in the candidate list are appended to it BEFORE the
-        # MAX_CANDIDATES_PER_PROMPT cap below, so that cap still binds.
+        # event_tickers = the already-CONFIRMED DIRECT companies this call
+        # chains from -- i.e. ONLY the L1 cascade stage, whose parent_pool
+        # IS the direct-company pool (spec 6's "event companies"). Restricted
+        # here, not just at the direct stage (parent_pool is None there,
+        # already excluded): grounding the L2 stage too (parent_pool =
+        # indirect_l1 companies) measured 6,657-7,165 tokens against
+        # COMPANY_PROMPT_TOKEN_BUDGET=6,500 -- see
+        # tests/test_prompt_budget.py, which is what holds this line.
+        event_tickers: list[str] = []
+        if parent_pool and all(m.impact_level == "direct" for m in parent_pool):
+            event_tickers = parent_tickers or []
         known_relationships, extra_tickers = supply_link_prompting.known_relationships_block(
-            session, parent_tickers or [],
+            session, event_tickers,
         )
         if extra_tickers:
             existing_tickers = {c.ticker for c in candidates}
             new_tickers = [t for t in extra_tickers if t not in existing_tickers]
             if new_tickers:
-                candidates = candidates + (
-                    session.query(Company).filter(Company.ticker.in_(new_tickers)).all()
+                # Same eligibility guards candidate_companies applies (see
+                # app.companies.candidates ~110-120): a resolved counterparty
+                # is still just a ticker string here, not yet vetted as a
+                # real, currently-tradeable Indian listing -- without these
+                # filters a demo row, a foreign/global listing, or an
+                # SME/RESTRICTED/SUSPENDED ticker could reach the prompt and
+                # the tool schema's enum by a path candidate_companies itself
+                # would never allow.
+                extra_companies = (
+                    session.query(Company)
+                    .filter(Company.ticker.in_(new_tickers))
+                    .filter(Company.ticker.notin_(DEMO_TICKERS))
+                    .filter(Company.market == "INDIA")
+                    .filter(Company.tradeability == "NORMAL")
+                    .all()
                 )
+                candidates = candidates + extra_companies
         candidates = candidates[:MAX_CANDIDATES_PER_PROMPT]
 
         if candidates:
