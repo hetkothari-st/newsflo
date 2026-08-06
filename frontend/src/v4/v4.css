@@ -53,24 +53,38 @@
    the broadsheet -- while the v4 shell is mounted, the page IS paper. */
 body:has(.nf4) { background: #fafafa; }
 
-/* The header rides sticky over the feed: full masthead on the homepage,
-   condensed (.cond, set on scroll) after it -- the top section stays
-   visible over every news card instead of scrolling away. */
-.nf4 .tophead {
+/* Top structure -- LAYOUT NEVER CHANGES ON SCROLL. The big masthead
+   (.bighead: ticker + wordmark) is ordinary content that scrolls away;
+   the compact bar (.topbar: mini wordmark + nav) is sticky at a
+   constant height, and the only thing scrolling toggles (.cond) is the
+   mini wordmark's OPACITY. Height-animating headers shifted the layout
+   mid-gesture and fought the snap. */
+.nf4 .bighead { border-bottom: 0; }
+.nf4 .topbar {
   position: sticky;
   top: 0;
   z-index: 20;
   background: var(--paper);
   border-bottom: 1px solid var(--ink);
 }
-.nf4 .masthead { transition: font-size 0.25s ease, padding 0.25s ease; }
-.nf4 .navrow { transition: padding 0.25s ease; }
-.nf4.cond .ticker { display: none; }
-.nf4.cond .masthead { font-size: 30px; padding: 6px 8px 2px; }
-.nf4.cond .navrow { padding: 4px 8px 8px; }
-/* Snapped card tops land below the pinned CONDENSED header -- a frozen
-   measurement, so snapping never feeds back into layout. */
-.nf4.snap { scroll-padding-top: var(--headcond, 72px); }
+.nf4 .barrow { display: flex; align-items: center; gap: 12px; padding: 9px 12px; }
+.nf4 .minimast {
+  font-family: var(--condensed);
+  font-weight: 400;
+  text-transform: uppercase;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+}
+.nf4.cond .minimast { opacity: 1; }
+.nf4 .barrow .navlinks { flex: 1; justify-content: center; min-width: 0; }
+/* Invisible right-side twin keeps the nav optically centered. */
+.nf4 .minibal { visibility: hidden; }
+.nf4.cond .minibal { visibility: hidden; opacity: 0; }
+/* Snapped card tops land below the constant sticky bar. */
+.nf4.snap { scroll-padding-top: var(--barh, 56px); }
 
 .nf4 * { box-sizing: border-box; }
 .nf4 button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
@@ -152,8 +166,8 @@ body:has(.nf4) { background: #fafafa; }
      heights, not minimums: a card taller than the snapport lets
      mandatory snapping legally rest between cards ("stuck between two
      stories" on phone). Text clamps below keep content inside. */
-  height: calc(100vh - var(--headcond, 72px));
-  height: calc(100dvh - var(--headcond, 72px));
+  height: calc(100vh - var(--barh, 56px));
+  height: calc(100dvh - var(--barh, 56px));
   overflow: hidden;
   scroll-snap-align: start;
   /* A flick always lands on the very next card -- never skips past it. */
@@ -175,8 +189,8 @@ body:has(.nf4) { background: #fafafa; }
    own -- the .snaptop sentinel at scroll 0 is the homepage rest
    position, so one flick lands square on card two. */
 .nf4 .storycard.first {
-  height: calc(100vh - var(--headfull, 220px));
-  height: calc(100dvh - var(--headfull, 220px));
+  height: calc(100vh - var(--stackh, 220px));
+  height: calc(100dvh - var(--stackh, 220px));
   scroll-snap-align: none;
 }
 @media (min-width: 900px) {
@@ -703,6 +717,10 @@ body:has(.nf4) { background: #fafafa; }
   .nf4 .navlinks::-webkit-scrollbar { display: none; }
   .nf4 .navlinks button { font-size: 11px; white-space: nowrap; }
   .nf4 .navlinks button.on { font-size: 15px; }
+  /* Phone bar: drop the invisible balance twin and shrink the mini
+     wordmark so all six labels keep room. */
+  .nf4 .minibal { display: none; }
+  .nf4 .minimast { font-size: 18px; }
   .nf4 .capf4 { gap: 12px; }
   .nf4 .storycard { padding: 24px 16px; gap: 16px; }
   .nf4 .storycard .lmove { font-size: 44px; }

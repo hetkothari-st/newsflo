@@ -47,25 +47,29 @@ export default function ShellV4() {
   const [info, setInfo] = useState<InfoV4Data | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
-  // Two FROZEN header measurements instead of one live value: the full
-  // (homepage) height sizes the first card, the condensed height sizes
-  // every later card and the snap padding. Each updates only while the
-  // header is in that state, so a condense/expand toggle never re-sizes
-  // the layout it is scrolling over -- the live-value version fed its
-  // own scroll position back into itself and oscillated (reported on
-  // phone: header and cards contracting/expanding in a loop).
-  const headerRef = useRef<HTMLElement | null>(null);
-  const [headFull, setHeadFull] = useState(220);
-  const [headCond, setHeadCond] = useState(72);
+  // LAYOUT NEVER CHANGES on scroll (the previous height-animating header
+  // shifted all content mid-gesture and fought the snap -- reported as
+  // glitching between cards 1 and 2). The big masthead + ticker are
+  // ordinary content that scrolls away; only a CONSTANT-height compact
+  // bar (mini wordmark + nav) is sticky, and "minimize" is purely an
+  // opacity fade of the mini wordmark. Two constant measurements: the
+  // bar (later cards + snap padding) and the whole top stack (first
+  // card).
+  const bigheadRef = useRef<HTMLDivElement | null>(null);
+  const barRef = useRef<HTMLElement | null>(null);
+  const [barHeight, setBarHeight] = useState(56);
+  const [stackHeight, setStackHeight] = useState(220);
   useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
+    const big = bigheadRef.current;
+    const bar = barRef.current;
+    if (!big || !bar) return;
     const measure = () => {
-      if (condensedRef.current) setHeadCond(el.offsetHeight);
-      else setHeadFull(el.offsetHeight);
+      setBarHeight(bar.offsetHeight);
+      setStackHeight(big.offsetHeight + bar.offsetHeight);
     };
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    observer.observe(big);
+    observer.observe(bar);
     measure();
     return () => observer.disconnect();
   }, []);
@@ -88,7 +92,7 @@ export default function ShellV4() {
     // every non-feed section.
     <div
       className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''}`}
-      style={{ '--headfull': `${headFull}px`, '--headcond': `${headCond}px` } as React.CSSProperties}
+      style={{ '--barh': `${barHeight}px`, '--stackh': `${stackHeight}px` } as React.CSSProperties}
       onScroll={(event) => {
         const top = event.currentTarget.scrollTop;
         const next = condensedRef.current ? top > 8 : top > 80;
@@ -98,19 +102,27 @@ export default function ShellV4() {
         }
       }}
     >
-      {/* Fixed page-top snap point -- the sticky header can't carry one
+      {/* Fixed page-top snap point -- the sticky bar can't carry one
           (its snap position would follow the scroll). */}
       <div className="snaptop" aria-hidden="true" />
-      <header ref={headerRef} className="tophead">
+
+      {/* Homepage masthead -- ordinary content, scrolls away naturally. */}
+      <div ref={bigheadRef} className="bighead">
         <div className="ticker">
           <span>{IST_DATE.format(new Date()).toUpperCase()}</span>
           <span>{editionLabel}</span>
           <span>NSE · BSE — EXCESS MOVE VS SECTOR</span>
         </div>
-
         <div className="masthead">Newsflo</div>
+      </div>
 
-        <div className="navrow">
+      {/* Constant-height sticky bar: mini wordmark (opacity-only fade,
+          zero layout impact) + the section nav. */}
+      <header ref={barRef} className="topbar">
+        <div className="barrow">
+          <span className="minimast" aria-hidden="true">
+            Newsflo
+          </span>
           <nav className="navlinks" aria-label="Sections">
             {NAV_ITEMS.map((item) => (
               <button
@@ -123,8 +135,10 @@ export default function ShellV4() {
               </button>
             ))}
           </nav>
+          <span className="minimast minibal" aria-hidden="true">
+            Newsflo
+          </span>
         </div>
-
         {view === 'feed' && feedDate !== null && (
           <div className="dateline">
             <span>Reading the {feedDate} edition</span>
