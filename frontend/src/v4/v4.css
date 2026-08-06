@@ -104,6 +104,12 @@ body:has(.nf4) { background: #fafafa; }
   text-align: center;
   user-select: none;
 }
+/* Desktop: the full-bleed slab at 23vw swallowed half the screen and
+   squeezed the homepage card to a strip -- cap it so the masthead stays
+   a banner and the first story keeps real height. */
+@media (min-width: 900px) {
+  .nf4 .masthead { font-size: clamp(120px, 15vw, 220px); }
+}
 
 /* ---------- NAV ROW ---------- */
 .nf4 .navrow {
