@@ -467,26 +467,15 @@ export default function FeedV4({
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd(alert.id)}
           >
-            {/* Inshorts-format tile (user decision): image first, then
-                headline, byline, summary, and a read-more source line. */}
-            <Plate src={alert.article.image_url} category={alert.category} className="lplate" />
-            <div className="sbody4">
+            <div>
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </div>
               <h1>{alert.article.title}</h1>
+              <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
               <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
-              <p className="lgist">{alert.summary_long ?? alert.summary_short ?? ''}</p>
-              <a
-                className="readmore"
-                href={alert.article.url}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(event) => event.stopPropagation()}
-              >
-                Read more at {alert.article.source}
-              </a>
             </div>
+            <Plate src={alert.article.image_url} category={alert.category} className="lplate" />
           </div>
           {openId === alert.id && (
             <RippleBand

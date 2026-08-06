@@ -185,41 +185,14 @@ body:has(.nf4) { background: #fafafa; }
   padding: 24px 16px;
   display: grid;
   grid-template-columns: 1fr;
-  /* MOBILE keeps the original card arrangement (user decision): text
-     block first, plate filling the bottom, no read-more line. The
-     Inshorts tile format applies from 900px up. */
+  /* Text sizes itself; the plate absorbs every remaining pixel of the
+     viewport-tall slot -- no dead paper above or below the card. */
   grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
 }
-.nf4 .storycard .sbody4 { order: 1; }
-.nf4 .storycard .lplate { order: 2; }
-.nf4 .storycard .sbody4 .metaline { order: 3; }
-.nf4 .storycard .sbody4 .lgist { order: 2; }
-.nf4 .storycard .sbody4 h1 { order: 1; }
-.nf4 .storycard .sbody4 .lmove { order: 0; }
-.nf4 .storycard .readmore { display: none; }
-@media (min-width: 900px) {
-  .nf4 .storycard .sbody4 { order: 2; }
-  .nf4 .storycard .lplate { order: 1; }
-  .nf4 .storycard .sbody4 .metaline { order: 2; }
-  .nf4 .storycard .sbody4 .lgist { order: 3; }
-  .nf4 .storycard .readmore { display: block; order: 4; }
-}
-.nf4 .storycard .sbody4 { display: flex; flex-direction: column; min-height: 0; }
-.nf4 .storycard .readmore {
-  margin-top: auto;
-  padding-top: 12px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: -0.12px;
-  text-transform: uppercase;
-  color: var(--ink);
-  text-decoration: none;
-  border-top: 1px solid var(--hairline);
-}
 /* A card whose story has no usable image collapses to one row -- the
    image row would otherwise reintroduce dead space. */
-.nf4 .storycard:not(:has(.lplate)) { grid-template-rows: 1fr; }
+.nf4 .storycard:not(:has(.lplate)) { grid-template-rows: 1fr; align-content: center; }
 /* The first card shares the homepage with the full masthead (sized by
    the frozen full-header measurement) and carries no snap point of its
    own -- the .snaptop sentinel at scroll 0 is the homepage rest
@@ -230,9 +203,8 @@ body:has(.nf4) { background: #fafafa; }
   scroll-snap-align: none;
 }
 @media (min-width: 900px) {
-  /* Desktop tile: image LEFT, body RIGHT (the reference format). */
   .nf4 .storycard {
-    grid-template-columns: 2fr 3fr;
+    grid-template-columns: 2fr 1fr;
     grid-template-rows: 1fr;
     align-items: stretch;
     padding: 40px 32px;
