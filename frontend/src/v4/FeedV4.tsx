@@ -270,9 +270,11 @@ function RippleBand({
                 data-testid={`v4row-${row.ticker}`}
                 onClick={(event) => {
                   // The page background flips back on click -- a company
-                  // row must open its deep dive instead.
+                  // row must open its deep dive instead. Demo stories
+                  // (negative preview-only ids) have no Alert row to give
+                  // the deep dive story context, so none is passed.
                   event.stopPropagation();
-                  onOpenDeepDive(row.ticker, alert.id);
+                  onOpenDeepDive(row.ticker, alert.id > 0 ? alert.id : undefined);
                 }}
               >
                 <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />

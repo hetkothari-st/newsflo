@@ -418,5 +418,10 @@ def test_demo_marked_articles_never_reach_the_production_feed(db_session, monkey
     from app.config import settings
     monkeypatch.setattr(settings, "allow_demo_feed", True)
     body = client.get("/api/feed-v2").json()
-    assert {row["id"] for row in body} == {real.id, demo.id}
+    ids = {row["id"] for row in body}
+    # On this preview branch the flag ALSO injects the in-memory demo
+    # stories (negative ids) -- the DB rows must both be present, and
+    # anything extra must be an injected demo id, never a hidden real row.
+    assert {real.id, demo.id} <= ids
+    assert all(extra < 0 for extra in ids - {real.id, demo.id})
     app.dependency_overrides.clear()

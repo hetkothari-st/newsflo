@@ -171,6 +171,14 @@ def list_feed_v2_alerts(
                 {tier for ac in alert.companies if (tier := cap_tiers.get(ac.company.ticker))}
             )
             results.append(row)
+    # PREVIEW-ONLY (this branch): in-memory demo stories appended when
+    # ALLOW_DEMO_FEED=true -- set only on the newsflo-v2 preview service.
+    # No demo rows exist in the shared database; the main service never
+    # sets the flag and master never carries this code path.
+    if settings.allow_demo_feed and date is None:
+        from app.routers.feed_v2_demo_inject import demo_feed_rows
+
+        results.extend(demo_feed_rows(db))
     return results
 
 
@@ -245,6 +253,13 @@ def get_feed_v2_alert(
     current_user: User | None = Depends(get_current_user_optional),
     lang: str = Depends(get_lang),
 ):
+    # PREVIEW-ONLY (this branch): negative ids are in-memory demo alerts.
+    if alert_id < 0 and settings.allow_demo_feed:
+        from app.routers.feed_v2_demo_inject import demo_alert_detail
+
+        payload = demo_alert_detail(db, alert_id)
+        if payload is not None:
+            return payload
     alert = _query_with_relations(db).filter(Alert.id == alert_id).first()
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
