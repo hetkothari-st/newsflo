@@ -27,9 +27,18 @@ Credit+Rating` (the literal spelling one would guess) returns `{"Table": [],
 simply the wrong bucket. Rating actions are filed under the broad
 `strCat=Company+Update` category, disambiguated by `subcategory=Credit+
 Rating`. Confirmed: 279 rows (`Table1[0].ROWCNT`) in the 30-day window above,
-all with `SUBCATNAME` = `"Credit Rating"` and `NEWSSUB` naming a rating
-agency and action (e.g. `"... Announcement under Regulation 30
-(LODR)-Credit Rating"`).
+all with `SUBCATNAME` = `"Credit Rating"` and `NEWSSUB` carrying the generic
+LODR boilerplate (e.g. `"Welspun Corp Ltd - 532144 - Announcement under
+Regulation 30 (LODR)-Credit Rating"`) — the `"-Credit Rating"` suffix
+confirms the subcategory, but `NEWSSUB` never names the rating agency. The
+agency name (and often the action — reaffirm/upgrade/downgrade — and the
+resulting grade) lives in `HEADLINE` instead, e.g. `"Care Ratings Reaffirms
+its rating on the Company''s Long Term Facilities and Non-Convertible
+Debentures to ''CARE AA+; Stable''"` for that same Welspun row. 18 of the 50
+rows in the fixture have an agency name (CRISIL/ICRA/CARE/India Ratings)
+directly in `HEADLINE`; the rest use generic phrasing ("as per enclosed
+letter.", "has informed the Exchange about the credit rating.") and require
+opening the PDF to identify the agency — see Task 3/4.
 
 The category-list endpoints named in the brief both 404 (return BSE's
 generic "page has been moved" HTML shell, HTTP 200, not JSON):
@@ -72,13 +81,21 @@ BSENewsid, Investor_Presentation, AUDIO_VIDEO_FILE
 ```
 
 Fields relevant to extraction: `SCRIP_CD` (BSE scrip code, int), `SLONGNAME`
-(company name), `NEWSSUB` (subject line, names the agency/action),
-`ATTACHMENTNAME` (bare filename, always seen as `.pdf` here — no non-PDF
-attachments observed among the 50 rows on this page), `NEWS_DT` (ISO
-timestamp string), `Fld_Attachsize` (bytes, matches the fetched PDF size
-exactly), `SUBCATNAME` (`"Credit Rating"` for every row on this page,
-confirming the subcategory filter worked), `CATEGORYNAME` (`"Company
-Update"`, confirming the category).
+(company name), `NEWSSUB` (subject line — generic LODR boilerplate only,
+`"<Company> - <scrip code> - Announcement under Regulation 30
+(LODR)-Credit Rating"`; useful for confirming the subcategory via its
+`"-Credit Rating"` suffix, but never names the agency), `HEADLINE` (the
+agency-bearing field — free text written per-filing, e.g. `"Credit rating by
+ICRA Limited"` for the Avenue Supermarts Ltd row, or `"Care Ratings
+Reaffirms its rating on the Company''s Long Term Facilities and
+Non-Convertible Debentures to ''CARE AA+; Stable''"` for Welspun Corp Ltd;
+present but generic ("as per enclosed letter.") on rows where the filer
+didn't restate the agency in the headline), `ATTACHMENTNAME` (bare filename,
+always seen as `.pdf` here — no non-PDF attachments observed among the 50
+rows on this page), `NEWS_DT` (ISO timestamp string), `Fld_Attachsize`
+(bytes, matches the fetched PDF size exactly), `SUBCATNAME` (`"Credit
+Rating"` for every row on this page, confirming the subcategory filter
+worked), `CATEGORYNAME` (`"Company Update"`, confirming the category).
 
 `Table1` is a single-row sidecar carrying `ROWCNT`, the total row count for
 the query (`279` here) — needed for pagination in Task 3, distinct from the
