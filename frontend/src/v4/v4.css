@@ -653,7 +653,13 @@ body:has(.nf4) { background: #fafafa; }
   .nf4 .ticker { font-size: 10px; gap: 8px; padding: 5px 8px; }
   .nf4 .ticker span:nth-child(3) { display: none; }
   .nf4 .navrow { padding: 12px 8px; }
-  .nf4 .navlinks { gap: 14px; }
+  /* Six section labels must hold one line -- tighter type and, as the
+     last resort on very narrow screens, sideways scroll instead of a
+     wrapped second row. */
+  .nf4 .navlinks { gap: 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .nf4 .navlinks::-webkit-scrollbar { display: none; }
+  .nf4 .navlinks button { font-size: 11px; white-space: nowrap; }
+  .nf4 .navlinks button.on { font-size: 15px; }
   .nf4 .capf4 { gap: 12px; }
   .nf4 .storycard { padding: 24px 16px; gap: 16px; }
   .nf4 .storycard .lmove { font-size: 44px; }
