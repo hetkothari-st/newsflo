@@ -92,27 +92,38 @@ export default function DeepDiveV4({
               </div>
             </div>
 
-            <div className="sumline">
-              {data.excess_move_pct !== null && (
-                <span>
-                  Excess
-                  <b className={data.excess_move_pct < 0 ? 'down' : 'up'}>
-                    {fmtPct(data.excess_move_pct)}
-                  </b>
-                </span>
-              )}
-              <span>
-                Raw / sector
-                <b>
-                  {data.raw_move_pct != null ? data.raw_move_pct.toFixed(1) : '—'} /{' '}
-                  {data.sector_move_pct != null ? data.sector_move_pct.toFixed(1) : '—'}
-                </b>
-              </span>
-              <span>
-                Volume
-                <b>{data.volume_multiple != null ? `${data.volume_multiple.toFixed(1)}×` : '—'}</b>
-              </span>
-            </div>
+            {/* Measured numbers only -- a cell with nothing measured is
+                omitted, never rendered as an em-dash wall (the null "— / —"
+                strip read as broken). No numbers, no strip. */}
+            {(data.excess_move_pct !== null ||
+              data.raw_move_pct != null ||
+              data.volume_multiple != null) && (
+              <div className="sumline">
+                {data.excess_move_pct !== null && (
+                  <span>
+                    Excess
+                    <b className={data.excess_move_pct < 0 ? 'down' : 'up'}>
+                      {fmtPct(data.excess_move_pct)}
+                    </b>
+                  </span>
+                )}
+                {(data.raw_move_pct != null || data.sector_move_pct != null) && (
+                  <span>
+                    Raw / sector
+                    <b>
+                      {data.raw_move_pct != null ? data.raw_move_pct.toFixed(1) : '—'} /{' '}
+                      {data.sector_move_pct != null ? data.sector_move_pct.toFixed(1) : '—'}
+                    </b>
+                  </span>
+                )}
+                {data.volume_multiple != null && (
+                  <span>
+                    Volume
+                    <b>{`${data.volume_multiple.toFixed(1)}×`}</b>
+                  </span>
+                )}
+              </div>
+            )}
 
             {data.intensity !== null && data.intensity.components.length > 0 && (
               <div className="layer4">

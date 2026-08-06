@@ -67,6 +67,25 @@ body:has(.nf4) { background: #fafafa; }
   background: var(--paper);
   border-bottom: 1px solid var(--ink);
 }
+/* Fixed-height slot for the mini wordmark: always in layout, so showing
+   or hiding it cannot move anything. The wordmark itself scales down
+   and fades in as the reader leaves the homepage -- the "getting
+   smaller" animation, via transform/opacity only. */
+.nf4 .minirow { height: 24px; display: flex; align-items: center; justify-content: center; overflow: visible; }
+.nf4 .minimast {
+  font-family: var(--condensed);
+  font-weight: 400;
+  text-transform: uppercase;
+  font-size: 21px;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(2.2) translateY(10px);
+  transform-origin: center top;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+.nf4.cond .minimast { opacity: 1; transform: scale(1) translateY(0); }
+@media (prefers-reduced-motion: reduce) { .nf4 .minimast { transition: none; } }
 /* Snapped card tops land below the constant sticky bar. */
 .nf4.snap { scroll-padding-top: var(--barh, 56px); }
 
@@ -163,17 +182,29 @@ body:has(.nf4) { background: #fafafa; }
   /* A flick always lands on the very next card -- never skips past it. */
   scroll-snap-stop: always;
   border-top: 1px solid var(--hairline);
-  padding: 32px 16px;
+  padding: 24px 16px;
   display: grid;
   grid-template-columns: 1fr;
-  /* Text sizes itself; the plate absorbs every remaining pixel of the
-     viewport-tall slot -- no dead paper above or below the card. */
-  grid-template-rows: auto 1fr;
-  gap: 24px;
+  /* Inshorts-format tile: image first (fixed share of the card), body
+     beneath -- headline, byline, summary, read-more. */
+  grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+  gap: 16px;
+}
+.nf4 .storycard .sbody4 { display: flex; flex-direction: column; min-height: 0; }
+.nf4 .storycard .readmore {
+  margin-top: auto;
+  padding-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-decoration: none;
+  border-top: 1px solid var(--hairline);
 }
 /* A card whose story has no usable image collapses to one row -- the
-   1fr plate row would otherwise reintroduce the dead space. */
-.nf4 .storycard:not(:has(.lplate)) { grid-template-rows: auto; align-content: center; }
+   image row would otherwise reintroduce dead space. */
+.nf4 .storycard:not(:has(.lplate)) { grid-template-rows: 1fr; }
 /* The first card shares the homepage with the full masthead (sized by
    the frozen full-header measurement) and carries no snap point of its
    own -- the .snaptop sentinel at scroll 0 is the homepage rest
@@ -184,11 +215,13 @@ body:has(.nf4) { background: #fafafa; }
   scroll-snap-align: none;
 }
 @media (min-width: 900px) {
+  /* Desktop tile: image LEFT, body RIGHT (the reference format). */
   .nf4 .storycard {
-    grid-template-columns: 2fr 1fr;
+    grid-template-columns: 2fr 3fr;
     grid-template-rows: 1fr;
     align-items: stretch;
-    padding: 48px 32px;
+    padding: 40px 32px;
+    gap: 32px;
   }
   .nf4 .storycard:not(:has(.lplate)) { grid-template-columns: 1fr; align-items: center; }
 }
@@ -339,26 +372,38 @@ body:has(.nf4) { background: #fafafa; }
 }
 @media (min-width: 900px) { .nf4 .bandtabs { padding-left: 32px; padding-right: 32px; } }
 
-/* Cap filter inside the affected-companies page -- ghost buttons like
-   the sub-section tabs: outlined at rest, ink-filled when active. */
-.nf4 .bandfilters { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--ink); flex-wrap: wrap; }
-.nf4 .bandfilters .bflab { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); margin-right: 4px; }
-.nf4 .bandfilters button {
+/* Cap-tier rail (user decision): floating on the right edge like Insta
+   story controls -- thumb-reachable anywhere in the list, no trip to
+   the top. Selection is lifted state, persisting across stories. */
+.nf4 .caprail {
+  position: fixed;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 32;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nf4 .caprail button {
+  width: 38px;
+  height: 38px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: -0.12px;
   color: var(--ash);
+  background: var(--paper);
   border: 1px solid var(--midstone);
   border-radius: var(--radius);
-  padding: 5px 12px;
-  min-width: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.nf4 .bandfilters button.on {
+.nf4 .caprail button.on {
   color: var(--paper);
   background: var(--ink);
   border-color: var(--ink);
 }
-@media (min-width: 900px) { .nf4 .bandfilters { padding-left: 32px; padding-right: 32px; } }
 
 /* Sections: full-bleed ink strip header, padded paper body. */
 .nf4 .layer4 { padding: 0; margin-top: 24px; }
@@ -613,6 +658,7 @@ body:has(.nf4) { background: #fafafa; }
   position: relative;
 }
 .nf4 .ddpop .bandclose { border-radius: var(--radius); }
+.nf4 .ddpop .sumline { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
 .nf4 .ddpop .sumline b { font-size: 20px; }
 .nf4 .ddpop .sumline > span { padding: 8px 12px; }
 .nf4 .ddpop .sumline.infosum { margin-top: 16px; }

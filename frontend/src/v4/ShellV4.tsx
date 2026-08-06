@@ -38,6 +38,11 @@ export default function ShellV4() {
   // card two (half of card one visible) despite mandatory snapping --
   // after the scroll goes idle in that dead zone, finish the trip home.
   const settleTimer = useRef<number | null>(null);
+  // Mini wordmark shown once the big masthead scrolls away. Opacity and
+  // transform ONLY (its slot is always in layout) -- scroll must never
+  // change layout (the old height-animating header glitched).
+  const [condensed, setCondensed] = useState(false);
+  const condensedRef = useRef(false);
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
@@ -89,18 +94,29 @@ export default function ShellV4() {
     // open (mandatory snap fights scrolling through a tall band) and on
     // every non-feed section.
     <div
-      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''}`}
+      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''}`}
       style={{ '--barh': `${barHeight}px`, '--stackh': `${stackHeight}px` } as React.CSSProperties}
       onScroll={(event) => {
-        if (view !== 'feed' || bandOpen) return;
         const el = event.currentTarget;
+        // Mini-wordmark toggle (opacity/transform only; hysteresis so a
+        // boundary position can't flap).
+        const next = condensedRef.current ? el.scrollTop > 8 : el.scrollTop > 80;
+        if (next !== condensedRef.current) {
+          condensedRef.current = next;
+          setCondensed(next);
+        }
+        if (view !== 'feed' || bandOpen) return;
         if (settleTimer.current !== null) window.clearTimeout(settleTimer.current);
+        const scheduledAt = el.scrollTop;
         settleTimer.current = window.setTimeout(() => {
           const top = el.scrollTop;
-          if (top > 4 && top < el.clientHeight * 0.8) {
+          // Only rescue a TRULY settled rest in the dead zone -- if the
+          // position moved since scheduling, a snap animation is still
+          // running and must not be fought.
+          if (Math.abs(top - scheduledAt) < 2 && top > 4 && top < el.clientHeight * 0.75) {
             el.scrollTo({ top: 0, behavior: 'smooth' });
           }
-        }, 160);
+        }, 220);
       }}
     >
       {/* Fixed page-top snap point -- the sticky bar can't carry one
@@ -121,6 +137,12 @@ export default function ShellV4() {
           as before (no mini wordmark; user decision), pinned so it stays
           available over every card. Layout never changes on scroll. */}
       <header ref={barRef} className="topbar">
+        {/* Fixed-height slot; the wordmark inside scales/fades in as the
+            big masthead scrolls away -- the shrink animation without a
+            single pixel of layout movement. */}
+        <div className="minirow" aria-hidden="true">
+          <span className="minimast">Newsflo</span>
+        </div>
         <div className="navrow">
           <nav className="navlinks" aria-label="Sections">
             {NAV_ITEMS.map((item) => (

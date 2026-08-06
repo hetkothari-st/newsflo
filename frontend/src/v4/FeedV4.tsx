@@ -134,19 +134,22 @@ const BAND_CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string; title: stri
 function RippleBand({
   alert,
   detail,
+  capFilter,
+  onCapFilter,
   onClose,
   onOpenDeepDive,
   onOpenInfo,
 }: {
   alert: FeedAlert;
   detail: AlertDetail | null;
+  // Shared across every story's ripple and PERSISTS between them (user
+  // decision) -- lives in FeedV4, not per band.
+  capFilter: CapTier | 'ALL';
+  onCapFilter: (cap: CapTier | 'ALL') => void;
   onClose: () => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
   onOpenInfo: (info: InfoV4Data) => void;
 }) {
-  // The cap filter lives inside each story's affected-companies section
-  // (user decision) -- per-card state, narrowing only this ripple's rows.
-  const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
   // Two swipeable sub-sections: Affected companies / Timeline.
   const [tab, setTab] = useState<'companies' | 'timeline'>('companies');
   const visibleRows = (layer: RippleLayer) =>
@@ -221,16 +224,18 @@ function RippleBand({
           Timeline
         </button>
       </div>
+      {/* Floating cap-tier rail (user decision: reachable like Insta
+          story controls, no trip to the top). Fixed to the right edge,
+          persists across stories via lifted state. */}
       {tab === 'companies' && (
-        <div className="bandfilters" role="group" aria-label="Cap tier filter">
-          <span className="bflab">Cap tier</span>
+        <div className="caprail" role="group" aria-label="Cap tier filter">
           {BAND_CAP_FILTERS.map(({ cap, label, title }) => (
             <button
               key={cap}
               className={capFilter === cap ? 'on' : ''}
               onClick={(event) => {
                 event.stopPropagation();
-                setCapFilter(cap);
+                onCapFilter(cap);
               }}
               aria-label={`Cap filter ${cap}`}
               title={title}
@@ -274,7 +279,7 @@ function RippleBand({
                   // (negative preview-only ids) have no Alert row to give
                   // the deep dive story context, so none is passed.
                   event.stopPropagation();
-                  onOpenDeepDive(row.ticker, alert.id > 0 ? alert.id : undefined);
+                  onOpenDeepDive(row.ticker, alert.id);
                 }}
               >
                 <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
@@ -368,6 +373,8 @@ export default function FeedV4({
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<number, AlertDetail>>({});
+  // Cap filter shared by every story's ripple -- persists across stories.
+  const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
 
   useEffect(() => {
     let cancelled = false;
@@ -460,20 +467,33 @@ export default function FeedV4({
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd(alert.id)}
           >
-            <div>
+            {/* Inshorts-format tile (user decision): image first, then
+                headline, byline, summary, and a read-more source line. */}
+            <Plate src={alert.article.image_url} category={alert.category} className="lplate" />
+            <div className="sbody4">
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </div>
               <h1>{alert.article.title}</h1>
-              <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
               <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
+              <p className="lgist">{alert.summary_long ?? alert.summary_short ?? ''}</p>
+              <a
+                className="readmore"
+                href={alert.article.url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Read more at {alert.article.source}
+              </a>
             </div>
-            <Plate src={alert.article.image_url} category={alert.category} className="lplate" />
           </div>
           {openId === alert.id && (
             <RippleBand
               alert={alert}
               detail={details[alert.id] ?? null}
+              capFilter={capFilter}
+              onCapFilter={setCapFilter}
               onClose={closeBand}
               onOpenDeepDive={onOpenDeepDive}
               onOpenInfo={onOpenInfo}

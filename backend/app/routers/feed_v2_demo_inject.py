@@ -204,3 +204,37 @@ def demo_alert_detail(db: Session, alert_id: int) -> dict | None:
         timeline = []
 
     return {**base, "layers": layers, "timeline": timeline}
+
+
+def demo_stock_context(db: Session, alert_id: int, ticker: str) -> dict | None:
+    """Story context for the stock deep dive when opened from a demo
+    story: the company's own demo row (excess/why/section) plus the other
+    demo companies as peers. None when the id/ticker isn't demo."""
+    detail = demo_alert_detail(db, alert_id)
+    if detail is None:
+        return None
+    own = None
+    section_title = None
+    peers: list[dict] = []
+    for layer in detail["layers"]:
+        for row in layer["rows"]:
+            if row["ticker"] == ticker:
+                own = row
+                section_title = layer["title"]
+            else:
+                peers.append(row)
+    if own is None:
+        return None
+    return {
+        "is_exposure_only": own["is_exposure_only"],
+        "excess_move_pct": own["excess_move_pct"],
+        "raw_move_pct": detail["raw_move_pct"] if ticker == detail["peak_ticker"] else own["excess_move_pct"],
+        "sector_move_pct": detail["sector_move_pct"],
+        "volume_multiple": detail["volume_multiple"] if ticker == detail["peak_ticker"] else None,
+        "liquidity_tier": own["liquidity_tier"],
+        "delivery_pct": own["delivery_pct"],
+        "intensity": own["intensity"],
+        "why": own["why"],
+        "section_title": section_title,
+        "peers": peers[:6],
+    }

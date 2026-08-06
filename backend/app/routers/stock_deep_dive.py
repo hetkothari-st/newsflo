@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
 from app.companies.branding import logo_url
+from app.config import settings
 from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
 from app.companies.price_series import fetch_pe_ratio
@@ -87,6 +88,16 @@ def get_stock_deep_dive(
     result = _company_facts(db, company, held_company_ids)
 
     if alert_id is None:
+        return result
+
+    # PREVIEW-ONLY (this branch): negative ids are in-memory demo stories;
+    # overlay their story context so the deep dive stays rich for them.
+    if alert_id < 0 and settings.allow_demo_feed:
+        from app.routers.feed_v2_demo_inject import demo_stock_context
+
+        context = demo_stock_context(db, alert_id, ticker)
+        if context is not None:
+            result.update(context)
         return result
 
     alert = db.query(Alert).filter(Alert.id == alert_id).one_or_none()
