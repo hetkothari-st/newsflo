@@ -118,9 +118,23 @@ def drain_extraction_queue(session: Session) -> None:
     disk. loader.apply_extraction commits internally, so a crash partway
     through leaves every document processed so far correctly written and
     the interrupted document still pending (no .done marker) for the next
-    run to pick back up."""
+    run to pick back up.
+
+    Each document's body runs inside its own try/except -- a poisoned
+    document (e.g. the LLM naming the same counterparty twice, which
+    pre-dates extract.py's gate() dedupe fix, hitting
+    uq_supply_link_company_relation_counterparty on the loader's flush)
+    must not crash the whole backlog drain. On any exception the session is
+    rolled back, the doc is counted "errored" and printed, and the drain
+    continues to the next document -- mark_extracted is deliberately NOT
+    called on this path, so the doc is retried on the next run instead of
+    being silently skipped forever or permanently re-poisoning the same
+    glob position."""
     client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
-    counts = {"extracted": 0, "unmatched_scrip": 0, "unextractable": 0, "llm_failed": 0}
+    counts = {
+        "extracted": 0, "unmatched_scrip": 0, "unextractable": 0,
+        "llm_failed": 0, "errored": 0,
+    }
 
     docs = snapshot.pending_docs(snapshot.DEFAULT_ROOT)
     total = len(docs)
@@ -128,56 +142,62 @@ def drain_extraction_queue(session: Session) -> None:
 
     for i, pdf_path in enumerate(docs, start=1):
         try:
-            meta = json.loads(
-                snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
-            )
-        except (OSError, ValueError):
-            meta = {}
-        try:
-            source_url = (
-                snapshot.url_sidecar_path(pdf_path).read_text(encoding="utf-8").strip()
-            )
-        except OSError:
-            source_url = ""
+            try:
+                meta = json.loads(
+                    snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                meta = {}
+            try:
+                source_url = (
+                    snapshot.url_sidecar_path(pdf_path).read_text(encoding="utf-8").strip()
+                )
+            except OSError:
+                source_url = ""
 
-        scrip_code = meta.get("scrip_code")
-        listing = (
-            session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
-            if scrip_code else None
-        )
-        company = (
-            session.query(Company).filter(Company.id == listing.company_id).first()
-            if listing is not None else None
-        )
+            scrip_code = meta.get("scrip_code")
+            listing = (
+                session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
+                if scrip_code else None
+            )
+            company = (
+                session.query(Company).filter(Company.id == listing.company_id).first()
+                if listing is not None else None
+            )
 
-        if company is None:
-            snapshot.mark_extracted(pdf_path)
-            counts["unmatched_scrip"] += 1
-        else:
-            text = extract.pdf_text(pdf_path)
-            if text is None:
+            if company is None:
                 snapshot.mark_extracted(pdf_path)
-                counts["unextractable"] += 1
+                counts["unmatched_scrip"] += 1
             else:
-                profile = extract.extract_profile(client, company.name, text)
-                if profile is None:
-                    # Left pending -- retried the next time this drain runs.
-                    counts["llm_failed"] += 1
-                else:
-                    as_of = _parse_news_date(meta.get("news_date")) or date.today()
-                    loader.apply_extraction(
-                        session, company, profile,
-                        source_url=source_url, source_agency=meta.get("agency") or "",
-                        as_of=as_of,
-                    )
+                text = extract.pdf_text(pdf_path)
+                if text is None:
                     snapshot.mark_extracted(pdf_path)
-                    counts["extracted"] += 1
+                    counts["unextractable"] += 1
+                else:
+                    profile = extract.extract_profile(client, company.name, text)
+                    if profile is None:
+                        # Left pending -- retried the next time this drain runs.
+                        counts["llm_failed"] += 1
+                    else:
+                        as_of = _parse_news_date(meta.get("news_date")) or date.today()
+                        loader.apply_extraction(
+                            session, company, profile,
+                            source_url=source_url, source_agency=meta.get("agency") or "",
+                            as_of=as_of,
+                        )
+                        snapshot.mark_extracted(pdf_path)
+                        counts["extracted"] += 1
+        except Exception as exc:
+            session.rollback()
+            counts["errored"] += 1
+            print(f"  [{i}/{total}] ERROR on {pdf_path}: {exc}")
 
         if i % _PROGRESS_EVERY == 0 or i == total:
             print(
                 f"  [{i}/{total}] extracted={counts['extracted']} "
                 f"unmatched_scrip={counts['unmatched_scrip']} "
-                f"unextractable={counts['unextractable']} llm_failed={counts['llm_failed']}"
+                f"unextractable={counts['unextractable']} llm_failed={counts['llm_failed']} "
+                f"errored={counts['errored']}"
             )
 
     print(f"done: {counts}")

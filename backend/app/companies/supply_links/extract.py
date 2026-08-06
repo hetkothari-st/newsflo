@@ -138,11 +138,27 @@ def extract_profile(client, company_name: str, text: str) -> dict | None:
 
     def gate(entries):
         kept = []
+        # Dedupe by whitespace-normalized, lowercased name -- BEFORE the cap
+        # slice, and keep the FIRST surviving entry per name. Without this,
+        # an LLM that names the same counterparty twice (two different
+        # provable quotes) yields two (name, evidence) tuples with the same
+        # name, and loader.apply_extraction's INSERT of both hits
+        # uq_supply_link_company_relation_counterparty -- an IntegrityError
+        # that (pre-fix) killed the rest of that scheduler run's queue and
+        # crashed backfill_supply_links.py's drain outright, and since the
+        # doc was never marked extracted, it re-poisoned every subsequent
+        # run at the same position.
+        seen_names: set[str] = set()
         for entry in entries or []:
             name = (entry.get("name") or "").strip()
             evidence = (entry.get("evidence") or "").strip()
-            if name and _evidence_in_text(evidence, text):
-                kept.append((name, evidence))
+            if not name or not _evidence_in_text(evidence, text):
+                continue
+            key = _normalize_ws(name)
+            if key in seen_names:
+                continue
+            seen_names.add(key)
+            kept.append((name, evidence))
         return kept[: config.SUPPLY_LINK_MAX_PER_RELATION]
 
     return {

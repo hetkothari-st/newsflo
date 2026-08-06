@@ -416,19 +416,35 @@ def _run_supply_links_refresh() -> None:
     Three ways a doc leaves the queue for good (mark_extracted): its scrip
     code resolves to no Listing/Company (unmatched_scrip), its PDF has no
     extractable text (unextractable), or extraction+load succeeded
-    (extracted). One way it stays pending for a retry on a later run: the
+    (extracted). Two ways it stays pending for a retry on a later run: the
     LLM call returned nothing (llm_failed) -- a transient provider failure
     should not permanently drop a document that a later run might extract
-    successfully.
+    successfully -- or the per-doc body raised (errored, see below).
 
-    Any failure is logged, never raised, same as every other scheduler job.
+    Each doc's body (sidecar reads through mark_extracted) runs inside its
+    own try/except: one poisoned document (e.g. a duplicate-counterparty
+    IntegrityError from loader.apply_extraction pre-dating the gate() dedupe
+    fix in extract.py) must never abort the rest of the day's queue. On any
+    exception the session is rolled back (a failed flush/commit leaves the
+    session unusable for the next iteration otherwise), the doc is counted
+    "errored" and logged with its path, and the loop continues -- crucially,
+    mark_extracted is NOT called on this path, so the doc is retried
+    (genuinely, now that the loop survives it) on the next run rather than
+    being permanently skipped or permanently poisoning the same glob
+    position forever.
+
+    Any failure escaping the loop itself is logged, never raised, same as
+    every other scheduler job.
     """
     import json
 
     from app.companies.supply_links import extract, loader
     from app.models import Company, Listing
 
-    counts = {"extracted": 0, "unmatched_scrip": 0, "unextractable": 0, "llm_failed": 0}
+    counts = {
+        "extracted": 0, "unmatched_scrip": 0, "unextractable": 0,
+        "llm_failed": 0, "errored": 0,
+    }
     deadline = time.monotonic() + _SUPPLY_BUDGET_SECONDS
 
     session = SessionLocal()
@@ -440,59 +456,66 @@ def _run_supply_links_refresh() -> None:
                 break
 
             try:
-                meta = json.loads(
-                    supply_snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
+                try:
+                    meta = json.loads(
+                        supply_snapshot.meta_sidecar_path(pdf_path).read_text(encoding="utf-8")
+                    )
+                except (OSError, ValueError):
+                    meta = {}
+                try:
+                    source_url = supply_snapshot.url_sidecar_path(pdf_path).read_text(
+                        encoding="utf-8"
+                    ).strip()
+                except OSError:
+                    source_url = ""
+
+                scrip_code = meta.get("scrip_code")
+                listing = (
+                    session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
+                    if scrip_code else None
                 )
-            except (OSError, ValueError):
-                meta = {}
-            try:
-                source_url = supply_snapshot.url_sidecar_path(pdf_path).read_text(
-                    encoding="utf-8"
-                ).strip()
-            except OSError:
-                source_url = ""
+                company = (
+                    session.query(Company).filter(Company.id == listing.company_id).first()
+                    if listing is not None else None
+                )
+                if company is None:
+                    supply_snapshot.mark_extracted(pdf_path)
+                    counts["unmatched_scrip"] += 1
+                    continue
 
-            scrip_code = meta.get("scrip_code")
-            listing = (
-                session.query(Listing).filter(Listing.scrip_code == scrip_code).first()
-                if scrip_code else None
-            )
-            company = (
-                session.query(Company).filter(Company.id == listing.company_id).first()
-                if listing is not None else None
-            )
-            if company is None:
+                text = extract.pdf_text(pdf_path)
+                if text is None:
+                    supply_snapshot.mark_extracted(pdf_path)
+                    counts["unextractable"] += 1
+                    continue
+
+                profile = extract.extract_profile(client, company.name, text)
+                if profile is None:
+                    counts["llm_failed"] += 1
+                    continue  # left pending -- retried on the next run
+
+                as_of = _parse_news_date(meta.get("news_date")) or date.today()
+                loader.apply_extraction(
+                    session, company, profile,
+                    source_url=source_url, source_agency=meta.get("agency") or "",
+                    as_of=as_of,
+                )
                 supply_snapshot.mark_extracted(pdf_path)
-                counts["unmatched_scrip"] += 1
+                counts["extracted"] += 1
+            except Exception:
+                session.rollback()
+                counts["errored"] += 1
+                logger.exception("Supply links refresh: doc failed, left pending: %s", pdf_path)
                 continue
-
-            text = extract.pdf_text(pdf_path)
-            if text is None:
-                supply_snapshot.mark_extracted(pdf_path)
-                counts["unextractable"] += 1
-                continue
-
-            profile = extract.extract_profile(client, company.name, text)
-            if profile is None:
-                counts["llm_failed"] += 1
-                continue  # left pending -- retried on the next run
-
-            as_of = _parse_news_date(meta.get("news_date")) or date.today()
-            loader.apply_extraction(
-                session, company, profile,
-                source_url=source_url, source_agency=meta.get("agency") or "",
-                as_of=as_of,
-            )
-            supply_snapshot.mark_extracted(pdf_path)
-            counts["extracted"] += 1
 
         logger.info(
             "Supply links refresh: extracted=%s unmatched_scrip=%s "
-            "unextractable=%s llm_failed=%s",
+            "unextractable=%s llm_failed=%s errored=%s",
             counts["extracted"], counts["unmatched_scrip"],
-            counts["unextractable"], counts["llm_failed"],
+            counts["unextractable"], counts["llm_failed"], counts["errored"],
         )
     except Exception:
+        session.rollback()
         logger.exception("Supply links refresh failed")
     finally:
         session.close()

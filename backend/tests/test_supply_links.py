@@ -757,3 +757,37 @@ def test_supply_links_never_create_companies_via_the_real_grounded_identify_comp
     alert = db_session.query(Alert).one()
     assert db_session.query(AlertCompany).filter_by(alert_id=alert.id).count() == 0
     assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 0
+
+# --- Task 7 review fix: poison-pill dedupe ---------------------------------
+#
+# Reproduced failure: an LLM naming the same counterparty twice (two
+# different provable quotes) produced two (name, evidence) tuples with the
+# same name. loader.apply_extraction then tried to INSERT both, hitting
+# uq_supply_link_company_relation_counterparty and raising IntegrityError --
+# which (pre-fix) killed the rest of that scheduler run's queue and crashed
+# backfill_supply_links.py's drain outright. gate() must dedupe by name
+# BEFORE the SUPPLY_LINK_MAX_PER_RELATION cap slice, keeping the first
+# surviving entry.
+
+
+def test_gate_dedupes_repeated_counterparty_name_before_capping(monkeypatch):
+    text = (
+        "Alpha Ltd derives a large share of revenue from Indian Railways. "
+        "Separately, Alpha Ltd also supplies rolling stock components to Indian Railways "
+        "under a long-term contract."
+    )
+    payload = {
+        "business_summary": None,
+        "suppliers": [],
+        "customers": [
+            {"name": "Indian Railways", "evidence": "derives a large share of revenue from Indian Railways"},
+            {"name": "Indian Railways", "evidence": "supplies rolling stock components to Indian Railways"},
+        ],
+    }
+    monkeypatch.setattr(extract, "_call_supply_tool", lambda client, name, text: payload)
+    result = extract.extract_profile(object(), "Alpha Ltd", text)
+    assert len(result["customers"]) == 1
+    name, evidence = result["customers"][0]
+    assert name == "Indian Railways"
+    # First surviving entry wins.
+    assert evidence == "derives a large share of revenue from Indian Railways"

@@ -160,3 +160,98 @@ def test_registered_job_ids_do_not_include_the_profile_refresh(monkeypatch):
         assert "business_profile_refresh" not in job_ids
     finally:
         scheduler._scheduler = None
+
+
+# --- Task 7 review fix: per-doc isolation in the extraction drain ----------
+#
+# Reproduced failure: extract.py's gate() (pre-dedupe-fix) could yield two
+# (name, evidence) entries for the same counterparty name, which
+# loader.apply_extraction then tried to INSERT twice, hitting
+# uq_supply_link_company_relation_counterparty and raising IntegrityError.
+# The job's single outer try/except caught it at the OUTER level, which
+# aborted the entire remaining queue for the day (every doc after the
+# poisoned one silently never processed) -- and since the poisoned doc was
+# never marked extracted, it re-poisoned every subsequent run at the same
+# glob position forever. The per-doc try/except must isolate exactly one
+# document's failure, roll back the session, count it "errored", and leave
+# it pending (no mark_extracted) while every other document in the same run
+# still gets processed.
+
+
+def test_supply_links_refresh_isolates_a_poisoned_doc(monkeypatch, tmp_path, db_session, caplog):
+    import json
+    import logging
+    from datetime import date as date_cls
+
+    from app.companies.supply_links import extract as supply_extract, loader as supply_loader
+    from app.models import Company, Listing, SupplyLink
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
+    monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+
+    poisoned = Company(ticker="POISON.NS", name="Poison Ltd", sector="other", index_tier="OTHER")
+    healthy = Company(ticker="HEALTHY.NS", name="Healthy Ltd", sector="other", index_tier="OTHER")
+    db_session.add_all([poisoned, healthy])
+    db_session.flush()
+    db_session.add_all([
+        Listing(company_id=poisoned.id, exchange="BSE", symbol="POISON", scrip_code="111",
+                source="test", as_of=date_cls(2026, 1, 1)),
+        Listing(company_id=healthy.id, exchange="BSE", symbol="HEALTHY", scrip_code="222",
+                source="test", as_of=date_cls(2026, 1, 1)),
+    ])
+    db_session.commit()
+    # Captured before the job runs and closes db_session (it's shared with
+    # this test via the SessionLocal monkeypatch above) -- querying with
+    # these plain ints afterwards avoids touching the now-detached ORM
+    # instances' attributes.
+    poisoned_id, healthy_id = poisoned.id, healthy.id
+
+    def _write_doc(scrip_code, name):
+        url = f"https://x/AttachLive/{scrip_code}.pdf"
+        pdf_path = scheduler.supply_snapshot.doc_path(str(tmp_path), scrip_code, url)
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(b"%PDF-1.4 fake")
+        scheduler.supply_snapshot.url_sidecar_path(pdf_path).write_text(url, encoding="utf-8")
+        scheduler.supply_snapshot.meta_sidecar_path(pdf_path).write_text(
+            json.dumps({
+                "scrip_code": scrip_code, "company_name": name,
+                "agency": "CRISIL", "news_date": "2026-08-06T00:00:00",
+            }),
+            encoding="utf-8",
+        )
+        return pdf_path
+
+    poisoned_pdf = _write_doc("111", "Poison Ltd")
+    healthy_pdf = _write_doc("222", "Healthy Ltd")
+
+    monkeypatch.setattr(supply_extract, "pdf_text", lambda _p: "some rationale text")
+    monkeypatch.setattr(
+        supply_extract, "extract_profile",
+        lambda client, name, text: {"business_summary": None, "suppliers": [], "customers": []},
+    )
+
+    def fake_apply_extraction(session, company, profile, *, source_url, source_agency, as_of):
+        if company.ticker == "POISON.NS":
+            raise RuntimeError("simulated duplicate-counterparty IntegrityError")
+        session.add(SupplyLink(
+            company_id=company.id, relation="CUSTOMER", counterparty_name="Some Buyer",
+            evidence="q", source_url=source_url, source_agency=source_agency, as_of=as_of,
+        ))
+        session.commit()
+        return {"links_written": 1, "links_kept_older": 0, "desc_written": 0, "desc_kept": 0}
+
+    monkeypatch.setattr(supply_loader, "apply_extraction", fake_apply_extraction)
+
+    caplog.set_level(logging.INFO, logger="app.scheduler")
+
+    scheduler._run_supply_links_refresh()  # must not raise despite the poisoned doc
+
+    assert "errored=1" in caplog.text
+    assert "extracted=1" in caplog.text
+    # Healthy doc: processed and marked done.
+    assert scheduler.supply_snapshot.done_marker_path(healthy_pdf).exists()
+    assert db_session.query(SupplyLink).filter_by(company_id=healthy_id).count() == 1
+    # Poisoned doc: left pending (no .done marker) for a genuine retry.
+    assert not scheduler.supply_snapshot.done_marker_path(poisoned_pdf).exists()
+    assert db_session.query(SupplyLink).filter_by(company_id=poisoned_id).count() == 0
