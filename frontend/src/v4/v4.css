@@ -870,14 +870,14 @@ body:has(.nf4.dark) { background: #2a2722; }
   .nf4 .pfcount { font-size: 56px; }
 }
 
-/* Ripple page entrance: a clean left-to-right swipe -- the page slides
-   in from the left edge (user decision; replaced the 3D card flip). */
+/* Ripple page entrance: paging, exactly like moving between charts --
+   the page slides in from the right edge as the next panel. */
 @media (prefers-reduced-motion: no-preference) {
   .nf4 .band {
     animation: nf4-swipe 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
   }
   @keyframes nf4-swipe {
-    from { transform: translateX(-100%); }
+    from { transform: translateX(100%); }
     to { transform: translateX(0); }
   }
 }
