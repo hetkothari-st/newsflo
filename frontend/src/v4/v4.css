@@ -870,16 +870,15 @@ body:has(.nf4.dark) { background: #2a2722; }
   .nf4 .pfcount { font-size: 56px; }
 }
 
-/* Card-flip entrance for the ripple page -- the overlay swings in from
-   the right edge like the deployed card turning over. */
+/* Ripple page entrance: a clean left-to-right swipe -- the page slides
+   in from the left edge (user decision; replaced the 3D card flip). */
 @media (prefers-reduced-motion: no-preference) {
   .nf4 .band {
-    animation: nf4-flip 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
-    transform-origin: right center;
+    animation: nf4-swipe 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
   }
-  @keyframes nf4-flip {
-    from { transform: perspective(1400px) rotateY(-70deg); opacity: 0.5; }
-    to { transform: perspective(1400px) rotateY(0deg); opacity: 1; }
+  @keyframes nf4-swipe {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
   }
 }
 @media (prefers-reduced-motion: reduce) {
