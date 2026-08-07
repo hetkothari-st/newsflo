@@ -257,7 +257,7 @@ function RippleBand({
           ))}
         </div>
       )}
-      {detail === null && <p className="bandempty">Setting the type…</p>}
+      {detail === null && <p className="bandempty">Loading…</p>}
       {tab === 'companies' && detail !== null && !anyRows && (
         <p className="bandempty">
           No companies in this cap tier for this story. Tap “All” to see everyone affected.

@@ -117,7 +117,7 @@ export default function ChartsV4Page() {
       {detail === null && error === null && (
         <div className="ddloading" aria-busy="true">
           <span className="ddload-rule" />
-          <p>Setting the type…</p>
+          <p>Loading…</p>
           <span className="ddload-rule" />
         </div>
       )}

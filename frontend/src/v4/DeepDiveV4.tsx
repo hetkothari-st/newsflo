@@ -83,7 +83,7 @@ export default function DeepDiveV4({
         {data === null && error === null && (
           <div className="ddloading" aria-busy="true" aria-label="Loading">
             <span className="ddload-rule" />
-            <p>Setting the type…</p>
+            <p>Loading…</p>
             <span className="ddload-rule" />
           </div>
         )}
