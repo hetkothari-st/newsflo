@@ -63,8 +63,13 @@ function isFullyTransparent(img: HTMLImageElement): boolean {
 function tryLoad(url: string): Promise<string | null> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(isFullyTransparent(img) ? null : url);
+    // Only Brandfetch needs the transparent-placeholder canvas probe
+    // (and serves CORS headers for it). Google's favicon endpoint sends
+    // NO CORS headers -- crossOrigin=anonymous makes the browser refuse
+    // the image outright, so load it plain; it never serves blanks.
+    const needsProbe = url.includes('cdn.brandfetch.io');
+    if (needsProbe) img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(needsProbe && isFullyTransparent(img) ? null : url);
     img.onerror = () => resolve(null);
     img.src = url;
   });
