@@ -706,15 +706,9 @@ body:has(.nf4.dark) { background: #2a2722; }
    line. Numerals mono; red/green only on the move numeral. */
 .nf4 .vr4 { padding: 2px 4px 0; }
 .nf4 .vr4-cur { position: relative; height: 26px; }
-.nf4 .vr4-curm {
-  position: absolute;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
 .nf4 .vr4-curv {
+  position: absolute;
+  top: 0;
   font-family: var(--mono, monospace);
   font-size: 11px;
   letter-spacing: -0.12px;
@@ -723,6 +717,9 @@ body:has(.nf4.dark) { background: #2a2722; }
 .nf4 .vr4-curv.up { color: var(--data-up); }
 .nf4 .vr4-curv.down { color: var(--data-down); }
 .nf4 .vr4-pin {
+  position: absolute;
+  top: 16px;
+  transform: translateX(-50%);
   width: 0;
   height: 0;
   border-left: 4px solid transparent;

@@ -29,13 +29,24 @@ export default function VolRangeV4({
     <div className="vr4">
       {move != null && (
         <div className="vr4-cur">
-          <div className="vr4-curm" style={{ left: `${clamp(pos(move), 4, 96)}%` }}>
-            <span className={`vr4-curv ${move < 0 ? 'down' : 'up'}`}>
-              this move {pct(move)}
-              {outside ? ' · outside the usual band' : ''}
-            </span>
-            <span className="vr4-pin" aria-hidden="true" />
-          </div>
+          {/* Pin sits exactly on the scale; the label anchors left/right
+              near the edges so it never clips out of the popup. */}
+          <span
+            className={`vr4-curv ${move < 0 ? 'down' : 'up'}`}
+            style={{
+              left: `${clamp(pos(move), 2, 98)}%`,
+              transform:
+                pos(move) > 65
+                  ? 'translateX(-90%)'
+                  : pos(move) < 35
+                    ? 'translateX(-10%)'
+                    : 'translateX(-50%)',
+            }}
+          >
+            this move {pct(move)}
+            {outside ? ' · outside the usual band' : ''}
+          </span>
+          <span className="vr4-pin" style={{ left: `${clamp(pos(move), 2, 98)}%` }} aria-hidden="true" />
         </div>
       )}
       <div className="vr4-track">
