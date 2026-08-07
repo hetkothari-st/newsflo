@@ -90,7 +90,11 @@
 .cnode-mv.flat { color: var(--ash); font-style: italic; }
 
 /* ---------- SVG tree charts (impact tree, sector tree) ---------- */
-.csvg { width: 100%; display: block; }
+/* Natural pixel size inside a sideways-scrolling wrap: on phones the
+   scaled-down tree was unreadable; full-size + pan beats tiny type. */
+.csvg-wrap { overflow-x: auto; scrollbar-width: none; }
+.csvg-wrap::-webkit-scrollbar { display: none; }
+.csvg { display: block; margin: 0 auto; }
 .csvg-edge { fill: none; stroke: var(--midstone); stroke-width: 1; }
 .csvg-band { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--ash); }
 .cn-box { fill: var(--paper); stroke: var(--hairline); }
@@ -169,14 +173,22 @@
 .ctl-h { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 4px; }
 .ctl-d { font-family: var(--serif); font-size: 16px; line-height: 1.35; margin: 0; color: var(--sepia); }
 
-/* ---------- 8 chain ---------- */
-.cchain { display: flex; flex-direction: column; align-items: stretch; max-width: 480px; margin: 0 auto; }
-.cchain-node { border: 1px solid var(--ink); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; font-family: var(--serif); font-size: 15px; line-height: 1.3; }
+/* ---------- 8 chain (sector propagation pills + stage labels) ---------- */
+.cchain { display: flex; flex-direction: column; align-items: stretch; max-width: 560px; margin: 0 auto; }
+.cchain-row { display: grid; grid-template-columns: 1fr 92px; gap: 12px; align-items: center; }
+.cchain-link { grid-column: 1; text-align: center; color: var(--ash); padding: 2px 0; }
+.cchain-node { grid-column: 1; border: 1px solid var(--ink); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; font-family: var(--serif); font-size: 15px; line-height: 1.3; }
 .cchain-node.news { background: var(--ink); color: var(--paper); }
 .cchain-node.news .cframe-newskicker { color: var(--paper); opacity: 0.7; }
+.cchain-node.sector { flex-direction: row; align-items: baseline; justify-content: space-between; }
+.cchain-node.sector.up { border-color: var(--data-up); }
+.cchain-node.sector.down { border-color: var(--data-down); }
 .cchain-node.market { border-width: 2px; }
 .cchain-h { font-family: var(--grotesque); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ash); }
-.cchain-node.news + .cchain-step .cchain-arrow, .cchain-arrow { text-align: center; color: var(--ash); padding: 4px 0; }
+.cchain-big { font-family: var(--serif); font-size: 22px; }
+.cchain-big.up { color: var(--data-up); }
+.cchain-big.down { color: var(--data-down); }
+.cchain-stage { grid-column: 2; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pebble); }
 .cchain-node b { font-weight: 400; }
 .cchain-node b.up { color: var(--data-up); }
 .cchain-node b.down { color: var(--data-down); }
@@ -187,5 +199,17 @@
 .cknow-hub { fill: var(--ink); }
 .cknow-hublabel { fill: var(--paper); font-family: var(--serif); font-size: 13px; }
 .cknow-node { fill: var(--paper); stroke: var(--ink); }
-.cknow-label { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; fill: var(--ink); }
-.cknow-count { font-family: var(--serif); font-size: 13px; fill: var(--sepia); }
+.cknow-node.on { fill: var(--ink); }
+.cknow-sat { cursor: pointer; }
+.cknow-label { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; fill: var(--ink); pointer-events: none; }
+.cknow-label.on { fill: var(--paper); }
+.cknow-count { font-family: var(--serif); font-size: 13px; fill: var(--sepia); pointer-events: none; }
+.cknow-count.on { fill: var(--paper); }
+.cknow-member { fill: var(--paper); stroke: var(--pebble); }
+.cknow-member.up { stroke: var(--data-up); stroke-width: 1.5; }
+.cknow-member.down { stroke: var(--data-down); stroke-width: 1.5; }
+.cknow-mlabel { font-size: 8px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; fill: var(--ink); }
+.cknow-msub { font-size: 8px; fill: var(--ash); }
+.cknow-msub.up { fill: var(--data-up); }
+.cknow-msub.down { fill: var(--data-down); }
+.cknow-hint { text-align: center; font-size: 11px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--pebble); margin: 8px 0 0; }

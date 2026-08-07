@@ -4,7 +4,7 @@
    node, edge and count derives from the story's real detail payload:
    edges connect the news event to the companies it demonstrably
    affected (never invented pairings between companies). */
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { AlertDetail } from '../../v3/api';
 import { flattenRows, intensityBand, type ChartMeta, type ChartRow } from './chartsData';
 
@@ -136,7 +136,15 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
   });
   const height = y - 10;
   return (
-    <svg className="csvg" viewBox={`0 0 ${W} ${height}`} role="img" aria-label="Impact tree">
+    <div className="csvg-wrap">
+      <svg
+        className="csvg"
+        width={W}
+        height={height}
+        viewBox={`0 0 ${W} ${height}`}
+        role="img"
+        aria-label="Impact tree"
+      >
       <rect className="cn-news" x={newsX} y={4} width={newsW} height={newsH} rx={8} />
       <text className="cn-newskicker" x={newsX + 12} y={20}>
         NEWS
@@ -166,6 +174,7 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
         );
       })}
     </svg>
+    </div>
   );
 }
 
@@ -353,7 +362,15 @@ export function CSectors({ detail }: { detail: AlertDetail }) {
   const maxLen = Math.max(...sectors.map(([, list]) => list.length));
   const height = sectorY + 40 + 26 + maxLen * rowStep + 4;
   return (
-    <svg className="csvg" viewBox={`0 0 ${W} ${height}`} role="img" aria-label="Sector tree">
+    <div className="csvg-wrap">
+      <svg
+        className="csvg"
+        width={W}
+        height={height}
+        viewBox={`0 0 ${W} ${height}`}
+        role="img"
+        aria-label="Sector tree"
+      >
       <rect className="cn-news" x={newsX} y={4} width={newsW} height={46} rx={8} />
       <text className="cn-newskicker" x={newsX + 12} y={20}>
         NEWS
@@ -400,6 +417,7 @@ export function CSectors({ detail }: { detail: AlertDetail }) {
         );
       })}
     </svg>
+    </div>
   );
 }
 
@@ -423,28 +441,59 @@ export function CTimeline({ detail }: { detail: AlertDetail }) {
   );
 }
 
-/* 8 -- Impact chain (reference chart 9): the story propagating through
-   its horizons into the measured market numbers. */
+/* 8 -- Impact chain (reference chart 9): the shock propagating from
+   the news through the sectors it actually hit, ordered by measured
+   reaction size, ending in the market numbers -- a cause-and-effect
+   chain, deliberately distinct from the timeline chart. */
 export function CEconomicChain({ detail }: { detail: AlertDetail }) {
+  const rows = flattenRows(detail);
+  const bySector = new Map<string, ChartRow[]>();
+  for (const row of rows) {
+    if (row.excess_move_pct == null) continue;
+    if (!bySector.has(row.sector)) bySector.set(row.sector, []);
+    bySector.get(row.sector)!.push(row);
+  }
+  const sectors = [...bySector.entries()]
+    .map(([sector, list]) => ({
+      sector,
+      avg: list.reduce((sum, row) => sum + row.excess_move_pct!, 0) / list.length,
+      count: list.length,
+    }))
+    .sort((a, b) => Math.abs(b.avg) - Math.abs(a.avg));
+  const stageLabel = (index: number) =>
+    index === 0 ? 'Directly hit' : index === 1 ? 'First spillover' : 'Wider spillover';
   return (
     <div className="cchain">
-      <div className="cchain-node news">
-        <span className="cframe-newskicker">The story</span>
-        <span>{detail.article.title}</span>
+      <div className="cchain-row">
+        <div className="cchain-node news">
+          <span className="cframe-newskicker">The story</span>
+          <span>{detail.article.title}</span>
+        </div>
+        <span className="cchain-stage" />
       </div>
-      {detail.timeline.map((entry, index) => (
-        <div className="cchain-step" key={`${entry.horizon}-${index}`}>
-          <span className="cchain-arrow">↓</span>
-          <div className="cchain-node">
-            <span className="cchain-h">{entry.horizon.replace(/_/g, ' ')}</span>
-            <span>{entry.description}</span>
+      {sectors.map((entry, index) => (
+        <div className="cchain-row" key={entry.sector}>
+          <div className="cchain-link" aria-hidden="true">
+            ↓
           </div>
+          <div className={`cchain-node sector ${moveClass(entry.avg)}`}>
+            <span className="cchain-h">
+              {entry.sector.replace(/_/g, ' ')} · {entry.count}{' '}
+              {entry.count === 1 ? 'company' : 'companies'}
+            </span>
+            <span className={`cchain-big ${moveClass(entry.avg)}`}>
+              {entry.avg < 0 ? '↓' : '↑'} {fmtPct(entry.avg)}
+            </span>
+          </div>
+          <span className="cchain-stage">{stageLabel(index)}</span>
         </div>
       ))}
-      <div className="cchain-step">
-        <span className="cchain-arrow">↓</span>
+      <div className="cchain-row">
+        <div className="cchain-link" aria-hidden="true">
+          ↓
+        </div>
         <div className="cchain-node market">
-          <span className="cchain-h">Measured market impact</span>
+          <span className="cchain-h">Stock market impact</span>
           <span>
             Raw <b className={moveClass(detail.raw_move_pct)}>{fmtPct(detail.raw_move_pct)}</b>
             {'  ·  '}
@@ -457,52 +506,118 @@ export function CEconomicChain({ detail }: { detail: AlertDetail }) {
             )}
           </span>
         </div>
+        <span className="cchain-stage">Market</span>
       </div>
     </div>
   );
 }
 
-/* 9 -- Knowledge map: hub with real relationship counts (reference
-   chart 10). */
+/* 9 -- Knowledge map: hub with real relationship counts; tapping a
+   category blooms its members beside it as a circle cluster (same
+   format), tap again to fold. */
 export function CKnowledge({ detail }: { detail: AlertDetail }) {
+  const [selected, setSelected] = useState<string | null>(null);
   const rows = flattenRows(detail);
+  const winners = rows.filter((r) => r.direction === 'bullish' && r.excess_move_pct != null);
+  const losers = rows.filter((r) => r.direction === 'bearish' && r.excess_move_pct != null);
+  const exposure = rows.filter((r) => r.excess_move_pct == null);
+  const sectors = [...new Set(rows.map((r) => r.sector))];
+  const member = (row: ChartRow) => ({
+    label: row.ticker.split('.')[0].slice(0, 7),
+    sub: row.excess_move_pct == null ? 'exp' : fmtPct(row.excess_move_pct),
+    cls: moveClass(row.excess_move_pct),
+  });
   const sats = [
-    { label: 'Winners', count: rows.filter((r) => r.direction === 'bullish' && r.excess_move_pct != null).length },
-    { label: 'Losers', count: rows.filter((r) => r.direction === 'bearish' && r.excess_move_pct != null).length },
-    { label: 'Exposure', count: rows.filter((r) => r.excess_move_pct == null).length },
-    { label: 'Sectors', count: new Set(rows.map((r) => r.sector)).size },
-    { label: 'Companies', count: rows.length },
-    { label: 'Horizons', count: detail.timeline.length },
-  ].filter((s) => s.count > 0);
-  const size = 380;
+    { label: 'Winners', members: winners.map(member) },
+    { label: 'Losers', members: losers.map(member) },
+    { label: 'Exposure', members: exposure.map(member) },
+    {
+      label: 'Sectors',
+      members: sectors.map((sector) => ({
+        label: sector.replace(/_/g, ' ').slice(0, 9),
+        sub: '',
+        cls: 'flat',
+      })),
+    },
+    { label: 'Companies', members: rows.map(member) },
+    {
+      label: 'Horizons',
+      members: detail.timeline.map((entry) => ({
+        label: entry.horizon.replace(/_/g, ' ').slice(0, 9),
+        sub: '',
+        cls: 'flat',
+      })),
+    },
+  ].filter((s) => s.members.length > 0);
+  const size = 520;
   const cx = size / 2;
-  const r = 136;
+  const r = 140;
   return (
-    <svg className="cknow" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Knowledge map">
-      {sats.map((sat, i) => {
-        const angle = (i / sats.length) * Math.PI * 2 - Math.PI / 2;
-        const x = cx + r * Math.cos(angle);
-        const y = cx + r * Math.sin(angle);
-        return (
-          <g key={sat.label}>
-            <line className="cknow-spoke" x1={cx} y1={cx} x2={x} y2={y} />
-            <circle className="cknow-node" cx={x} cy={y} r={31} />
-            <text className="cknow-label" x={x} y={y - 3} textAnchor="middle">
-              {sat.label}
-            </text>
-            <text className="cknow-count" x={x} y={y + 13} textAnchor="middle">
-              ({sat.count})
-            </text>
-          </g>
-        );
-      })}
-      <circle className="cknow-hub" cx={cx} cy={cx} r={46} />
-      <text className="cknow-hublabel" x={cx} y={cx - 2} textAnchor="middle">
-        News
-      </text>
-      <text className="cknow-hublabel" x={cx} y={cx + 12} textAnchor="middle">
-        event
-      </text>
-    </svg>
+    <div className="csvg-wrap">
+      <svg
+        className="cknow"
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        role="img"
+        aria-label="Knowledge map"
+      >
+        {sats.map((sat, i) => {
+          const angle = (i / sats.length) * Math.PI * 2 - Math.PI / 2;
+          const x = cx + r * Math.cos(angle);
+          const y = cx + r * Math.sin(angle);
+          const isSelected = selected === sat.label;
+          return (
+            <g key={sat.label}>
+              <line className="cknow-spoke" x1={cx} y1={cx} x2={x} y2={y} />
+              {isSelected &&
+                sat.members.map((m, j) => {
+                  const spread = Math.min(Math.PI * 1.1, 0.55 * sat.members.length);
+                  const ma = angle - spread / 2 + (spread * j) / Math.max(1, sat.members.length - 1 || 1);
+                  const mr = 88;
+                  const mx = Math.min(size - 30, Math.max(30, x + mr * Math.cos(ma)));
+                  const my = Math.min(size - 30, Math.max(30, y + mr * Math.sin(ma)));
+                  return (
+                    <g key={m.label + j}>
+                      <line className="cknow-spoke" x1={x} y1={y} x2={mx} y2={my} />
+                      <circle className={`cknow-member ${m.cls}`} cx={mx} cy={my} r={24} />
+                      <text className="cknow-mlabel" x={mx} y={my + (m.sub ? -1 : 3)} textAnchor="middle">
+                        {m.label}
+                      </text>
+                      {m.sub && (
+                        <text className={`cknow-msub ${m.cls}`} x={mx} y={my + 10} textAnchor="middle">
+                          {m.sub}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              <g
+                className="cknow-sat"
+                onClick={() => setSelected(isSelected ? null : sat.label)}
+                role="button"
+                aria-label={`${sat.label}: ${sat.members.length}`}
+              >
+                <circle className={`cknow-node ${isSelected ? 'on' : ''}`} cx={x} cy={y} r={31} />
+                <text className={`cknow-label ${isSelected ? 'on' : ''}`} x={x} y={y - 3} textAnchor="middle">
+                  {sat.label}
+                </text>
+                <text className={`cknow-count ${isSelected ? 'on' : ''}`} x={x} y={y + 13} textAnchor="middle">
+                  ({sat.members.length})
+                </text>
+              </g>
+            </g>
+          );
+        })}
+        <circle className="cknow-hub" cx={cx} cy={cx} r={46} />
+        <text className="cknow-hublabel" x={cx} y={cx - 2} textAnchor="middle">
+          News
+        </text>
+        <text className="cknow-hublabel" x={cx} y={cx + 12} textAnchor="middle">
+          event
+        </text>
+      </svg>
+      <p className="cknow-hint">Tap a circle to unfold its members.</p>
+    </div>
   );
 }
