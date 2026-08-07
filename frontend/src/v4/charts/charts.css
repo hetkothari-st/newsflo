@@ -39,11 +39,13 @@
   scrollbar-width: none;
 }
 .cpage-strip::-webkit-scrollbar { display: none; }
-.cpage-slide { flex: 0 0 100%; scroll-snap-align: start; scroll-snap-stop: always; overflow-y: auto; }
+/* Flex + auto margins: a chart that fits sits dead-center in the slide;
+   one that overflows collapses the margins to 0 and scrolls from the top. */
+.cpage-slide { flex: 0 0 100%; scroll-snap-align: start; scroll-snap-stop: always; overflow-y: auto; display: flex; flex-direction: column; }
 .cpage-foot { padding: 8px 16px; border-top: 1px solid var(--hairline); font-size: 11px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); text-align: center; flex-shrink: 0; }
 
 /* ---------- frame ---------- */
-.cframe { padding: 20px 16px 32px; max-width: 720px; margin: 0 auto; }
+.cframe { padding: 20px 16px 32px; max-width: 720px; width: 100%; margin: auto; }
 .cframe-head { display: flex; gap: 14px; align-items: baseline; }
 .cframe-no { font-family: var(--serif); font-size: 40px; color: var(--pebble); line-height: 1; }
 .cframe-title { font-family: var(--serif); font-weight: 400; font-size: 28px; line-height: 1.1; margin: 0; }
