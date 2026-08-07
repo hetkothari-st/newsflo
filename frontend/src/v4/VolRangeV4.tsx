@@ -28,26 +28,18 @@ export default function VolRangeV4({
   return (
     <div className="vr4">
       {move != null && (
-        <div className="vr4-cur">
-          {/* Pin sits exactly on the scale; the label anchors left/right
-              near the edges so it never clips out of the popup. */}
-          <span
-            className={`vr4-curv ${move < 0 ? 'down' : 'up'}`}
-            style={{
-              left: `${clamp(pos(move), 2, 98)}%`,
-              transform:
-                pos(move) > 65
-                  ? 'translateX(-90%)'
-                  : pos(move) < 35
-                    ? 'translateX(-10%)'
-                    : 'translateX(-50%)',
-            }}
-          >
-            this move {pct(move)}
-            {outside ? ' · outside the usual band' : ''}
-          </span>
-          <span className="vr4-pin" style={{ left: `${clamp(pos(move), 2, 98)}%` }} aria-hidden="true" />
-        </div>
+        <>
+          {/* Static caption row -- the value never chases the pin, so it
+              can never clip at the popup edge. The pin alone marks the
+              position on the scale below. */}
+          <div className="vr4-caption">
+            <span className={`vr4-curv ${move < 0 ? 'down' : 'up'}`}>this move {pct(move)}</span>
+            {outside && <span className="vr4-note">outside the usual band</span>}
+          </div>
+          <div className="vr4-cur">
+            <span className="vr4-pin" style={{ left: `${clamp(pos(move), 1, 99)}%` }} aria-hidden="true" />
+          </div>
+        </>
       )}
       <div className="vr4-track">
         <span

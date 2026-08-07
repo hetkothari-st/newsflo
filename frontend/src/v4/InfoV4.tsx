@@ -92,7 +92,9 @@ export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: (
                   )}
                 </p>
               )}
-              {classification.length > 0 && <p className="ddprose">{classification.join(' — ')}</p>}
+              {classification.length > 0 && (
+                <p className="ddprose ddclass">{classification.join(' — ')}</p>
+              )}
             </div>
           </div>
         )}

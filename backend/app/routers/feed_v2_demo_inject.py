@@ -19,6 +19,7 @@ import seed_feed_v2_demo as seed
 from app.companies.branding import logo_url
 from app.companies.fundamentals import fundamentals_payload
 from app.market.cap_tier import cap_tier_map
+from app.market.event_volatility import volatility_range_payload
 from app.models import Company, utcnow
 
 _VERDICTS = {
@@ -239,7 +240,15 @@ def demo_stock_context(db: Session, alert_id: int, ticker: str) -> dict | None:
                 peers.append(row)
     if own is None:
         return None
+    # REAL empirical range (subsystem D): (company, category) is genuine
+    # measured history whatever story frames it -- null when no samples,
+    # exactly like the real alert path. Never fabricated.
+    company = _company(db, ticker)
+    volatility = (
+        volatility_range_payload(db, company, detail["category"]) if company else None
+    )
     return {
+        "volatility_range": volatility,
         "is_exposure_only": own["is_exposure_only"],
         "excess_move_pct": own["excess_move_pct"],
         "raw_move_pct": detail["raw_move_pct"] if ticker == detail["peak_ticker"] else own["excess_move_pct"],

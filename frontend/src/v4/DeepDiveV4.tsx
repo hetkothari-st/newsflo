@@ -16,6 +16,15 @@ function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 }
 
+/* First two sentences of the sourced description -- the deep dive wants
+   a compact "who is this" line, not the full sourced paragraph (that
+   stays in the (i) glance). Attribution link still travels with it. */
+function shortDesc(text: string): string {
+  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)/g);
+  if (!sentences || sentences.length <= 2) return text;
+  return sentences.slice(0, 2).join('').trim();
+}
+
 export default function DeepDiveV4({
   ticker,
   alertId,
@@ -248,7 +257,7 @@ export default function DeepDiveV4({
                 <div className="lbody4">
                   {data.business_desc && (
                     <p className="ddprose">
-                      {data.business_desc}
+                      {shortDesc(data.business_desc)}
                       {data.business_desc_source_url && (
                         <>
                           {' '}
@@ -265,7 +274,7 @@ export default function DeepDiveV4({
                     </p>
                   )}
                   {data.fundamentals && (
-                    <p className="ddprose">
+                    <p className="ddprose ddclass">
                       {[
                         data.fundamentals.classification.sector,
                         data.fundamentals.classification.industry,

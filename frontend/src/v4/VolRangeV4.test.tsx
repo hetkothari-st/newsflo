@@ -23,11 +23,13 @@ describe('VolRangeV4', () => {
   it('pins the actual move inside the band without the outside note', () => {
     render(<VolRangeV4 range={range} move={1.9} />);
     expect(screen.getByText('this move +1.9%')).toBeInTheDocument();
+    expect(screen.queryByText('outside the usual band')).not.toBeInTheDocument();
   });
 
   it('stretches the scale and says so when the move is outside the band', () => {
     render(<VolRangeV4 range={range} move={-6.5} />);
-    expect(screen.getByText('this move −6.5% · outside the usual band')).toBeInTheDocument();
+    expect(screen.getByText('this move −6.5%')).toBeInTheDocument();
+    expect(screen.getByText('outside the usual band')).toBeInTheDocument();
   });
 
   it('labels pooled sector-level samples honestly', () => {

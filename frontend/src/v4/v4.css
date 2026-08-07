@@ -705,26 +705,42 @@ body:has(.nf4.dark) { background: #2a2722; }
    and the actual move pinned above -- replaces the deployed plain-text
    line. Numerals mono; red/green only on the move numeral. */
 .nf4 .vr4 { padding: 2px 4px 0; }
-.nf4 .vr4-cur { position: relative; height: 26px; }
+/* BSE classification path: quieter than the description prose */
+.nf4 .ddclass { color: var(--ash); font-size: 14px; letter-spacing: 0.01em; }
+
+.nf4 .vr4-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
 .nf4 .vr4-curv {
-  position: absolute;
-  top: 0;
   font-family: var(--mono, monospace);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: -0.12px;
   white-space: nowrap;
 }
 .nf4 .vr4-curv.up { color: var(--data-up); }
 .nf4 .vr4-curv.down { color: var(--data-down); }
+.nf4 .vr4-note {
+  font-size: 11px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ash);
+  white-space: nowrap;
+}
+.nf4 .vr4-cur { position: relative; height: 9px; }
 .nf4 .vr4-pin {
   position: absolute;
-  top: 16px;
+  top: 1px;
   transform: translateX(-50%);
   width: 0;
   height: 0;
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
-  border-top: 6px solid var(--ink);
+  border-top: 7px solid var(--ink);
 }
 .nf4 .vr4-track { position: relative; height: 10px; }
 .nf4 .vr4-track::before {
@@ -735,8 +751,8 @@ body:has(.nf4.dark) { background: #2a2722; }
   top: 4px;
   border-top: 1px solid var(--hairline);
 }
-.nf4 .vr4-band { position: absolute; top: 3px; height: 3px; background: var(--ink); }
-.nf4 .vr4-tick { position: absolute; top: -1px; width: 1px; height: 11px; background: var(--ink); }
+.nf4 .vr4-band { position: absolute; top: 2px; height: 5px; background: var(--ink); border-radius: 2px; }
+.nf4 .vr4-tick { position: absolute; top: -2px; width: 2px; height: 13px; background: var(--ink); }
 .nf4 .vr4-scale { position: relative; height: 26px; }
 .nf4 .vr4-scale span {
   position: absolute;
