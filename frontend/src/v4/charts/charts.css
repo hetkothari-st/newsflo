@@ -112,6 +112,8 @@
 .cn-newskicker { font-size: 8px; font-weight: 700; letter-spacing: 0.1em; fill: var(--paper); opacity: 0.65; }
 .cn-newshl { font-family: var(--serif); font-size: 12px; fill: var(--paper); }
 .cn-sector { fill: var(--paper); stroke: var(--ink); }
+.cn-fb { fill: none; stroke: var(--midstone); }
+.cn-fbtk { font-size: 8px; font-weight: 700; fill: var(--ash); }
 
 /* ---------- 2 ripple svg ---------- */
 .cripple { width: 100%; max-width: 420px; display: block; margin: 0 auto; }

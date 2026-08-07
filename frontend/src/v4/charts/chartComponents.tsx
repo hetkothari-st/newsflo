@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import type { AlertDetail } from '../../v3/api';
 import LogoV4 from '../LogoV4';
+import { useLogo } from '../logoResolve';
 import { flattenRows, intensityBand, type ChartMeta, type ChartRow } from './chartsData';
 
 function fmtPct(value: number): string {
@@ -49,20 +50,27 @@ function useMeasuredWidth(initial = 680): [React.RefObject<HTMLDivElement>, numb
 
 function SvgNode({ x, y, row }: { x: number; y: number; row: ChartRow }) {
   const cls = moveClass(row.excess_move_pct);
-  const hasLogo = Boolean(row.logo_url);
-  const tx = x + (hasLogo ? 34 : 10);
+  const resolved = useLogo(row.logo_url, row.ticker, row.name);
+  const tx = x + 34;
   return (
     <g>
       <rect className={`cn-box ${cls}`} x={x} y={y} width={NODE_W} height={NODE_H} rx={8} />
-      {hasLogo && (
+      {resolved ? (
         <image
-          href={row.logo_url!}
+          href={resolved}
           x={x + 8}
           y={y + (NODE_H - 20) / 2}
           width={20}
           height={20}
           preserveAspectRatio="xMidYMid meet"
         />
+      ) : (
+        <>
+          <rect className="cn-fb" x={x + 8} y={y + (NODE_H - 20) / 2} width={20} height={20} rx={6} />
+          <text className="cn-fbtk" x={x + 18} y={y + NODE_H / 2 + 3} textAnchor="middle">
+            {row.ticker.split('.')[0].slice(0, 2)}
+          </text>
+        </>
       )}
       <text className="cn-tk" x={tx} y={y + 16}>
         {row.ticker.split('.')[0].slice(0, 9)}
@@ -210,14 +218,52 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
   );
 }
 
-/* 2 -- Ripple graph: radial rings by reaction size (reference chart 2). */
+/* 2 -- Ripple graph: radial rings by reaction size (reference chart 2),
+   company logos inside the circles, ticker + move beneath. */
+function RippleNode({ row, x, y }: { row: ChartRow; x: number; y: number }) {
+  const cls = moveClass(row.excess_move_pct);
+  const resolved = useLogo(row.logo_url, row.ticker, row.name);
+  const clipId = `rip-${row.ticker.replace(/[^a-zA-Z0-9]/g, '')}`;
+  return (
+    <g>
+      <circle className={`cripple-node ${cls}`} cx={x} cy={y} r={19} />
+      {resolved ? (
+        <>
+          <clipPath id={clipId}>
+            <circle cx={x} cy={y} r={16} />
+          </clipPath>
+          <image
+            href={resolved}
+            x={x - 13}
+            y={y - 13}
+            width={26}
+            height={26}
+            preserveAspectRatio="xMidYMid meet"
+            clipPath={`url(#${clipId})`}
+          />
+        </>
+      ) : (
+        <text className="cripple-tk" x={x} y={y + 3} textAnchor="middle">
+          {row.ticker.split('.')[0].slice(0, 2)}
+        </text>
+      )}
+      <text className="cripple-tk" x={x} y={y + 31} textAnchor="middle">
+        {row.ticker.split('.')[0].slice(0, 7)}
+      </text>
+      <text className={`cripple-mv ${cls}`} x={x} y={y + 41} textAnchor="middle">
+        {fmtPct(row.excess_move_pct!)}
+      </text>
+    </g>
+  );
+}
+
 export function CRipple({ detail }: { detail: AlertDetail }) {
   const rows = flattenRows(detail)
     .filter((row) => row.excess_move_pct != null)
     .sort((a, b) => Math.abs(b.excess_move_pct!) - Math.abs(a.excess_move_pct!));
-  const size = 380;
+  const size = 430;
   const cx = size / 2;
-  const rings = [82, 128, 168];
+  const rings = [92, 142, 190];
   const third = Math.ceil(rows.length / 3) || 1;
   return (
     <svg className="cripple" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Ripple graph">
@@ -229,17 +275,10 @@ export function CRipple({ detail }: { detail: AlertDetail }) {
         const angle = (i / rows.length) * Math.PI * 2 - Math.PI / 2;
         const x = cx + ring * Math.cos(angle);
         const y = cx + ring * Math.sin(angle);
-        const cls = moveClass(row.excess_move_pct);
         return (
           <g key={row.ticker}>
             <line className="cripple-spoke" x1={cx} y1={cx} x2={x} y2={y} />
-            <circle className={`cripple-node ${cls}`} cx={x} cy={y} r={17} />
-            <text className="cripple-tk" x={x} y={y - 1} textAnchor="middle">
-              {row.ticker.split('.')[0].slice(0, 6)}
-            </text>
-            <text className={`cripple-mv ${cls}`} x={x} y={y + 9} textAnchor="middle">
-              {fmtPct(row.excess_move_pct!)}
-            </text>
+            <RippleNode row={row} x={x} y={y} />
           </g>
         );
       })}
@@ -522,8 +561,63 @@ export function CEconomicChain({ detail }: { detail: AlertDetail }) {
 }
 
 /* 9 -- Knowledge map: hub with real relationship counts; tapping a
-   category blooms its members beside it as a circle cluster (same
-   format), tap again to fold. */
+   category blooms its members beside it (logos inside company member
+   circles). Tap again to fold. */
+interface KnowMember {
+  label: string;
+  sub: string;
+  cls: string;
+  logoUrl?: string | null;
+  ticker?: string;
+  name?: string;
+}
+
+function KnowMemberNode({ m, x, y }: { m: KnowMember; x: number; y: number }) {
+  const resolved = useLogo(m.logoUrl, m.ticker ?? m.label, m.name);
+  const clipId = `know-${(m.ticker ?? m.label).replace(/[^a-zA-Z0-9]/g, '')}`;
+  const showLogo = Boolean(m.ticker) && Boolean(resolved);
+  return (
+    <g>
+      <circle className={`cknow-member ${m.cls}`} cx={x} cy={y} r={24} />
+      {showLogo ? (
+        <>
+          <clipPath id={clipId}>
+            <circle cx={x} cy={y - 5} r={11} />
+          </clipPath>
+          <image
+            href={resolved!}
+            x={x - 10}
+            y={y - 15}
+            width={20}
+            height={20}
+            preserveAspectRatio="xMidYMid meet"
+            clipPath={`url(#${clipId})`}
+          />
+          <text className="cknow-mlabel" x={x} y={y + 12} textAnchor="middle">
+            {m.label}
+          </text>
+          {m.sub && (
+            <text className={`cknow-msub ${m.cls}`} x={x} y={y + 20} textAnchor="middle">
+              {m.sub}
+            </text>
+          )}
+        </>
+      ) : (
+        <>
+          <text className="cknow-mlabel" x={x} y={y + (m.sub ? -1 : 3)} textAnchor="middle">
+            {m.label}
+          </text>
+          {m.sub && (
+            <text className={`cknow-msub ${m.cls}`} x={x} y={y + 10} textAnchor="middle">
+              {m.sub}
+            </text>
+          )}
+        </>
+      )}
+    </g>
+  );
+}
+
 export function CKnowledge({ detail }: { detail: AlertDetail }) {
   const [selected, setSelected] = useState<string | null>(null);
   const rows = flattenRows(detail);
@@ -531,12 +625,15 @@ export function CKnowledge({ detail }: { detail: AlertDetail }) {
   const losers = rows.filter((r) => r.direction === 'bearish' && r.excess_move_pct != null);
   const exposure = rows.filter((r) => r.excess_move_pct == null);
   const sectors = [...new Set(rows.map((r) => r.sector))];
-  const member = (row: ChartRow) => ({
+  const member = (row: ChartRow): KnowMember => ({
     label: row.ticker.split('.')[0].slice(0, 7),
     sub: row.excess_move_pct == null ? 'exp' : fmtPct(row.excess_move_pct),
     cls: moveClass(row.excess_move_pct),
+    logoUrl: row.logo_url,
+    ticker: row.ticker,
+    name: row.name,
   });
-  const sats = [
+  const sats: Array<{ label: string; members: KnowMember[] }> = [
     { label: 'Winners', members: winners.map(member) },
     { label: 'Losers', members: losers.map(member) },
     { label: 'Exposure', members: exposure.map(member) },
@@ -589,15 +686,7 @@ export function CKnowledge({ detail }: { detail: AlertDetail }) {
                   return (
                     <g key={m.label + j}>
                       <line className="cknow-spoke" x1={x} y1={y} x2={mx} y2={my} />
-                      <circle className={`cknow-member ${m.cls}`} cx={mx} cy={my} r={24} />
-                      <text className="cknow-mlabel" x={mx} y={my + (m.sub ? -1 : 3)} textAnchor="middle">
-                        {m.label}
-                      </text>
-                      {m.sub && (
-                        <text className={`cknow-msub ${m.cls}`} x={mx} y={my + 10} textAnchor="middle">
-                          {m.sub}
-                        </text>
-                      )}
+                      <KnowMemberNode m={m} x={mx} y={my} />
                     </g>
                   );
                 })}
