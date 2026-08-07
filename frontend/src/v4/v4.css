@@ -389,6 +389,8 @@ body:has(.nf4.dark) { background: #2a2722; }
   background: var(--ink);
   border-color: var(--ink);
 }
+/* Charts entry -- same ghost-button language, pushed to the row's end. */
+.nf4 .bandtabs .chartsbtn { margin-left: auto; color: var(--ink); border-color: var(--ink); }
 @media (min-width: 900px) { .nf4 .bandtabs { padding-left: 32px; padding-right: 32px; } }
 
 /* Cap-tier rail (user decision): floating on the right edge like Insta

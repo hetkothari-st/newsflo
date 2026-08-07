@@ -7,6 +7,7 @@
    the v3 shell; filter semantics (cap_tiers story match + row-level
    narrowing) are identical. */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getAlertDetail,
   getCalendarCounts,
@@ -150,6 +151,7 @@ function RippleBand({
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
   onOpenInfo: (info: InfoV4Data) => void;
 }) {
+  const navigate = useNavigate();
   // Two swipeable sub-sections: Affected companies / Timeline.
   const [tab, setTab] = useState<'companies' | 'timeline'>('companies');
   const visibleRows = (layer: RippleLayer) =>
@@ -222,6 +224,16 @@ function RippleBand({
           }}
         >
           Timeline
+        </button>
+        <button
+          className="chartsbtn"
+          onClick={(event) => {
+            event.stopPropagation();
+            navigate(`/v4/charts/${alert.id}`);
+          }}
+          aria-label="Impact charts"
+        >
+          Charts ↗
         </button>
       </div>
       {/* Floating cap-tier rail (user decision: reachable like Insta
@@ -353,6 +365,7 @@ function RippleBand({
 
 export default function FeedV4({
   date,
+  initialOpenId = null,
   onEdition,
   onOpenDeepDive,
   onOpenInfo,
@@ -361,6 +374,9 @@ export default function FeedV4({
   // null = today (with latest-edition fallback); YYYY-MM-DD = a back
   // issue picked from the archive, fetched exactly, no fallback.
   date: string | null;
+  // Reopen this story's ripple as soon as the feed loads (the charts
+  // page's way back). Applied once.
+  initialOpenId?: number | null;
   onEdition: (edition: { count: number; date: string | null }) => void;
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
   onOpenInfo: (info: InfoV4Data) => void;
@@ -375,6 +391,7 @@ export default function FeedV4({
   const [details, setDetails] = useState<Record<number, AlertDetail>>({});
   // Cap filter shared by every story's ripple -- persists across stories.
   const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
+  const initialApplied = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -429,6 +446,13 @@ export default function FeedV4({
     setOpenId(null);
     onBandOpenChange(false);
   }, [onBandOpenChange]);
+
+  // One-shot: returning from the charts page reopens that story's ripple.
+  useEffect(() => {
+    if (initialApplied.current || initialOpenId === null || alerts === null) return;
+    initialApplied.current = true;
+    if (alerts.some((alert) => alert.id === initialOpenId)) toggle(initialOpenId);
+  }, [alerts, initialOpenId, toggle]);
 
   // Leftward drag on a card -> its affected-companies page (user
   // decision; the "See who's affected" tap remains for mouse users).

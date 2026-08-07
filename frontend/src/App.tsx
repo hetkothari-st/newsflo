@@ -10,6 +10,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Shell from './v3/Shell';
 import ShellV4 from './v4/ShellV4';
+import ChartsV4Page from './v4/charts/ChartsV4Page';
 import ChartDeckPage from './features/visualize/deck/ChartDeckPage';
 import { useAuth } from './lib/auth';
 
@@ -42,6 +43,16 @@ export default function App() {
   // serves the v3 shell at / -- this swap ships only to the preview.
   if (location.pathname === '/' || location.pathname === '/v4') {
     return <ShellV4 />;
+  }
+
+  // v4 charts page (from-scratch broadsheet charts; the older deck at
+  // /alerts/:id/charts is untouched).
+  if (/^\/v4\/charts\/-?\d+$/.test(location.pathname)) {
+    return (
+      <Routes>
+        <Route path="/v4/charts/:id" element={<ChartsV4Page />} />
+      </Routes>
+    );
   }
 
   // The card-feed shell owns the whole viewport (its own top bar + bottom

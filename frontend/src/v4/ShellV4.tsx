@@ -59,6 +59,14 @@ export default function ShellV4() {
   const [info, setInfo] = useState<InfoV4Data | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
+  // Returning from the charts page: /v4?ripple=<id> reopens that story's
+  // ripple section directly. Read once at mount.
+  const [initialRipple] = useState<number | null>(() => {
+    const raw = new URLSearchParams(window.location.search).get('ripple');
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  });
   // LAYOUT NEVER CHANGES on scroll (the previous height-animating header
   // shifted all content mid-gesture and fought the snap -- reported as
   // glitching between cards 1 and 2). The big masthead + ticker are
@@ -180,6 +188,7 @@ export default function ShellV4() {
       {view === 'feed' && (
         <FeedV4
           date={feedDate}
+          initialOpenId={initialRipple}
           onEdition={setEdition}
           onOpenDeepDive={openDeepDive}
           onOpenInfo={setInfo}
