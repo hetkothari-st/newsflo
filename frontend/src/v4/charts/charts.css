@@ -100,6 +100,8 @@
    horizontal panning, nothing cut. */
 .csvg-wrap { width: 100%; }
 .csvg { display: block; margin: 0 auto; max-width: 100%; }
+/* every company element opens the (i) glance */
+.cpage-strip [data-ticker] { cursor: pointer; }
 .csvg-edge { fill: none; stroke: var(--midstone); stroke-width: 1; }
 .csvg-band { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--ash); }
 .cn-box { fill: var(--paper); stroke: var(--hairline); }

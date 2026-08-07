@@ -9,7 +9,8 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getAlertDetail, type AlertDetail } from '../../v3/api';
 import { useAuth } from '../../lib/auth';
-import { availableCharts } from './chartsData';
+import InfoV4, { type InfoV4Data } from '../InfoV4';
+import { availableCharts, flattenRows } from './chartsData';
 import {
   CEconomicChain,
   ChartFrame,
@@ -52,6 +53,30 @@ export default function ChartsV4Page() {
   }, [alertId, token]);
 
   const backToRipple = () => navigate(`/v4?ripple=${alertId}`);
+
+  // The (i) glance popup, opened by tapping any company node/row in any
+  // chart. One delegated handler: every company element in the charts
+  // carries data-ticker; the row's own detail-payload fields feed the
+  // same InfoV4 the ripple section uses.
+  const [info, setInfo] = useState<InfoV4Data | null>(null);
+  const handleStripClick = (event: React.MouseEvent) => {
+    if (detail === null) return;
+    const hit = (event.target as Element).closest('[data-ticker]');
+    if (hit === null) return;
+    const ticker = hit.getAttribute('data-ticker');
+    const row = flattenRows(detail).find((r) => r.ticker === ticker);
+    if (!row) return;
+    setInfo({
+      name: row.name,
+      ticker: row.ticker,
+      sector: row.sector,
+      logoUrl: row.logo_url,
+      fundamentals: row.fundamentals,
+      businessDesc: row.business_desc,
+      businessDescSourceUrl: row.business_desc_source_url,
+      volatilityRange: row.volatility_range,
+    });
+  };
 
   const handleScroll = () => {
     const strip = stripRef.current;
@@ -118,6 +143,7 @@ export default function ChartsV4Page() {
             className="cpage-strip"
             ref={stripRef}
             onScroll={handleScroll}
+            onClick={handleStripClick}
             onTouchStart={(event) => {
               touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
             }}
@@ -144,6 +170,7 @@ export default function ChartsV4Page() {
           <footer className="cpage-foot">← swipe between charts · swipe right past 01 for the ripple</footer>
         </>
       )}
+      {info !== null && <InfoV4 info={info} onClose={() => setInfo(null)} />}
     </div>
   );
 }

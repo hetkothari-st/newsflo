@@ -53,7 +53,7 @@ function SvgNode({ x, y, row }: { x: number; y: number; row: ChartRow }) {
   const resolved = useLogo(row.logo_url, row.ticker, row.name);
   const tx = x + 34;
   return (
-    <g>
+    <g data-ticker={row.ticker}>
       <rect className={`cn-box ${cls}`} x={x} y={y} width={NODE_W} height={NODE_H} rx={8} />
       {resolved ? (
         <image
@@ -245,7 +245,7 @@ function RippleNode({ row, x, y, relation }: { row: ChartRow; x: number; y: numb
   const clipId = `rip-${row.ticker.replace(/[^a-zA-Z0-9]/g, '')}`;
   const rel = relationLabel(relation);
   return (
-    <g>
+    <g data-ticker={row.ticker}>
       {rel && (
         <text className="cripple-rel" x={x} y={y - 30} textAnchor="middle">
           {rel}
@@ -411,7 +411,7 @@ export function CLevels({ detail }: { detail: AlertDetail }) {
           </div>
           <div className="clevel-grid">
             {levelRows.map((row) => (
-              <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+              <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker} data-ticker={row.ticker}>
                 <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                 <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
                 <span className="cnode-nm">{row.name}</span>
@@ -451,7 +451,7 @@ export function CIntensity({ detail }: { detail: AlertDetail }) {
                 <span>{band} intensity</span>
               </div>
               {bandRows.map((row) => (
-                <div className="cint-row" key={row.ticker}>
+                <div className="cint-row" key={row.ticker} data-ticker={row.ticker}>
                   <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                   <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
                   <span className="cnode-nm">{row.name}</span>
@@ -484,7 +484,7 @@ export function CSplit({ detail }: { detail: AlertDetail }) {
   const neutral = rows.filter((row) => row.excess_move_pct == null);
   const col = (list: ChartRow[]) =>
     list.map((row) => (
-      <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+      <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker} data-ticker={row.ticker}>
         <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
         <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
         <span className="cnode-nm">{row.name}</span>
@@ -550,7 +550,7 @@ export function CSectors({ detail }: { detail: AlertDetail }) {
             </div>
             <div className="cstree-list">
               {list.map((row) => (
-                <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+                <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker} data-ticker={row.ticker}>
                   <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                   <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
                   <span className="cnode-nm">{row.name}</span>
@@ -675,7 +675,7 @@ function KnowMemberNode({ m, x, y }: { m: KnowMember; x: number; y: number }) {
   const clipId = `know-${(m.ticker ?? m.label).replace(/[^a-zA-Z0-9]/g, '')}`;
   const showLogo = Boolean(m.ticker) && Boolean(resolved);
   return (
-    <g>
+    <g data-ticker={m.ticker || undefined}>
       <circle className={`cknow-member ${m.cls}`} cx={x} cy={y} r={24} />
       {showLogo ? (
         <>
