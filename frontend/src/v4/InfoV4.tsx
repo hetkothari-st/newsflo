@@ -8,6 +8,7 @@
 import type { Fundamentals } from '../lib/api';
 import type { VolatilityRangeData } from '../components/VolatilityRange';
 import LogoV4 from './LogoV4';
+import VolRangeV4 from './VolRangeV4';
 
 export interface InfoV4Data {
   name: string;
@@ -28,8 +29,6 @@ const RATIO_LABELS: Array<{ key: 'pe' | 'pb' | 'roe' | 'opm' | 'npm' | 'eps'; la
   { key: 'npm', label: 'NPM' },
   { key: 'eps', label: 'EPS' },
 ];
-
-const pct = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`;
 
 export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: () => void }) {
   const classification = info.fundamentals
@@ -116,14 +115,7 @@ export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: (
               <span>Typical on this news type</span>
             </div>
             <div className="lbody4">
-              <p className="ddprose">
-                {pct(range.min_excess_move_pct)} … {pct(range.max_excess_move_pct)} · median{' '}
-                {pct(range.median_excess_move_pct)}{' '}
-                <span className="ddrangen">
-                  ({range.level === 'SECTOR' ? 'sector-level, ' : ''}
-                  {range.n_events} events)
-                </span>
-              </p>
+              <VolRangeV4 range={range} />
             </div>
           </div>
         )}

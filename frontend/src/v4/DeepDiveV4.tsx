@@ -6,9 +6,10 @@
    Scrim click closes; clicks inside the panel don't. */
 import { useEffect, useState } from 'react';
 import { getStockDeepDive, type StockDeepDive } from '../v3/api';
-import { isLowDelivery, isThinTrading } from '../v3/format';
+import { componentLabel, isLowDelivery, isThinTrading } from '../v3/format';
 import type { InfoV4Data } from './InfoV4';
 import LogoV4 from './LogoV4';
+import VolRangeV4 from './VolRangeV4';
 import { useAuth } from '../lib/auth';
 
 function fmtPct(value: number): string {
@@ -125,6 +126,20 @@ export default function DeepDiveV4({
               </div>
             )}
 
+            {data.volatility_range && (
+              <div className="layer4">
+                <div className="lhead4">
+                  <span className="li4" aria-hidden="true">
+                    ◆
+                  </span>
+                  <span>Typical on this news type</span>
+                </div>
+                <div className="lbody4">
+                  <VolRangeV4 range={data.volatility_range} move={data.excess_move_pct} />
+                </div>
+              </div>
+            )}
+
             {data.intensity !== null && data.intensity.components.length > 0 && (
               <div className="layer4">
                 <div className="lhead4">
@@ -132,17 +147,20 @@ export default function DeepDiveV4({
                     ◆
                   </span>
                   <span>
-                    {data.intensity.band} intensity {data.intensity.score} — how the score is built
+                    {data.intensity.band} intensity {data.intensity.score} — how the score is built ·{' '}
+                    {data.intensity.components.length} signals
                   </span>
                 </div>
                 <div className="lbody4">
                   {data.intensity.components.map((component) => (
                     <div className="comp4" key={component.label}>
-                      <span className="cl">{component.label}</span>
+                      <span className="cl">{componentLabel(component)}</span>
                       <span className="cbar">
                         <i style={{ width: `${Math.min(100, Math.max(0, component.score))}%` }} />
                       </span>
-                      <span className="cv">{Math.round(component.contribution)}</span>
+                      <span className="cv">
+                        {component.score} × {component.weight.toFixed(2).replace(/^0/, '')}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -215,25 +233,49 @@ export default function DeepDiveV4({
               </div>
             )}
 
-            {data.fundamentals && (
+            {/* Sourced description first (companies DB, CC BY-SA link
+                travels with the text); the official classification is the
+                deployed version's no-description fallback -- never any
+                invented filler. */}
+            {(data.fundamentals || data.business_desc) && (
               <div className="layer4">
                 <div className="lhead4">
                   <span className="li4" aria-hidden="true">
                     ◆
                   </span>
-                  <span>What they do — {data.fundamentals.source}</span>
+                  <span>What they do{data.fundamentals ? ` — ${data.fundamentals.source}` : ''}</span>
                 </div>
                 <div className="lbody4">
-                  <p className="ddprose">
-                    {[
-                      data.fundamentals.classification.sector,
-                      data.fundamentals.classification.industry,
-                      data.fundamentals.classification.group,
-                      data.fundamentals.classification.sub_group,
-                    ]
-                      .filter(Boolean)
-                      .join(' — ')}
-                  </p>
+                  {data.business_desc && (
+                    <p className="ddprose">
+                      {data.business_desc}
+                      {data.business_desc_source_url && (
+                        <>
+                          {' '}
+                          <a
+                            className="ddsource"
+                            href={data.business_desc_source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            source
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  )}
+                  {data.fundamentals && (
+                    <p className="ddprose">
+                      {[
+                        data.fundamentals.classification.sector,
+                        data.fundamentals.classification.industry,
+                        data.fundamentals.classification.group,
+                        data.fundamentals.classification.sub_group,
+                      ]
+                        .filter(Boolean)
+                        .join(' — ')}
+                    </p>
+                  )}
                 </div>
               </div>
             )}

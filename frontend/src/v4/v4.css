@@ -698,7 +698,66 @@ body:has(.nf4.dark) { background: #2a2722; }
 .nf4 .comp4 .cl { font-size: 12px; letter-spacing: -0.12px; text-transform: uppercase; min-width: 11ch; color: var(--ash); }
 .nf4 .comp4 .cbar { flex: 1; height: 8px; background: var(--hairline); border-radius: var(--radius); overflow: hidden; }
 .nf4 .comp4 .cbar i { display: block; height: 100%; background: var(--ink); }
-.nf4 .comp4 .cv { font-family: var(--serif); font-size: 16px; }
+.nf4 .comp4 .cv { font-family: var(--serif); font-size: 16px; white-space: nowrap; }
+
+/* ---- volatility range: editorial rule (VolRangeV4) ----
+   Hairline scale, solid ink band for the typical min..max, median tick,
+   and the actual move pinned above -- replaces the deployed plain-text
+   line. Numerals mono; red/green only on the move numeral. */
+.nf4 .vr4 { padding: 2px 4px 0; }
+.nf4 .vr4-cur { position: relative; height: 26px; }
+.nf4 .vr4-curm {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.nf4 .vr4-curv {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  letter-spacing: -0.12px;
+  white-space: nowrap;
+}
+.nf4 .vr4-curv.up { color: var(--data-up); }
+.nf4 .vr4-curv.down { color: var(--data-down); }
+.nf4 .vr4-pin {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid var(--ink);
+}
+.nf4 .vr4-track { position: relative; height: 10px; }
+.nf4 .vr4-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  border-top: 1px solid var(--hairline);
+}
+.nf4 .vr4-band { position: absolute; top: 3px; height: 3px; background: var(--ink); }
+.nf4 .vr4-tick { position: absolute; top: -1px; width: 1px; height: 11px; background: var(--ink); }
+.nf4 .vr4-scale { position: relative; height: 26px; }
+.nf4 .vr4-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: var(--ash);
+  white-space: nowrap;
+  top: 2px;
+}
+.nf4 .vr4-scale .med { top: 13px; }
+.nf4 .vr4-n {
+  font-size: 11px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ash);
+  margin: 2px 0 0;
+}
 .nf4 .warnbox4 {
   font-family: var(--serif);
   font-size: 16px;
