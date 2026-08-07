@@ -201,6 +201,9 @@ export default function DeepDiveV4({
                             sector: peer.sector,
                             logoUrl: peer.logo_url,
                             fundamentals: peer.fundamentals,
+                            businessDesc: peer.business_desc,
+                            businessDescSourceUrl: peer.business_desc_source_url,
+                            volatilityRange: peer.volatility_range,
                           });
                         }}
                       >

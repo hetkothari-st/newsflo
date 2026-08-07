@@ -1,9 +1,12 @@
 /* v4 (i) glance popup -- the deployed shell's "glance and stay" info
-   sheet in the broadsheet language: a small paper popup with the
-   company's identity and its official BSE classification + ratios.
+   sheet in the broadsheet language, at full parity with it: the sourced
+   business description (with attribution), the official BSE
+   classification + key ratios, and the empirical volatility range.
    Deliberately separate from the deep dive (row tap = go deep, (i) =
-   glance), exactly like the deployed version. */
+   glance). A company with none of these renders no body section at all
+   -- omit, never invent. */
 import type { Fundamentals } from '../lib/api';
+import type { VolatilityRangeData } from '../components/VolatilityRange';
 import LogoV4 from './LogoV4';
 
 export interface InfoV4Data {
@@ -12,6 +15,9 @@ export interface InfoV4Data {
   sector: string;
   logoUrl: string | null;
   fundamentals?: Fundamentals | null;
+  businessDesc?: string | null;
+  businessDescSourceUrl?: string | null;
+  volatilityRange?: VolatilityRangeData | null;
 }
 
 const RATIO_LABELS: Array<{ key: 'pe' | 'pb' | 'roe' | 'opm' | 'npm' | 'eps'; label: string }> = [
@@ -22,6 +28,8 @@ const RATIO_LABELS: Array<{ key: 'pe' | 'pb' | 'roe' | 'opm' | 'npm' | 'eps'; la
   { key: 'npm', label: 'NPM' },
   { key: 'eps', label: 'EPS' },
 ];
+
+const pct = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`;
 
 export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: () => void }) {
   const classification = info.fundamentals
@@ -34,6 +42,8 @@ export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: (
     : [];
   const ratios = info.fundamentals?.ratios ?? {};
   const shownRatios = RATIO_LABELS.filter(({ key }) => ratios[key] != null);
+  const hasWhat = classification.length > 0 || Boolean(info.businessDesc);
+  const range = info.volatilityRange;
 
   return (
     <div className="ddscrim" onClick={onClose}>
@@ -56,9 +66,7 @@ export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: (
             </div>
           </div>
         </div>
-        {/* No fallback text: an unclassified company renders no section at
-            all -- same omit-rather-than-invent rule as the deployed sheet. */}
-        {classification.length > 0 && (
+        {hasWhat && (
           <div className="layer4">
             <div className="lhead4">
               <span className="li4" aria-hidden="true">
@@ -67,7 +75,25 @@ export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: (
               <span>What they do{info.fundamentals?.source ? ` — ${info.fundamentals.source}` : ''}</span>
             </div>
             <div className="lbody4">
-              <p className="ddprose">{classification.join(' — ')}</p>
+              {info.businessDesc && (
+                <p className="ddprose">
+                  {info.businessDesc}
+                  {info.businessDescSourceUrl && (
+                    <>
+                      {' '}
+                      <a
+                        className="ddsource"
+                        href={info.businessDescSourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        source
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
+              {classification.length > 0 && <p className="ddprose">{classification.join(' — ')}</p>}
             </div>
           </div>
         )}
@@ -79,6 +105,26 @@ export default function InfoV4({ info, onClose }: { info: InfoV4Data; onClose: (
                 <b>{ratios[key]!.toFixed(1)}</b>
               </span>
             ))}
+          </div>
+        )}
+        {range && (
+          <div className="layer4">
+            <div className="lhead4">
+              <span className="li4" aria-hidden="true">
+                ◆
+              </span>
+              <span>Typical on this news type</span>
+            </div>
+            <div className="lbody4">
+              <p className="ddprose">
+                {pct(range.min_excess_move_pct)} … {pct(range.max_excess_move_pct)} · median{' '}
+                {pct(range.median_excess_move_pct)}{' '}
+                <span className="ddrangen">
+                  ({range.level === 'SECTOR' ? 'sector-level, ' : ''}
+                  {range.n_events} events)
+                </span>
+              </p>
+            </div>
           </div>
         )}
         <p className="dddisc">Glance view. Tap the row for the full impact breakdown.</p>

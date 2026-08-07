@@ -324,6 +324,9 @@ function RippleBand({
                       sector: row.sector,
                       logoUrl: row.logo_url,
                       fundamentals: row.fundamentals,
+                      businessDesc: row.business_desc,
+                      businessDescSourceUrl: row.business_desc_source_url,
+                      volatilityRange: row.volatility_range,
                     });
                   }}
                 >
