@@ -14,6 +14,7 @@ Usage:
 Idempotent by URL: refuses to insert a duplicate Article row.
 """
 import argparse
+import os
 import re
 import sys
 from datetime import timezone
@@ -52,6 +53,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("--source", default=None, help="source label; defaults to the domain")
+    parser.add_argument(
+        "--key-env",
+        default=None,
+        help="env var holding an alternate Groq API key (e.g. the separate-"
+        "quota translation key) when the main analysis bucket is exhausted",
+    )
     args = parser.parse_args()
 
     session = SessionLocal()
@@ -86,7 +93,13 @@ def main() -> None:
             session.commit()
             print(f"Article id={article.id} inserted: {title[:90]}")
 
-        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+        if args.key_env:
+            alt_key = os.environ.get(args.key_env, "")
+            if not alt_key:
+                raise SystemExit(f"env var {args.key_env} is empty")
+            client = build_client([alt_key], settings.gemini_api_key or None)
+        else:
+            client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
         created = process_new_articles(session, client, throttle_seconds=2.5)
         print(f"Pipeline done: {created} alert(s) created.")
 
