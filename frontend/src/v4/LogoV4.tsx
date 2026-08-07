@@ -20,16 +20,29 @@ const GROUP_DOMAINS: Record<string, string> = {
   vedanta: 'vedantalimited.com',
 };
 
+/* Ticker-keyed domains for companies whose own ISIN/ticker has no
+   Brandfetch art but whose website does. Verified real marks -- extend
+   only after checking the domain actually serves one. */
+const TICKER_DOMAINS: Record<string, string> = {
+  'HPCL.NS': 'hindustanpetroleum.com',
+  'OILINDIA.NS': 'oil-india.com',
+};
+
 function initials(ticker: string): string {
   return ticker.split('.')[0].slice(0, 2).toUpperCase();
 }
 
-function candidateUrls(logoUrl: string | null | undefined, name: string | undefined): string[] {
+function candidateUrls(
+  logoUrl: string | null | undefined,
+  name: string | undefined,
+  ticker: string,
+): string[] {
   const urls = logoUrl ? [logoUrl] : [];
-  const groupKey = name?.split(/\s+/)[0]?.toLowerCase() ?? '';
-  const domain = GROUP_DOMAINS[groupKey];
   const clientId = logoUrl?.match(/[?&]c=([^&]+)/)?.[1];
-  if (domain && clientId) urls.push(`https://cdn.brandfetch.io/${domain}?c=${clientId}`);
+  const groupKey = name?.split(/\s+/)[0]?.toLowerCase() ?? '';
+  for (const domain of [TICKER_DOMAINS[ticker], GROUP_DOMAINS[groupKey]]) {
+    if (domain && clientId) urls.push(`https://cdn.brandfetch.io/${domain}?c=${clientId}`);
+  }
   return urls;
 }
 
@@ -65,7 +78,7 @@ export default function LogoV4({
 }) {
   const [candidateIndex, setCandidateIndex] = useState(0);
   useEffect(() => setCandidateIndex(0), [logoUrl, ticker]);
-  const candidates = candidateUrls(logoUrl, name);
+  const candidates = candidateUrls(logoUrl, name, ticker);
   const src = candidates[candidateIndex];
   const showFallback = src === undefined;
   return (

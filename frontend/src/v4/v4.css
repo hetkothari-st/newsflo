@@ -72,8 +72,6 @@ body:has(.nf4.dark) { background: #2a2722; }
   --data-down-onink: #b3362a;
 }
 .nf4.dark .ddscrim { background: rgba(0, 0, 0, 0.6); }
-.nf4.dark .clg { background: #fff; border: 1px solid var(--hairline); border-radius: var(--radius); }
-.nf4.dark .clg.clg-fb { background: transparent; }
 
 /* Theme toggle in the nav row. */
 .nf4 .navrow { position: relative; }
@@ -406,10 +404,11 @@ body:has(.nf4.dark) { background: #2a2722; }
   flex-direction: column;
   gap: 8px;
 }
+.nf4 .caprail { gap: 6px; }
 .nf4 .caprail button {
-  width: 38px;
-  height: 38px;
-  font-size: 12px;
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: -0.12px;
   color: var(--ash);

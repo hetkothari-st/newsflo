@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 import seed_feed_v2_demo as seed
 from app.companies.branding import logo_url
+from app.companies.fundamentals import fundamentals_payload
 from app.market.cap_tier import cap_tier_map
 from app.models import Company, utcnow
 
@@ -66,6 +67,7 @@ def _layer_row(db: Session, ticker: str, name: str, sector: str, direction: str,
                excess: float | None, cap_tiers: dict[str, str], *,
                delivery_pct: float | None = 60.0, liquidity: str | None = "HIGH",
                exposure_only: bool = False, why: str | None = None) -> dict:
+    company = _company(db, ticker)
     return {
         "ticker": ticker,
         "name": name,
@@ -75,7 +77,9 @@ def _layer_row(db: Session, ticker: str, name: str, sector: str, direction: str,
         "delivery_pct": delivery_pct,
         "business_desc": seed.BUSINESS_DESCRIPTIONS.get(ticker),
         "business_desc_source_url": None,
-        "fundamentals": None,
+        # Real BSE classification/ratios from the shared DB's actual
+        # Company row -- the (i) glance shows genuine "what they do".
+        "fundamentals": fundamentals_payload(company) if company else None,
         "volatility_range": None,
         "direction": direction,
         "excess_move_pct": excess,
