@@ -15,12 +15,13 @@ pick up wherever the previous extraction pass stopped.
 """
 import argparse
 import json
+import time
 from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
 from app import config
-from app.analysis.claude_client import build_client
+from app.companies.supply_links.llm import build_extraction_client
 from app.companies.market_caps import alert_referenced_tickers
 from app.companies.supply_links import extract, fetchers, loader, snapshot
 from app.config import settings
@@ -29,6 +30,15 @@ from app.models import Company, Listing
 
 _THROTTLE_SECONDS = 1.0
 _PROGRESS_EVERY = 25
+# Groq burst-limits back-to-back LLM calls (measured 2026-08-07: each drain
+# run extracted ~25-35 docs rapid-fire, then 5 consecutive 429s tripped the
+# breaker -- while single calls minutes later succeeded). The budget-free
+# runbook therefore paces calls and COOLS DOWN on a breaker trip instead of
+# exiting; only repeated cooldowns with zero successes between them mean the
+# day's quota is genuinely gone.
+_LLM_PAUSE_SECONDS = 3.0        # after every LLM call, success or not
+_COOLDOWN_SECONDS = 600         # after a breaker trip: wait, reset, continue
+_MAX_FRUITLESS_COOLDOWNS = 3    # consecutive cooldowns with 0 extractions -> stop
 # BSE's own cap is ~30 days (fetchers.py); 28 keeps every window comfortably
 # under it, same margin fetchers._MAX_WINDOW_DAYS uses for a single call.
 _WINDOW_DAYS = 28
@@ -127,18 +137,25 @@ def drain_extraction_queue(session: Session) -> None:
     readable meta whose scrip genuinely matches no company is a different,
     correct case: unmatched_scrip + mark_extracted, unchanged.
 
-    Circuit breaker: same discipline as
-    app.scheduler._run_supply_links_refresh -- SUPPLY_LLM_FAILURE_BREAKER
-    CONSECUTIVE llm_failed docs stops the drain for this run (a
-    rate-limited/quota-exhausted provider will not un-limit mid-run), reset
-    by any successful extraction.
+    Circuit breaker: unlike the scheduler's budgeted job (which hard-stops --
+    it gets another run tomorrow), this budget-free drain COOLS DOWN on
+    SUPPLY_LLM_FAILURE_BREAKER consecutive llm_failed docs and continues:
+    Groq burst-limits rapid-fire calls while the same call succeeds minutes
+    later (measured 2026-08-07). Only _MAX_FRUITLESS_COOLDOWNS consecutive
+    cooldowns with zero successes between them -- the signature of a genuinely
+    exhausted day quota -- end the run.
     """
-    client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+    # Dedicated rotating Gemini pool when configured (see
+    # app.companies.supply_links.llm) -- keeps the analysis pipeline's Groq
+    # quota untouched while the backlog drains.
+    client = build_extraction_client()
     counts = {
         "extracted": 0, "unmatched_scrip": 0, "unextractable": 0,
         "llm_failed": 0, "errored": 0,
     }
     consecutive_llm_failures = 0
+    fruitless_cooldowns = 0
+    extracted_since_cooldown = 0
 
     docs = snapshot.pending_docs(snapshot.DEFAULT_ROOT)
     total = len(docs)
@@ -189,17 +206,33 @@ def drain_extraction_queue(session: Session) -> None:
                             counts["unextractable"] += 1
                         else:
                             profile = extract.extract_profile(client, company.name, text)
+                            time.sleep(_LLM_PAUSE_SECONDS)
                             if profile is None:
                                 # Left pending -- retried the next time this drain runs.
                                 counts["llm_failed"] += 1
                                 consecutive_llm_failures += 1
                                 if consecutive_llm_failures >= config.SUPPLY_LLM_FAILURE_BREAKER:
-                                    breaker_tripped = True
-                                    print(
-                                        f"  [{i}/{total}] circuit breaker tripped after "
-                                        f"{consecutive_llm_failures} consecutive llm_failed "
-                                        "docs -- stopping drain, remaining docs stay pending."
-                                    )
+                                    if extracted_since_cooldown == 0:
+                                        fruitless_cooldowns += 1
+                                    else:
+                                        fruitless_cooldowns = 1
+                                    extracted_since_cooldown = 0
+                                    consecutive_llm_failures = 0
+                                    if fruitless_cooldowns >= _MAX_FRUITLESS_COOLDOWNS:
+                                        breaker_tripped = True
+                                        print(
+                                            f"  [{i}/{total}] {fruitless_cooldowns} consecutive "
+                                            "cooldowns with zero extractions -- day quota "
+                                            "genuinely exhausted, stopping drain."
+                                        )
+                                    else:
+                                        print(
+                                            f"  [{i}/{total}] burst-limited "
+                                            f"({config.SUPPLY_LLM_FAILURE_BREAKER} consecutive "
+                                            f"llm_failed) -- cooling down "
+                                            f"{_COOLDOWN_SECONDS}s, then continuing."
+                                        )
+                                        time.sleep(_COOLDOWN_SECONDS)
                             else:
                                 as_of = snapshot.parse_news_date(meta.get("news_date"))
                                 if as_of is None:
@@ -220,6 +253,7 @@ def drain_extraction_queue(session: Session) -> None:
                                     snapshot.mark_extracted(pdf_path)
                                     counts["extracted"] += 1
                                     consecutive_llm_failures = 0
+                                    extracted_since_cooldown += 1
         except Exception as exc:
             session.rollback()
             counts["errored"] += 1

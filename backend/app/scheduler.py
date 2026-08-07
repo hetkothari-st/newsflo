@@ -448,7 +448,11 @@ def _run_supply_links_refresh() -> None:
 
     session = SessionLocal()
     try:
-        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+        # Dedicated rotating Gemini pool when configured -- the backlog must
+        # not compete with the analysis pipeline's shared Groq quota (see
+        # app.companies.supply_links.llm).
+        from app.companies.supply_links.llm import build_extraction_client
+        client = build_extraction_client()
 
         for pdf_path in supply_snapshot.pending_docs(supply_snapshot.DEFAULT_ROOT):
             if time.monotonic() >= deadline:

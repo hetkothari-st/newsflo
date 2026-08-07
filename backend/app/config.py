@@ -23,6 +23,17 @@ class Settings(BaseSettings):
         keys = [self.groq_api_key] if self.groq_api_key else []
         keys += [k.strip() for k in self.groq_api_keys_extra.split(",") if k.strip()]
         return keys
+
+    # Comma-separated Gemini keys DEDICATED to supply-link extraction, so
+    # the rating-rationale backlog drains without touching the analysis
+    # pipeline's shared Groq quota (user-provisioned 2026-08-07; see
+    # app.companies.supply_links.llm for the rotation semantics). Empty by
+    # default -- extraction then rides the shared chain, as before.
+    supply_gemini_api_keys_raw: str = os.environ.get("SUPPLY_GEMINI_API_KEYS", "")
+
+    @property
+    def supply_gemini_api_keys(self) -> list[str]:
+        return [k.strip() for k in self.supply_gemini_api_keys_raw.split(",") if k.strip()]
     # A Groq key from a SEPARATE account (its own, independent per-minute
     # token quota bucket) -- unlike groq_api_keys_extra above, which are
     # same-org keys that share ONE bucket with groq_api_key and only help
