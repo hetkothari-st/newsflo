@@ -770,7 +770,11 @@ body:has(.nf4.dark) { background: #2a2722; }
 @media (max-width: 600px) {
   .nf4 .ticker { font-size: 10px; gap: 8px; padding: 5px 8px; }
   .nf4 .ticker span:nth-child(3) { display: none; }
-  .nf4 .navrow { padding: 12px 8px; }
+  .nf4 .navrow { padding: 12px 8px; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+  /* Phone: the theme toggle joins the row as a real flex item instead of
+     floating over the last nav label; the nav flexes and scrolls beside it. */
+  .nf4 .navlinks { flex: 1; min-width: 0; }
+  .nf4 .themebtn { position: static; transform: none; flex-shrink: 0; }
   /* Six section labels must hold one line -- tighter type and, as the
      last resort on very narrow screens, sideways scroll instead of a
      wrapped second row. */
