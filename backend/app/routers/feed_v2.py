@@ -287,6 +287,18 @@ def get_feed_v2_alert(
             if translated_why and row["why"]:
                 row["why"] = translated_why
     result["timeline"] = get_timeline_entries(db, alert)
+    # Derivation edges for the ripple network chart: who each company was
+    # derived FROM in the cascade (AlertCompany.parent_company_id) --
+    # direct companies hang off the news event itself. Real analysed
+    # relationships only, never invented pairings.
+    result["edges"] = [
+        {
+            "source": ac.parent_company.ticker if ac.parent_company_id else None,
+            "target": ac.company.ticker,
+            "relation": ac.impact_level or "direct",
+        }
+        for ac in alert.companies
+    ]
     # -- COMMENTED OUT (superseded by result["layers"] above -- the old flat
     # ripple + impact_companies split served the pre-swipe-card UI):
     # result["ripple"] = compute_ripple_companies(

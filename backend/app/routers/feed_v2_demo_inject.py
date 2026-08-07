@@ -207,7 +207,17 @@ def demo_alert_detail(db: Session, alert_id: int) -> dict | None:
         ]
         timeline = []
 
-    return {**base, "layers": layers, "timeline": timeline}
+    # Derivation edges for the ripple network chart. The seed defines
+    # explicit relations: every companion derives from the peak company
+    # (its `relation` field says how); the peak itself is direct.
+    if ticker == "RELIANCE.NS":
+        edges = [{"source": None, "target": ticker, "relation": "direct"}] + [
+            {"source": ticker, "target": c[0], "relation": c[3]} for c in seed.RIPPLE_COMPANIONS
+        ]
+    else:
+        edges = [{"source": None, "target": ticker, "relation": "direct"}]
+
+    return {**base, "layers": layers, "timeline": timeline, "edges": edges}
 
 
 def demo_stock_context(db: Session, alert_id: int, ticker: str) -> dict | None:

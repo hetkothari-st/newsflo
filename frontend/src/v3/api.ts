@@ -111,6 +111,9 @@ export interface TimelineEntry {
 export interface AlertDetail extends FeedAlert {
   layers: RippleLayer[];
   timeline: TimelineEntry[];
+  // Cascade derivation edges (v4 ripple network chart): who each company
+  // was derived from; source null = hangs off the news event directly.
+  edges?: Array<{ source: string | null; target: string; relation: string }>;
 }
 
 export interface StockDeepDive {

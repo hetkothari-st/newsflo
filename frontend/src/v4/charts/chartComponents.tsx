@@ -222,12 +222,32 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
    event on top, then each impact tier as a row of circle nodes fanning
    out beneath the one above. Tiers are the story's real layers; edges
    fan from the tier above (never invented company-to-company pairs). */
-function RippleNode({ row, x, y }: { row: ChartRow; x: number; y: number }) {
+// How this company was derived from its parent, in plain words.
+const RELATION_LABELS: Record<string, string> = {
+  direct: '',
+  indirect_l1: 'derived',
+  indirect_l2: '2nd order',
+};
+
+function relationLabel(relation: string | undefined): string {
+  if (!relation) return '';
+  const known = RELATION_LABELS[relation];
+  if (known !== undefined) return known;
+  return relation.replace(/_/g, ' ');
+}
+
+function RippleNode({ row, x, y, relation }: { row: ChartRow; x: number; y: number; relation?: string }) {
   const cls = moveClass(row.excess_move_pct);
   const resolved = useLogo(row.logo_url, row.ticker, row.name);
   const clipId = `rip-${row.ticker.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const rel = relationLabel(relation);
   return (
     <g>
+      {rel && (
+        <text className="cripple-rel" x={x} y={y - 30} textAnchor="middle">
+          {rel}
+        </text>
+      )}
       <circle className={`cripple-node ${cls}`} cx={x} cy={y} r={22} />
       {resolved ? (
         <>
@@ -264,32 +284,51 @@ export function CRipple({ detail }: { detail: AlertDetail }) {
   const W = Math.max(300, Math.min(measured, 680));
   const CELL = 88;
   const perRow = Math.max(3, Math.floor(W / CELL));
-  const ROW_H = 108;
+  const ROW_H = 112;
   const newsY = 34;
-  let y = newsY + 66;
-  const tiers: Array<{ positions: Array<{ row: ChartRow; x: number; y: number }>; bottom: number }> = [];
-  detail.layers.forEach((layer, layerIndex) => {
-    const rows = layer.rows.map((row) => ({
-      ...row,
-      layerIndex,
-      layerTitle: layer.title,
-      relationship: layer.relationship,
-      icon: layer.icon,
-    }));
-    const lines = chunk(rows, perRow);
-    const positions: Array<{ row: ChartRow; x: number; y: number }> = [];
+
+  const rowByTicker = new Map(flattenRows(detail).map((row) => [row.ticker, row]));
+  // Depth from the news event via the cascade's parent edges.
+  const edges = (detail.edges ?? []).filter((edge) => rowByTicker.has(edge.target));
+  const parentOf = new Map(edges.map((edge) => [edge.target, edge.source]));
+  const relationOf = new Map(edges.map((edge) => [edge.target, edge.relation]));
+  const depthOf = (ticker: string, guard = 0): number => {
+    const parent = parentOf.get(ticker);
+    if (!parent || guard > 6 || !rowByTicker.has(parent)) return 1;
+    return depthOf(parent, guard + 1) + 1;
+  };
+  const tickers = edges.length > 0 ? edges.map((edge) => edge.target) : [...rowByTicker.keys()];
+  const byDepth = new Map<number, ChartRow[]>();
+  for (const ticker of tickers) {
+    const depth = edges.length > 0 ? depthOf(ticker) : rowByTicker.get(ticker)!.layerIndex + 1;
+    if (!byDepth.has(depth)) byDepth.set(depth, []);
+    byDepth.get(depth)!.push(rowByTicker.get(ticker)!);
+  }
+  const depths = [...byDepth.keys()].sort((a, b) => a - b);
+
+  // Position nodes depth by depth; children sit near their parent's x.
+  const pos = new Map<string, { x: number; y: number }>();
+  let y = newsY + 70;
+  for (const depth of depths) {
+    const rows = byDepth.get(depth)!;
+    const ordered = [...rows].sort((a, b) => {
+      const pa = pos.get(parentOf.get(a.ticker) ?? '')?.x ?? W / 2;
+      const pb = pos.get(parentOf.get(b.ticker) ?? '')?.x ?? W / 2;
+      return pa - pb;
+    });
+    const lines = chunk(ordered, perRow);
     for (const line of lines) {
       const lineWidth = line.length * CELL;
       let x = (W - lineWidth) / 2 + CELL / 2;
       for (const row of line) {
-        positions.push({ row, x, y });
+        pos.set(row.ticker, { x, y });
         x += CELL;
       }
       y += ROW_H;
     }
-    tiers.push({ positions, bottom: y - ROW_H + 50 });
-  });
-  const height = y - ROW_H + 78;
+  }
+  const height = y - ROW_H + 82;
+
   return (
     <div className="csvg-wrap" ref={wrapRef}>
       <svg
@@ -300,34 +339,37 @@ export function CRipple({ detail }: { detail: AlertDetail }) {
         role="img"
         aria-label="Ripple graph"
       >
-        {tiers.map((tier, index) => {
-          const sourceY = index === 0 ? newsY + 26 : tiers[index - 1].bottom;
-          const sourceX = W / 2;
+        {tickers.map((ticker) => {
+          const p = pos.get(ticker);
+          if (!p) return null;
+          const parent = parentOf.get(ticker);
+          const from = parent ? pos.get(parent) : undefined;
+          const fx = from?.x ?? W / 2;
+          const fy = from ? from.y + 22 : newsY + 26;
           return (
-            <g key={index}>
-              {tier.positions.map((p) => (
-                <path
-                  key={`e-${p.row.ticker}`}
-                  className="cripple-spoke"
-                  d={`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + 24}, ${p.x} ${p.y - 44}, ${p.x} ${p.y - 22}`}
-                />
-              ))}
-            </g>
+            <path
+              key={`e-${ticker}`}
+              className="cripple-spoke"
+              d={`M ${fx} ${fy} C ${fx} ${fy + 26}, ${p.x} ${p.y - 46}, ${p.x} ${p.y - 22}`}
+            />
           );
         })}
-        {tiers.map((tier, index) => (
-          <g key={`n-${index}`}>
-            {tier.positions.map((p) => (
-              <RippleNode key={p.row.ticker} row={p.row} x={p.x} y={p.y} />
-            ))}
-          </g>
-        ))}
+        {tickers.map((ticker) => {
+          const p = pos.get(ticker);
+          if (!p) return null;
+          return (
+            <RippleNode
+              key={ticker}
+              row={rowByTicker.get(ticker)!}
+              x={p.x}
+              y={p.y}
+              relation={relationOf.get(ticker)}
+            />
+          );
+        })}
         <circle className="cripple-hub" cx={W / 2} cy={newsY} r={26} />
         <text className="cripple-hublabel" x={W / 2} y={newsY + 3} textAnchor="middle">
           NEWS
-        </text>
-        <text className="cripple-newslabel" x={W / 2} y={newsY + 44} textAnchor="middle">
-          News event
         </text>
       </svg>
     </div>

@@ -129,6 +129,8 @@
 .cripple-mv { font-size: 8px; fill: var(--ash); }
 .cripple-mv.up { fill: var(--data-up); }
 .cripple-mv.down { fill: var(--data-down); }
+/* derivation word on the parent edge (competitor / supplier / ...) */
+.cripple-rel { font-size: 7.5px; font-style: italic; letter-spacing: 0.04em; fill: var(--ash); }
 
 /* ---------- 3 levels (full-width bands, reference chart 4) --
    editorial sections: a ruled uppercase header per level, ledger rows
