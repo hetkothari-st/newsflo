@@ -4,7 +4,7 @@
    node, edge and count derives from the story's real detail payload:
    edges connect the news event to the companies it demonstrably
    affected (never invented pairings between companies). */
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import type { AlertDetail } from '../../v3/api';
 import { flattenRows, intensityBand, type ChartMeta, type ChartRow } from './chartsData';
 
@@ -30,6 +30,22 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+/* Measured wrapper width -- charts lay themselves out to the space they
+   actually have instead of a fixed canvas that gets cut on phones. */
+function useMeasuredWidth(initial = 680): [React.RefObject<HTMLDivElement>, number] {
+  const ref = useRef<HTMLDivElement>(null!);
+  const [width, setWidth] = useState(initial);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    setWidth(el.clientWidth);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width];
+}
+
 function SvgNode({ x, y, row }: { x: number; y: number; row: ChartRow }) {
   const cls = moveClass(row.excess_move_pct);
   return (
@@ -50,9 +66,9 @@ function SvgNode({ x, y, row }: { x: number; y: number; row: ChartRow }) {
 
 /* Lay out rows of nodes centered in a width; returns node positions and
    the total height consumed. */
-function layoutRows(rows: ChartRow[], width: number, startY: number) {
+function layoutRows(rows: ChartRow[], width: number, startY: number, perRow = PER_ROW) {
   const positions: Array<{ row: ChartRow; x: number; y: number }> = [];
-  const lines = chunk(rows, PER_ROW);
+  const lines = chunk(rows, perRow);
   let y = startY;
   for (const line of lines) {
     const lineWidth = line.length * NODE_W + (line.length - 1) * H_GAP;
@@ -107,10 +123,13 @@ export function ChartFrame({
 }
 
 /* 1 -- Impact tree: news root, tier bands, fan edges news->tier1 and
-   tier-hub->next tier (reference chart 1). */
+   tier-hub->next tier (reference chart 1). Lays out to the measured
+   width -- nodes wrap into more rows on phones, nothing is cut. */
 export function CImpactTree({ detail }: { detail: AlertDetail }) {
-  const W = 680;
-  const newsW = 300;
+  const [wrapRef, measured] = useMeasuredWidth();
+  const W = Math.max(300, Math.min(measured, 680));
+  const perRow = Math.max(2, Math.floor((W + H_GAP) / (NODE_W + H_GAP)));
+  const newsW = Math.min(300, W - 16);
   const newsH = 46;
   const newsX = (W - newsW) / 2;
   let y = newsH + 40;
@@ -129,14 +148,14 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
       icon: layer.icon,
     }));
     const labelY = y;
-    const { positions } = layoutRows(rows, W, y + 18);
+    const { positions } = layoutRows(rows, W, y + 18, perRow);
     const bottom = Math.max(...positions.map((p) => p.y)) + NODE_H;
     tiers.push({ label: layer.title, positions, top: labelY, bottom });
     y = bottom + 44;
   });
   const height = y - 10;
   return (
-    <div className="csvg-wrap">
+    <div className="csvg-wrap" ref={wrapRef}>
       <svg
         className="csvg"
         width={W}
@@ -145,35 +164,35 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
         role="img"
         aria-label="Impact tree"
       >
-      <rect className="cn-news" x={newsX} y={4} width={newsW} height={newsH} rx={8} />
-      <text className="cn-newskicker" x={newsX + 12} y={20}>
-        NEWS
-      </text>
-      <text className="cn-newshl" x={newsX + 12} y={36}>
-        {detail.article.title.slice(0, 40)}
-      </text>
-      {tiers.map((tier, index) => {
-        const sourceY = index === 0 ? 4 + newsH : tiers[index - 1].bottom;
-        const sourceX = W / 2;
-        return (
-          <g key={tier.label + index}>
-            <text className="csvg-band" x={0} y={tier.top + 8}>
-              {tier.label.toUpperCase().slice(0, 52)}
-            </text>
-            {tier.positions.map((p) => (
-              <path
-                key={`e-${p.row.ticker}`}
-                className="csvg-edge"
-                d={`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + 22}, ${p.x + NODE_W / 2} ${p.y - 20}, ${p.x + NODE_W / 2} ${p.y}`}
-              />
-            ))}
-            {tier.positions.map((p) => (
-              <SvgNode key={p.row.ticker} x={p.x} y={p.y} row={p.row} />
-            ))}
-          </g>
-        );
-      })}
-    </svg>
+        <rect className="cn-news" x={newsX} y={4} width={newsW} height={newsH} rx={8} />
+        <text className="cn-newskicker" x={newsX + 12} y={20}>
+          NEWS
+        </text>
+        <text className="cn-newshl" x={newsX + 12} y={36}>
+          {detail.article.title.slice(0, Math.floor(newsW / 7))}
+        </text>
+        {tiers.map((tier, index) => {
+          const sourceY = index === 0 ? 4 + newsH : tiers[index - 1].bottom;
+          const sourceX = W / 2;
+          return (
+            <g key={tier.label + index}>
+              <text className="csvg-band" x={0} y={tier.top + 8}>
+                {tier.label.toUpperCase().slice(0, Math.floor(W / 13))}
+              </text>
+              {tier.positions.map((p) => (
+                <path
+                  key={`e-${p.row.ticker}`}
+                  className="csvg-edge"
+                  d={`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + 22}, ${p.x + NODE_W / 2} ${p.y - 20}, ${p.x + NODE_W / 2} ${p.y}`}
+                />
+              ))}
+              {tier.positions.map((p) => (
+                <SvgNode key={p.row.ticker} x={p.x} y={p.y} row={p.row} />
+              ))}
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -343,8 +362,9 @@ export function CSplit({ detail }: { detail: AlertDetail }) {
   );
 }
 
-/* 6 -- Sector tree: news root, sector nodes, company columns with edges
-   (reference chart 8). */
+/* 6 -- Sector tree (reference chart 8), vertical tabular form: news
+   root, then each sector as a header card with its companies on a
+   connector spine beneath -- fits any width, nothing cut. */
 export function CSectors({ detail }: { detail: AlertDetail }) {
   const rows = flattenRows(detail);
   const bySector = new Map<string, ChartRow[]>();
@@ -352,71 +372,43 @@ export function CSectors({ detail }: { detail: AlertDetail }) {
     if (!bySector.has(row.sector)) bySector.set(row.sector, []);
     bySector.get(row.sector)!.push(row);
   }
-  const sectors = [...bySector.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 5);
-  const colW = NODE_W + 18;
-  const W = Math.max(560, sectors.length * colW);
-  const newsW = 300;
-  const newsX = (W - newsW) / 2;
-  const sectorY = 96;
-  const rowStep = NODE_H + 12;
-  const maxLen = Math.max(...sectors.map(([, list]) => list.length));
-  const height = sectorY + 40 + 26 + maxLen * rowStep + 4;
+  const sectors = [...bySector.entries()].sort((a, b) => b[1].length - a[1].length);
   return (
-    <div className="csvg-wrap">
-      <svg
-        className="csvg"
-        width={W}
-        height={height}
-        viewBox={`0 0 ${W} ${height}`}
-        role="img"
-        aria-label="Sector tree"
-      >
-      <rect className="cn-news" x={newsX} y={4} width={newsW} height={46} rx={8} />
-      <text className="cn-newskicker" x={newsX + 12} y={20}>
-        NEWS
-      </text>
-      <text className="cn-newshl" x={newsX + 12} y={36}>
-        {detail.article.title.slice(0, 40)}
-      </text>
-      {sectors.map(([sector, list], index) => {
-        const colX = index * colW + (colW - NODE_W) / 2 + (W - sectors.length * colW) / 2;
-        const cxCol = colX + NODE_W / 2;
+    <div className="cstree">
+      <div className="cchain-node news">
+        <span className="cframe-newskicker">News</span>
+        <span>{detail.article.title}</span>
+      </div>
+      {sectors.map(([sector, list]) => {
         const measured = list.filter((row) => row.excess_move_pct != null);
         const avg =
           measured.length > 0
             ? measured.reduce((sum, row) => sum + row.excess_move_pct!, 0) / measured.length
             : null;
         return (
-          <g key={sector}>
-            <path
-              className="csvg-edge"
-              d={`M ${W / 2} 50 C ${W / 2} 72, ${cxCol} ${sectorY - 18}, ${cxCol} ${sectorY}`}
-            />
-            <rect className="cn-sector" x={colX} y={sectorY} width={NODE_W} height={40} rx={8} />
-            <text className="cn-tk" x={colX + 10} y={sectorY + 17}>
-              {sector.replace(/_/g, ' ').toUpperCase().slice(0, 14)}
-            </text>
-            {avg != null && (
-              <text className={`cn-mv ${moveClass(avg)}`} x={colX + 10} y={sectorY + 32}>
-                {fmtPct(avg)}
-              </text>
-            )}
-            {list.length > 0 && (
-              <line
-                className="csvg-edge"
-                x1={cxCol}
-                y1={sectorY + 40}
-                x2={cxCol}
-                y2={sectorY + 40 + 26 + (list.length - 1) * rowStep}
-              />
-            )}
-            {list.map((row, rowIndex) => (
-              <SvgNode key={row.ticker} x={colX} y={sectorY + 40 + 26 + rowIndex * rowStep} row={row} />
-            ))}
-          </g>
+          <div className="cstree-sector" key={sector}>
+            <span className="cstree-drop" aria-hidden="true" />
+            <div className="cstree-shead">
+              <span>{sector.replace(/_/g, ' ')}</span>
+              <span className="cstree-scount">
+                {list.length} {list.length === 1 ? 'company' : 'companies'}
+              </span>
+              {avg != null && <span className={`cnode-mv big ${moveClass(avg)}`}>{fmtPct(avg)}</span>}
+            </div>
+            <div className="cstree-list">
+              {list.map((row) => (
+                <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+                  <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
+                  <span className="cnode-nm">{row.name}</span>
+                  <span className={`cnode-mv ${moveClass(row.excess_move_pct)}`}>
+                    {row.excess_move_pct == null ? 'exposure' : fmtPct(row.excess_move_pct)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         );
       })}
-    </svg>
     </div>
   );
 }
