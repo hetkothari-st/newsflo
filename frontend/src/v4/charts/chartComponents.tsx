@@ -218,26 +218,28 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
   );
 }
 
-/* 2 -- Ripple graph: radial rings by reaction size (reference chart 2),
-   company logos inside the circles, ticker + move beneath. */
+/* 2 -- Ripple graph (reference chart 2): a tiered NETWORK -- the news
+   event on top, then each impact tier as a row of circle nodes fanning
+   out beneath the one above. Tiers are the story's real layers; edges
+   fan from the tier above (never invented company-to-company pairs). */
 function RippleNode({ row, x, y }: { row: ChartRow; x: number; y: number }) {
   const cls = moveClass(row.excess_move_pct);
   const resolved = useLogo(row.logo_url, row.ticker, row.name);
   const clipId = `rip-${row.ticker.replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <g>
-      <circle className={`cripple-node ${cls}`} cx={x} cy={y} r={19} />
+      <circle className={`cripple-node ${cls}`} cx={x} cy={y} r={22} />
       {resolved ? (
         <>
           <clipPath id={clipId}>
-            <circle cx={x} cy={y} r={16} />
+            <circle cx={x} cy={y} r={18} />
           </clipPath>
           <image
             href={resolved}
-            x={x - 13}
-            y={y - 13}
-            width={26}
-            height={26}
+            x={x - 15}
+            y={y - 15}
+            width={30}
+            height={30}
             preserveAspectRatio="xMidYMid meet"
             clipPath={`url(#${clipId})`}
           />
@@ -247,46 +249,88 @@ function RippleNode({ row, x, y }: { row: ChartRow; x: number; y: number }) {
           {row.ticker.split('.')[0].slice(0, 2)}
         </text>
       )}
-      <text className="cripple-tk" x={x} y={y + 31} textAnchor="middle">
-        {row.ticker.split('.')[0].slice(0, 7)}
+      <text className="cripple-tk" x={x} y={y + 35} textAnchor="middle">
+        {row.ticker.split('.')[0].slice(0, 8)}
       </text>
-      <text className={`cripple-mv ${cls}`} x={x} y={y + 41} textAnchor="middle">
-        {fmtPct(row.excess_move_pct!)}
+      <text className={`cripple-mv ${cls}`} x={x} y={y + 46} textAnchor="middle">
+        {row.excess_move_pct == null ? 'exposure' : fmtPct(row.excess_move_pct)}
       </text>
     </g>
   );
 }
 
 export function CRipple({ detail }: { detail: AlertDetail }) {
-  const rows = flattenRows(detail)
-    .filter((row) => row.excess_move_pct != null)
-    .sort((a, b) => Math.abs(b.excess_move_pct!) - Math.abs(a.excess_move_pct!));
-  const size = 430;
-  const cx = size / 2;
-  const rings = [92, 142, 190];
-  const third = Math.ceil(rows.length / 3) || 1;
+  const [wrapRef, measured] = useMeasuredWidth();
+  const W = Math.max(300, Math.min(measured, 680));
+  const CELL = 88;
+  const perRow = Math.max(3, Math.floor(W / CELL));
+  const ROW_H = 108;
+  const newsY = 34;
+  let y = newsY + 66;
+  const tiers: Array<{ positions: Array<{ row: ChartRow; x: number; y: number }>; bottom: number }> = [];
+  detail.layers.forEach((layer, layerIndex) => {
+    const rows = layer.rows.map((row) => ({
+      ...row,
+      layerIndex,
+      layerTitle: layer.title,
+      relationship: layer.relationship,
+      icon: layer.icon,
+    }));
+    const lines = chunk(rows, perRow);
+    const positions: Array<{ row: ChartRow; x: number; y: number }> = [];
+    for (const line of lines) {
+      const lineWidth = line.length * CELL;
+      let x = (W - lineWidth) / 2 + CELL / 2;
+      for (const row of line) {
+        positions.push({ row, x, y });
+        x += CELL;
+      }
+      y += ROW_H;
+    }
+    tiers.push({ positions, bottom: y - ROW_H + 50 });
+  });
+  const height = y - ROW_H + 78;
   return (
-    <svg className="cripple" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Ripple graph">
-      {rings.map((r) => (
-        <circle key={r} className="cripple-ring" cx={cx} cy={cx} r={r} />
-      ))}
-      {rows.map((row, i) => {
-        const ring = rings[Math.min(Math.floor(i / third), 2)];
-        const angle = (i / rows.length) * Math.PI * 2 - Math.PI / 2;
-        const x = cx + ring * Math.cos(angle);
-        const y = cx + ring * Math.sin(angle);
-        return (
-          <g key={row.ticker}>
-            <line className="cripple-spoke" x1={cx} y1={cx} x2={x} y2={y} />
-            <RippleNode row={row} x={x} y={y} />
+    <div className="csvg-wrap" ref={wrapRef}>
+      <svg
+        className="cripple"
+        width={W}
+        height={height}
+        viewBox={`0 0 ${W} ${height}`}
+        role="img"
+        aria-label="Ripple graph"
+      >
+        {tiers.map((tier, index) => {
+          const sourceY = index === 0 ? newsY + 26 : tiers[index - 1].bottom;
+          const sourceX = W / 2;
+          return (
+            <g key={index}>
+              {tier.positions.map((p) => (
+                <path
+                  key={`e-${p.row.ticker}`}
+                  className="cripple-spoke"
+                  d={`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + 24}, ${p.x} ${p.y - 44}, ${p.x} ${p.y - 22}`}
+                />
+              ))}
+            </g>
+          );
+        })}
+        {tiers.map((tier, index) => (
+          <g key={`n-${index}`}>
+            {tier.positions.map((p) => (
+              <RippleNode key={p.row.ticker} row={p.row} x={p.x} y={p.y} />
+            ))}
           </g>
-        );
-      })}
-      <circle className="cripple-hub" cx={cx} cy={cx} r={32} />
-      <text className="cripple-hublabel" x={cx} y={cx + 3} textAnchor="middle">
-        NEWS
-      </text>
-    </svg>
+        ))}
+        <circle className="cripple-hub" cx={W / 2} cy={newsY} r={26} />
+        <text className="cripple-hublabel" x={W / 2} y={newsY + 3} textAnchor="middle">
+          NEWS
+        </text>
+        <text className="cripple-newslabel" x={W / 2} y={newsY + 44} textAnchor="middle">
+          News event
+        </text>
+      </svg>
+    </div>
   );
 }
 

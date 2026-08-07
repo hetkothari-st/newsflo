@@ -118,7 +118,8 @@
 /* ---------- 2 ripple svg ---------- */
 .cripple { width: 100%; max-width: 420px; display: block; margin: 0 auto; }
 .cripple-ring { fill: none; stroke: var(--hairline); }
-.cripple-spoke { stroke: var(--hairline); }
+.cripple-spoke { stroke: var(--midstone); fill: none; }
+.cripple-newslabel { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--ash); }
 .cripple-hub { fill: var(--ink); }
 .cripple-hublabel { fill: var(--paper); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
 .cripple-node { fill: var(--paper); stroke: var(--pebble); }
