@@ -6,6 +6,7 @@
    affected (never invented pairings between companies). */
 import { useEffect, useRef, useState, type JSX } from 'react';
 import type { AlertDetail } from '../../v3/api';
+import LogoV4 from '../LogoV4';
 import { flattenRows, intensityBand, type ChartMeta, type ChartRow } from './chartsData';
 
 function fmtPct(value: number): string {
@@ -48,16 +49,28 @@ function useMeasuredWidth(initial = 680): [React.RefObject<HTMLDivElement>, numb
 
 function SvgNode({ x, y, row }: { x: number; y: number; row: ChartRow }) {
   const cls = moveClass(row.excess_move_pct);
+  const hasLogo = Boolean(row.logo_url);
+  const tx = x + (hasLogo ? 34 : 10);
   return (
     <g>
       <rect className={`cn-box ${cls}`} x={x} y={y} width={NODE_W} height={NODE_H} rx={8} />
-      <text className="cn-tk" x={x + 10} y={y + 16}>
-        {row.ticker.split('.')[0].slice(0, 10)}
+      {hasLogo && (
+        <image
+          href={row.logo_url!}
+          x={x + 8}
+          y={y + (NODE_H - 20) / 2}
+          width={20}
+          height={20}
+          preserveAspectRatio="xMidYMid meet"
+        />
+      )}
+      <text className="cn-tk" x={tx} y={y + 16}>
+        {row.ticker.split('.')[0].slice(0, 9)}
       </text>
-      <text className="cn-nm" x={x + 10} y={y + 29}>
-        {row.name.slice(0, 20)}
+      <text className="cn-nm" x={tx} y={y + 29}>
+        {row.name.slice(0, 16)}
       </text>
-      <text className={`cn-mv ${cls}`} x={x + 10} y={y + 42}>
+      <text className={`cn-mv ${cls}`} x={tx} y={y + 42}>
         {row.excess_move_pct == null ? 'exposure' : fmtPct(row.excess_move_pct)}
       </text>
     </g>
@@ -177,7 +190,7 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
           return (
             <g key={tier.label + index}>
               <text className="csvg-band" x={0} y={tier.top + 8}>
-                {tier.label.toUpperCase().slice(0, Math.floor(W / 13))}
+                {tier.label.toUpperCase()}
               </text>
               {tier.positions.map((p) => (
                 <path
@@ -262,6 +275,7 @@ export function CLevels({ detail }: { detail: AlertDetail }) {
           <div className="clevel-grid">
             {levelRows.map((row) => (
               <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+                <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                 <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
                 <span className="cnode-nm">{row.name}</span>
                 <span className={`cnode-mv ${moveClass(row.excess_move_pct)}`}>
@@ -301,6 +315,7 @@ export function CIntensity({ detail }: { detail: AlertDetail }) {
               </div>
               {bandRows.map((row) => (
                 <div className="cint-row" key={row.ticker}>
+                  <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                   <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
                   <span className="cnode-nm">{row.name}</span>
                   <span className={`cnode-mv ${moveClass(row.excess_move_pct)}`}>
@@ -333,6 +348,7 @@ export function CSplit({ detail }: { detail: AlertDetail }) {
   const col = (list: ChartRow[]) =>
     list.map((row) => (
       <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+        <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
         <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
         <span className="cnode-nm">{row.name}</span>
         <span className={`cnode-mv ${moveClass(row.excess_move_pct)}`}>
@@ -398,6 +414,7 @@ export function CSectors({ detail }: { detail: AlertDetail }) {
             <div className="cstree-list">
               {list.map((row) => (
                 <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker}>
+                  <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                   <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
                   <span className="cnode-nm">{row.name}</span>
                   <span className={`cnode-mv ${moveClass(row.excess_move_pct)}`}>

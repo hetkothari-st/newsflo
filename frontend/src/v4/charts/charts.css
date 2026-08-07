@@ -65,29 +65,33 @@
 .cframe-legend .lg-down { background: var(--data-down); }
 .cframe-legend .lg-flat { background: var(--pebble); }
 
-/* ---------- shared node card ---------- */
+/* ---------- shared node row: a flat ledger line, broadsheet-style --
+   hairline separation, direction lives in the numeral only (no colored
+   bars, no pills, no tinted boxes). ---------- */
 .cnode {
   display: inline-flex;
   flex-direction: column;
   gap: 1px;
-  border: 1px solid var(--hairline);
-  border-left-width: 3px;
-  border-left-color: var(--pebble);
-  border-radius: 8px;
-  padding: 6px 10px;
+  padding: 6px 0;
   max-width: 150px;
-  background: var(--paper);
 }
-.cnode.up { border-left-color: var(--data-up); }
-.cnode.down { border-left-color: var(--data-down); }
-.cnode.wide { max-width: none; width: 100%; flex-direction: row; align-items: baseline; gap: 10px; }
+.cnode.wide {
+  max-width: none;
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
 .cnode-tk { font-size: 11px; font-weight: 700; letter-spacing: -0.11px; }
-.cnode-nm { font-family: var(--serif); font-size: 13px; color: var(--sepia); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cnode-nm { font-family: var(--serif); font-size: 15px; color: var(--sepia); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cnode.wide .cnode-nm { flex: 1; min-width: 0; }
-.cnode-mv { font-family: var(--serif); font-size: 13px; }
+.cnode-mv { font-family: var(--serif); font-size: 15px; }
 .cnode-mv.up { color: var(--data-up); }
 .cnode-mv.down { color: var(--data-down); }
 .cnode-mv.flat { color: var(--ash); font-style: italic; }
+.cnode.wide .clg { width: 40px; height: 24px; }
 
 /* ---------- SVG tree charts (impact tree, sector tree) ---------- */
 /* Charts lay themselves out to the measured wrapper width -- no
@@ -123,12 +127,13 @@
 .cripple-mv.up { fill: var(--data-up); }
 .cripple-mv.down { fill: var(--data-down); }
 
-/* ---------- 3 levels (full-width bands, reference chart 4) ---------- */
-.clevels { display: flex; flex-direction: column; gap: 16px; }
-.clevel { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px; }
-.clevel-label { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ash); margin-bottom: 8px; border-bottom: 1px solid var(--ink); padding-bottom: 5px; }
+/* ---------- 3 levels (full-width bands, reference chart 4) --
+   editorial sections: a ruled uppercase header per level, ledger rows
+   beneath. No boxed panels. ---------- */
+.clevels { display: flex; flex-direction: column; gap: 28px; }
+.clevel-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); border-top: 1px solid var(--ink); padding-top: 6px; }
 .clevel-label em { font-style: normal; font-weight: 400; color: var(--pebble); }
-.clevel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.clevel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); column-gap: 24px; }
 
 /* ---------- 4 intensity (elbow list + right band axis) ---------- */
 .cintensity { display: flex; flex-direction: column; gap: 18px; }
@@ -143,16 +148,15 @@
 .cint-axis { display: flex; align-items: center; border-left: 1px solid var(--hairline); padding-left: 10px; min-width: 64px; }
 .cint-axis span { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pebble); line-height: 1.5; }
 
-/* ---------- 5 split ---------- */
-.csplit-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.csplit-col { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px; }
-.csplit-col.up { border-color: var(--data-up); }
-.csplit-col.down { border-color: var(--data-down); }
-.csplit-collabel { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ash); }
-.csplit-collabel.up { color: var(--data-up); }
-.csplit-collabel.down { color: var(--data-down); }
-.csplit-neutral { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px; }
-@media (max-width: 520px) { .csplit-cols { grid-template-columns: 1fr; } }
+/* ---------- 5 split -- two ruled editorial columns, no colored boxes;
+   the direction lives in the header word and the numerals. ---------- */
+.csplit-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.csplit-col { display: flex; flex-direction: column; min-width: 0; }
+.csplit-collabel { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); border-top: 1px solid var(--ink); padding-top: 6px; }
+.csplit-collabel.up { color: var(--data-up); border-top-color: var(--data-up); }
+.csplit-collabel.down { color: var(--data-down); border-top-color: var(--data-down); }
+.csplit-neutral { margin-top: 28px; display: flex; flex-direction: column; }
+@media (max-width: 520px) { .csplit-cols { grid-template-columns: 1fr; gap: 24px; } }
 
 /* ---------- 6 sector tree (vertical tabular) ---------- */
 .cstree { display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; }
@@ -161,20 +165,20 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius);
-  padding: 8px 12px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--hairline);
+  padding: 7px 0;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .cstree-scount { font-weight: 400; color: var(--pebble); font-size: 10px; flex: 1; }
-.cnode-mv.big { font-size: 17px; }
-.cstree-list { position: relative; margin-left: 24px; padding-left: 16px; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
-.cstree-list::before { content: ''; position: absolute; left: 0; top: 0; bottom: 22px; border-left: 1px solid var(--midstone); }
+.cnode-mv.big { font-size: 18px; }
+.cstree-list { position: relative; margin-left: 20px; padding-left: 16px; display: flex; flex-direction: column; }
+.cstree-list::before { content: ''; position: absolute; left: 0; top: 0; bottom: 20px; border-left: 1px solid var(--hairline); }
 .cstree-list .cnode { position: relative; }
-.cstree-list .cnode::before { content: ''; position: absolute; left: -16px; top: 50%; width: 14px; border-top: 1px solid var(--midstone); }
+.cstree-list .cnode::before { content: ''; position: absolute; left: -16px; top: 50%; width: 12px; border-top: 1px solid var(--hairline); }
 
 /* ---------- 7 timeline (spine + horizon cards, reference chart 7) ---------- */
 .ctl { display: flex; flex-direction: column; }
