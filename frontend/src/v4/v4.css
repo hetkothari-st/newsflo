@@ -705,8 +705,9 @@ body:has(.nf4.dark) { background: #2a2722; }
    and the actual move pinned above -- replaces the deployed plain-text
    line. Numerals mono; red/green only on the move numeral. */
 .nf4 .vr4 { padding: 2px 4px 0; }
-/* BSE classification path: quieter than the description prose */
-.nf4 .ddclass { color: var(--ash); font-size: 14px; letter-spacing: 0.01em; }
+/* BSE classification path: quieter and smaller than the description
+   prose (user: lighter grey, lower font) */
+.nf4 .ddclass { color: var(--ash); font-size: 12.5px; letter-spacing: 0.01em; }
 
 .nf4 .vr4-caption {
   display: flex;

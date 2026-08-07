@@ -16,6 +16,8 @@ const GROUP_DOMAINS: Record<string, string> = {
 const TICKER_DOMAINS: Record<string, string> = {
   'HPCL.NS': 'hindustanpetroleum.com',
   'OILINDIA.NS': 'oil-india.com',
+  'PRABHA.NS': 'prabhaenergy.com',
+  'ANTELOPUS.NS': 'antelopusenergy.com',
 };
 
 export function logoCandidates(
@@ -27,7 +29,13 @@ export function logoCandidates(
   const clientId = logoUrl?.match(/[?&]c=([^&]+)/)?.[1];
   const groupKey = name?.split(/\s+/)[0]?.toLowerCase() ?? '';
   for (const domain of [TICKER_DOMAINS[ticker], GROUP_DOMAINS[groupKey]]) {
-    if (domain && clientId) urls.push(`https://cdn.brandfetch.io/${domain}?c=${clientId}`);
+    if (!domain) continue;
+    if (clientId) urls.push(`https://cdn.brandfetch.io/${domain}?c=${clientId}`);
+    // Curated-domain last resort: the site's own favicon via Google's
+    // resolver -- real marks Brandfetch doesn't carry (verified for the
+    // domains listed above). Only for curated domains, so the generic
+    // gray-globe default can't leak in for arbitrary companies.
+    urls.push(`https://www.google.com/s2/favicons?domain=${domain}&sz=128`);
   }
   return urls;
 }
