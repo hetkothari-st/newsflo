@@ -223,9 +223,12 @@ export function CImpactTree({ detail }: { detail: AlertDetail }) {
    out beneath the one above. Tiers are the story's real layers; edges
    fan from the tier above (never invented company-to-company pairs). */
 // How this company was derived from its parent, in plain words.
+// Generic cascade levels stay unlabeled (the edge already says
+// "derived"; repeating the word on every node read as noise on mobile).
+// Specific relations (competitor / supplier / input cost...) still show.
 const RELATION_LABELS: Record<string, string> = {
   direct: '',
-  indirect_l1: 'derived',
+  indirect_l1: '',
   indirect_l2: '2nd order',
 };
 
@@ -346,11 +349,20 @@ export function CRipple({ detail }: { detail: AlertDetail }) {
           const from = parent ? pos.get(parent) : undefined;
           const fx = from?.x ?? W / 2;
           const fy = from ? from.y + 22 : newsY + 26;
+          // Orthogonal elbow: drop from the parent, run along a bus line
+          // in the gap above the child's row, drop into the child. No
+          // diagonal sweeps across the grid (they read as a hairball on
+          // mobile); node fills mask pass-throughs, org-chart style.
+          const busY = p.y - 40;
           return (
             <path
               key={`e-${ticker}`}
               className="cripple-spoke"
-              d={`M ${fx} ${fy} C ${fx} ${fy + 26}, ${p.x} ${p.y - 46}, ${p.x} ${p.y - 22}`}
+              d={
+                fx === p.x
+                  ? `M ${fx} ${fy} L ${p.x} ${p.y - 22}`
+                  : `M ${fx} ${fy} L ${fx} ${busY} L ${p.x} ${busY} L ${p.x} ${p.y - 22}`
+              }
             />
           );
         })}
@@ -744,13 +756,27 @@ export function CKnowledge({ detail }: { detail: AlertDetail }) {
   const size = 520;
   const cx = size / 2;
   const r = 140;
+  // Tight canvas around the ring (satellite radius + breathing room) --
+  // the bloom that needed the extra 520px square lives in the band now.
+  const ext = r + 31 + 16;
+  const [wrapRef, measured] = useMeasuredWidth();
+  const selSat = sats.find((s) => s.label === selected) ?? null;
+  // Selected members unfold in a wrapped band UNDER the map (same
+  // circular nodes) -- the old radial bloom overlapped neighbouring
+  // satellites on mobile and turned to soup with many members.
+  const bandW = Math.max(280, Math.min(measured, 520));
+  const memberCell = 84;
+  const memberRow = 78;
+  const perBandRow = Math.max(3, Math.floor(bandW / memberCell));
+  const bandLines = selSat ? chunk(selSat.members, perBandRow) : [];
+  const bandH = bandLines.length * memberRow + 12;
   return (
-    <div className="csvg-wrap">
+    <div className="csvg-wrap" ref={wrapRef}>
       <svg
         className="cknow"
-        width={size}
-        height={size}
-        viewBox={`0 0 ${size} ${size}`}
+        width={ext * 2}
+        height={ext * 2}
+        viewBox={`${cx - ext} ${cx - ext} ${ext * 2} ${ext * 2}`}
         role="img"
         aria-label="Knowledge map"
       >
@@ -762,20 +788,6 @@ export function CKnowledge({ detail }: { detail: AlertDetail }) {
           return (
             <g key={sat.label}>
               <line className="cknow-spoke" x1={cx} y1={cx} x2={x} y2={y} />
-              {isSelected &&
-                sat.members.map((m, j) => {
-                  const spread = Math.min(Math.PI * 1.1, 0.55 * sat.members.length);
-                  const ma = angle - spread / 2 + (spread * j) / Math.max(1, sat.members.length - 1 || 1);
-                  const mr = 88;
-                  const mx = Math.min(size - 30, Math.max(30, x + mr * Math.cos(ma)));
-                  const my = Math.min(size - 30, Math.max(30, y + mr * Math.sin(ma)));
-                  return (
-                    <g key={m.label + j}>
-                      <line className="cknow-spoke" x1={x} y1={y} x2={mx} y2={my} />
-                      <KnowMemberNode m={m} x={mx} y={my} />
-                    </g>
-                  );
-                })}
               <g
                 className="cknow-sat"
                 onClick={() => setSelected(isSelected ? null : sat.label)}
@@ -801,7 +813,32 @@ export function CKnowledge({ detail }: { detail: AlertDetail }) {
           event
         </text>
       </svg>
-      <p className="cknow-hint">Tap a circle to unfold its members.</p>
+      {selSat && (
+        <div className="cknow-band">
+          <div className="cknow-bandhead">
+            {selSat.label} · {selSat.members.length}
+          </div>
+          <svg
+            width={bandW}
+            height={bandH}
+            viewBox={`0 0 ${bandW} ${bandH}`}
+            role="img"
+            aria-label={`${selSat.label} members`}
+          >
+            {bandLines.map((line, li) => {
+              const lineWidth = line.length * memberCell;
+              const startX = (bandW - lineWidth) / 2 + memberCell / 2;
+              const y = li * memberRow + memberRow / 2;
+              return line.map((m, j) => (
+                <KnowMemberNode key={`${m.label}-${li}-${j}`} m={m} x={startX + j * memberCell} y={y} />
+              ));
+            })}
+          </svg>
+        </div>
+      )}
+      <p className="cknow-hint">
+        {selSat ? 'Tap the circle again to fold it.' : 'Tap a circle to unfold its members.'}
+      </p>
     </div>
   );
 }

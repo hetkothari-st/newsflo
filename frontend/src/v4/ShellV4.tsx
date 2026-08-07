@@ -61,12 +61,32 @@ export default function ShellV4() {
   const [feedDate, setFeedDate] = useState<string | null>(null);
   // Returning from the charts page: /v4?ripple=<id> reopens that story's
   // ripple section directly. Read once at mount.
-  const [initialRipple] = useState<number | null>(() => {
+  const [initialRipple, setInitialRipple] = useState<number | null>(() => {
+    // Pure read only -- StrictMode double-invokes this initializer, so
+    // the URL mutation lives in the mount effect below.
     const raw = new URLSearchParams(window.location.search).get('ripple');
     if (raw === null) return null;
     const parsed = Number(raw);
     return Number.isNaN(parsed) ? null : parsed;
   });
+  // Consume the param: strip it from the URL so a refresh doesn't
+  // reopen the ripple. Idempotent, safe under StrictMode's double run.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ripple') === null) return;
+    params.delete('ripple');
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + (query ? `?${query}` : ''),
+    );
+  }, []);
+  // Leaving the feed spends the one-shot: coming back from the archive
+  // (which remounts FeedV4) must not reopen the ripple.
+  useEffect(() => {
+    if (view !== 'feed' && initialRipple !== null) setInitialRipple(null);
+  }, [view, initialRipple]);
   // LAYOUT NEVER CHANGES on scroll (the previous height-animating header
   // shifted all content mid-gesture and fought the snap -- reported as
   // glitching between cards 1 and 2). The big masthead + ticker are
