@@ -249,6 +249,9 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
       <h1 className="phead">Directory</h1>
       <p className="psub">Every tracked stock. Filter by cap tier and sector.</p>
       <div className="dirsearch">
+        <span className="dirsearch-glyph" aria-hidden="true">
+          ⌕
+        </span>
         <input
           type="search"
           className="dirsearch-input"
