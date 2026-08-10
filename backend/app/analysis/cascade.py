@@ -31,8 +31,10 @@ unparseable arguments JSON). See that helper and
 _is_stochastic_tool_failure for the exact allow-list and for why rate
 limits, auth failures, and 413s are deliberately NOT retried there.
 """
+import hashlib
 import json
 import logging
+from collections import OrderedDict
 
 from openai import BadRequestError, RateLimitError
 
@@ -242,7 +244,27 @@ def build_facts_tool() -> dict:
     }
 
 
+# In-process memo of validated facts results, keyed by article content.
+# extract_facts is the pipeline's PAID stage (protected call, billed
+# Gemini): when a later CHEAP stage fails and the whole analyze_article is
+# retried, re-running facts re-bills real money for a result we already
+# hold -- measured live 2026-08-10 as the bulk of a leak (13 retries, each
+# re-billing facts, zero output). Bounded FIFO so a long-lived scheduler
+# process can't grow it unbounded.
+_FACTS_MEMO: "OrderedDict[str, FactsResult]" = OrderedDict()
+_FACTS_MEMO_MAX = 500
+
+
+def _facts_memo_key(title: str, content: str) -> str:
+    return hashlib.sha256(f"{title}\n{content}".encode("utf-8")).hexdigest()
+
+
 def _extract_facts(client, title: str, content: str) -> FactsResult:
+    memo_key = _facts_memo_key(title, content)
+    cached = _FACTS_MEMO.get(memo_key)
+    if cached is not None:
+        return cached
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -270,7 +292,11 @@ def _extract_facts(client, title: str, content: str) -> FactsResult:
     # Validation stays OUTSIDE the retry on purpose: a ValidationError here
     # means well-formed JSON that our schema rejects, which is not the
     # stochastic garbage class -- see _is_stochastic_tool_failure.
-    return FactsResult.model_validate(arguments)
+    result = FactsResult.model_validate(arguments)
+    _FACTS_MEMO[memo_key] = result
+    while len(_FACTS_MEMO) > _FACTS_MEMO_MAX:
+        _FACTS_MEMO.popitem(last=False)
+    return result
 
 
 def build_sector_tool(cascade: bool, valid_parents: list[str] | None) -> dict:

@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -344,6 +346,10 @@ class _GeminiCompletions:
             "generationConfig": {
                 "maxOutputTokens": max_tokens,
                 "temperature": ANALYSIS_TEMPERATURE,
+                # Thinking tokens bill as output; these are tight-schema
+                # extraction calls that don't need internal reasoning --
+                # see config.gemini_thinking_budget.
+                "thinkingConfig": {"thinkingBudget": settings.gemini_thinking_budget},
             },
         }
         if system_content is not None:
@@ -524,11 +530,34 @@ class _GroqCompletions:
     def create(self, *, tier=None, call_name=None, **kwargs):
         if tier == LLM_TIER_CHEAP:
             kwargs["model"] = LLM_TIER_MODELS["groq"][LLM_TIER_CHEAP]
+        _pace_groq_call()
         response = self._inner.chat.completions.create(**kwargs)
         record_usage(usage_from_openai(
             response, call_name=call_name, model=kwargs.get("model"), tier=tier,
         ))
         return response
+
+
+# Process-wide Groq pacing (config.groq_min_call_interval_seconds). The
+# cascade's cheap stages fire back-to-back and one article alone can
+# saturate gpt-oss-20b's 8,000 TPM window (measured 2026-08-10) -- spacing
+# every Groq call out is the only placement that covers every path
+# (cascade, relevance, refinement) without per-site bookkeeping. Lock, not
+# atomics: calls come from the scheduler thread and request threads alike.
+_GROQ_PACE_LOCK = threading.Lock()
+_last_groq_call_at = 0.0
+
+
+def _pace_groq_call() -> None:
+    global _last_groq_call_at
+    interval = settings.groq_min_call_interval_seconds
+    if not interval:
+        return
+    with _GROQ_PACE_LOCK:
+        wait = _last_groq_call_at + interval - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_groq_call_at = time.monotonic()
 
 
 class _GroqChat:

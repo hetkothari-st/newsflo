@@ -116,6 +116,21 @@ class Settings(BaseSettings):
     # the DB row's `enabled` is the source of truth -- this setting never
     # overrides an existing row.
     ingestion_enabled_sources: str = os.environ.get("INGESTION_ENABLED_SOURCES", "finnhub")
+    # Gemini "thinking" budget. gemini-2.5-flash reasons internally before
+    # answering and bills those hidden tokens as OUTPUT (the expensive
+    # direction) -- often 500-2,000 per call, measured as roughly half the
+    # paid bill on 2026-08-10. The cascade's calls are structured
+    # extraction with tight schemas; they don't need it. 0 disables
+    # thinking entirely; set a positive budget (or -1 for model-decides)
+    # to re-enable, e.g. for identify_companies quality experiments.
+    gemini_thinking_budget: int = int(os.environ.get("GEMINI_THINKING_BUDGET", "0"))
+    # Minimum spacing between consecutive Groq calls, process-wide. The
+    # cascade's cheap stages run back-to-back and a single article's calls
+    # (~3-4k tokens each) alone saturate gpt-oss-20b's 8,000 TPM ceiling --
+    # measured live 2026-08-10: one uncontested article 429'd itself. 0
+    # (default) preserves existing behavior; ~20-25s lets a full cascade
+    # complete on free-tier Groq at ~2-3 min/article.
+    groq_min_call_interval_seconds: float = float(os.environ.get("GROQ_MIN_CALL_INTERVAL_SECONDS", "0"))
     # Exchange-announcement noise gate (app/filtering/exchange_noise.py) --
     # NSE/BSE corporate filings are dominated by mechanically produced
     # non-news (NAV declarations, trading-window closures, newspaper-copy

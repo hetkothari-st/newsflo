@@ -30,6 +30,18 @@ def db_session():
 
 
 @pytest.fixture(autouse=True)
+def _clear_facts_memo():
+    # The paid-stage facts memo (app/analysis/cascade.py._FACTS_MEMO) is
+    # keyed by article text, and cascade tests reuse the same fixture
+    # titles -- without clearing, one test's cached facts silently satisfy
+    # the next test's expected LLM call.
+    from app.analysis.cascade import _FACTS_MEMO
+    _FACTS_MEMO.clear()
+    yield
+    _FACTS_MEMO.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_og_image_fetch(monkeypatch):
     # process_new_articles fetches each article's og:image over a real HTTP
     # GET (see app/ingestion/og_image.py). Stub it everywhere by default so
