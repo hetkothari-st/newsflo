@@ -199,8 +199,16 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
     deferred = 0
     # .all() materialises the NEW rows once, up front. An article left as
     # NEW below is therefore never revisited within this run -- the loop is
-    # iterating a fixed snapshot, not a live query.
-    for article in session.query(Article).filter_by(status="NEW").all():
+    # iterating a fixed snapshot, not a live query. Newest published first:
+    # when a backlog exists (fresh deployment, provider burst, quota
+    # recovery), current news must not wait behind stale news for its LLM
+    # call -- the tail still drains, just after the fresh stories.
+    for article in (
+        session.query(Article)
+        .filter_by(status="NEW")
+        .order_by(Article.published_at.desc().nullslast(), Article.id.desc())
+        .all()
+    ):
         if not is_english_text(article.title, article_text(article)):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed
