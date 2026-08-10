@@ -17,6 +17,7 @@ import {
   type DiscoveryTab,
 } from '../v3/api';
 import LogoV4 from './LogoV4';
+import { displaySector } from '../v3/directoryFilters';
 import { formatMarketCap } from './directoryLiveCaps';
 import { useDirectoryLiveCaps } from './useDirectoryLiveCaps';
 import { useAuth } from '../lib/auth';
@@ -185,8 +186,10 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
     };
   }, [token]);
 
+  // displaySector bifurcates "banking" into Banking vs Finance (non-bank
+  // financials) at display level -- same split as the v3 Directory.
   const sectors = useMemo(() => {
-    const unique = new Set((companies ?? []).map((company) => company.sector));
+    const unique = new Set((companies ?? []).map(displaySector));
     return ['ALL', ...Array.from(unique).sort()];
   }, [companies]);
 
@@ -200,7 +203,7 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
     const rows = (companies ?? []).filter(
       (company) =>
         (capFilter === 'ALL' || company.cap_tier === capFilter) &&
-        (sectorFilter === 'ALL' || company.sector === sectorFilter) &&
+        (sectorFilter === 'ALL' || displaySector(company) === sectorFilter) &&
         (q === '' ||
           company.name.toLowerCase().includes(q) ||
           company.ticker.toLowerCase().includes(q)),
@@ -232,7 +235,7 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
     setQuery('');
     setDropdownOpen(false);
     if (capFilter !== 'ALL' && company.cap_tier !== capFilter) setCapFilter('ALL');
-    if (sectorFilter !== 'ALL' && company.sector !== sectorFilter) setSectorFilter('ALL');
+    if (sectorFilter !== 'ALL' && displaySector(company) !== sectorFilter) setSectorFilter('ALL');
     setHighlightTicker(company.ticker);
     if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
     highlightTimer.current = window.setTimeout(() => setHighlightTicker(null), 2000);
@@ -344,7 +347,7 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
               </div>
               <div className="emeta">
                 <span>{company.ticker}</span>
-                <span>{company.sector.replace(/_/g, ' ')}</span>
+                <span>{displaySector(company).replace(/_/g, ' ')}</span>
                 {live && (
                   <span className={live.source === 'live' ? 'capval live' : 'capval'}>
                     {formatMarketCap(live.marketCap)}

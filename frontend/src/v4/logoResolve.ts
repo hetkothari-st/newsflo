@@ -143,14 +143,19 @@ export function resolveLogo(
 import { useEffect, useState } from 'react';
 
 /* undefined = still resolving, null = no real mark exists, string = the
-   verified logo URL. */
+   verified logo URL. `enabled=false` defers resolution entirely -- the
+   Directory renders 2000+ rows and even throttled probes for all of them
+   exceed Brandfetch's rate window, so offscreen rows must not probe at
+   all (LogoV4 flips this on via IntersectionObserver). */
 export function useLogo(
   logoUrl: string | null | undefined,
   ticker: string,
   name?: string,
+  enabled: boolean = true,
 ): string | null | undefined {
   const [resolved, setResolved] = useState<string | null | undefined>(undefined);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     setResolved(undefined);
     resolveLogo(logoUrl, ticker, name).then((url) => {
@@ -159,6 +164,6 @@ export function useLogo(
     return () => {
       cancelled = true;
     };
-  }, [logoUrl, ticker, name]);
+  }, [logoUrl, ticker, name, enabled]);
   return resolved;
 }
