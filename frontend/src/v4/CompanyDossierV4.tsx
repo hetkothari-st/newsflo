@@ -30,11 +30,56 @@ function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 }
 
+/* Sourced prose -> bullet points, verbatim sentences only: split on
+   sentence boundaries, keep the ones that read as complete dated events
+   (drop mid-flow fragments the tail-anchored trim can open on), cap the
+   count. Reformatting, never rewriting -- every bullet is a sentence
+   the source actually contains. */
+const MAX_BULLETS = 6;
+
+function toBullets(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(
+      (sentence) =>
+        sentence.length > 30 &&
+        /^[A-Z0-9₹"']/.test(sentence) &&
+        !/^(And|But|Or|Also|However)\b/.test(sentence),
+    )
+    .slice(0, MAX_BULLETS);
+}
+
+function SourcedBullets({ text, sourceUrl }: { text: string; sourceUrl: string | null }) {
+  const bullets = toBullets(text);
+  if (bullets.length === 0) return null;
+  return (
+    <>
+      <ul className="ddwhy">
+        {bullets.map((bullet) => (
+          <li className="ddprose" key={bullet.slice(0, 40)}>
+            {bullet}
+          </li>
+        ))}
+      </ul>
+      {sourceUrl && (
+        <p className="dsc-srcline">
+          <a className="ddsource" href={sourceUrl} target="_blank" rel="noreferrer">
+            source
+          </a>
+        </p>
+      )}
+    </>
+  );
+}
+
 /* Five-year close series as a broadsheet rule: single ink line, hairline
    baseline grid, serif endpoints. Direction color only on the numeral. */
 function PriceRule({ points }: { points: PricePoint[] }) {
   const wrapRef = useRef<HTMLDivElement>(null!);
   const [width, setWidth] = useState(320);
+  // Hovered/touched point index; null = no crosshair.
+  const [hover, setHover] = useState<number | null>(null);
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -57,6 +102,15 @@ function PriceRule({ points }: { points: PricePoint[] }) {
   const last = points[points.length - 1];
   const change = ((last.close - first.close) / first.close) * 100;
 
+  const indexFromClientX = (clientX: number, target: SVGSVGElement) => {
+    const rect = target.getBoundingClientRect();
+    const rel = (clientX - rect.left - PAD) / Math.max(1, rect.width - PAD * 2);
+    return Math.min(points.length - 1, Math.max(0, Math.round(rel * (points.length - 1))));
+  };
+  const hovered = hover !== null ? points[hover] : null;
+  // Keep the floating label inside the canvas near the edges.
+  const labelX = hover !== null ? Math.min(width - 78, Math.max(6, x(hover) - 36)) : 0;
+
   return (
     <div ref={wrapRef} className="dscchart">
       <div className="dscchart-cap">
@@ -64,11 +118,37 @@ function PriceRule({ points }: { points: PricePoint[] }) {
         <b className={change < 0 ? 'down' : 'up'}>{fmtPct(change)} over five years</b>
         <span>{IST_DATE.format(new Date(last.date))}</span>
       </div>
-      <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="img" aria-label="Five-year price history">
+      <svg
+        width={width}
+        height={H}
+        viewBox={`0 0 ${width} ${H}`}
+        role="img"
+        aria-label="Five-year price history"
+        onMouseMove={(event) => setHover(indexFromClientX(event.clientX, event.currentTarget))}
+        onMouseLeave={() => setHover(null)}
+        onTouchStart={(event) => setHover(indexFromClientX(event.touches[0].clientX, event.currentTarget))}
+        onTouchMove={(event) => setHover(indexFromClientX(event.touches[0].clientX, event.currentTarget))}
+        onTouchEnd={() => setHover(null)}
+      >
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} className="dsc-grid" x1={PAD} x2={width - PAD} y1={PAD + f * (H - PAD * 2)} y2={PAD + f * (H - PAD * 2)} />
         ))}
         <path className="dsc-line" d={path} />
+        {hovered && hover !== null && (
+          <g className="dsc-hover">
+            <line className="dsc-cross" x1={x(hover)} x2={x(hover)} y1={PAD} y2={H - PAD} />
+            <circle className="dsc-dot" cx={x(hover)} cy={y(hovered.close)} r={3.5} />
+            <g transform={`translate(${labelX}, 2)`}>
+              <rect className="dsc-tipbox" width={72} height={30} rx={6} />
+              <text className="dsc-tipprice" x={36} y={13} textAnchor="middle">
+                ₹{hovered.close >= 1000 ? hovered.close.toFixed(0) : hovered.close.toFixed(1)}
+              </text>
+              <text className="dsc-tipdate" x={36} y={25} textAnchor="middle">
+                {IST_DATE.format(new Date(hovered.date))}
+              </text>
+            </g>
+          </g>
+        )}
       </svg>
       <div className="dscchart-cap">
         <span>₹{first.close.toFixed(0)}</span>
@@ -265,19 +345,9 @@ export default function CompanyDossierV4() {
             </Section>
           )}
 
-          {dossier.history_text && (
+          {dossier.history_text && toBullets(dossier.history_text).length > 0 && (
             <Section title="The story so far">
-              <p className="ddprose">
-                {dossier.history_text}
-                {dossier.history_source_url && (
-                  <>
-                    {' '}
-                    <a className="ddsource" href={dossier.history_source_url} target="_blank" rel="noreferrer">
-                      source
-                    </a>
-                  </>
-                )}
-              </p>
+              <SourcedBullets text={dossier.history_text} sourceUrl={dossier.history_source_url} />
             </Section>
           )}
 
@@ -287,19 +357,12 @@ export default function CompanyDossierV4() {
             </Section>
           )}
 
-          {dossier.developments_text && (
+          {dossier.developments_text && toBullets(dossier.developments_text).length > 0 && (
             <Section title="Recent developments">
-              <p className="ddprose">
-                {dossier.developments_text}
-                {dossier.developments_source_url && (
-                  <>
-                    {' '}
-                    <a className="ddsource" href={dossier.developments_source_url} target="_blank" rel="noreferrer">
-                      source
-                    </a>
-                  </>
-                )}
-              </p>
+              <SourcedBullets
+                text={dossier.developments_text}
+                sourceUrl={dossier.developments_source_url}
+              />
             </Section>
           )}
 

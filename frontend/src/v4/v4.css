@@ -737,6 +737,14 @@ body:has(.nf4.dark) { background: #2a2722; }
 .nf4 .dscchart-cap b.down { color: var(--data-down); }
 .nf4 .dsc-grid { stroke: var(--hairline); }
 .nf4 .dsc-line { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+/* Hover crosshair + price tip -- ink on paper, no shadows. */
+.nf4 .dscchart svg { touch-action: pan-y; cursor: crosshair; }
+.nf4 .dsc-cross { stroke: var(--midstone); stroke-dasharray: 3 3; }
+.nf4 .dsc-dot { fill: var(--ink); }
+.nf4 .dsc-tipbox { fill: var(--paper); stroke: var(--ink); }
+.nf4 .dsc-tipprice { font-family: var(--serif); font-size: 13px; fill: var(--ink); }
+.nf4 .dsc-tipdate { font-size: 8.5px; letter-spacing: 0.02em; text-transform: uppercase; fill: var(--ash); }
+.nf4 .dsc-srcline { margin: 4px 0 0; }
 .nf4 .dsc-newsrow {
   display: flex;
   align-items: baseline;
