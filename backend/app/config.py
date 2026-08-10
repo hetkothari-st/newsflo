@@ -386,6 +386,17 @@ UNIVERSE_MAX_AGE_DAYS = 7
 MARKET_CAP_MAX_AGE_DAYS = 30
 CLASSIFICATION_MAX_AGE_DAYS = 180
 AMFI_MAX_AGE_DAYS = 240
+# Share counts change only on corporate actions (splits/buybacks/QIPs) --
+# refresh far less often than caps.
+SHARES_OUTSTANDING_MAX_AGE_DAYS = 180
+# A live tick older than this is treated as "market closed" and the
+# Directory's live cap falls back to the stored market_cap. Generous
+# enough to ride out brief hub reconnects, tight enough that yesterday's
+# last tick never masquerades as live today.
+LIVE_CAP_TICK_MAX_AGE_MINUTES = 15
+# Per-run ceiling on the daily full-universe shares-outstanding sweep --
+# ~2,600 Indian companies cover in ~9 runs, then it's maintenance only.
+SHARES_SWEEP_BATCH_SIZE = 300
 
 # Liquidity tier thresholds (spec v2 §4.6): derived from 20-day average
 # traded value (close x volume, same unit as prices x shares). LOW liquidity

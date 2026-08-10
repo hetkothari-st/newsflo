@@ -384,3 +384,37 @@ def test_alert_deep_dive_serves_the_range_for_that_alerts_category(db_session, m
     assert response.status_code == 200
     assert response.json()["volatility_range"]["level"] == "COMPANY"
     app.dependency_overrides.clear()
+
+
+def test_directory_live_caps_ranks_and_labels_sources(db_session):
+    from datetime import datetime, timedelta, timezone
+
+    from app.prices.live_price import LIVE_PRICE_CACHE
+
+    LIVE_PRICE_CACHE.clear()
+    small = _company("SMALL.NS", market_cap=100.0)
+    small.market = "INDIA"
+    small.instrument_token = 42
+    small.shares_outstanding = 50.0
+    big = _company("BIG.NS", market_cap=900.0)
+    big.market = "INDIA"
+    db_session.add_all([small, big])
+    db_session.commit()
+    # Live tick lifts SMALL.NS (50 shares x 100 = 5000) above BIG.NS's stored 900.
+    LIVE_PRICE_CACHE[42] = {"ltp": 100.0, "as_of": datetime.now(timezone.utc) - timedelta(minutes=1)}
+
+    _override_db(db_session)
+    client = TestClient(app)
+    response = client.get("/api/feed-v2/directory/live-caps")
+    app.dependency_overrides.clear()
+    LIVE_PRICE_CACHE.clear()
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    rows = response.json()
+    assert [(r["ticker"], r["rank"], r["cap_source"]) for r in rows] == [
+        ("SMALL.NS", 1, "live"),
+        ("BIG.NS", 2, "stored"),
+    ]
+    assert rows[0]["market_cap"] == 5000.0
+    assert rows[0]["as_of"] is not None and rows[1]["as_of"] is None

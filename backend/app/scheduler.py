@@ -6,7 +6,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.analysis.claude_client import build_client
 from app.analysis.refinement import run_pending_refinements
-from app.companies.market_caps import alert_referenced_tickers, refresh_market_caps
+from app.companies.market_caps import (
+    alert_referenced_tickers, backfill_shares_outstanding, refresh_market_caps,
+)
 from app.companies.supply_links import snapshot as supply_snapshot
 from app.companies.universe import fetchers, snapshot
 from app import config
@@ -243,6 +245,14 @@ def _run_market_cap_refresh() -> None:
         tickers = alert_referenced_tickers(session, days=7)
         updated = refresh_market_caps(session, tickers)
         logger.info("Market-cap refresh: %s/%s companies updated", updated, len(tickers))
+        # Shares-outstanding sweep for the Directory's live intraday cap:
+        # batched over the whole Indian pool (oldest first), NOT just the
+        # alert working set -- live ranking needs universe-wide coverage,
+        # reached within a few runs at this batch size.
+        shares_updated = backfill_shares_outstanding(
+            session, limit=config.SHARES_SWEEP_BATCH_SIZE,
+        )
+        logger.info("Shares-outstanding sweep: %s companies updated", shares_updated)
     except Exception:
         logger.exception("Market-cap refresh failed")
     finally:

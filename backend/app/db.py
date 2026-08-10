@@ -105,6 +105,8 @@ _ADDED_COLUMNS = [
     ("companies", "financials_source", "VARCHAR"),
     ("companies", "financials_as_of", "DATE"),
     ("market_moves", "category", "VARCHAR"),
+    ("companies", "shares_outstanding", "FLOAT"),
+    ("companies", "shares_outstanding_as_of", "DATE"),
 ]
 
 

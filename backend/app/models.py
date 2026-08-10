@@ -54,6 +54,13 @@ class Company(Base):
     classification_as_of = Column(Date, nullable=True)
     market_cap_source = Column(String, nullable=True)  # 'BSE' | 'yfinance'
     market_cap_as_of = Column(Date, nullable=True)
+    # Share count for the Directory's live intraday cap (live LTP x shares).
+    # Changes only on corporate actions, so it refreshes on a slow sweep
+    # (app.companies.market_caps.backfill_shares_outstanding). NULL means
+    # "no live cap for this company" -- the stored market_cap is used
+    # instead, never a fabricated number.
+    shares_outstanding = Column(Float, nullable=True)
+    shares_outstanding_as_of = Column(Date, nullable=True)
     # AMFI's PUBLISHED categorisation, when the list is available. Distinct
     # from the derived tier in app.market.cap_tier, which is computed on
     # read and never stored. NULL is normal and expected.

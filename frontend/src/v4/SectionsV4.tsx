@@ -17,6 +17,8 @@ import {
   type DiscoveryTab,
 } from '../v3/api';
 import LogoV4 from './LogoV4';
+import { formatMarketCap } from './directoryLiveCaps';
+import { useDirectoryLiveCaps } from './useDirectoryLiveCaps';
 import { useAuth } from '../lib/auth';
 
 function fmtPct(value: number): string {
@@ -154,11 +156,25 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
     return ['ALL', ...Array.from(unique).sort()];
   }, [companies]);
 
-  const filtered = (companies ?? []).filter(
-    (company) =>
-      (capFilter === 'ALL' || company.cap_tier === capFilter) &&
-      (sectorFilter === 'ALL' || company.sector === sectorFilter),
-  );
+  // Live market-cap ranking: /directory/live-caps polls every 5s (live
+  // tick x shares where available, stored cap otherwise) and the list
+  // re-sorts by it -- caps barely move within 5s, so row swaps are rare.
+  // Until the first poll lands, rows keep the API's ticker order.
+  const liveCaps = useDirectoryLiveCaps();
+  const filtered = useMemo(() => {
+    const rows = (companies ?? []).filter(
+      (company) =>
+        (capFilter === 'ALL' || company.cap_tier === capFilter) &&
+        (sectorFilter === 'ALL' || company.sector === sectorFilter),
+    );
+    if (liveCaps.size === 0) return rows;
+    return [...rows].sort(
+      (a, b) =>
+        (liveCaps.get(a.ticker)?.rank ?? Number.MAX_SAFE_INTEGER) -
+          (liveCaps.get(b.ticker)?.rank ?? Number.MAX_SAFE_INTEGER) ||
+        a.ticker.localeCompare(b.ticker),
+    );
+  }, [companies, capFilter, sectorFilter, liveCaps]);
 
   return (
     <div className="page4">
@@ -192,21 +208,31 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
       {companies !== null && filtered.length === 0 && (
         <p className="empty4">No companies match these filters.</p>
       )}
-      {filtered.map((company) => (
-        <div className="entry4" key={company.ticker} onClick={() => onOpenDeepDive(company.ticker)}>
-          <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
-          <div className="ebody">
-            <div className="etop">
-              <span className="ename">{company.name}</span>
-              {company.cap_tier !== null && <span className="gtag">{company.cap_tier}</span>}
-            </div>
-            <div className="emeta">
-              <span>{company.ticker}</span>
-              <span>{company.sector.replace(/_/g, ' ')}</span>
+      {filtered.map((company) => {
+        const live = liveCaps.get(company.ticker);
+        return (
+          <div className="entry4" key={company.ticker} onClick={() => onOpenDeepDive(company.ticker)}>
+            {live && <span className="rank4">{live.rank}</span>}
+            <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
+            <div className="ebody">
+              <div className="etop">
+                <span className="ename">{company.name}</span>
+                {company.cap_tier !== null && <span className="gtag">{company.cap_tier}</span>}
+              </div>
+              <div className="emeta">
+                <span>{company.ticker}</span>
+                <span>{company.sector.replace(/_/g, ' ')}</span>
+                {live && (
+                  <span className={live.source === 'live' ? 'capval live' : 'capval'}>
+                    {formatMarketCap(live.marketCap)}
+                    {live.source === 'live' ? ' · live' : ''}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

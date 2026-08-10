@@ -8,7 +8,7 @@ market cap, PE -- no excess/intensity/peers, since none of those mean
 anything without a specific event to measure against). Never fabricates a
 number for either path (see this phase's Global Constraints).
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user_optional
@@ -24,6 +24,7 @@ from app.market.cap_tier import cap_tier_map, resolve_cap_tier
 from app.market.event_volatility import volatility_range_payload
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple import get_sector_peers_for_alert
+from app.prices.live_cap import rank_live_caps
 from app.market.ripple_layers import compute_ripple_layers
 from app.models import Alert, AlertCompany, Company, MarketMove, User
 from app.routers.articles import get_db
@@ -153,6 +154,27 @@ def get_stock_deep_dive(
     result["delivery_pct"] = move.delivery_pct
     result["intensity"] = _intensity_for_company_move(db, company, move, breadth_score)
     return result
+
+
+@router.get("/directory/live-caps")
+def get_directory_live_caps(response: Response, db: Session = Depends(get_db)):
+    """Whole-universe market-cap ranking for the Directory, refreshed by a
+    5s client poll: live (fresh Kite tick x shares outstanding) where both
+    exist, stored Company.market_cap otherwise -- each row labeled with its
+    source. Same pool and tie-break as the cap-tier ranking, so rank and
+    tier tags never disagree. Public reference data, same as /directory."""
+    response.headers["Cache-Control"] = "no-store"
+    ranked = rank_live_caps(db)
+    return [
+        {
+            "ticker": cap.ticker,
+            "rank": rank,
+            "market_cap": cap.market_cap,
+            "cap_source": cap.source,
+            "as_of": cap.as_of.isoformat() if cap.as_of is not None else None,
+        }
+        for rank, cap in enumerate(ranked, start=1)
+    ]
 
 
 @router.get("/directory")

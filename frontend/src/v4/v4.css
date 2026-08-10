@@ -608,6 +608,18 @@ body:has(.nf4.dark) { background: #2a2722; }
 
 /* Ruled entry rows shared by Discover / Directory / Portfolio. */
 .nf4 .entry4 { border-top: 1px solid var(--hairline); padding: 16px 0; cursor: pointer; display: flex; gap: 14px; align-items: flex-start; }
+/* Directory live-cap ranking: rank numeral + cap value in the meta line */
+.nf4 .entry4 .rank4 {
+  font-family: var(--mono, monospace);
+  font-size: 13px;
+  color: var(--pebble);
+  min-width: 3ch;
+  text-align: right;
+  flex: 0 0 auto;
+  margin-top: 10px;
+}
+.nf4 .entry4 .capval { font-family: var(--mono, monospace); color: var(--ash); }
+.nf4 .entry4 .capval.live { color: var(--ink); }
 .nf4 .entry4 .ebody { flex: 1; min-width: 0; }
 .nf4 .entry4 .clg { margin-top: 4px; }
 .nf4 .entry4:first-of-type { border-top: 1px solid var(--ink); }
