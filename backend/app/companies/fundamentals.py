@@ -15,6 +15,14 @@ _CONSOLIDATED = (
 )
 
 
+def ratio_or_none(value: float | None) -> float | None:
+    """BSE writes literal 0.00 into ratio slots it has no figure for (see
+    fundamentals_payload docstring). Shared by fundamentals_payload and the
+    directory serializer so the sentinel rule cannot drift between callers.
+    Negative values (loss-making EPS/NPM) are real and kept."""
+    return value if value is not None and value != 0 else None
+
+
 def fundamentals_payload(company: Company) -> dict | None:
     """None when the company has no official classification (the curated
     global rows and NSE-only names). A NULL ratio is OMITTED rather than sent
@@ -47,11 +55,11 @@ def fundamentals_payload(company: Company) -> dict | None:
 
     ratios = {
         k: v for k in _RATIOS
-        if (v := getattr(company, k)) is not None and v != 0
+        if (v := ratio_or_none(getattr(company, k))) is not None
     }
     consolidated = {
         k: v for k, a in _CONSOLIDATED
-        if (v := getattr(company, a)) is not None and v != 0
+        if (v := ratio_or_none(getattr(company, a))) is not None
     }
     if ratios:
         payload["ratios"] = ratios

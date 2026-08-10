@@ -178,6 +178,12 @@ export interface DirectoryCompany {
   sector: string;
   cap_tier: CapTier | null;
   logo_url: string | null;
+  market_cap: number | null; // absolute rupees; format to crore client-side
+  index_tier: string; // NIFTY50 | NIFTY100 | NIFTY500 | OTHER
+  sub_sector: string | null;
+  pe: number | null;
+  pb: number | null;
+  roe: number | null;
 }
 
 export interface PortfolioHolding {
@@ -277,15 +283,9 @@ export function getDiscovery(tab: DiscoveryTab, token: string | null = null): Pr
   return getJson<DiscoveryEntry[]>(`/api/feed-v2/discovery/${tab}`, token);
 }
 
-export function getDirectory(
-  filters: { capTier?: CapTier; sector?: string } = {},
-  token: string | null = null,
-): Promise<DirectoryCompany[]> {
-  const params = new URLSearchParams();
-  if (filters.capTier) params.set('cap_tier', filters.capTier);
-  if (filters.sector) params.set('sector', filters.sector);
-  const query = params.toString() ? `?${params.toString()}` : '';
-  return getJson<DirectoryCompany[]>(`/api/feed-v2/directory${query}`, token);
+export function getDirectory(token: string | null = null): Promise<DirectoryCompany[]> {
+  // All filtering is client-side (directoryFilters.ts) -- one full fetch.
+  return getJson<DirectoryCompany[]>('/api/feed-v2/directory', token);
 }
 
 export function getPortfolioOverlay(token: string | null): Promise<PortfolioOverlay> {
