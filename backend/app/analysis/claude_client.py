@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 import time
 from types import SimpleNamespace
@@ -14,6 +15,8 @@ from app.analysis.usage_log import (
 from app.config import (
     LLM_TIER_CHEAP, LLM_TIER_MODELS, PROMPT_CACHE_CONTROL, resolve_tier, settings,
 )
+
+logger = logging.getLogger(__name__)
 
 # Anthropic is the primary provider when a real (funded) key is configured --
 # best quality, native forced tool-use. Groq is the fallback so a real,
@@ -346,12 +349,14 @@ class _GeminiCompletions:
             "generationConfig": {
                 "maxOutputTokens": max_tokens,
                 "temperature": ANALYSIS_TEMPERATURE,
-                # Thinking tokens bill as output; these are tight-schema
-                # extraction calls that don't need internal reasoning --
-                # see config.gemini_thinking_budget.
-                "thinkingConfig": {"thinkingBudget": settings.gemini_thinking_budget},
             },
         }
+        # Thinking tokens bill as output; opt-in only -- see
+        # config.gemini_thinking_budget for why the default omits it.
+        if settings.gemini_thinking_budget is not None:
+            body["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": settings.gemini_thinking_budget,
+            }
         if system_content is not None:
             body["systemInstruction"] = {"parts": [{"text": system_content}]}
 
@@ -614,7 +619,16 @@ class FallbackClient:
     def _call(self, **kwargs):
         try:
             return self._primary.chat.completions.create(**kwargs)
-        except (RateLimitError, AnthropicAPIError, GeminiAPIError):
+        except (RateLimitError, AnthropicAPIError, GeminiAPIError) as exc:
+            # Log WHY before degrading -- a silent fallback made two real
+            # incidents (a spend-cap hit, a suspected bad request shape)
+            # undiagnosable on 2026-08-10: every downstream error pointed
+            # at the fallback provider while the primary's failure reason
+            # vanished.
+            logger.warning(
+                "LLM primary failed for call=%s, degrading to fallback: %s: %.200s",
+                kwargs.get("call_name"), type(exc).__name__, exc,
+            )
             return self._secondary.chat.completions.create(**kwargs)
 
 

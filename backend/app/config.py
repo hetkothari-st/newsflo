@@ -119,11 +119,15 @@ class Settings(BaseSettings):
     # Gemini "thinking" budget. gemini-2.5-flash reasons internally before
     # answering and bills those hidden tokens as OUTPUT (the expensive
     # direction) -- often 500-2,000 per call, measured as roughly half the
-    # paid bill on 2026-08-10. The cascade's calls are structured
-    # extraction with tight schemas; they don't need it. 0 disables
-    # thinking entirely; set a positive budget (or -1 for model-decides)
-    # to re-enable, e.g. for identify_companies quality experiments.
-    gemini_thinking_budget: int = int(os.environ.get("GEMINI_THINKING_BUDGET", "0"))
+    # paid bill on 2026-08-10. UNSET (default) omits the field entirely --
+    # the provider's default behavior, the only configuration verified
+    # working with tool-forced calls. Set 0 to disable thinking (cost
+    # halves) ONLY after verifying against a live key: on 2026-08-10 a
+    # thinkingBudget=0 deploy coincided with Gemini silently refusing
+    # identify_companies calls, unproven but unexcluded as the cause.
+    gemini_thinking_budget: int | None = (
+        int(os.environ["GEMINI_THINKING_BUDGET"]) if os.environ.get("GEMINI_THINKING_BUDGET") else None
+    )
     # Minimum spacing between consecutive Groq calls, process-wide. The
     # cascade's cheap stages run back-to-back and a single article's calls
     # (~3-4k tokens each) alone saturate gpt-oss-20b's 8,000 TPM ceiling --
