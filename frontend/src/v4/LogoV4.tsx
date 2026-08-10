@@ -18,11 +18,15 @@ export default function LogoV4({
   logoUrl,
   ticker,
   name,
+  domain,
   size = 'sm',
 }: {
   logoUrl?: string | null;
   ticker: string;
   name?: string;
+  // Yahoo-sourced website domain -- extends the fallback chain for
+  // companies Brandfetch has no mark for.
+  domain?: string | null;
   size?: 'sm' | 'md';
 }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -46,7 +50,7 @@ export default function LogoV4({
     return () => observer.disconnect();
   }, [nearViewport]);
 
-  const resolved = useLogo(logoUrl, ticker, name, nearViewport);
+  const resolved = useLogo(logoUrl, ticker, name, nearViewport, domain);
   const showFallback = resolved === null;
   return (
     <span

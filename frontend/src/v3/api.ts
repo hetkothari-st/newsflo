@@ -187,6 +187,9 @@ export interface DirectoryCompany {
   pe: number | null;
   pb: number | null;
   roe: number | null;
+  // Yahoo-sourced site domain (bare host) -- logo fallback chain input;
+  // null until backfill_domains.py has visited the company.
+  website_domain: string | null;
 }
 
 export interface PortfolioHolding {

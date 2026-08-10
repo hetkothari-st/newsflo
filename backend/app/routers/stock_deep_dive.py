@@ -209,5 +209,8 @@ def get_directory(
             "pe": ratio_or_none(company.pe),
             "pb": ratio_or_none(company.pb),
             "roe": ratio_or_none(company.roe),
+            # Yahoo-sourced site domain -- the client's logo fallback chain
+            # for companies Brandfetch has no mark for.
+            "website_domain": company.website_domain,
         })
     return results

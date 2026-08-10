@@ -21,6 +21,16 @@ export async function getDirectoryLiveCaps(): Promise<LiveCapRow[]> {
 /* Indian-numbering crore formatting: ₹17.9L Cr for lakh-crore scale,
    ₹9,420 Cr below it, one decimal only when the number is small enough
    for it to matter. */
+/* Global (non-Indian) rows store market_cap in USD -- a different unit
+   in the same column, distinguished by market/index_tier. Formatted in
+   the $T/$B idiom those numbers are read in, never crore. */
+export function formatMarketCapUsd(usd: number): string {
+  if (usd >= 1e12) return `$${(usd / 1e12).toFixed(2)}T`;
+  if (usd >= 1e9) return `$${(usd / 1e9).toFixed(usd >= 1e11 ? 0 : 1)}B`;
+  if (usd >= 1e6) return `$${(usd / 1e6).toFixed(0)}M`;
+  return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
+
 export function formatMarketCap(rupees: number): string {
   const crore = rupees / 1e7;
   if (crore >= 1e5) {

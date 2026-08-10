@@ -19,13 +19,14 @@ def _company(
     ticker, sector="oil_gas", business_desc=None, market_cap=None, market_cap_as_of=None,
     official_sector=None, eps=None, financials_source=None, financials_as_of=None,
     index_tier="NIFTY50", sub_sector=None, pe=None, pb=None, roe=None,
+    website_domain=None,
 ):
     return Company(
         ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier=index_tier,
         business_desc=business_desc, market_cap=market_cap, market_cap_as_of=market_cap_as_of,
         official_sector=official_sector, eps=eps,
         financials_source=financials_source, financials_as_of=financials_as_of,
-        sub_sector=sub_sector, pe=pe, pb=pb, roe=roe,
+        sub_sector=sub_sector, pe=pe, pb=pb, roe=roe, website_domain=website_domain,
     )
 
 
@@ -338,6 +339,22 @@ def test_directory_passes_through_null_ratios_and_null_sub_sector(db_session):
     assert row["pe"] is None
     assert row["pb"] is None
     assert row["roe"] is None
+    assert row["website_domain"] is None
+    app.dependency_overrides.clear()
+
+
+def test_directory_includes_website_domain_when_set(db_session):
+    _override_db(db_session)
+    db_session.add(_company(
+        "RELIANCE.NS", market_cap=1000.0, market_cap_as_of=TODAY,
+        website_domain="ril.com",
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    row = client.get("/api/feed-v2/directory").json()[0]
+
+    assert row["website_domain"] == "ril.com"
     app.dependency_overrides.clear()
 
 

@@ -799,6 +799,41 @@ body:has(.nf4.dark) { background: #2a2722; }
    is OS-rendered and can't match paper/ink; this one is a ruled index
    like the search dropdown. Selection is marked with an em-dash and
    weight, never a color fill. */
+/* Sticky search + filter block: pinned below the constant topbar while
+   the Directory list scrolls. Paper ground so entries slide beneath it;
+   hairline base rule marks the edge. */
+.nf4 .dirsticky {
+  position: sticky;
+  top: var(--barh, 56px);
+  z-index: 15;
+  background: var(--paper);
+  padding-top: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+.nf4 .dirsticky .texttabs { margin-bottom: 12px; }
+
+/* Back-to-top: a quiet ghost button pinned bottom-right, shown only once
+   the reader is deep in the list. */
+.nf4 .totop {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 25;
+  font-family: var(--grotesque);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.nf4 .totop:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
 .nf4 .fmenu { position: relative; display: inline-block; }
 .nf4 .fmenu-btn {
   display: inline-flex;

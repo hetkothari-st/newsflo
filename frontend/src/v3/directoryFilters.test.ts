@@ -26,6 +26,7 @@ function company(overrides: Partial<DirectoryCompany>): DirectoryCompany {
     pe: 25.0,
     pb: 2.5,
     roe: 12.0,
+    website_domain: null,
     ...overrides,
   };
 }

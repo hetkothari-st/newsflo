@@ -19,7 +19,7 @@ import {
 import FilterMenuV4 from './FilterMenuV4';
 import LogoV4 from './LogoV4';
 import { displaySector } from '../v3/directoryFilters';
-import { formatMarketCap } from './directoryLiveCaps';
+import { formatMarketCap, formatMarketCapUsd } from './directoryLiveCaps';
 import { useDirectoryLiveCaps } from './useDirectoryLiveCaps';
 import { useAuth } from '../lib/auth';
 
@@ -176,6 +176,22 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [highlightTicker, setHighlightTicker] = useState<string | null>(null);
   const highlightTimer = useRef<number | null>(null);
+  // Back-to-top: shown once the reader is deep in the list; scrolls the
+  // .nf4 container (the app's scroll root), not window.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [showTop, setShowTop] = useState(false);
+
+  useEffect(() => {
+    const scroller = pageRef.current?.closest('.nf4');
+    if (!scroller) return;
+    const onScroll = () => setShowTop(scroller.scrollTop > 600);
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    pageRef.current?.closest('.nf4')?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -253,9 +269,10 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
   };
 
   return (
-    <div className="page4">
+    <div className="page4" ref={pageRef}>
       <h1 className="phead">Directory</h1>
       <p className="psub">Every tracked stock. Filter by cap tier and sector.</p>
+      <div className="dirsticky">
       <div className="dirsearch">
         <span className="dirsearch-glyph" aria-hidden="true">
           ⌕
@@ -294,7 +311,12 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
                     jumpTo(company);
                   }}
                 >
-                  <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
+                  <LogoV4
+                    logoUrl={company.logo_url}
+                    ticker={company.ticker}
+                    name={company.name}
+                    domain={company.website_domain}
+                  />
                   <span className="ds-name">{company.name}</span>
                   <span className="ds-meta">
                     {company.ticker.split('.')[0]}
@@ -326,12 +348,22 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
           }))}
         />
       </div>
+      </div>
+      {showTop && (
+        <button type="button" className="totop" onClick={scrollToTop} aria-label="Back to top">
+          ↑ Top
+        </button>
+      )}
       {error !== null && <p className="empty4">{error}</p>}
       {companies !== null && filtered.length === 0 && (
         <p className="empty4">No companies match these filters.</p>
       )}
       {filtered.map((company) => {
         const live = liveCaps.get(company.ticker);
+        // Global rows: outside the India cap-tier ranking (their caps are
+        // USD, a different pool) -- a GLOBAL ghost tag and a $-formatted
+        // cap instead of tier + ₹ crore.
+        const isGlobal = company.index_tier === 'GLOBAL_LARGE_CAP';
         return (
           <div
             className={`entry4 ${highlightTicker === company.ticker ? 'flash' : ''}`}
@@ -340,11 +372,17 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
             onClick={() => navigate(`/v4/company/${encodeURIComponent(company.ticker)}`)}
           >
             {live && <span className="rank4">{live.rank}</span>}
-            <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
+            <LogoV4
+              logoUrl={company.logo_url}
+              ticker={company.ticker}
+              name={company.name}
+              domain={company.website_domain}
+            />
             <div className="ebody">
               <div className="etop">
                 <span className="ename">{company.name}</span>
                 {company.cap_tier !== null && <span className="gtag">{company.cap_tier}</span>}
+                {company.cap_tier === null && isGlobal && <span className="gtag">GLOBAL</span>}
               </div>
               <div className="emeta">
                 <span>{company.ticker}</span>
@@ -354,6 +392,9 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
                     {formatMarketCap(live.marketCap)}
                     {live.source === 'live' ? ' · live' : ''}
                   </span>
+                )}
+                {!live && isGlobal && company.market_cap !== null && (
+                  <span className="capval">{formatMarketCapUsd(company.market_cap)}</span>
                 )}
               </div>
             </div>

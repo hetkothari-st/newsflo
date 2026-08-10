@@ -18,6 +18,7 @@ const COMPANIES: DirectoryCompany[] = [
     pe: 44.9,
     pb: 3.2,
     roe: 15.0,
+    website_domain: null,
   },
   {
     ticker: 'TCS.NS',
@@ -31,6 +32,7 @@ const COMPANIES: DirectoryCompany[] = [
     pe: 28.1,
     pb: 11.0,
     roe: 46.0,
+    website_domain: null,
   },
   {
     ticker: 'SMALLCO.NS',
@@ -44,6 +46,7 @@ const COMPANIES: DirectoryCompany[] = [
     pe: null,
     pb: null,
     roe: null,
+    website_domain: null,
   },
   {
     ticker: 'HDFCBANK.NS',
@@ -57,6 +60,7 @@ const COMPANIES: DirectoryCompany[] = [
     pe: 18.2,
     pb: 2.8,
     roe: 17.0,
+    website_domain: null,
   },
   {
     ticker: 'LICI.NS',
@@ -70,6 +74,7 @@ const COMPANIES: DirectoryCompany[] = [
     pe: 12.0,
     pb: 1.9,
     roe: 22.0,
+    website_domain: null,
   },
 ];
 

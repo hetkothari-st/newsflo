@@ -24,17 +24,19 @@ export function logoCandidates(
   logoUrl: string | null | undefined,
   name: string | undefined,
   ticker: string,
+  websiteDomain?: string | null,
 ): string[] {
   const urls = logoUrl ? [logoUrl] : [];
   const clientId = logoUrl?.match(/[?&]c=([^&]+)/)?.[1];
   const groupKey = name?.split(/\s+/)[0]?.toLowerCase() ?? '';
-  for (const domain of [TICKER_DOMAINS[ticker], GROUP_DOMAINS[groupKey]]) {
+  // websiteDomain is Yahoo-profile-sourced (backfill_domains.py) -- a real
+  // company site, so the favicon path is safe for it the same way it is
+  // for the curated domains: no arbitrary-guess gray globes.
+  for (const domain of [websiteDomain, TICKER_DOMAINS[ticker], GROUP_DOMAINS[groupKey]]) {
     if (!domain) continue;
     if (clientId) urls.push(`https://cdn.brandfetch.io/${domain}?c=${clientId}`);
-    // Curated-domain last resort: the site's own favicon via Google's
-    // resolver -- real marks Brandfetch doesn't carry (verified for the
-    // domains listed above). Only for curated domains, so the generic
-    // gray-globe default can't leak in for arbitrary companies.
+    // The site's own favicon via Google's resolver -- real marks
+    // Brandfetch doesn't carry.
     urls.push(`https://www.google.com/s2/favicons?domain=${domain}&sz=128`);
   }
   return urls;
@@ -116,6 +118,7 @@ export function resolveLogo(
   logoUrl: string | null | undefined,
   ticker: string,
   name?: string,
+  websiteDomain?: string | null,
 ): Promise<string | null> {
   const existing = cache.get(ticker);
   if (existing) return existing;
@@ -123,7 +126,7 @@ export function resolveLogo(
     await acquireProbeSlot();
     try {
       let sawError = false;
-      for (const url of logoCandidates(logoUrl, name, ticker)) {
+      for (const url of logoCandidates(logoUrl, name, ticker, websiteDomain)) {
         const result = await tryLoad(url);
         if (result.status === 'ok') return result.url;
         if (result.status === 'error') sawError = true;
@@ -152,18 +155,19 @@ export function useLogo(
   ticker: string,
   name?: string,
   enabled: boolean = true,
+  websiteDomain?: string | null,
 ): string | null | undefined {
   const [resolved, setResolved] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     setResolved(undefined);
-    resolveLogo(logoUrl, ticker, name).then((url) => {
+    resolveLogo(logoUrl, ticker, name, websiteDomain).then((url) => {
       if (!cancelled) setResolved(url);
     });
     return () => {
       cancelled = true;
     };
-  }, [logoUrl, ticker, name, enabled]);
+  }, [logoUrl, ticker, name, enabled, websiteDomain]);
   return resolved;
 }
