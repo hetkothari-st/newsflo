@@ -173,7 +173,7 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
 
   useEffect(() => {
     let cancelled = false;
-    getDirectory({}, token)
+    getDirectory(token)
       .then((result) => {
         if (!cancelled) setCompanies(result);
       })

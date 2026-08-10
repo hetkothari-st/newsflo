@@ -33,7 +33,15 @@ export default function CompanyLogo({
       {showFallback ? (
         <span aria-hidden="true">{initials(ticker)}</span>
       ) : (
-        <img src={logoUrl ?? undefined} alt="" onError={() => setFailed(true)} />
+        // lazy: the Directory mounts 1000+ rows at once -- eager loads
+        // burst the logo CDN into 429s; offscreen rows must not fetch.
+        <img
+          src={logoUrl ?? undefined}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
       )}
     </span>
   );

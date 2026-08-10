@@ -60,7 +60,12 @@ function isFullyTransparent(img: HTMLImageElement): boolean {
   }
 }
 
-function tryLoad(url: string): Promise<string | null> {
+/* 'none' = the CDN answered and there is verifiably no logo (cacheable);
+   'error' = the load failed (network, 429 rate limit) -- NOT proof the
+   logo doesn't exist, so it must never be cached as "no logo". */
+type ProbeResult = { status: 'ok'; url: string } | { status: 'none' } | { status: 'error' };
+
+function tryLoad(url: string): Promise<ProbeResult> {
   return new Promise((resolve) => {
     const img = new Image();
     // Only Brandfetch needs the transparent-placeholder canvas probe
@@ -69,10 +74,40 @@ function tryLoad(url: string): Promise<string | null> {
     // the image outright, so load it plain; it never serves blanks.
     const needsProbe = url.includes('cdn.brandfetch.io');
     if (needsProbe) img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(needsProbe && isFullyTransparent(img) ? null : url);
-    img.onerror = () => resolve(null);
+    img.onload = () =>
+      resolve(needsProbe && isFullyTransparent(img) ? { status: 'none' } : { status: 'ok', url });
+    img.onerror = () => resolve({ status: 'error' });
     img.src = url;
   });
+}
+
+/* A whole-universe list (Directory sections include ~500 global names)
+   mounting at once used to fire one probe per row simultaneously --
+   Brandfetch answered the burst with 429s, and every 429 was then cached
+   as "no logo" for the session. Gate the probes through a small
+   concurrency window instead: the queue drains in the background and no
+   burst ever reaches the CDN. */
+const MAX_CONCURRENT_PROBES = 4;
+let activeProbes = 0;
+const probeQueue: (() => void)[] = [];
+
+function acquireProbeSlot(): Promise<void> {
+  return new Promise((resolve) => {
+    if (activeProbes < MAX_CONCURRENT_PROBES) {
+      activeProbes += 1;
+      resolve();
+    } else {
+      probeQueue.push(() => {
+        activeProbes += 1;
+        resolve();
+      });
+    }
+  });
+}
+
+function releaseProbeSlot(): void {
+  activeProbes -= 1;
+  probeQueue.shift()?.();
 }
 
 const cache = new Map<string, Promise<string | null>>();
@@ -85,11 +120,21 @@ export function resolveLogo(
   const existing = cache.get(ticker);
   if (existing) return existing;
   const promise = (async () => {
-    for (const url of logoCandidates(logoUrl, name, ticker)) {
-      const ok = await tryLoad(url);
-      if (ok !== null) return ok;
+    await acquireProbeSlot();
+    try {
+      let sawError = false;
+      for (const url of logoCandidates(logoUrl, name, ticker)) {
+        const result = await tryLoad(url);
+        if (result.status === 'ok') return result.url;
+        if (result.status === 'error') sawError = true;
+      }
+      // Every candidate failed to LOAD (vs. answered "no logo"): drop the
+      // cache entry so the next mount retries once the rate limit clears.
+      if (sawError) cache.delete(ticker);
+      return null;
+    } finally {
+      releaseProbeSlot();
     }
-    return null;
   })();
   cache.set(ticker, promise);
   return promise;
