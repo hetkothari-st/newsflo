@@ -1,9 +1,11 @@
-/* Raw Pulse-by-Zerodha wire -- every pulse item exactly as ingested,
-   newest first, refreshed every 60s. Deliberately upstream of the whole
-   intelligence pipeline: no analysis, no measurement gating, no LLM of
-   any kind behind this view. Editorial list styling per the broadsheet
-   spec: hairline rules, mono timestamps, no emoji. */
+/* Pulse-by-Zerodha live tab -- raw pulse items rendered in the SAME
+   pictorial storycard format as the main feed (image plate + serif
+   headline + gist), one full-viewport snap slot per story, newest
+   first, refreshed every 60s. Deliberately upstream of the whole
+   intelligence pipeline: no analysis, no measurement, no LLM of any
+   kind behind this view -- a plain DB read. */
 import { useEffect, useState } from 'react';
+import { categoryArtUrl } from '../v3/categoryArt';
 
 type PulseItem = {
   id: number;
@@ -20,6 +22,26 @@ const IST_TIME = new Intl.DateTimeFormat('en-IN', {
   hour12: false,
   timeZone: 'Asia/Kolkata',
 });
+
+/* Same fallback chain as the feed's Plate: the story's own scraped
+   photo, then curated category artwork, then nothing -- a broken-image
+   glyph must never reach the page. Raw pulse items carry no category,
+   so the artwork falls back to the market-commentary plate. */
+function PulsePlate({ src }: { src: string | null }) {
+  const [stage, setStage] = useState<'story' | 'category' | 'none'>(src !== null ? 'story' : 'category');
+  const resolved = stage === 'story' ? src : stage === 'category' ? categoryArtUrl('market_commentary') : null;
+  if (resolved === null) return null;
+  return (
+    <img
+      key={resolved}
+      className="lplate"
+      src={resolved}
+      alt=""
+      loading="lazy"
+      onError={() => setStage(stage === 'story' ? 'category' : 'none')}
+    />
+  );
+}
 
 export default function PulseLiveV4() {
   const [items, setItems] = useState<PulseItem[] | null>(null);
@@ -45,34 +67,36 @@ export default function PulseLiveV4() {
     };
   }, []);
 
+  if (error && items === null) {
+    return <p className="empty4">Pulse wire unavailable — retrying every minute.</p>;
+  }
+  if (items !== null && items.length === 0) {
+    return <p className="empty4">No pulse items ingested yet today.</p>;
+  }
+
   return (
-    <section className="pulsewire" aria-label="Pulse live wire">
-      <div className="pulsehead">
-        <span>PULSE — LIVE WIRE</span>
-        <span>AGGREGATED BY ZERODHA PULSE · UNANALYZED · NEWEST FIRST</span>
-      </div>
-      {error && <p className="pulseempty">Wire unavailable — retrying every minute.</p>}
-      {items !== null && items.length === 0 && !error && (
-        <p className="pulseempty">No pulse items ingested yet today.</p>
-      )}
-      {(items ?? []).map((item) => (
-        <a key={item.id} className="pulserow" href={item.url} target="_blank" rel="noreferrer">
-          {item.image_url ? (
-            <img className="pulseimg" src={item.image_url} alt="" loading="lazy" />
-          ) : (
-            <div className="pulseimg pulseimg-none" aria-hidden="true">
-              N
+    <div>
+      {(items ?? []).map((item, index) => (
+        <div key={item.id}>
+          <a
+            className={`storycard ${index === 0 ? 'first' : ''}`}
+            data-testid={`v4pulse-${item.id}`}
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{ textDecoration: 'none', color: 'inherit' }}
+          >
+            <div>
+              <div className="lmove">
+                PULSE · {item.published_at ? IST_TIME.format(new Date(item.published_at)) + ' IST' : 'LIVE'}
+              </div>
+              <h1>{item.title}</h1>
+              {item.summary && <p className="lgist">{item.summary}</p>}
             </div>
-          )}
-          <div className="pulsebody">
-            <div className="pulsetime">
-              {item.published_at ? IST_TIME.format(new Date(item.published_at)) + ' IST' : '—'}
-            </div>
-            <div className="pulsetitle">{item.title}</div>
-            {item.summary && <div className="pulsesumm">{item.summary}</div>}
-          </div>
-        </a>
+            <PulsePlate src={item.image_url} />
+          </a>
+        </div>
       ))}
-    </section>
+    </div>
   );
 }
