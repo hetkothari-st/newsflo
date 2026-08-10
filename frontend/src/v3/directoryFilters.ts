@@ -61,10 +61,25 @@ function matchesSearch(company: DirectoryCompany, query: string): boolean {
   return company.name.toLowerCase().includes(q) || company.ticker.toLowerCase().includes(q);
 }
 
+// The backend's closed sector taxonomy keeps all financials under "banking"
+// (BSE "financial services" maps there). The directory bifurcates that bucket
+// for display: non-bank financials become a derived "finance" sector. Display
+// only -- Company.sector is untouched (it is rewritten by the monthly universe
+// refresh, so a stored split would revert).
+const FINANCE_SUB_SECTORS = new Set(['nbfc', 'housing_finance', 'insurance', 'asset_management']);
+
+export function displaySector(company: DirectoryCompany): string {
+  if (company.sector !== 'banking') return company.sector;
+  // Unclassified (null sub_sector) banking rows stay under Banking.
+  return company.sub_sector !== null && FINANCE_SUB_SECTORS.has(company.sub_sector)
+    ? 'finance'
+    : 'banking';
+}
+
 export function companyMatchesFilters(company: DirectoryCompany, f: DirectoryFilterState): boolean {
   if (!matchesSearch(company, f.search)) return false;
   if (f.capTier !== 'ALL' && company.cap_tier !== f.capTier) return false;
-  if (f.sector !== 'ALL' && company.sector !== f.sector) return false;
+  if (f.sector !== 'ALL' && displaySector(company) !== f.sector) return false;
   if (f.sector !== 'ALL' && f.subSector !== 'ALL' && company.sub_sector !== f.subSector) return false;
   if (f.indexTier !== 'ALL' && company.index_tier !== f.indexTier) return false;
   if (!passesRange(company.pe, f.peMin, f.peMax)) return false;
@@ -94,15 +109,17 @@ function uniqueSorted(values: (string | null)[]): string[] {
 }
 
 export function sectorOptions(companies: DirectoryCompany[]): string[] {
-  return ['ALL', ...uniqueSorted(companies.map((c) => c.sector))];
+  return ['ALL', ...uniqueSorted(companies.map(displaySector))];
 }
 
 // Empty (not ['ALL']) when no sector chosen or the sector has no classified
 // sub-sectors ("other" never does) -- the caller hides the drilldown then.
+// Keyed on displaySector, so Banking offers bank sub-sectors and Finance
+// offers only the non-bank financial ones.
 export function subSectorOptions(companies: DirectoryCompany[], sector: string): string[] {
   if (sector === 'ALL') return [];
   const subs = uniqueSorted(
-    companies.filter((c) => c.sector === sector).map((c) => c.sub_sector),
+    companies.filter((c) => displaySector(c) === sector).map((c) => c.sub_sector),
   );
   return subs.length === 0 ? [] : ['ALL', ...subs];
 }
