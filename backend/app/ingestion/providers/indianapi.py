@@ -6,22 +6,20 @@ The key is capped at 500 requests/month -- the 90-minute default cadence
 (16/day, ~480/month) fits the whole month, unlike the historical 1-minute
 cadence that burned the budget in ~8 hours (see the old config.py comment).
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 
 from app.config import settings
-from app.ingestion.providers.base import Checkpoint, NormalizedArticle
+from app.ingestion.providers.base import IST, Checkpoint, NormalizedArticle
 
 INDIANAPI_NEWS_URL = "https://stock.indianapi.in/news"
 FETCH_TIMEOUT_SECONDS = 10
 
+
 # IndianAPI's pub_date has no timezone offset (e.g. "2026-07-17T10:43:00") --
 # every source it aggregates is an Indian publication, so that's always IST
 # wall-clock time, not naive UTC.
-IST = timezone(timedelta(hours=5, minutes=30))
-
-
 def _parse_pub_date(value: str | None) -> datetime | None:
     if not value:
         return None

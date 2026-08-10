@@ -35,10 +35,19 @@ def fetch_pending_full_text(session: Session) -> None:
     each article (not batched) so a mid-run crash doesn't lose already-
     fetched articles.
     """
+    # Exchange announcements are excluded: their content field already IS
+    # the full disclosure text, and their URLs (BSE's synthesized
+    # anndet_new.aspx pages, NSE's PDF/XBRL attachments) yield nothing to
+    # trafilatura while costing a serial 10s-timeout request each against
+    # hosts this codebase documents as throttling bursts (see the BSE
+    # comment in app/scheduler.py's universe job). 150+ such items per
+    # 5-minute poll would add minutes of fruitless fetching to every
+    # analysis tick.
     articles = (
         session.query(Article)
         .filter_by(status="NEW")
         .filter(Article.full_content_fetch_attempted_at.is_(None))
+        .filter(Article.provider.is_(None) | Article.provider.notin_(("nse", "bse")))
         .all()
     )
     for article in articles:

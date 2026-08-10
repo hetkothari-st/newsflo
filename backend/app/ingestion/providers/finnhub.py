@@ -3,12 +3,15 @@
 headline->title, summary->content, unix datetime->published_at, and the
 "image": "" -> None normalization that keeps pipeline.py's og:image
 fallback triggering."""
+import logging
 from datetime import datetime, timezone
 
 import httpx
 
 from app.config import settings
 from app.ingestion.providers.base import Checkpoint, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 
 FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/news"
 FETCH_TIMEOUT_SECONDS = 10
@@ -40,7 +43,9 @@ class FinnhubProvider:
                 # One failing category never blocks the other -- but if BOTH
                 # fail, raise so the collector records a real failure
                 # against the breaker instead of logging a healthy
-                # zero-item poll.
+                # zero-item poll. A partial failure doesn't reach the
+                # breaker, so log it here or it is invisible.
+                logger.warning("finnhub category %r fetch failed: %s", category, exc)
                 errors.append(exc)
                 continue
             if isinstance(payload, list):

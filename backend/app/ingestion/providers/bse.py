@@ -17,11 +17,11 @@ NEWSSUB, whose fixed LODR shape is
 "<Company> - <scrip> - Announcement under Regulation 30 (LODR)-<Category>".
 """
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 
-from app.ingestion.providers.base import Checkpoint, NormalizedArticle
+from app.ingestion.providers.base import IST, Checkpoint, NormalizedArticle
 
 ANNOUNCEMENTS_URL = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 ANNOUNCEMENT_PAGE_URL = "https://www.bseindia.com/corporates/anndet_new.aspx?newsid={newsid}"
@@ -41,9 +41,6 @@ BROWSER_HEADERS = {
 _NEWSSUB_CATEGORY_RE = re.compile(r"\(LODR\)\s*-\s*(?P<category>.+?)\s*$")
 
 # NEWS_DT is IST wall-clock without an offset ("2026-08-10T13:06:50.813").
-IST = timezone(timedelta(hours=5, minutes=30))
-
-
 def _parse_news_dt(value: str | None) -> datetime | None:
     if not value:
         return None

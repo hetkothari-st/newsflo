@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -198,7 +198,15 @@ class AnalysisCache(Base):
 
 class Article(Base):
     __tablename__ = "articles"
-    __table_args__ = (UniqueConstraint("url", name="uq_articles_url"),)
+    __table_args__ = (
+        UniqueConstraint("url", name="uq_articles_url"),
+        # Dedup-path indexes for the collector's per-item idempotency
+        # lookups. create_all builds these on a fresh DB; db.py's
+        # _ensure_indexes covers DBs whose columns came from the
+        # index-less _ADDED_COLUMNS ALTER TABLE path.
+        Index("ix_articles_url_hash", "url_hash"),
+        Index("ix_articles_provider_article_id", "provider", "provider_article_id"),
+    )
 
     id = Column(Integer, primary_key=True)
     source = Column(String, nullable=False)

@@ -129,6 +129,9 @@ def test_marketaux_fetch_sends_checkpoint_as_published_after(monkeypatch):
 
     assert captured["published_after"] == "2026-08-10T11:58:00"
     assert captured["limit"] == 3
+    # Ascending is load-bearing: desc + a 3-item page + a max-based cursor
+    # would permanently skip every article past the newest 3 per window.
+    assert captured["sort_order"] == "asc"
 
 
 def test_marketaux_checkpoint_advances_with_overlap_from_data_not_wall_clock():

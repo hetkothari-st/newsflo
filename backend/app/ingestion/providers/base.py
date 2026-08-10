@@ -21,8 +21,14 @@ this contract + one line in app/ingestion/providers/registry.py. Nothing
 downstream changes.
 """
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Protocol, runtime_checkable
+
+# India Standard Time, shared by every provider that parses IST wall-clock
+# timestamps (NSE, BSE, IndianAPI, PIB). Deliberately NOT imported from
+# app.ist_time: that module imports app.pipeline (for _as_aware_utc), which
+# would drag the whole analysis/LLM import graph into every provider import.
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 @dataclass

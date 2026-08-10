@@ -51,7 +51,14 @@ class MarketauxProvider:
             "language": "en",
             "limit": PAGE_LIMIT,
             "sort": "published_on",
-            "sort_order": "desc",
+            # ASCENDING, deliberately: each poll takes the OLDEST unseen
+            # articles and the cursor advances to the batch max, i.e.
+            # forward pagination. Descending here loses data permanently --
+            # a desc page returns only the newest PAGE_LIMIT items and the
+            # max-based cursor then jumps past every unfetched older item
+            # in the window. Ascending merely falls behind real time when
+            # volume exceeds the page budget, and catches up.
+            "sort_order": "asc",
         }
         if checkpoint.cursor:
             params["published_after"] = checkpoint.cursor

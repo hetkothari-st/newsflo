@@ -1,8 +1,9 @@
 """Generic RSS/Atom provider, parametrized per feed. One class covers the
-press feeds (Economic Times / Moneycontrol / Business Standard, previously
-app/ingestion/poller.py + sources.py), the government feeds (PIB / RBI /
-SEBI), and -- via the NseAnnouncementsProvider subclass -- NSE's corporate
-announcements feed.
+press feeds (Economic Times / Moneycontrol / LiveMint / BusinessLine --
+superseding app/ingestion/poller.py + sources.py, which remain only as the
+end-to-end test suite's ingestion harness), the government feeds (PIB /
+RBI / SEBI), and -- via the NseAnnouncementsProvider subclass -- NSE's
+corporate announcements feed.
 
 The bytes-then-parse pattern is preserved verbatim from poller.py:
 feedparser.parse(url) fetches with NO timeout, and one hung feed inside a
@@ -11,12 +12,12 @@ max_instances=1 scheduler job blocks every future poll permanently
 timeout, then hand feedparser only the already-downloaded bytes.
 """
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import feedparser
 import httpx
 
-from app.ingestion.providers.base import Checkpoint, NormalizedArticle
+from app.ingestion.providers.base import IST, Checkpoint, NormalizedArticle
 
 FEED_FETCH_TIMEOUT_SECONDS = 10
 
@@ -37,15 +38,17 @@ BROWSER_UA_HEADERS = {
 # app/filtering/exchange_noise.py.
 _NSE_SUBJECT_RE = re.compile(r"\|\s*SUBJECT:\s*(?P<subject>.+?)\s*$")
 
-# NSE/PIB timestamps carry no offset and are IST wall-clock.
-IST = timezone(timedelta(hours=5, minutes=30))
-
-
 def _entry_published(entry) -> datetime | None:
     published_parsed = entry.get("published_parsed")
     if published_parsed:
         return datetime(*published_parsed[:6], tzinfo=timezone.utc)
     return None
+
+
+def _json_safe_raw(raw_item: dict) -> dict:
+    """feedparser entries hold parser objects the collector's json.dumps
+    would choke on -- keep only the plain scalar fields."""
+    return {k: v for k, v in raw_item.items() if isinstance(v, (str, int, float, bool, type(None)))}
 
 
 class RssProvider:
@@ -95,7 +98,7 @@ class RssProvider:
             title=raw_item.get("title", ""),
             content=raw_item.get("summary", ""),
             published_at=_entry_published(raw_item),
-            raw={k: v for k, v in raw_item.items() if isinstance(v, (str, int, float, bool, type(None)))},
+            raw=_json_safe_raw(raw_item),
         )
 
     def next_checkpoint(self, raw_items: list[dict], previous: Checkpoint) -> Checkpoint:
@@ -150,5 +153,5 @@ class NseAnnouncementsProvider(RssProvider):
             content=body,
             published_at=published_at,
             source_category=source_category,
-            raw={k: v for k, v in raw_item.items() if isinstance(v, (str, int, float, bool, type(None)))},
+            raw=_json_safe_raw(raw_item),
         )

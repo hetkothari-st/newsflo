@@ -18,12 +18,15 @@ artlist mode returns no article body -- content stays empty and the
 existing fetch_pending_full_text stage (app/ingestion/full_text.py) scrapes
 the page like it already does for any thin article, source-agnostically.
 """
+import logging
 import time
 from datetime import datetime, timezone
 
 import httpx
 
 from app.ingestion.providers.base import Checkpoint, NormalizedArticle
+
+logger = logging.getLogger(__name__)
 
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 FETCH_TIMEOUT_SECONDS = 20
@@ -89,7 +92,10 @@ class GdeltProvider:
                 # GDELT answers over-rate requests with HTTP 200 + a plain-
                 # text throttle notice, which lands here as the JSON
                 # ValueError. One failing query doesn't block the other;
-                # both failing is a real source failure for the breaker.
+                # both failing is a real source failure for the breaker. A
+                # partial failure doesn't reach the breaker, so log it here
+                # or it is invisible.
+                logger.warning("gdelt query %s fetch failed: %s", index, exc)
                 errors.append(exc)
                 continue
             articles = payload.get("articles")

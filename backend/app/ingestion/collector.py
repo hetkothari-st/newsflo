@@ -66,11 +66,16 @@ def ensure_registry_rows(session: Session) -> list[IngestionSource]:
     for slug, provider in PROVIDER_REGISTRY.items():
         row = session.query(IngestionSource).filter_by(slug=slug).one_or_none()
         if row is None:
+            # A legacy per-source env override (e.g. the
+            # FINNHUB_POLL_INTERVAL_MINUTES a deployment may already set)
+            # wins over the provider's code default at seed time, so
+            # upgrading a deployment never silently changes its cadence.
+            interval = getattr(settings, f"{slug}_poll_interval_minutes", None)
             row = IngestionSource(
                 slug=slug,
                 display_name=provider.display_name,
                 enabled=1 if slug in enabled_set else 0,
-                poll_interval_minutes=provider.default_poll_interval_minutes,
+                poll_interval_minutes=interval or provider.default_poll_interval_minutes,
             )
             session.add(row)
         rows.append(row)
