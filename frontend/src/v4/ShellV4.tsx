@@ -136,8 +136,13 @@ export default function ShellV4() {
       onScroll={(event) => {
         const el = event.currentTarget;
         // Mini-wordmark toggle (opacity/transform only; hysteresis so a
-        // boundary position can't flap).
-        const next = condensedRef.current ? el.scrollTop > 8 : el.scrollTop > 80;
+        // boundary position can't flap). Appears only once the BIG
+        // masthead has fully scrolled out from under the sticky bar --
+        // a fixed low threshold showed both titles at once.
+        const bigGone = stackHeight - barHeight;
+        const next = condensedRef.current
+          ? el.scrollTop > Math.max(8, bigGone - 40)
+          : el.scrollTop >= bigGone;
         if (next !== condensedRef.current) {
           condensedRef.current = next;
           setCondensed(next);
