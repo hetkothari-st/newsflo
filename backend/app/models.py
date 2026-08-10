@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -205,7 +205,15 @@ class AnalysisCache(Base):
 
 class Article(Base):
     __tablename__ = "articles"
-    __table_args__ = (UniqueConstraint("url", name="uq_articles_url"),)
+    __table_args__ = (
+        UniqueConstraint("url", name="uq_articles_url"),
+        # Dedup-path indexes for the collector's per-item idempotency
+        # lookups. create_all builds these on a fresh DB; db.py's
+        # _ensure_indexes covers DBs whose columns came from the
+        # index-less _ADDED_COLUMNS ALTER TABLE path.
+        Index("ix_articles_url_hash", "url_hash"),
+        Index("ix_articles_provider_article_id", "provider", "provider_article_id"),
+    )
 
     id = Column(Integer, primary_key=True)
     source = Column(String, nullable=False)
@@ -219,8 +227,53 @@ class Article(Base):
     image_url = Column(String, nullable=True)  # og:image / twitter:image scraped from the article page
     full_content = Column(Text, nullable=True)  # scraped+extracted full body text, see app/ingestion/full_text.py
     full_content_fetch_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    # Multi-source ingestion metadata (app/ingestion/collector.py). All
+    # nullable: rows inserted before the provider layer shipped simply have
+    # provider=NULL, and nothing downstream reads these -- `source` keeps its
+    # existing publisher-display-name meaning untouched.
+    provider = Column(String, nullable=True)             # registry slug, e.g. "marketaux"
+    provider_article_id = Column(String, nullable=True)  # provider's native id (Marketaux uuid, Benzinga id, BSE NEWSID)
+    url_hash = Column(String, nullable=True)             # sha256 of the canonicalized url (tracking params stripped)
+    raw_payload = Column(Text, nullable=True)            # original provider item as JSON, for debugging/reprocessing
+    source_category = Column(String, nullable=True)      # structured announcement category (NSE/BSE), feeds exchange_noise
 
     alerts = relationship("Alert", back_populates="article")
+
+
+class IngestionSource(Base):
+    """One row per registered ingestion source: registry config (enabled,
+    poll interval), checkpoint cursor, and health/circuit-breaker state, all
+    in one place because all three are per-source state written by the same
+    poll cycle (app/ingestion/collector.py).
+
+    Rows are seeded on scheduler boot from each provider's code defaults
+    (app/ingestion/providers/registry.py); `enabled` seeds from
+    settings.ingestion_enabled_sources so a deployment chooses its active
+    sources via env without code changes. After first seed the DB row is the
+    source of truth -- flipping `enabled` in the DB takes effect on the next
+    poll tick, no redeploy."""
+
+    __tablename__ = "ingestion_sources"
+
+    id = Column(Integer, primary_key=True)
+    slug = Column(String, nullable=False, unique=True)
+    display_name = Column(String, nullable=False)
+    enabled = Column(Integer, nullable=False, default=0)  # 0/1, same convention as User.email_alerts_enabled
+    poll_interval_minutes = Column(Integer, nullable=False, default=5)
+    cursor = Column(Text, nullable=True)  # opaque per-provider checkpoint (see providers/base.py Checkpoint)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    last_success_at = Column(DateTime(timezone=True), nullable=True)
+    last_fetched_count = Column(Integer, nullable=True)   # items returned by the provider this poll, pre-dedup
+    last_inserted_count = Column(Integer, nullable=True)  # new Article rows actually inserted this poll
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    breaker_open_until = Column(DateTime(timezone=True), nullable=True)  # cooldown window, never a permanent disable
+    last_error = Column(Text, nullable=True)
+    last_error_at = Column(DateTime(timezone=True), nullable=True)
+    # Exponential moving average of (fetched_at - published_at) across
+    # inserted items -- the source's real-world delivery latency, for the
+    # health endpoint. One aggregate per source, not a time series.
+    avg_publish_to_fetch_latency_seconds = Column(Float, nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class Alert(Base):

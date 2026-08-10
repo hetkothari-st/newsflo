@@ -952,3 +952,62 @@ def test_archive_fallback_failure_still_degrades_to_failed(tmp_path):
                                       sleep=lambda _s: None, throttle_seconds=0)
     assert result["fetched"] == 0
     assert len(result["failed"]) == 1
+
+
+# --- dedicated extraction LLM rotation --------------------------------------
+
+class _FakeAdapter:
+    def __init__(self, name, fail=False):
+        self.name, self.fail, self.calls = name, fail, 0
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError(f"{self.name} quota")
+        return f"response-from-{self.name}"
+
+
+def test_rotation_sticks_to_a_working_key():
+    from app.companies.supply_links.llm import RotatingExtractionClient
+    a, b = _FakeAdapter("a"), _FakeAdapter("b")
+    client = RotatingExtractionClient([a, b], shared_fallback=None)
+    assert client.chat.completions.create() == "response-from-a"
+    assert client.chat.completions.create() == "response-from-a"
+    assert (a.calls, b.calls) == (2, 0), "a working key keeps serving"
+
+
+def test_rotation_advances_past_a_failing_key():
+    from app.companies.supply_links.llm import RotatingExtractionClient
+    a, b = _FakeAdapter("a", fail=True), _FakeAdapter("b")
+    client = RotatingExtractionClient([a, b], shared_fallback=None)
+    assert client.chat.completions.create() == "response-from-b"
+    # cursor stuck to b: a is not retried on the next call
+    assert client.chat.completions.create() == "response-from-b"
+    assert (a.calls, b.calls) == (1, 2)
+
+
+def test_all_dedicated_keys_failing_falls_back_to_shared_chain():
+    from app.companies.supply_links.llm import RotatingExtractionClient
+    a, b = _FakeAdapter("a", fail=True), _FakeAdapter("b", fail=True)
+    shared = _FakeAdapter("shared")
+    client = RotatingExtractionClient([a, b], shared_fallback=shared)
+    assert client.chat.completions.create() == "response-from-shared"
+
+
+def test_everything_failing_raises_for_the_llm_failed_path():
+    import pytest as _pytest
+    from app.companies.supply_links.llm import RotatingExtractionClient
+    a = _FakeAdapter("a", fail=True)
+    client = RotatingExtractionClient([a], shared_fallback=None)
+    with _pytest.raises(RuntimeError):
+        client.chat.completions.create()
+
+
+def test_no_dedicated_keys_means_the_shared_chain_verbatim(monkeypatch):
+    from app.companies.supply_links import llm
+    monkeypatch.setattr(llm.settings, "supply_gemini_api_keys_raw", "", raising=False)
+    sentinel = object()
+    monkeypatch.setattr(llm, "build_client", lambda *a, **k: sentinel)
+    assert llm.build_extraction_client() is sentinel

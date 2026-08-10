@@ -6,6 +6,7 @@ from openai import RateLimitError
 from sqlalchemy.orm import Session
 
 from app.analysis.claude_client import FALLBACK_MODEL, tier_kwargs
+from app.config import settings
 from app.models import Article
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,7 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
     deterministic gates over them -- those cost nothing and their verdicts
     do not depend on the provider being up.
     """
+    from app.filtering.exchange_noise import is_exchange_noise
     from app.filtering.junk import is_junk
     from app.filtering.language_gate import is_english_text
     from app.filtering.prefilter import PrefilterCounters, apply_prefilter
@@ -205,6 +207,13 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
         if is_junk(article.title, article_text(article)):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed
+        if is_exchange_noise(
+            article.provider, article.source_category,
+            article.title, article_text(article),
+            mode=settings.exchange_noise_mode,
+        ):
+            article.status = "FILTERED"
+            continue  # deterministic gate (NSE/BSE announcement noise) -- no LLM call
         if apply_prefilter(article.title, article_text(article), counters):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed

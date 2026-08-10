@@ -42,15 +42,21 @@ def _write_doc(tmp_path, scrip_code, meta=None, write_url=True):
 def test_drain_extraction_queue_circuit_breaker_stops_after_consecutive_llm_failures(
     monkeypatch, tmp_path, db_session,
 ):
-    """C2: 6 pending docs that all come back llm_failed must stop the drain
-    after SUPPLY_LLM_FAILURE_BREAKER (5) consecutive failures -- the 6th
-    doc's extract_profile is never even attempted this run."""
+    """C2, budget-free semantics (2026-08-07): a breaker trip COOLS DOWN and
+    continues -- Groq burst-limits rapid-fire calls that succeed minutes
+    later -- so with everything failing, the drain attempts
+    SUPPLY_LLM_FAILURE_BREAKER docs per cooldown cycle and gives up only
+    after _MAX_FRUITLESS_COOLDOWNS consecutive zero-extraction cycles:
+    16 failing docs -> exactly 15 attempts (3 cycles x 5), the 16th never
+    tried, nothing marked extracted. (The scheduler's budgeted job keeps
+    the original hard stop -- it gets tomorrow's run.)"""
     from app import config
 
-    monkeypatch.setattr(backfill_supply_links, "build_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links, "build_extraction_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links.time, "sleep", lambda _s: None)
     monkeypatch.setattr(backfill_supply_links.snapshot, "DEFAULT_ROOT", str(tmp_path))
 
-    for i in range(6):
+    for i in range(16):
         company = Company(ticker=f"FAIL{i}.NS", name=f"Fail {i} Ltd", sector="other", index_tier="OTHER")
         db_session.add(company)
         db_session.flush()
@@ -72,15 +78,17 @@ def test_drain_extraction_queue_circuit_breaker_stops_after_consecutive_llm_fail
 
     backfill_supply_links.drain_extraction_queue(db_session)
 
-    assert len(calls) == config.SUPPLY_LLM_FAILURE_BREAKER  # 6th doc never attempted
+    expected = config.SUPPLY_LLM_FAILURE_BREAKER * backfill_supply_links._MAX_FRUITLESS_COOLDOWNS
+    assert len(calls) == expected  # 15: three fruitless cycles, 16th doc never attempted
     pending = backfill_supply_links.snapshot.pending_docs(str(tmp_path))
-    assert len(pending) == 6  # nothing marked extracted
+    assert len(pending) == 16  # nothing marked extracted
 
 
 def test_drain_extraction_queue_unparsable_news_date_never_stamped_today(monkeypatch, tmp_path, db_session):
     """I3: a missing/unparsable news_date must count "errored" and leave the
     doc pending -- never default to date.today()."""
-    monkeypatch.setattr(backfill_supply_links, "build_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links, "build_extraction_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links.time, "sleep", lambda _s: None)
     monkeypatch.setattr(backfill_supply_links.snapshot, "DEFAULT_ROOT", str(tmp_path))
 
     company = Company(ticker="STALE.NS", name="Stale Ltd", sector="other", index_tier="OTHER")
@@ -117,7 +125,8 @@ def test_drain_extraction_queue_unparsable_news_date_never_stamped_today(monkeyp
 def test_drain_extraction_queue_unreadable_url_sidecar_stays_pending(monkeypatch, tmp_path, db_session):
     """I7: an unreadable .url sidecar must count "errored" and leave the doc
     pending, never fall back to source_url=""."""
-    monkeypatch.setattr(backfill_supply_links, "build_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links, "build_extraction_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links.time, "sleep", lambda _s: None)
     monkeypatch.setattr(backfill_supply_links.snapshot, "DEFAULT_ROOT", str(tmp_path))
 
     company = Company(ticker="NOURL.NS", name="No URL Ltd", sector="other", index_tier="OTHER")
@@ -149,7 +158,8 @@ def test_drain_extraction_queue_corrupt_meta_sidecar_stays_pending_not_unmatched
     """M3: a corrupt/unreadable meta.json must count "errored" and leave the
     doc pending, NOT fall through to meta={} -> unmatched_scrip ->
     mark_extracted."""
-    monkeypatch.setattr(backfill_supply_links, "build_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links, "build_extraction_client", lambda *a, **kw: object())
+    monkeypatch.setattr(backfill_supply_links.time, "sleep", lambda _s: None)
     monkeypatch.setattr(backfill_supply_links.snapshot, "DEFAULT_ROOT", str(tmp_path))
 
     pdf_path = _write_doc(tmp_path, "952", meta="{not valid json")

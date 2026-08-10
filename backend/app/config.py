@@ -23,6 +23,17 @@ class Settings(BaseSettings):
         keys = [self.groq_api_key] if self.groq_api_key else []
         keys += [k.strip() for k in self.groq_api_keys_extra.split(",") if k.strip()]
         return keys
+
+    # Comma-separated Gemini keys DEDICATED to supply-link extraction, so
+    # the rating-rationale backlog drains without touching the analysis
+    # pipeline's shared Groq quota (user-provisioned 2026-08-07; see
+    # app.companies.supply_links.llm for the rotation semantics). Empty by
+    # default -- extraction then rides the shared chain, as before.
+    supply_gemini_api_keys_raw: str = os.environ.get("SUPPLY_GEMINI_API_KEYS", "")
+
+    @property
+    def supply_gemini_api_keys(self) -> list[str]:
+        return [k.strip() for k in self.supply_gemini_api_keys_raw.split(",") if k.strip()]
     # A Groq key from a SEPARATE account (its own, independent per-minute
     # token quota bucket) -- unlike groq_api_keys_extra above, which are
     # same-org keys that share ONE bucket with groq_api_key and only help
@@ -50,38 +61,66 @@ class Settings(BaseSettings):
     # optional-at-dev-time pattern as anthropic_api_key defaulting to "".)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "dev-insecure-secret-change-in-production")
     resend_api_key: str = os.environ.get("RESEND_API_KEY", "")
-    # News ingestion source -- see app/ingestion/indianapi.py. Now disabled
-    # (not deleted, see app/scheduler.py), replaced by the thenewsapi block
-    # below. The RSS-feed poller (app/ingestion/poller.py + sources.py) is
-    # also still fully intact, just not wired into the scheduler either.
+    # News ingestion source -- now app/ingestion/providers/indianapi.py,
+    # scheduled through the provider registry (IngestionSource rows).
     indianapi_api_key: str = os.environ.get("INDIANAPI_API_KEY", "")
-    # This key is capped at 500 requests/month. Explicit product decision to
-    # poll at 1/min anyway (confirmed with the user, who understood the
-    # tradeoff): at that rate the 500 budget is exhausted in ~8 hours, after
-    # which IndianAPI ingestion goes dark (fetch_new_indianapi_articles
-    # degrades to returning 0, per its "never raise, skip this cycle"
-    # contract) until the key's quota resets next month.
-    indianapi_poll_interval_minutes: int = int(os.environ.get("INDIANAPI_POLL_INTERVAL_MINUTES", "1"))
-    # News ingestion source -- replaces IndianAPI (disabled, not deleted --
-    # see app/scheduler.py). See docs/superpowers/specs/2026-07-20-
-    # thenewsapi-ingestion-source-design.md.
+    # SEED OVERRIDE ONLY: per-source cadence lives in
+    # IngestionSource.poll_interval_minutes now. This env var (like the
+    # finnhub one below) is read once, when ensure_registry_rows first
+    # seeds the source's row on a fresh DB -- set it to carry a
+    # deployment's existing cadence through the upgrade; edit the DB row
+    # to change cadence afterwards. Default None = use the provider's
+    # code default (90 min: the 500 req/month cap fits ~16 polls/day --
+    # the historical 1/min cadence burned the whole budget in ~8 hours).
+    indianapi_poll_interval_minutes: int | None = (
+        int(os.environ["INDIANAPI_POLL_INTERVAL_MINUTES"]) if os.environ.get("INDIANAPI_POLL_INTERVAL_MINUTES") else None
+    )
+    # thenewsapi (app/ingestion/thenewsapi.py) is superseded and unwired --
+    # its 100 req/day cap kept exhausting mid-day (see docs/superpowers/
+    # specs/2026-07-21-finnhub-ingestion-source-design.md). Module and key
+    # kept for reference; there is no registry provider for it.
     thenewsapi_api_key: str = os.environ.get("THENEWSAPI_API_KEY", "")
-    # This key is capped at 100 requests/day. Explicit product decision to
-    # poll at 1/min anyway (confirmed with the user, who understood the
-    # tradeoff after being shown the math): at that rate the 100/day budget
-    # is exhausted in ~100 minutes, after which thenewsapi ingestion goes
-    # dark (fetch_new_thenewsapi_articles degrades to returning 0, per its
-    # "never raise, skip this cycle" contract) until the cap resets at
-    # midnight (thenewsapi's reset timezone) -- this repeats every day,
-    # not a one-time cost like IndianAPI's monthly cap above. Same
-    # documented-tradeoff pattern as indianapi_poll_interval_minutes.
-    thenewsapi_poll_interval_minutes: int = int(os.environ.get("THENEWSAPI_POLL_INTERVAL_MINUTES", "1"))
-    # News ingestion source -- replaces thenewsapi (disabled, not deleted --
-    # see app/scheduler.py). thenewsapi's 100/day cap kept exhausting
-    # mid-day in production; Finnhub's free tier is 60 calls/min. See
-    # docs/superpowers/specs/2026-07-21-finnhub-ingestion-source-design.md.
+    # News ingestion source -- now app/ingestion/providers/finnhub.py,
+    # scheduled through the provider registry. Free tier is 60 calls/min;
+    # the provider's default cadence is 1/min (2 calls per cycle).
     finnhub_api_key: str = os.environ.get("FINNHUB_API_KEY", "")
-    finnhub_poll_interval_minutes: int = int(os.environ.get("FINNHUB_POLL_INTERVAL_MINUTES", "1"))
+    # SEED OVERRIDE ONLY -- same semantics as
+    # indianapi_poll_interval_minutes above.
+    finnhub_poll_interval_minutes: int | None = (
+        int(os.environ["FINNHUB_POLL_INTERVAL_MINUTES"]) if os.environ.get("FINNHUB_POLL_INTERVAL_MINUTES") else None
+    )
+    # --- Multi-source ingestion layer (app/ingestion/collector.py) ---
+    # Marketaux free tier: 3 articles/request, 100 requests/day. The
+    # provider's default 15-minute cadence = 96 req/day, just under the cap;
+    # anything faster exhausts the budget mid-day exactly the way thenewsapi
+    # did (see its comment above). Upgrade the plan before shortening this.
+    marketaux_api_key: str = os.environ.get("MARKETAUX_API_TOKEN", os.environ.get("MARKETAUX_API_KEY", ""))
+    # Benzinga REST /api/v2/news. Quota undocumented for this key -- the
+    # collector's per-source circuit breaker backs off automatically on
+    # sustained 429s, so a too-fast interval degrades gracefully instead of
+    # hammering the API.
+    benzinga_api_key: str = os.environ.get("BENZINGA_API_KEY", "")
+    # Comma-separated provider slugs whose IngestionSource row seeds
+    # enabled=1 on FIRST boot against a database that has no row for them
+    # yet (see app/ingestion/providers/registry.py for the slug list).
+    # Defaults to "finnhub" so a deployment that predates the multi-source
+    # layer keeps exactly its current behavior after upgrading; the
+    # multi-source service sets the full list in its env. After first seed
+    # the DB row's `enabled` is the source of truth -- this setting never
+    # overrides an existing row.
+    ingestion_enabled_sources: str = os.environ.get("INGESTION_ENABLED_SOURCES", "finnhub")
+    # Exchange-announcement noise gate (app/filtering/exchange_noise.py) --
+    # NSE/BSE corporate filings are dominated by mechanically produced
+    # non-news (NAV declarations, trading-window closures, newspaper-copy
+    # attachments). Same shadow/enforce/off semantics as
+    # relevance_prefilter_mode above, and shadow-by-default for the same
+    # reason: the cost of a wrong reject is a real disclosure silently
+    # missing from the feed. The multi-source service runs "enforce".
+    exchange_noise_mode: str = os.environ.get("EXCHANGE_NOISE_MODE", "shadow")
+
+    @property
+    def ingestion_enabled_source_set(self) -> set[str]:
+        return {s.strip() for s in self.ingestion_enabled_sources.split(",") if s.strip()}
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound

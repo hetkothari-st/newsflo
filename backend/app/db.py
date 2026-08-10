@@ -107,6 +107,11 @@ _ADDED_COLUMNS = [
     ("market_moves", "category", "VARCHAR"),
     ("companies", "shares_outstanding", "FLOAT"),
     ("companies", "shares_outstanding_as_of", "DATE"),
+    ("articles", "provider", "VARCHAR"),
+    ("articles", "provider_article_id", "VARCHAR"),
+    ("articles", "url_hash", "VARCHAR"),
+    ("articles", "raw_payload", "TEXT"),
+    ("articles", "source_category", "VARCHAR"),
 ]
 
 
@@ -137,8 +142,29 @@ def _add_missing_columns() -> None:
                 conn.commit()
 
 
+# Indexes the multi-source ingestion dedup path needs (see
+# app/ingestion/collector.py._already_seen -- per-item lookups by url_hash
+# and (provider, provider_article_id) every poll cycle). create_all builds
+# these for a brand-new DB via the model's index definitions, but an
+# existing DB got the columns from _ADDED_COLUMNS' bare ALTER TABLE, which
+# never creates indexes -- so they are ensured explicitly here. IF NOT
+# EXISTS is valid on both SQLite and Postgres.
+_ENSURED_INDEXES = [
+    ("ix_articles_url_hash", "articles", "url_hash"),
+    ("ix_articles_provider_article_id", "articles", "provider, provider_article_id"),
+]
+
+
+def _ensure_indexes() -> None:
+    with engine.connect() as conn:
+        for name, table, columns in _ENSURED_INDEXES:
+            conn.exec_driver_sql(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})")
+            conn.commit()
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  ensures models are registered on Base
 
     Base.metadata.create_all(engine)
     _add_missing_columns()
+    _ensure_indexes()
