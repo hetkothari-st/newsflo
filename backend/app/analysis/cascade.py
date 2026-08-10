@@ -47,6 +47,15 @@ from app.reasoning.rulebook import (
 from app.analysis.claude_client import (
     FALLBACK_MODEL, GROQ_TPM_CEILING, MODEL, SYSTEM_PROMPT, tier_kwargs,
 )
+
+# The Groq model serving the cascade's CHEAP stages. Defaults to
+# FALLBACK_MODEL (gpt-oss-20b, its own daily quota bucket); the env
+# override exists because that bucket is small (200k TPD) and a heavy day
+# exhausts it while llama-3.3's separate bucket still has headroom --
+# measured live 2026-08-10. Same tool-call contract either way.
+import os as _os
+CHEAP_STAGE_MODEL = _os.environ.get("CASCADE_CHEAP_MODEL") or FALLBACK_MODEL
+
 from app.analysis.schemas import (
     CATEGORIES, EVENT_TYPES, SECTOR_DEFINITIONS, SECTORS, TIME_HORIZONS,
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
@@ -279,7 +288,7 @@ def _extract_facts(client, title: str, content: str) -> FactsResult:
 
     def _attempt() -> dict:
         response = client.chat.completions.create(
-            model=FALLBACK_MODEL,
+            model=CHEAP_STAGE_MODEL,
             max_tokens=1024,
             tools=[build_facts_tool()],
             tool_choice={"type": "function", "function": {"name": "record_facts"}},
@@ -475,7 +484,7 @@ def _identify_sectors(client, facts: str, parent_sectors: list[SectorFinding] | 
 
     def _attempt() -> dict:
         response = client.chat.completions.create(
-            model=FALLBACK_MODEL,
+            model=CHEAP_STAGE_MODEL,
             max_tokens=2048,
             tools=[tool],
             tool_choice={"type": "function", "function": {"name": "record_sectors"}},
@@ -720,12 +729,12 @@ def build_company_tool(parent_tickers: list[str] | None, valid_tickers: list[str
     }
 
 
-def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_model: str = FALLBACK_MODEL):
+def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_model: str | None = None):
     """Try `model`; retry once on `fallback_model`, with the identical
     prompt, on either a RateLimitError (quota/rate-limited) or a
     tool_use_failed 400 (the model's tool-call structure was unparseable).
 
-    `fallback_model` defaults to FALLBACK_MODEL (gpt-oss-20b) -- the shape
+    `fallback_model` defaults to CHEAP_STAGE_MODEL (see its comment) -- the shape
     every OTHER caller of this function wants. _identify_companies is the one
     exception: its slim-prompt ladder passes `model`/`fallback_model` derived
     from GROQ_TPM_CEILING (claude_client.py) instead -- see the comment at
@@ -738,6 +747,8 @@ def _call_with_model_fallback(call_fn, model: str, call_name: str, fallback_mode
     the caller return an empty company list indistinguishable from "no
     companies found", which is worse than a loud failure.
     """
+    if fallback_model is None:
+        fallback_model = CHEAP_STAGE_MODEL
     try:
         return call_fn(model)
     except RateLimitError:
@@ -792,7 +803,7 @@ COMPANY_PROMPT_TOKEN_BUDGET = 6_500
 # quietly putting this stage back over gpt-oss's ceiling -- which is exactly
 # how it broke, so do not reorder this ladder to "fix" a size problem. Fix
 # the size.
-_SLIM_PROMPT_PRIMARY_MODEL = FALLBACK_MODEL
+_SLIM_PROMPT_PRIMARY_MODEL = CHEAP_STAGE_MODEL
 _SLIM_PROMPT_FALLBACK_MODEL = MODEL
 
 # Ceiling on how many already-identified companies a CASCADE-stage prompt
@@ -1340,7 +1351,7 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
 
         def _attempt() -> dict:
             response = client.chat.completions.create(
-                model=FALLBACK_MODEL, max_tokens=2048, tools=[tool],
+                model=CHEAP_STAGE_MODEL, max_tokens=2048, tools=[tool],
                 tool_choice={"type": "function", "function": {"name": "record_edge_verification"}},
                 messages=messages,
                 **tier_kwargs("generate_edges"),
