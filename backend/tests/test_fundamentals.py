@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.companies.fundamentals import fundamentals_payload
+from app.companies.fundamentals import fundamentals_payload, ratio_or_none
 from app.models import Company
 
 
@@ -87,3 +87,10 @@ def test_negative_ratios_are_real_and_kept():
     ))
     assert p["ratios"]["eps"] == -4.31
     assert p["ratios"]["npm"] == -2.05
+
+
+def test_ratio_or_none_sentinel_rule():
+    assert ratio_or_none(None) is None
+    assert ratio_or_none(0.0) is None
+    assert ratio_or_none(-2.1) == -2.1
+    assert ratio_or_none(5.0) == 5.0

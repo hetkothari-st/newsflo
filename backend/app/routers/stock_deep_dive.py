@@ -15,7 +15,7 @@ from app.auth.dependencies import get_current_user_optional
 from app.companies.branding import logo_url
 from app.config import settings
 from app.companies.descriptions import sourced_description
-from app.companies.fundamentals import fundamentals_payload
+from app.companies.fundamentals import fundamentals_payload, ratio_or_none
 from app.companies.price_series import fetch_pe_ratio
 from app.i18n import get_lang
 from app.market.alert_measurement import _intensity_for_company_move
@@ -201,5 +201,13 @@ def get_directory(
             "sector": company.sector,
             "cap_tier": tier,
             "logo_url": logo_url(company),
+            # Raw rupees (normalize.py stores BSE crore * 1e7); the client
+            # formats to crore for display.
+            "market_cap": company.market_cap,
+            "index_tier": company.index_tier,
+            "sub_sector": company.sub_sector,
+            "pe": ratio_or_none(company.pe),
+            "pb": ratio_or_none(company.pb),
+            "roe": ratio_or_none(company.roe),
         })
     return results

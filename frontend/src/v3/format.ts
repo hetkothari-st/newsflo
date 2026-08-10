@@ -96,3 +96,13 @@ export function isLowDelivery(deliveryPct: number | null): boolean {
 export function isThinTrading(liq: LiquidityTier | null, cap: CapTier | null): boolean {
   return liq === 'LOW' && (cap === 'SMALL' || cap === 'MICRO');
 }
+
+export function fmtMarketCapCr(marketCap: number | null): string {
+  // market_cap arrives as absolute rupees (normalize.py stores BSE crore * 1e7).
+  if (marketCap == null) return '—';
+  return `₹${(marketCap / 1e7).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`;
+}
+
+export function fmtRatio(value: number | null): string {
+  return value == null ? '—' : value.toFixed(1);
+}

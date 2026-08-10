@@ -18,12 +18,14 @@ def _override_db(db_session):
 def _company(
     ticker, sector="oil_gas", business_desc=None, market_cap=None, market_cap_as_of=None,
     official_sector=None, eps=None, financials_source=None, financials_as_of=None,
+    index_tier="NIFTY50", sub_sector=None, pe=None, pb=None, roe=None,
 ):
     return Company(
-        ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier="NIFTY50",
+        ticker=ticker, name=f"Company {ticker}", sector=sector, index_tier=index_tier,
         business_desc=business_desc, market_cap=market_cap, market_cap_as_of=market_cap_as_of,
         official_sector=official_sector, eps=eps,
         financials_source=financials_source, financials_as_of=financials_as_of,
+        sub_sector=sub_sector, pe=pe, pb=pb, roe=roe,
     )
 
 
@@ -276,6 +278,82 @@ def test_directory_and_single_stock_endpoint_agree_on_cap_tier_with_global_pollu
         ticker = f"IND{i}.NS"
         single_tier = client.get(f"/api/feed-v2/stock/{ticker}").json()["cap_tier"]
         assert directory[ticker] == single_tier == "LARGE"
+    app.dependency_overrides.clear()
+
+
+def test_directory_includes_market_cap_index_tier_sub_sector_and_ratios(db_session):
+    _override_db(db_session)
+    db_session.add(_company(
+        "RELIANCE.NS", sector="oil_gas", market_cap=17_662_582_622_436.0,
+        market_cap_as_of=TODAY, sub_sector="refining_marketing",
+        pe=44.95, pb=3.2, roe=15.0,
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    response = client.get("/api/feed-v2/directory")
+
+    assert response.status_code == 200
+    row = response.json()[0]
+    # Raw rupees, no crore conversion server-side -- the client formats.
+    assert row["market_cap"] == 17_662_582_622_436.0
+    assert row["index_tier"] == "NIFTY50"
+    assert row["sub_sector"] == "refining_marketing"
+    assert row["pe"] == 44.95
+    assert row["pb"] == 3.2
+    assert row["roe"] == 15.0
+    app.dependency_overrides.clear()
+
+
+def test_directory_omits_zero_sentinel_ratios_as_null(db_session):
+    """BSE writes literal 0.00 for 'no figure' -- same sentinel contract as
+    fundamentals_payload. Negative ratios are real (loss-makers) and kept."""
+    _override_db(db_session)
+    db_session.add(_company(
+        "LOSSCO.NS", market_cap=1000.0, market_cap_as_of=TODAY,
+        pe=0.0, pb=0.0, roe=-8.4,
+    ))
+    db_session.commit()
+    client = TestClient(app)
+
+    row = client.get("/api/feed-v2/directory").json()[0]
+
+    assert row["pe"] is None
+    assert row["pb"] is None
+    assert row["roe"] == -8.4
+    app.dependency_overrides.clear()
+
+
+def test_directory_passes_through_null_ratios_and_null_sub_sector(db_session):
+    """Keys are always present (None, never omitted) so the client can branch
+    on them without existence checks."""
+    _override_db(db_session)
+    db_session.add(_company("BARE.NS", market_cap=1000.0, market_cap_as_of=TODAY))
+    db_session.commit()
+    client = TestClient(app)
+
+    row = client.get("/api/feed-v2/directory").json()[0]
+
+    assert row["sub_sector"] is None
+    assert row["pe"] is None
+    assert row["pb"] is None
+    assert row["roe"] is None
+    app.dependency_overrides.clear()
+
+
+def test_directory_index_tier_reflects_company_column(db_session):
+    _override_db(db_session)
+    db_session.add_all([
+        _company("N50.NS", market_cap=2000.0, market_cap_as_of=TODAY, index_tier="NIFTY50"),
+        _company("OTH.NS", market_cap=1000.0, market_cap_as_of=TODAY, index_tier="OTHER"),
+    ])
+    db_session.commit()
+    client = TestClient(app)
+
+    by_ticker = {row["ticker"]: row for row in client.get("/api/feed-v2/directory").json()}
+
+    assert by_ticker["N50.NS"]["index_tier"] == "NIFTY50"
+    assert by_ticker["OTH.NS"]["index_tier"] == "OTHER"
     app.dependency_overrides.clear()
 
 

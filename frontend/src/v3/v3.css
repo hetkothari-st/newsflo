@@ -177,10 +177,23 @@
 /* ---------- DIRECTORY ---------- */
 .nf3 .dirfilter { display: flex; gap: 6px; padding: 12px 14px; flex-wrap: wrap; }
 .nf3 .dirfilter select { font: inherit; font-size: 12px; padding: 6px 10px; background: var(--s1); color: var(--ink); border: 0.5px solid var(--border); border-radius: 8px; }
+.nf3 .dirfilter input[type="search"] { font: inherit; font-size: 12px; padding: 6px 10px; background: var(--s1); color: var(--ink); border: 0.5px solid var(--border); border-radius: 8px; flex: 1 1 100%; }
+.nf3 .adv-toggle { font: inherit; font-size: 11px; padding: 5px 10px; border-radius: 8px; cursor: pointer; background: transparent; color: var(--ink3); border: 0.5px solid var(--border); }
+.nf3 .adv-toggle.on { background: var(--s2); color: var(--ink); border-color: var(--ink3); }
+.nf3 .diradv { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 0 14px 12px; }
+.nf3 .diradv-field { display: flex; flex-direction: column; gap: 3px; }
+.nf3 .diradv-field .lab { font-size: 9.5px; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.04em; }
+.nf3 .diradv-field .range { display: flex; align-items: center; gap: 4px; }
+.nf3 .diradv input[type="number"] { width: 56px; font: inherit; font-size: 12px; padding: 5px 7px; background: var(--s1); color: var(--ink); border: 0.5px solid var(--border); border-radius: 6px; }
 .nf3 .direntry { display: flex; align-items: center; gap: 9px; padding: 11px 16px; border-bottom: 0.5px solid var(--border); cursor: pointer; }
 .nf3 .de-name { font-size: 13px; }
 .nf3 .de-tk { font-family: var(--mono); font-size: 10px; color: var(--ink3); }
-.nf3 .de-cap { margin-left: auto; }
+.nf3 .de-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.nf3 .de-figs { text-align: right; }
+.nf3 .de-mcap { font-family: var(--mono); font-size: 11px; }
+.nf3 .de-pe { font-family: var(--mono); font-size: 9.5px; color: var(--ink3); margin-top: 1px; }
+.nf3 .de-badges { display: flex; align-items: center; gap: 4px; }
+.nf3 .tag.idx { background: var(--s2); color: var(--ink2); border: 0.5px solid var(--border); }
 
 /* ---------- PORTFOLIO ---------- */
 .nf3 .pf-sum { margin: 12px 14px; background: var(--s1); border: 0.5px solid var(--border); border-radius: 12px; padding: 14px 16px; }
