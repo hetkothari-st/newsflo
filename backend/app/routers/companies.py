@@ -12,7 +12,9 @@ from app.companies.market import infer_market
 from app.companies.price_series import fetch_price_series
 from app.i18n import get_lang
 from app.market.cap_tier import resolve_cap_tier
-from app.models import Alert, AlertCompany, Article, Company, CompanyIndexMembership, Listing, MarketMove
+from app.models import (
+    Alert, AlertCompany, Article, Company, CompanyIndexMembership, CompanyProfile, Listing, MarketMove,
+)
 from app.pipeline import decode_key_points
 from app.prices.live_cap import compute_live_cap
 from app.prices.live_price import LIVE_PRICE_CACHE, compute_change_pct, get_previous_close
@@ -176,6 +178,7 @@ def get_company_dossier(ticker: str, db: Session = Depends(get_db)):
     desc_text, desc_url = sourced_description(company)
     cap_tier = resolve_cap_tier(db, company)
     live_cap = compute_live_cap(company)
+    profile = db.query(CompanyProfile).filter(CompanyProfile.company_id == company.id).one_or_none()
     return {
         "id": company.id,
         "ticker": company.ticker,
@@ -206,12 +209,12 @@ def get_company_dossier(ticker: str, db: Session = Depends(get_db)):
         "market_cap_source": live_cap.source if live_cap else None,
         "news": news,
         "track_record": get_win_rate(db, company.id),
-        # Sourced enrichment (history / recent developments) -- filled by
-        # the company-profile pipeline; null until then, section hidden.
-        "history_text": None,
-        "history_source_url": None,
-        "developments_text": None,
-        "developments_source_url": None,
+        # Sourced enrichment (Stage B of app.companies.descriptions):
+        # attributed Wikipedia history/developments; null hides the section.
+        "history_text": profile.history_text if profile else None,
+        "history_source_url": profile.source_url if profile and profile.history_text else None,
+        "developments_text": profile.developments_text if profile else None,
+        "developments_source_url": profile.source_url if profile and profile.developments_text else None,
     }
 
 

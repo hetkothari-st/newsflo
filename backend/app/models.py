@@ -70,6 +70,11 @@ class Company(Base):
     tradeability = Column(
         String, nullable=False, default="NORMAL", server_default="NORMAL",
     )  # NORMAL | RESTRICTED | SME | SUSPENDED
+    # Company website domain (bare host, no scheme), sourced from Yahoo
+    # Finance profile data by backend/backfill_domains.py. Feeds the logo
+    # fallback chain for companies Brandfetch has no mark for -- NULL means
+    # not yet fetched or Yahoo has no website on file.
+    website_domain = Column(String, nullable=True)
 
     # BSE-published fundamentals, from the same ComHeadernew payload the
     # classification comes from -- already fetched monthly, previously
@@ -187,6 +192,32 @@ class SupplyLink(Base):
     source_agency = Column(String, nullable=False)
     as_of = Column(Date, nullable=False)
     extracted_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CompanyProfile(Base):
+    """Sourced 'recent years' history + recent developments for the
+    Directory's company dossier -- Stage B of app.companies.descriptions.
+    Rides the ARTICLE->COMPANY proof Stage A already established
+    (business_desc_source_url); never re-derives it. One row per company.
+    The two text fields are independently nullable: an article with a
+    History section but no recent-developments heading populates only
+    history_text -- the dossier hides the missing half, never fills it.
+    NULL means 'not attempted or nothing qualified', never 'empty'. Both
+    fields always come from the same article/revision, so one
+    source_url/revision covers them (CC BY-SA attribution travels with
+    the text wherever it renders)."""
+    __tablename__ = "company_profiles"
+    __table_args__ = (UniqueConstraint("company_id", name="uq_company_profile_company"),)
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    source_url = Column(String, nullable=False)
+    source_title = Column(String, nullable=False)
+    source_revision_id = Column(Integer, nullable=True)
+    history_text = Column(Text, nullable=True)
+    developments_text = Column(Text, nullable=True)
+    as_of = Column(Date, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class AnalysisCache(Base):

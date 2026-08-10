@@ -17,9 +17,13 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.companies.descriptions import extract
-from app.models import Company, Listing
+from app.models import Company, CompanyProfile, Listing
 
 SOURCE_NAME = "wikipedia"
+
+# "Recent years" = this far back from the snapshot day. Five is the
+# dossier's own framing ("what has it been doing the last five years").
+PROFILE_LOOKBACK_YEARS = 5
 
 
 def resolve_company(session: Session, refs: extract.ArticleRefs) -> Company | None:
@@ -130,3 +134,62 @@ def apply_pages(session: Session, pages: list[dict], as_of: date) -> dict:
 
     session.commit()
     return stats
+
+
+def apply_profile(session: Session, company: Company, full_page: dict, as_of: date) -> str:
+    """Stage B write for ONE company whose article `full_page` describes.
+    The title is ALREADY proven to belong to this company by Stage A's
+    resolution -- this function never re-derives the match. Deterministic
+    extraction only (section split -> recent-year paragraph filter ->
+    whole-sentence bounding); no LLM, no invented text.
+
+    Never clobbers: a page that stops yielding a section this run leaves
+    the previously stored text in place. Returns one of
+    'written' | 'unchanged' | 'empty' for the runbook's counts.
+    """
+    section_map = extract.sections(full_page.get("extract") or "")
+    cutoff = as_of.year - PROFILE_LOOKBACK_YEARS
+    max_year = as_of.year + 1  # forward-dated "in fiscal 2027" phrasing
+
+    history_section = extract.find_section(section_map, extract._HISTORY_HEADINGS)
+    history = extract.bounded_text(
+        extract.recent_paragraphs(history_section or "", cutoff, max_year),
+        extract.HISTORY_MAX_CHARS,
+        extract.HISTORY_HARD_CHARS,
+    )
+    developments_section = extract.find_section(section_map, extract._DEVELOPMENTS_HEADINGS)
+    developments = extract.bounded_text(
+        extract.recent_paragraphs(developments_section or "", cutoff, max_year),
+        extract.DEVELOPMENTS_MAX_CHARS,
+        extract.DEVELOPMENTS_HARD_CHARS,
+    )
+
+    profile = (
+        session.query(CompanyProfile).filter(CompanyProfile.company_id == company.id).one_or_none()
+    )
+    if history is None and developments is None:
+        # Nothing qualified. No half-empty marker row; an existing row's
+        # text stays (never clobber good data with nothing).
+        return "empty"
+
+    title = full_page.get("title") or ""
+    url = extract.source_url(title)
+    if profile is None:
+        profile = CompanyProfile(
+            company_id=company.id, source_url=url, source_title=title,
+            source_revision_id=full_page.get("revid"), as_of=as_of,
+        )
+        session.add(profile)
+    changed = False
+    if history is not None and history != profile.history_text:
+        profile.history_text = history
+        changed = True
+    if developments is not None and developments != profile.developments_text:
+        profile.developments_text = developments
+        changed = True
+    profile.source_url = url
+    profile.source_title = title
+    profile.source_revision_id = full_page.get("revid")
+    profile.as_of = as_of
+    session.commit()
+    return "written" if changed else "unchanged"

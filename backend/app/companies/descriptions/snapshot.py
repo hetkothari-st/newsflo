@@ -48,6 +48,25 @@ def fetched_titles(root: str, day: date) -> set[str]:
     return {filename_to_title(p.name) for p in directory.glob("*.json")}
 
 
+FULL_DIRNAME = "full"
+
+
+def full_dir(root: str, day: date) -> Path:
+    return snapshot_dir(root, day) / FULL_DIRNAME
+
+
+def full_path(root: str, day: date, title: str) -> Path:
+    return full_dir(root, day) / title_to_filename(title)
+
+
+def fetched_full_titles(root: str, day: date) -> set[str]:
+    """Titles whose FULL extract (Stage B) is already on disk for ``day``."""
+    directory = full_dir(root, day)
+    if not directory.is_dir():
+        return set()
+    return {filename_to_title(p.name) for p in directory.glob("*.json")}
+
+
 def search_dir(root: str, day: date) -> Path:
     return snapshot_dir(root, day) / SEARCH_DIRNAME
 

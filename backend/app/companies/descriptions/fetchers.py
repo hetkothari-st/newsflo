@@ -161,6 +161,58 @@ def search_for_companies(root: str, day: date, companies: list[tuple[str, str]],
     return list(titles)
 
 
+def fetch_full_extract(title: str, opener=None) -> dict | None:
+    """Full (non-intro) plaintext extract + revision id for ONE article.
+    The extracts API only allows exlimit>1 when exintro is set, so a full
+    extract is one title per request -- affordable because Stage B only
+    ever runs over the already-proven subset (Company rows Stage A
+    resolved), never the whole candidate pool. Returns None for a missing
+    page; raises on API shape-change, same as every fetcher here."""
+    data = _api(
+        {
+            "action": "query",
+            "prop": "revisions|extracts",
+            "rvprop": "ids",
+            "explaintext": "1",
+            "titles": title,
+        },
+        opener=opener,
+    )
+    pages = data.get("query", {}).get("pages", [])
+    if not pages or pages[0].get("missing"):
+        return None
+    page = pages[0]
+    revisions = page.get("revisions") or []
+    return {
+        "title": page["title"],
+        "revid": revisions[0].get("revid") if revisions else None,
+        "extract": page.get("extract", ""),
+    }
+
+
+def fetch_full_extracts(root: str, day: date, titles: list[str], opener=None,
+                        progress=None) -> int:
+    """Snapshot the FULL extract for each title into <day>/full/. Skips
+    titles already on disk (resumable); returns how many were newly
+    written. One request per title -- see fetch_full_extract."""
+    already = snapshot.fetched_full_titles(root, day)
+    pending = [t for t in titles if t not in already]
+    written = 0
+    for index, title in enumerate(pending):
+        record = fetch_full_extract(title, opener=opener)
+        if record is not None:
+            path = snapshot.full_path(root, day, title)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(".json.part")
+            temp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            temp.replace(path)
+            written += 1
+        if progress and index % 25 == 0:
+            progress(index, len(pending))
+        time.sleep(THROTTLE_SECONDS)
+    return written
+
+
 def _write_page(root: str, day: date, title: str, record: dict) -> Path:
     path = snapshot.page_path(root, day, title)
     path.parent.mkdir(parents=True, exist_ok=True)

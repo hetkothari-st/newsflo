@@ -123,6 +123,100 @@ def summarize(extract_text: str) -> str | None:
     return out
 
 
+# ---- Stage B: dossier history/developments from the FULL extract ----
+# Plaintext extracts delimit sections with "== Heading ==" lines. Level-2
+# headings partition the article; deeper levels ("=== 2020s ===") stay
+# folded into their parent's body -- a decade subsection of History is
+# still History.
+_SECTION_HEADING = re.compile(r"^==\s*([^=].*?)\s*==\s*$", re.MULTILINE)
+
+_HISTORY_HEADINGS = ("history", "corporate history", "company history")
+_DEVELOPMENTS_HEADINGS = ("recent developments", "recent history", "recent events")
+
+_YEAR = re.compile(r"\b(19|20)\d{2}\b")
+
+# The dossier's history block reads as a few short paragraphs; developments
+# as a brief pointer. Whole-sentence bounded, like the lead summary.
+HISTORY_MAX_CHARS = 900
+HISTORY_HARD_CHARS = 1400
+DEVELOPMENTS_MAX_CHARS = 500
+DEVELOPMENTS_HARD_CHARS = 800
+
+
+def sections(full_extract: str) -> dict[str, str]:
+    """{lowercased level-2 heading: body} for a full plaintext extract.
+    The pre-heading lead is not returned (Stage A already owns the lead)."""
+    text = full_extract or ""
+    result: dict[str, str] = {}
+    matches = list(_SECTION_HEADING.finditer(text))
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        heading = match.group(1).strip().lower()
+        # First occurrence wins -- a duplicated heading later in the page
+        # (rare vandalism/format noise) must not overwrite the real one.
+        result.setdefault(heading, text[start:end].strip())
+    return result
+
+
+def recent_paragraphs(section_text: str, cutoff_year: int, max_year: int) -> list[str]:
+    """Paragraphs (blank-line separated) that carry a year token within
+    [cutoff_year, max_year], original order. A paragraph with no year at
+    all is unverifiable as 'recent' and is dropped, never guessed."""
+    kept: list[str] = []
+    for raw in (section_text or "").split("\n\n"):
+        # Drop nested sub-heading LINES ("=== 2020s ===") but keep the
+        # paragraph text they precede -- a sub-heading often shares its
+        # blank-line block with the first paragraph beneath it.
+        lines = [line for line in raw.split("\n") if not line.strip().startswith("=")]
+        paragraph = " ".join(" ".join(lines).split())
+        if not paragraph:
+            continue
+        years = [int(m.group(0)) for m in _YEAR.finditer(paragraph)]
+        if any(cutoff_year <= year <= max_year for year in years):
+            kept.append(paragraph)
+    return kept
+
+
+def bounded_text(paragraphs: list[str], max_chars: int, hard_chars: int) -> str | None:
+    """Tail-anchored whole-sentence bounding: paragraphs arrive in
+    chronological order, so when the budget forces a cut, the MOST RECENT
+    (last) paragraphs are kept -- truncating from the front would keep the
+    oldest of the 'recent' window and silently drop the newest material.
+    None when nothing usable remains."""
+    if not paragraphs:
+        return None
+    joined = " ".join(paragraphs)
+    if len(joined) <= max_chars:
+        return joined if len(joined) >= _MIN_DESCRIPTION_CHARS else None
+
+    kept: list[str] = []
+    total = 0
+    for paragraph in reversed(paragraphs):
+        if kept and total + len(paragraph) > max_chars:
+            break
+        kept.insert(0, paragraph)
+        total += len(paragraph) + 1
+    out = " ".join(kept)
+    if len(out) > hard_chars:
+        # A single paragraph larger than the whole budget: keep its TAIL
+        # (the most recent sentences), opening on a sentence boundary.
+        tail = out[-hard_chars:]
+        split = _SENTENCE_SPLIT.split(tail)
+        out = " ".join(split[1:]).strip() if len(split) > 1 else tail
+    # No stub check here: this branch only runs when the source exceeded
+    # the budget, so substance exists -- a short kept tail is still the
+    # most recent real material, not a stub.
+    return out or None
+
+
+def find_section(section_map: dict[str, str], headings: tuple[str, ...]) -> str | None:
+    for heading in headings:
+        if heading in section_map:
+            return section_map[heading]
+    return None
+
+
 def source_url(title: str) -> str:
     """Stable, human-checkable URL for the article a description came from.
     Stored alongside the text so any claim can be traced back."""

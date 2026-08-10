@@ -327,7 +327,9 @@ def test_get_company_prices_invalid_period_returns_400(db_session):
     db_session.commit()
     client = TestClient(app)
 
-    resp = client.get(f"/api/companies/{company.id}/prices?period=5y")
+    # 5y became a VALID period for the dossier's five-year chart -- use a
+    # period that stays outside the allowlist.
+    resp = client.get(f"/api/companies/{company.id}/prices?period=7y")
 
     assert resp.status_code == 400
     app.dependency_overrides.clear()
