@@ -551,7 +551,14 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
     filter_new_articles(session, claude_client, throttle_seconds)
 
     alerts_created = 0
-    pending = session.query(Article).filter_by(status="CATEGORIZED").all()
+    # Newest first, same reasoning as filter_new_articles's ordering: a
+    # backlog must never make current news queue behind stale news.
+    pending = (
+        session.query(Article)
+        .filter_by(status="CATEGORIZED")
+        .order_by(Article.published_at.desc().nullslast(), Article.id.desc())
+        .all()
+    )
 
     for article in pending:
         reusable_alert = _find_reusable_alert(session, article)
