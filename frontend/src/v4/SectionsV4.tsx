@@ -3,7 +3,7 @@
    rules) restyled as ruled editorial columns -- serif entry names,
    uppercase meta lines, hairline rules, no chips except outlined ghost
    tags, active tabs emphasised by scale only. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   getCarReview,
@@ -130,12 +130,46 @@ export function DiscoverV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string
 
 /* ---------- DIRECTORY ---------- */
 
+/* Autocomplete matching: prefix beats substring, ties by live rank.
+   Pure client-side -- the whole directory is already loaded. */
+function searchMatches(
+  companies: DirectoryCompany[],
+  query: string,
+  rankOf: (ticker: string) => number,
+): DirectoryCompany[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const scored = companies
+    .map((company) => {
+      const name = company.name.toLowerCase();
+      const ticker = company.ticker.toLowerCase();
+      const prefix = name.startsWith(q) || ticker.startsWith(q);
+      const anywhere = prefix || name.includes(q) || ticker.includes(q);
+      return anywhere ? { company, prefix } : null;
+    })
+    .filter((entry): entry is { company: DirectoryCompany; prefix: boolean } => entry !== null);
+  scored.sort(
+    (a, b) =>
+      Number(b.prefix) - Number(a.prefix) ||
+      rankOf(a.company.ticker) - rankOf(b.company.ticker) ||
+      a.company.ticker.localeCompare(b.company.ticker),
+  );
+  return scored.slice(0, 8).map((entry) => entry.company);
+}
+
 export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string) => void }) {
   const { token } = useAuth();
   const [companies, setCompanies] = useState<DirectoryCompany[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [capFilter, setCapFilter] = useState<CapTier | 'ALL'>('ALL');
   const [sectorFilter, setSectorFilter] = useState<string>('ALL');
+  // Search: the query filters the ranked list live; the dropdown offers
+  // the top matches, and picking one jumps to (and briefly highlights)
+  // that company's row in the full ranking.
+  const [query, setQuery] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [highlightTicker, setHighlightTicker] = useState<string | null>(null);
+  const highlightTimer = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,10 +196,14 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
   // Until the first poll lands, rows keep the API's ticker order.
   const liveCaps = useDirectoryLiveCaps();
   const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
     const rows = (companies ?? []).filter(
       (company) =>
         (capFilter === 'ALL' || company.cap_tier === capFilter) &&
-        (sectorFilter === 'ALL' || company.sector === sectorFilter),
+        (sectorFilter === 'ALL' || company.sector === sectorFilter) &&
+        (q === '' ||
+          company.name.toLowerCase().includes(q) ||
+          company.ticker.toLowerCase().includes(q)),
     );
     if (liveCaps.size === 0) return rows;
     return [...rows].sort(
@@ -174,12 +212,89 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
           (liveCaps.get(b.ticker)?.rank ?? Number.MAX_SAFE_INTEGER) ||
         a.ticker.localeCompare(b.ticker),
     );
-  }, [companies, capFilter, sectorFilter, liveCaps]);
+  }, [companies, capFilter, sectorFilter, liveCaps, query]);
+
+  const suggestions = useMemo(
+    () =>
+      dropdownOpen && query.trim() !== ''
+        ? searchMatches(
+            companies ?? [],
+            query,
+            (ticker) => liveCaps.get(ticker)?.rank ?? Number.MAX_SAFE_INTEGER,
+          )
+        : [],
+    [companies, query, dropdownOpen, liveCaps],
+  );
+
+  // Jump to a company's row in the full ranking: clear the query, lift
+  // any filter that would hide it, then scroll + pulse the row.
+  const jumpTo = (company: DirectoryCompany) => {
+    setQuery('');
+    setDropdownOpen(false);
+    if (capFilter !== 'ALL' && company.cap_tier !== capFilter) setCapFilter('ALL');
+    if (sectorFilter !== 'ALL' && company.sector !== sectorFilter) setSectorFilter('ALL');
+    setHighlightTicker(company.ticker);
+    if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+    highlightTimer.current = window.setTimeout(() => setHighlightTicker(null), 2000);
+    // Scroll after the cleared query/filters have re-rendered the list.
+    window.setTimeout(() => {
+      document
+        .getElementById(`dirrow-${company.ticker}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
+  };
 
   return (
     <div className="page4">
       <h1 className="phead">Directory</h1>
       <p className="psub">Every tracked stock. Filter by cap tier and sector.</p>
+      <div className="dirsearch">
+        <input
+          type="search"
+          className="dirsearch-input"
+          placeholder="Search companies…"
+          aria-label="Search companies"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setDropdownOpen(true);
+          }}
+          onFocus={() => setDropdownOpen(true)}
+          onBlur={() => window.setTimeout(() => setDropdownOpen(false), 120)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && suggestions.length > 0) jumpTo(suggestions[0]);
+            if (event.key === 'Escape') setDropdownOpen(false);
+          }}
+        />
+        {suggestions.length > 0 && (
+          <div className="dirsearch-drop" role="listbox" aria-label="Company suggestions">
+            {suggestions.map((company) => {
+              const rank = liveCaps.get(company.ticker)?.rank;
+              return (
+                <div
+                  className="dirsearch-item"
+                  role="option"
+                  aria-selected="false"
+                  key={company.ticker}
+                  // mousedown, not click: it fires before the input's blur
+                  // closes the dropdown.
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    jumpTo(company);
+                  }}
+                >
+                  <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
+                  <span className="ds-name">{company.name}</span>
+                  <span className="ds-meta">
+                    {company.ticker.split('.')[0]}
+                    {rank !== undefined ? ` · #${rank}` : ''}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
       <div className="texttabs">
         <select
           aria-label="Cap tier filter"
@@ -211,7 +326,12 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
       {filtered.map((company) => {
         const live = liveCaps.get(company.ticker);
         return (
-          <div className="entry4" key={company.ticker} onClick={() => onOpenDeepDive(company.ticker)}>
+          <div
+            className={`entry4 ${highlightTicker === company.ticker ? 'flash' : ''}`}
+            id={`dirrow-${company.ticker}`}
+            key={company.ticker}
+            onClick={() => onOpenDeepDive(company.ticker)}
+          >
             {live && <span className="rank4">{live.rank}</span>}
             <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
             <div className="ebody">

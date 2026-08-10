@@ -620,6 +620,59 @@ body:has(.nf4.dark) { background: #2a2722; }
 }
 .nf4 .entry4 .capval { font-family: var(--mono, monospace); color: var(--ash); }
 .nf4 .entry4 .capval.live { color: var(--ink); }
+/* Directory search: hairline-underlined input, paper dropdown of top
+   matches; a picked row pulses briefly so the eye lands on it. */
+.nf4 .dirsearch { position: relative; margin-bottom: 14px; }
+.nf4 .dirsearch-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono, monospace);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  padding: 8px 2px;
+}
+.nf4 .dirsearch-input::placeholder { color: var(--pebble); text-transform: uppercase; font-size: 12px; letter-spacing: 0.08em; }
+.nf4 .dirsearch-input:focus { outline: none; border-bottom-width: 2px; }
+.nf4 .dirsearch-drop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  max-height: 340px;
+  overflow-y: auto;
+}
+.nf4 .dirsearch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-top: 1px solid var(--hairline);
+}
+.nf4 .dirsearch-item:first-child { border-top: none; }
+.nf4 .dirsearch-item:hover { background: var(--hairline); }
+.nf4 .dirsearch-item .ds-name {
+  font-family: var(--serif);
+  font-size: 16px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nf4 .dirsearch-item .ds-meta { font-family: var(--mono, monospace); font-size: 11px; color: var(--ash); white-space: nowrap; }
+.nf4 .entry4.flash { animation: nf4-rowflash 2s ease-out; }
+@keyframes nf4-rowflash {
+  from { background: var(--hairline); }
+  to { background: transparent; }
+}
 .nf4 .entry4 .ebody { flex: 1; min-width: 0; }
 .nf4 .entry4 .clg { margin-top: 4px; }
 .nf4 .entry4:first-of-type { border-top: 1px solid var(--ink); }
