@@ -742,6 +742,67 @@ body:has(.nf4.dark) { background: #2a2722; }
   padding: 4px 8px;
 }
 
+/* Editorial filter dropdown (FilterMenuV4) -- native select's open list
+   is OS-rendered and can't match paper/ink; this one is a ruled index
+   like the search dropdown. Selection is marked with an em-dash and
+   weight, never a color fill. */
+.nf4 .fmenu { position: relative; display: inline-block; }
+.nf4 .fmenu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--grotesque);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.nf4 .fmenu-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.nf4 .fmenu-caret { font-size: 9px; color: var(--ash); line-height: 1; }
+.nf4 .fmenu-btn.open .fmenu-caret { color: var(--ink); }
+.nf4 .fmenu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  width: max-content;
+  max-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+}
+.nf4 .fmenu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 14px 8px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ash);
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nf4 .fmenu-item:first-child { border-top: none; }
+.nf4 .fmenu-item.act { background: var(--hairline); color: var(--ink); }
+.nf4 .fmenu-item.sel { color: var(--ink); font-weight: 700; }
+.nf4 .fmenu-mark {
+  flex: 0 0 14px;
+  color: var(--ink);
+  font-weight: 400;
+}
+
 /* Portfolio count -- a broadside numeral. */
 .nf4 .pfcount { font-family: var(--serif); font-size: 77px; line-height: 0.9; margin: 0 0 4px; }
 .nf4 .pfcount small { font-size: 24px; color: var(--ash); }

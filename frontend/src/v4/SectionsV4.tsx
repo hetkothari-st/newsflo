@@ -16,6 +16,7 @@ import {
   type DiscoveryEntry,
   type DiscoveryTab,
 } from '../v3/api';
+import FilterMenuV4 from './FilterMenuV4';
 import LogoV4 from './LogoV4';
 import { displaySector } from '../v3/directoryFilters';
 import { formatMarketCap } from './directoryLiveCaps';
@@ -302,28 +303,24 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
         )}
       </div>
       <div className="texttabs">
-        <select
-          aria-label="Cap tier filter"
+        <FilterMenuV4
+          label="Cap tier filter"
           value={capFilter}
-          onChange={(event) => setCapFilter(event.target.value as CapTier | 'ALL')}
-        >
-          {CAP_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option === 'ALL' ? 'All caps' : option}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Sector filter"
+          onChange={(next) => setCapFilter(next as CapTier | 'ALL')}
+          options={CAP_OPTIONS.map((option) => ({
+            value: option,
+            label: option === 'ALL' ? 'All caps' : option,
+          }))}
+        />
+        <FilterMenuV4
+          label="Sector filter"
           value={sectorFilter}
-          onChange={(event) => setSectorFilter(event.target.value)}
-        >
-          {sectors.map((sector) => (
-            <option key={sector} value={sector}>
-              {sector === 'ALL' ? 'All sectors' : sector.replace(/_/g, ' ')}
-            </option>
-          ))}
-        </select>
+          onChange={setSectorFilter}
+          options={sectors.map((sector) => ({
+            value: sector,
+            label: sector === 'ALL' ? 'All sectors' : sector.replace(/_/g, ' '),
+          }))}
+        />
       </div>
       {error !== null && <p className="empty4">{error}</p>}
       {companies !== null && filtered.length === 0 && (
