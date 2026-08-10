@@ -589,19 +589,68 @@ class FallbackClient:
             return self._secondary.chat.completions.create(**kwargs)
 
 
+class _RoutedCompletions:
+    def __init__(self, router: "CallRoutedClient"):
+        self._router = router
+
+    def create(self, **kwargs):
+        return self._router._call(**kwargs)
+
+
+class _RoutedChat:
+    def __init__(self, router: "CallRoutedClient"):
+        self.completions = _RoutedCompletions(router)
+
+
+class CallRoutedClient:
+    """Routes each LLM call by its ``call_name`` (the kwarg every call site
+    already passes via tier_kwargs): protected calls -- the ones that decide
+    which companies are affected and why (config.LLM_PROTECTED_CALLS) -- go
+    to the ``protected`` client (a PAID Gemini key chain, no per-minute
+    ceiling); everything else stays on the ``default`` free chain. This is
+    the cost boundary: the paid key is spent ONLY where output quality is
+    the product, high-volume cheap calls (relevance gate, summaries,
+    translations) never touch it. A call with no call_name routes to
+    default -- unknown work must never silently spend the paid budget."""
+
+    def __init__(self, protected, default, protected_calls):
+        self._protected = protected
+        self._default = default
+        self._protected_calls = frozenset(protected_calls)
+        self.chat = _RoutedChat(self)
+
+    def _call(self, **kwargs):
+        if kwargs.get("call_name") in self._protected_calls:
+            return self._protected.chat.completions.create(**kwargs)
+        return self._default.chat.completions.create(**kwargs)
+
+
 def build_client(
     groq_api_key: str | list[str], gemini_api_key: str | None = None,
-) -> GroqAdapter | FallbackClient:
+    gemini_paid_api_key: str | None = None,
+) -> "GroqAdapter | FallbackClient | CallRoutedClient":
     """The Groq client is always wrapped in a GroqAdapter, whether it ends
     up as the primary or as FallbackClient's secondary: every client this
     returns must accept the same create(tier=..., call_name=...) contract,
     or a degrade-to-Groq would blow up on kwargs a raw OpenAI client has
-    never heard of. GroqAdapter.inner is the client it wraps."""
+    never heard of. GroqAdapter.inner is the client it wraps.
+
+    With ``gemini_paid_api_key`` set, the protected calls
+    (config.LLM_PROTECTED_CALLS) route to that key -- still with the Groq
+    degrade-to-fallback safety net -- while every other call keeps the
+    free chain. See CallRoutedClient for the cost rationale."""
+    from app.config import LLM_PROTECTED_CALLS
+
     if isinstance(groq_api_key, list):
         groq_client = GroqAdapter(RotatingClient(groq_api_key, base_url=GROQ_BASE_URL))
     else:
         groq_client = GroqAdapter(OpenAI(api_key=groq_api_key, base_url=GROQ_BASE_URL))
 
-    if gemini_api_key:
-        return FallbackClient(GeminiAdapter(gemini_api_key), groq_client)
-    return groq_client
+    default_chain = (
+        FallbackClient(GeminiAdapter(gemini_api_key), groq_client)
+        if gemini_api_key else groq_client
+    )
+    if gemini_paid_api_key:
+        protected_chain = FallbackClient(GeminiAdapter(gemini_paid_api_key), groq_client)
+        return CallRoutedClient(protected_chain, default_chain, LLM_PROTECTED_CALLS)
+    return default_chain

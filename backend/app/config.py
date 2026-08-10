@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./newsflo.db")
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
+    # PAID Gemini key, spent ONLY on the protected calls (extract_facts,
+    # identify_companies -- see LLM_PROTECTED_CALLS below and
+    # claude_client.CallRoutedClient). Empty = no routing, everything rides
+    # the free chain exactly as before. Never put this key in
+    # GEMINI_API_KEY: that would burn paid quota on every cheap
+    # high-volume call (relevance gate, summaries) too.
+    gemini_paid_api_key: str = os.environ.get("GEMINI_PAID_API_KEY", "")
     openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     groq_api_key: str = os.environ.get("GROQ_API_KEY", "")

@@ -102,7 +102,10 @@ def _run_ingestion_and_analysis() -> None:
     raising, so one bad run never crashes the scheduler thread."""
     session = SessionLocal()
     try:
-        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+        client = build_client(
+            settings.groq_api_keys, settings.gemini_api_key or None,
+            gemini_paid_api_key=settings.gemini_paid_api_key or None,
+        )
         created = process_new_articles(session, client, throttle_seconds=2.5)
         logger.info("Analysis cycle: %s alerts created", created)
     except Exception:
@@ -153,7 +156,10 @@ def _run_deferred_refinement() -> None:
         return
     session = SessionLocal()
     try:
-        client = build_client(settings.groq_api_keys, settings.gemini_api_key or None)
+        client = build_client(
+            settings.groq_api_keys, settings.gemini_api_key or None,
+            gemini_paid_api_key=settings.gemini_paid_api_key or None,
+        )
         refined = run_pending_refinements(
             client, session, throttle_seconds=2.5,
         )
