@@ -3,6 +3,7 @@
 import type { DirectoryCompany } from './api';
 import CompanyLogo from './CompanyLogo';
 import { sectorLabel } from '../features/visualize/transforms';
+import { displaySector } from './directoryFilters';
 import { capClass, fmtMarketCapCr, fmtRatio } from './format';
 
 const INDEX_BADGES: Record<string, string> = {
@@ -30,7 +31,7 @@ export default function DirectoryRow({
       <div>
         <div className="de-name">{company.name}</div>
         <div className="de-tk">
-          {company.ticker} · {sectorLabel(company.sector)}
+          {company.ticker} · {sectorLabel(displaySector(company))}
         </div>
       </div>
       <div className="de-right">

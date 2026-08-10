@@ -4,6 +4,7 @@ import {
   DEFAULT_DIRECTORY_FILTERS,
   applyDirectoryView,
   companyMatchesFilters,
+  displaySector,
   indexTierOptions,
   parseFilterBound,
   sectorOptions,
@@ -165,6 +166,54 @@ describe('option derivation', () => {
 
   it('indexTierOptions derives from data, not a hardcoded list', () => {
     expect(indexTierOptions(list)).toEqual(['ALL', 'NIFTY50', 'OTHER']);
+  });
+});
+
+describe('displaySector banking/finance bifurcation', () => {
+  it('non-banking sectors pass through unchanged', () => {
+    expect(displaySector(company({ sector: 'it', sub_sector: 'services' }))).toBe('it');
+    expect(displaySector(company({ sector: 'other', sub_sector: null }))).toBe('other');
+  });
+
+  it('non-bank financials become the derived finance sector', () => {
+    for (const sub of ['nbfc', 'housing_finance', 'insurance', 'asset_management']) {
+      expect(displaySector(company({ sector: 'banking', sub_sector: sub }))).toBe('finance');
+    }
+  });
+
+  it('banks and unclassified banking rows stay banking', () => {
+    expect(displaySector(company({ sector: 'banking', sub_sector: 'private_bank' }))).toBe('banking');
+    expect(displaySector(company({ sector: 'banking', sub_sector: 'psu_bank' }))).toBe('banking');
+    expect(displaySector(company({ sector: 'banking', sub_sector: 'banking_other' }))).toBe('banking');
+    expect(displaySector(company({ sector: 'banking', sub_sector: null }))).toBe('banking');
+  });
+
+  it('sector filter matches the derived sector, not the stored one', () => {
+    const nbfc = company({ sector: 'banking', sub_sector: 'nbfc' });
+    const bank = company({ sector: 'banking', sub_sector: 'psu_bank' });
+    expect(companyMatchesFilters(nbfc, filters({ sector: 'finance' }))).toBe(true);
+    expect(companyMatchesFilters(bank, filters({ sector: 'finance' }))).toBe(false);
+    expect(companyMatchesFilters(nbfc, filters({ sector: 'banking' }))).toBe(false);
+    expect(companyMatchesFilters(bank, filters({ sector: 'banking' }))).toBe(true);
+  });
+
+  it('sectorOptions lists banking and finance when both are present', () => {
+    const list = [
+      company({ ticker: 'HDFC.NS', sector: 'banking', sub_sector: 'private_bank' }),
+      company({ ticker: 'LIC.NS', sector: 'banking', sub_sector: 'insurance' }),
+    ];
+    expect(sectorOptions(list)).toEqual(['ALL', 'banking', 'finance']);
+  });
+
+  it('sub-sector drilldown splits along the bifurcation', () => {
+    const list = [
+      company({ ticker: 'HDFC.NS', sector: 'banking', sub_sector: 'private_bank' }),
+      company({ ticker: 'SBI.NS', sector: 'banking', sub_sector: 'psu_bank' }),
+      company({ ticker: 'LIC.NS', sector: 'banking', sub_sector: 'insurance' }),
+      company({ ticker: 'BAJFIN.NS', sector: 'banking', sub_sector: 'nbfc' }),
+    ];
+    expect(subSectorOptions(list, 'banking')).toEqual(['ALL', 'private_bank', 'psu_bank']);
+    expect(subSectorOptions(list, 'finance')).toEqual(['ALL', 'insurance', 'nbfc']);
   });
 });
 

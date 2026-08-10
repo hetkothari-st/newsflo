@@ -53,6 +53,9 @@ const SECTOR_LABEL: Record<string, string> = {
   chemicals: 'Chemicals',
   textiles: 'Textiles',
   other: 'Other',
+  // Not a backend sector: the Directory's display-level split of "banking"
+  // into banks vs non-bank financials (see v3/directoryFilters.ts).
+  finance: 'Finance',
 };
 
 export function sectorLabel(sector: string): string {
