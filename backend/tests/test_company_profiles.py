@@ -118,3 +118,15 @@ def test_dossier_endpoint_serves_profile_fields(db_session):
     assert "2022" in body["history_text"]
     assert body["history_source_url"].startswith("https://en.wikipedia.org/")
     assert "battery factory" in body["developments_text"]
+
+
+def test_apply_profile_falls_back_to_undated_history(db_session):
+    company = _company(db_session)
+    outcome = loader.apply_profile(
+        db_session, company,
+        _page("== History ==\nFounded as a family firm, it grew across the region without fanfare."),
+        as_of=AS_OF,
+    )
+    assert outcome == "written"
+    profile = db_session.query(CompanyProfile).one()
+    assert "family firm" in profile.history_text

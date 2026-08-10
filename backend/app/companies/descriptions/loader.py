@@ -157,6 +157,18 @@ def apply_profile(session: Session, company: Company, full_page: dict, as_of: da
         extract.HISTORY_MAX_CHARS,
         extract.HISTORY_HARD_CHARS,
     )
+    if history is None and history_section:
+        # No recent-dated paragraphs, but the article HAS a history --
+        # fall back to its most recent material regardless of age
+        # (bounded_text is tail-anchored, so the newest content wins).
+        # Still sourced and attributed; the UI titles the section
+        # age-neutrally ("The story so far"), so older text never
+        # masquerades as the last five years.
+        history = extract.bounded_text(
+            extract.all_paragraphs(history_section),
+            extract.HISTORY_MAX_CHARS,
+            extract.HISTORY_HARD_CHARS,
+        )
     developments_section = extract.find_section(section_map, extract._DEVELOPMENTS_HEADINGS)
     developments = extract.bounded_text(
         extract.recent_paragraphs(developments_section or "", cutoff, max_year),

@@ -210,6 +210,19 @@ def bounded_text(paragraphs: list[str], max_chars: int, hard_chars: int) -> str 
     return out or None
 
 
+def all_paragraphs(section_text: str) -> list[str]:
+    """Every paragraph of a section (sub-heading lines stripped), original
+    order, no year filter -- the fallback when a history section carries
+    no explicitly recent-dated material."""
+    kept: list[str] = []
+    for raw in (section_text or "").split("\n\n"):
+        lines = [line for line in raw.split("\n") if not line.strip().startswith("=")]
+        paragraph = " ".join(" ".join(lines).split())
+        if paragraph:
+            kept.append(paragraph)
+    return kept
+
+
 def find_section(section_map: dict[str, str], headings: tuple[str, ...]) -> str | None:
     for heading in headings:
         if heading in section_map:

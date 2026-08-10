@@ -266,7 +266,7 @@ export default function CompanyDossierV4() {
           )}
 
           {dossier.history_text && (
-            <Section title="The recent years">
+            <Section title="The story so far">
               <p className="ddprose">
                 {dossier.history_text}
                 {dossier.history_source_url && (
