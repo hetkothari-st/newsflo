@@ -8,8 +8,14 @@ Base = declarative_base()
 
 def get_engine(url: str | None = None):
     url = url or settings.database_url
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    return create_engine(url, connect_args=connect_args)
+    if url.startswith("sqlite"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    # pool_pre_ping: a pooled Postgres connection that sat idle (overnight /
+    # weekend) gets silently dropped server-side; without the ping the next
+    # request inherits the dead socket and 500s with "connection timed out"
+    # (seen live 2026-08-10 on the preview service). The ping costs one
+    # round-trip per checkout and replaces the dead connection instead.
+    return create_engine(url, pool_pre_ping=True, pool_recycle=300)
 
 
 engine = get_engine()
