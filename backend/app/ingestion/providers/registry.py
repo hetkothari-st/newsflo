@@ -66,6 +66,19 @@ _PROVIDERS: list[Provider] = [
     ),
     # Indian press RSS -- the feeds the legacy poller (poller.py/sources.py)
     # served before it was unwired, now one health-tracked source each
+    # Pulse by Zerodha -- aggregator of all major Indian financial news
+    # sources in one feed (verified live 2026-08-10: rolling ~25-item
+    # window, ~2h depth). High overlap with the individual press feeds is
+    # fine: the collector's idempotency tiers collapse duplicates, and
+    # Pulse often surfaces a publisher we don't poll directly.
+    RssProvider(
+        slug="pulse_zerodha",
+        display_name="Pulse by Zerodha",
+        source_name="pulse_zerodha",
+        feed_url="https://pulse.zerodha.com/feed.php",
+        headers=BROWSER_UA_HEADERS,
+        poll_interval_minutes=2,
+    ),
     # Browser UA on all three: Business Standard 403s a default client UA
     # outright (verified live 2026-08-10), and the other two gain nothing
     # from advertising one.
