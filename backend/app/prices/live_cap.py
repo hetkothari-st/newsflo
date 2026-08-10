@@ -57,12 +57,19 @@ def compute_live_cap(company: Company, now: datetime | None = None) -> LiveCap |
 
 
 def rank_live_caps(session: Session, now: datetime | None = None) -> list[LiveCap]:
-    """Every rankable company (same pool as GET /directory: non-null stored
-    cap), best-honest cap each, sorted (cap desc, ticker asc) -- the same
-    total order app.market.cap_tier.compute_cap_tiers uses, so ranks stay
-    consistent with the LARGE/MID/SMALL/MICRO tags shown beside them."""
+    """Every rankable company, best-honest cap each, sorted (cap desc,
+    ticker asc) -- the same pool AND total order app.market.cap_tier uses
+    (India-only, non-null cap), so ranks stay consistent with the
+    LARGE/MID/SMALL/MICRO tags shown beside them. The India filter is
+    load-bearing beyond tier parity: curated GLOBAL rows store their cap
+    in the listing currency (USD), and ranking raw USD against INR would
+    both skew every rank and print dollar figures as rupees."""
     now = now or datetime.now(timezone.utc)
-    companies = session.query(Company).filter(Company.market_cap.isnot(None)).all()
+    companies = (
+        session.query(Company)
+        .filter(Company.market == "INDIA", Company.market_cap.isnot(None))
+        .all()
+    )
     caps = [cap for company in companies if (cap := compute_live_cap(company, now)) is not None]
     caps.sort(key=lambda c: (-c.market_cap, c.ticker))
     return caps

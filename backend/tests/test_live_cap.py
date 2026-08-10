@@ -77,6 +77,20 @@ def test_ranking_orders_by_effective_cap_with_ticker_tiebreak(db_session):
     assert [c.source for c in ranked[1:]] == ["stored", "stored"]
 
 
+def test_global_companies_never_enter_the_ranking_pool(db_session):
+    # Curated GLOBAL rows store market_cap in the listing currency (USD);
+    # ranking raw USD against INR would skew every rank -- same India-only
+    # pool rule as app.market.cap_tier.
+    _clear_cache()
+    _company(db_session, ticker="AAPL", market="GLOBAL", market_cap=3.5e12,
+             instrument_token=None, shares_outstanding=None)
+    _company(db_session, ticker="INR.NS", market_cap=1000.0,
+             instrument_token=None, shares_outstanding=None)
+
+    ranked = live_cap.rank_live_caps(db_session, now=NOW)
+    assert [c.ticker for c in ranked] == ["INR.NS"]
+
+
 def test_naive_tick_timestamp_is_treated_as_utc(db_session):
     _clear_cache()
     company = _company(db_session)
