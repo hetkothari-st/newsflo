@@ -11,12 +11,14 @@ import ArchiveV4 from './ArchiveV4';
 import DeepDiveV4 from './DeepDiveV4';
 import FeedV4 from './FeedV4';
 import InfoV4, { type InfoV4Data } from './InfoV4';
+import PulseLiveV4 from './PulseLiveV4';
 import { DirectoryV4, DiscoverV4, PortfolioV4, ReviewV4 } from './SectionsV4';
 
-type View = 'feed' | 'disc' | 'dir' | 'pf' | 'car' | 'arch';
+type View = 'feed' | 'pulse' | 'disc' | 'dir' | 'pf' | 'car' | 'arch';
 
 const NAV_ITEMS: Array<{ view: View; label: string }> = [
   { view: 'feed', label: 'Feed' },
+  { view: 'pulse', label: 'Pulse' },
   { view: 'disc', label: 'Discover' },
   { view: 'dir', label: 'Directory' },
   { view: 'pf', label: 'Portfolio' },
@@ -220,6 +222,7 @@ export default function ShellV4() {
           onBandOpenChange={setBandOpen}
         />
       )}
+      {view === 'pulse' && <PulseLiveV4 />}
       {view === 'disc' && <DiscoverV4 onOpenDeepDive={openDeepDive} />}
       {view === 'dir' && <DirectoryV4 onOpenDeepDive={openDeepDive} />}
       {view === 'pf' && <PortfolioV4 onOpenDeepDive={openDeepDive} />}

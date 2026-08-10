@@ -1063,10 +1063,23 @@ def _identify_companies(
         # fits either model, so the direct stage runs on the same slim,
         # rulebook-free ladder as the cascade stages (parent_pool is not
         # None) -- see rationale_instructions above.
-        response = _call_with_model_fallback(
-            _call, _SLIM_PROMPT_PRIMARY_MODEL, call_name="identify_companies",
-            fallback_model=_SLIM_PROMPT_FALLBACK_MODEL,
-        )
+        try:
+            response = _call_with_model_fallback(
+                _call, _SLIM_PROMPT_PRIMARY_MODEL, call_name="identify_companies",
+                fallback_model=_SLIM_PROMPT_FALLBACK_MODEL,
+            )
+        except BadRequestError as exc:
+            # Groq validates the tool schema server-side and 400s WITH the
+            # model's full generation attached. llama's characteristic
+            # violations (key_points as a string, missing magnitude fields)
+            # wrap answers whose company picks are substantively right --
+            # measured live 2026-08-10: three consecutive rejections each
+            # naming correct OMC/airline impacts. Salvage what validates
+            # instead of discarding the whole call.
+            salvaged = _salvage_rejected_company_call(exc)
+            if salvaged is None:
+                raise
+            return salvaged
 
         return _forced_tool_arguments(response, "record_sector_companies")
 
@@ -1106,6 +1119,76 @@ def _identify_companies(
                 impact_level=impact_level, parent_ticker=company.get("parent_ticker"),
             ))
     return mentions
+
+
+# Fallback magnitude band applied ONLY to salvaged companies that llama
+# emitted without magnitude fields. Deliberately the most conservative
+# band in the taxonomy: the calibration blender
+# (app.calibration.blender.get_calibrated_magnitude) overrides stored
+# magnitudes with measured event-volatility data wherever available, so
+# this placeholder mainly needs to be honest about uncertainty, not
+# precise.
+_SALVAGE_MAGNITUDE_LOW = 1.0
+_SALVAGE_MAGNITUDE_HIGH = 3.0
+
+
+def _salvage_rejected_company_call(exc: BadRequestError) -> dict | None:
+    """Recover usable sector_companies arguments from a Groq
+    tool_use_failed 400. Returns the arguments dict with per-company
+    repairs applied (string lists coerced, missing magnitudes defaulted),
+    or None when nothing parseable/salvageable is attached. Companies
+    that still fail required-field checks are dropped INDIVIDUALLY --
+    all-or-nothing rejection is what this exists to fix."""
+    body = getattr(exc, "body", None) or {}
+    raw = (body.get("error") or {}).get("failed_generation") if isinstance(body, dict) else None
+    if not raw:
+        return None
+
+    text = raw.strip()
+    if text.startswith("<function="):
+        text = text.split(">", 1)[-1]
+        if text.endswith("</function>"):
+            text = text[: -len("</function>")]
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    arguments = parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else parsed
+    groups = arguments.get("sector_companies")
+    if not isinstance(groups, list):
+        return None
+
+    def _listify(value):
+        if isinstance(value, str):
+            return [value]
+        return value if isinstance(value, list) else []
+
+    kept, dropped = [], 0
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        repaired_companies = []
+        for company in group.get("companies", []):
+            if not isinstance(company, dict) or not company.get("name") or not company.get("direction") \
+                    or not company.get("rationale") or not company.get("time_horizon"):
+                dropped += 1
+                continue
+            company = dict(company)
+            company["key_points"] = _listify(company.get("key_points"))
+            for field in ("reasons", "evidence_refs", "risks", "assumptions", "unknowns"):
+                company[field] = _listify(company.get(field))
+            company.setdefault("magnitude_low", _SALVAGE_MAGNITUDE_LOW)
+            company.setdefault("magnitude_high", _SALVAGE_MAGNITUDE_HIGH)
+            repaired_companies.append(company)
+        if repaired_companies:
+            kept.append({**group, "companies": repaired_companies})
+    if not kept:
+        return None
+    logger.warning(
+        "identify_companies: salvaged %s company entries (%s dropped) from a schema-rejected generation",
+        sum(len(g["companies"]) for g in kept), dropped,
+    )
+    return {"sector_companies": kept}
 
 
 def _identify_companies_per_sector(

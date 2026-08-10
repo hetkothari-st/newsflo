@@ -240,6 +240,20 @@ class Article(Base):
     alerts = relationship("Alert", back_populates="article")
 
 
+class GeminiPaidUsage(Base):
+    """One row per article whose analysis was allowed to use the PAID
+    Gemini key (app/pipeline.py.select_analysis_client). The unique
+    article_id makes budget accounting retry-proof: re-analyzing the same
+    article reuses its row instead of consuming budget twice. Today's row
+    count IS the spent budget -- no counter to drift."""
+
+    __tablename__ = "gemini_paid_usage"
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, unique=True)
+    used_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class IngestionSource(Base):
     """One row per registered ingestion source: registry config (enabled,
     poll interval), checkpoint cursor, and health/circuit-breaker state, all

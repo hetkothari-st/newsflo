@@ -535,6 +535,61 @@ def build_anchor_sub_sectors(session: Session, companies: list) -> dict[str, set
     return anchor_sub_sectors
 
 
+# Per-tick cap on Pulse og:image scrapes -- serial HTTP GETs, so bound the
+# work each cycle; the tail catches up next tick.
+_PULSE_IMAGE_BATCH = 15
+
+
+def backfill_pulse_images(session: Session) -> None:
+    """Pulse's RSS carries no images but the app's cards require one --
+    scrape each pulse article's publisher page for its og:image, newest
+    first. A failed scrape stores "" (attempted-and-failed sentinel, so
+    it is never rescraped every tick); serializers already treat empty as
+    image-less and _persist_alert's own og fallback only fires on None,
+    so the sentinel never causes a duplicate fetch there either."""
+    articles = (
+        session.query(Article)
+        .filter(Article.provider == "pulse_zerodha", Article.image_url.is_(None))
+        .order_by(Article.published_at.desc().nullslast())
+        .limit(_PULSE_IMAGE_BATCH)
+        .all()
+    )
+    for article in articles:
+        article.image_url = fetch_og_image(article.url) or ""
+        session.commit()
+
+
+def select_analysis_client(session: Session, article: Article, claude_client):
+    """The client this article's cascade may use. The PAID Gemini chain
+    (CallRoutedClient) is granted ONLY to articles from an eligible
+    provider (settings.gemini_paid_providers, default: pulse_zerodha) and
+    ONLY within today's article budget
+    (settings.gemini_paid_daily_article_budget) -- everything else gets
+    the router's free default chain. Budget accounting is retry-proof: an
+    article that already holds a gemini_paid_usage row reuses its grant
+    instead of consuming budget again."""
+    from app.analysis.claude_client import CallRoutedClient
+    from app.models import GeminiPaidUsage
+
+    if not isinstance(claude_client, CallRoutedClient):
+        return claude_client
+    if article.provider not in settings.gemini_paid_provider_set:
+        return claude_client._default
+
+    existing = session.query(GeminiPaidUsage).filter_by(article_id=article.id).one_or_none()
+    if existing is not None:
+        return claude_client
+
+    day_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    used_today = session.query(GeminiPaidUsage).filter(GeminiPaidUsage.used_at >= day_start).count()
+    if used_today >= settings.gemini_paid_daily_article_budget:
+        return claude_client._default
+
+    session.add(GeminiPaidUsage(article_id=article.id))
+    session.commit()
+    return claude_client
+
+
 def process_new_articles(session: Session, claude_client, throttle_seconds: float = 0) -> int:
     """Run the filter -> analyze -> resolve -> alert pipeline over every
     CATEGORIZED article.
@@ -548,6 +603,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
     client, is not slowed down; the scheduler passes a real value.
     """
     fetch_pending_full_text(session)
+    backfill_pulse_images(session)
     filter_new_articles(session, claude_client, throttle_seconds)
 
     alerts_created = 0
@@ -598,9 +654,10 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
 
         analysis = get_cached_analysis(session, article)
         if analysis is None:
+            article_client = select_analysis_client(session, article, claude_client)
             for attempt in range(2):  # try once, retry once
                 try:
-                    analysis = analyze_article(claude_client, article.title, article_text(article), session=session)
+                    analysis = analyze_article(article_client, article.title, article_text(article), session=session)
                     break
                 except Exception:
                     # Logged, not swallowed silently -- a burst of

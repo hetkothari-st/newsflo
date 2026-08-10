@@ -11,6 +11,12 @@ from app.models import Article
 
 logger = logging.getLogger(__name__)
 
+# Article.provider slugs whose every item is financial news by
+# construction (curated aggregators) -- they skip the per-article LLM
+# relevance call and are admitted straight to analysis. Deterministic
+# gates (language, junk) still apply to them.
+PRE_CURATED_PROVIDERS = frozenset({"pulse_zerodha"})
+
 
 class RelevanceRateLimited(Exception):
     """The relevance call failed because the provider is rate-limited or out
@@ -225,6 +231,14 @@ def filter_new_articles(session: Session, client, throttle_seconds: float = 0) -
         if apply_prefilter(article.title, article_text(article), counters):
             article.status = "FILTERED"
             continue  # deterministic gate -- no LLM call, no throttle needed
+        if article.provider in PRE_CURATED_PROVIDERS:
+            # Pulse aggregates exclusively financial/market news -- every
+            # item is by construction the kind of article the LLM gate
+            # exists to find. Admitting it directly saves one LLM call per
+            # article and removes the gate's latency; the deterministic
+            # gates above (language/junk) still apply.
+            article.status = "CATEGORIZED"
+            continue
         if rate_limited:
             deferred += 1
             continue  # left NEW on purpose -- the next tick retries it

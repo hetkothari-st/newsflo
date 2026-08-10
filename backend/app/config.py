@@ -16,6 +16,23 @@ class Settings(BaseSettings):
     # GEMINI_API_KEY: that would burn paid quota on every cheap
     # high-volume call (relevance gate, summaries) too.
     gemini_paid_api_key: str = os.environ.get("GEMINI_PAID_API_KEY", "")
+    # HARD daily budget on the paid key, counted in ARTICLES (not calls):
+    # only this many articles per day may route their protected calls to
+    # the paid Gemini chain; every article past the cap -- and every
+    # article from a provider not in gemini_paid_providers -- runs on the
+    # free chain no matter what. Enforced in
+    # app/pipeline.py.select_analysis_client, accounted retry-proof in the
+    # gemini_paid_usage table.
+    gemini_paid_daily_article_budget: int = int(os.environ.get("GEMINI_PAID_DAILY_ARTICLE_BUDGET", "5"))
+    # Comma-separated Article.provider slugs eligible for the paid key.
+    # Default: only Pulse by Zerodha (curated financial news, every item
+    # analysis-worthy). Empty string = no provider is eligible = the paid
+    # key is never used regardless of the budget.
+    gemini_paid_providers: str = os.environ.get("GEMINI_PAID_PROVIDERS", "pulse_zerodha")
+
+    @property
+    def gemini_paid_provider_set(self) -> set[str]:
+        return {s.strip() for s in self.gemini_paid_providers.split(",") if s.strip()}
     openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     groq_api_key: str = os.environ.get("GROQ_API_KEY", "")
