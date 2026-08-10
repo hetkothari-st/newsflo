@@ -701,6 +701,59 @@ body:has(.nf4.dark) { background: #2a2722; }
   color: var(--ash);
   white-space: nowrap;
 }
+/* ---------- COMPANY DOSSIER (full-page report) ---------- */
+.nf4.dossierpage { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow-y: auto; }
+.nf4 .dsc-body { max-width: 720px; width: 100%; margin: 0 auto; padding: 8px 16px 64px; }
+.nf4 .dsc-nameplate { text-align: center; padding: 18px 0 6px; }
+.nf4 .dsc-nameplate .clg { margin: 0 auto 10px; }
+.nf4 .dsc-name { font-family: var(--serif); font-weight: 400; font-size: clamp(30px, 7vw, 48px); line-height: 1.1; margin: 0 0 10px; }
+.nf4 .dsc-symbols {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ash);
+  align-items: center;
+}
+.nf4 .dsc-indices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.nf4 .dsc-priceband { margin: 18px 0 6px; border-top: 1px solid var(--ink); }
+.nf4 .dsc-section { margin-top: 22px; }
+.nf4 .dscchart-cap {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ash);
+  padding: 2px 4px;
+}
+.nf4 .dscchart-cap b { font-family: var(--serif); font-size: 15px; text-transform: none; letter-spacing: 0; }
+.nf4 .dscchart-cap b.up { color: var(--data-up); }
+.nf4 .dscchart-cap b.down { color: var(--data-down); }
+.nf4 .dsc-grid { stroke: var(--hairline); }
+.nf4 .dsc-line { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+.nf4 .dsc-newsrow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--hairline);
+  color: inherit;
+  text-decoration: none;
+}
+.nf4 .dsc-newsrow:first-of-type { border-top: none; }
+.nf4 .dsc-newsdate { font-size: 11px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); white-space: nowrap; flex: 0 0 auto; }
+.nf4 .dsc-newstitle { font-family: var(--serif); font-size: 16px; line-height: 1.3; flex: 1; min-width: 0; }
+.nf4 .dsc-newsmove { font-family: var(--serif); font-size: 16px; white-space: nowrap; }
+.nf4 .dsc-newsmove.up { color: var(--data-up); }
+.nf4 .dsc-newsmove.down { color: var(--data-down); }
+.nf4 .dsc-newsmove.flat { color: var(--pebble); }
+
 .nf4 .entry4.flash { animation: nf4-rowflash 2s ease-out; }
 @keyframes nf4-rowflash {
   from { background: var(--hairline); }

@@ -11,6 +11,7 @@ import RegisterPage from './pages/RegisterPage';
 import Shell from './v3/Shell';
 import ShellV4 from './v4/ShellV4';
 import ChartsV4Page from './v4/charts/ChartsV4Page';
+import CompanyDossierV4 from './v4/CompanyDossierV4';
 import ChartDeckPage from './features/visualize/deck/ChartDeckPage';
 import { useAuth } from './lib/auth';
 
@@ -51,6 +52,15 @@ export default function App() {
     return (
       <Routes>
         <Route path="/v4/charts/:id" element={<ChartsV4Page />} />
+      </Routes>
+    );
+  }
+
+  // Company dossier -- the Directory's full-page company report.
+  if (/^\/v4\/company\//.test(location.pathname)) {
+    return (
+      <Routes>
+        <Route path="/v4/company/:ticker" element={<CompanyDossierV4 />} />
       </Routes>
     );
   }

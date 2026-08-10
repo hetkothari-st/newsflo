@@ -4,7 +4,7 @@
    uppercase meta lines, hairline rules, no chips except outlined ghost
    tags, active tabs emphasised by scale only. */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   getCarReview,
   getDirectory,
@@ -159,7 +159,11 @@ function searchMatches(
   return scored.slice(0, 8).map((entry) => entry.company);
 }
 
-export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string) => void }) {
+// onOpenDeepDive is kept in the signature for API stability with ShellV4,
+// but a directory row now opens the full-page company dossier instead
+// (user decision) -- the deep-dive popup remains the news-context view.
+export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDive: (ticker: string) => void }) {
+  const navigate = useNavigate();
   const { token } = useAuth();
   const [companies, setCompanies] = useState<DirectoryCompany[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -333,7 +337,7 @@ export function DirectoryV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
             className={`entry4 ${highlightTicker === company.ticker ? 'flash' : ''}`}
             id={`dirrow-${company.ticker}`}
             key={company.ticker}
-            onClick={() => onOpenDeepDive(company.ticker)}
+            onClick={() => navigate(`/v4/company/${encodeURIComponent(company.ticker)}`)}
           >
             {live && <span className="rank4">{live.rank}</span>}
             <LogoV4 logoUrl={company.logo_url} ticker={company.ticker} name={company.name} />
