@@ -105,6 +105,11 @@ _ADDED_COLUMNS = [
     ("companies", "financials_source", "VARCHAR"),
     ("companies", "financials_as_of", "DATE"),
     ("market_moves", "category", "VARCHAR"),
+    ("articles", "provider", "VARCHAR"),
+    ("articles", "provider_article_id", "VARCHAR"),
+    ("articles", "url_hash", "VARCHAR"),
+    ("articles", "raw_payload", "TEXT"),
+    ("articles", "source_category", "VARCHAR"),
 ]
 
 

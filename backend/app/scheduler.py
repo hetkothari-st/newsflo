@@ -12,23 +12,16 @@ from app.companies.universe import fetchers, snapshot
 from app import config
 from app.config import settings
 from app.db import SessionLocal
-# IndianAPI is disabled (not deleted) -- replaced by thenewsapi.com, see
-# docs/superpowers/specs/2026-07-20-thenewsapi-ingestion-source-design.md.
-# Swap the fetch_new_indianapi_articles(...) call back in (and re-enable
-# this import and the _run_indianapi_ingestion function below) to revert.
-# from app.ingestion.indianapi import fetch_new_indianapi_articles
-# thenewsapi is disabled (not deleted) -- replaced by finnhub.io, see
-# docs/superpowers/specs/2026-07-21-finnhub-ingestion-source-design.md.
-# Swap the fetch_new_thenewsapi_articles(...) call back in (and re-enable
-# this import and the _run_thenewsapi_ingestion function below) to revert.
-# from app.ingestion.thenewsapi import fetch_new_thenewsapi_articles
-from app.ingestion.finnhub import fetch_new_finnhub_articles
-# RSS ingestion (poller.py + sources.py) is intact and fully working, just
-# not wired in below -- IndianAPI's /news endpoint is the active source now.
-# Swap the fetch_new_articles(...) call back in (and re-enable this import)
-# to revert.
-# from app.ingestion.poller import fetch_new_articles
-# from app.ingestion.sources import RSS_FEEDS
+# All ingestion sources (Finnhub, IndianAPI, Marketaux, Benzinga, GDELT,
+# NSE/BSE announcements, PIB/RBI/SEBI, press RSS) now run through the
+# generic provider registry + collector runner -- one scheduler job per
+# registered provider, gated per-deployment by IngestionSource.enabled
+# (seeded from INGESTION_ENABLED_SOURCES). See app/ingestion/collector.py
+# and app/ingestion/providers/registry.py. The pre-registry flat fetchers
+# (finnhub.py, indianapi.py) were migrated into providers/; thenewsapi.py
+# remains unmigrated-and-unwired (superseded, kept for reference).
+from app.ingestion.collector import ensure_registry_rows, run_source
+from app.ingestion.providers.registry import PROVIDER_REGISTRY
 from app.outcomes.car import check_pending_car_outcomes
 from app.outcomes.tracker import check_pending_outcomes
 from app.pipeline import process_new_articles
@@ -82,52 +75,19 @@ def _run_car_review() -> None:
         session.close()
 
 
-# def _run_indianapi_ingestion() -> None:
-#     """Poll IndianAPI's /news endpoint for fresh Indian market news. Runs on
-#     its own, much longer interval (indianapi_poll_interval_minutes) rather
-#     than the fast analysis cycle below -- this key is capped at 500
-#     requests/month, nowhere near enough for a 2-minute cadence. Whatever
-#     lands here (status=NEW) is picked up and analyzed by the next regular
-#     _run_ingestion_and_analysis tick, not here. Any failure is logged, never
-#     raised, same as every other scheduler job."""
-#     session = SessionLocal()
-#     try:
-#         inserted = fetch_new_indianapi_articles(session, settings.indianapi_api_key)
-#         logger.info("IndianAPI poll: %s new articles", inserted)
-#     except Exception:
-#         logger.exception("IndianAPI ingestion poll failed")
-#     finally:
-#         session.close()
-
-
-# def _run_thenewsapi_ingestion() -> None:
-#     """Poll thenewsapi.com's /v1/news/all endpoint for fresh business/
-#     politics/general/tech news. Runs on its own, much longer interval
-#     (thenewsapi_poll_interval_minutes) rather than the fast per-minute
-#     analysis cycle -- this key is capped at 100 requests/day. Any failure
-#     is logged, never raised, same as every other scheduler job."""
-#     session = SessionLocal()
-#     try:
-#         inserted = fetch_new_thenewsapi_articles(session, settings.thenewsapi_api_key)
-#         logger.info("thenewsapi poll: %s new articles", inserted)
-#     except Exception:
-#         logger.exception("thenewsapi ingestion poll failed")
-#     finally:
-#         session.close()
-
-
-def _run_finnhub_ingestion() -> None:
-    """Poll finnhub.io's /v1/news endpoint (general + merger categories)
-    for fresh market news. Runs on its own interval
-    (finnhub_poll_interval_minutes) rather than the fast per-minute
-    analysis cycle. Any failure is logged, never raised, same as every
-    other scheduler job."""
+def _run_source_ingestion(slug: str) -> None:
+    """Run one poll cycle for one registered ingestion source through the
+    generic collector (fetch -> normalize -> dedup -> Article status=NEW,
+    plus checkpoint/health/breaker bookkeeping -- see
+    app/ingestion/collector.py). Whatever lands is picked up and analyzed
+    by the next regular _run_ingestion_and_analysis tick, not here. Any
+    failure is logged, never raised, same as every other scheduler job."""
     session = SessionLocal()
     try:
-        inserted = fetch_new_finnhub_articles(session, settings.finnhub_api_key)
-        logger.info("finnhub poll: %s new articles", inserted)
+        result = run_source(session, slug)
+        logger.info("ingestion poll (%s): %s", slug, result)
     except Exception:
-        logger.exception("finnhub ingestion poll failed")
+        logger.exception("ingestion poll failed for source=%s", slug)
     finally:
         session.close()
 
@@ -588,28 +548,30 @@ def start_scheduler() -> None:
         minutes=60,
         id="car_review",
     )
-    # IndianAPI job disabled -- see the import comment above. Restore this
-    # block (and re-enable _run_indianapi_ingestion) to revert.
-    # scheduler.add_job(
-    #     _run_indianapi_ingestion,
-    #     trigger="interval",
-    #     minutes=settings.indianapi_poll_interval_minutes,
-    #     id="indianapi_poll",
-    # )
-    # thenewsapi job disabled -- see the import comment above. Restore
-    # this block (and re-enable _run_thenewsapi_ingestion) to revert.
-    # scheduler.add_job(
-    #     _run_thenewsapi_ingestion,
-    #     trigger="interval",
-    #     minutes=settings.thenewsapi_poll_interval_minutes,
-    #     id="thenewsapi_poll",
-    # )
-    scheduler.add_job(
-        _run_finnhub_ingestion,
-        trigger="interval",
-        minutes=settings.finnhub_poll_interval_minutes,
-        id="finnhub_poll",
-    )
+    # One generic ingestion job per registered provider. Which of them
+    # actually fetch anything is controlled by IngestionSource.enabled
+    # (seeded from INGESTION_ENABLED_SOURCES on first boot, DB-editable
+    # afterwards without a redeploy) -- a disabled source's job wakes,
+    # reads its row, and returns immediately. poll_interval_minutes is
+    # read at boot; changing it in the DB takes effect on next restart,
+    # same as POLL_INTERVAL_MINUTES has always behaved.
+    seed_session = SessionLocal()
+    try:
+        registry_rows = ensure_registry_rows(seed_session)
+        intervals = {row.slug: row.poll_interval_minutes for row in registry_rows}
+    except Exception:
+        logger.exception("ingestion registry seeding failed -- falling back to provider defaults")
+        intervals = {}
+    finally:
+        seed_session.close()
+    for slug, provider in PROVIDER_REGISTRY.items():
+        scheduler.add_job(
+            _run_source_ingestion,
+            trigger="interval",
+            minutes=intervals.get(slug, provider.default_poll_interval_minutes),
+            args=[slug],
+            id=f"ingest_{slug}",
+        )
     scheduler.add_job(
         _run_ingestion_and_analysis,
         trigger="interval",

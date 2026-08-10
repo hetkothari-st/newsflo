@@ -93,6 +93,38 @@ class Settings(BaseSettings):
     # docs/superpowers/specs/2026-07-21-finnhub-ingestion-source-design.md.
     finnhub_api_key: str = os.environ.get("FINNHUB_API_KEY", "")
     finnhub_poll_interval_minutes: int = int(os.environ.get("FINNHUB_POLL_INTERVAL_MINUTES", "1"))
+    # --- Multi-source ingestion layer (app/ingestion/collector.py) ---
+    # Marketaux free tier: 3 articles/request, 100 requests/day. The
+    # provider's default 15-minute cadence = 96 req/day, just under the cap;
+    # anything faster exhausts the budget mid-day exactly the way thenewsapi
+    # did (see its comment above). Upgrade the plan before shortening this.
+    marketaux_api_key: str = os.environ.get("MARKETAUX_API_TOKEN", os.environ.get("MARKETAUX_API_KEY", ""))
+    # Benzinga REST /api/v2/news. Quota undocumented for this key -- the
+    # collector's per-source circuit breaker backs off automatically on
+    # sustained 429s, so a too-fast interval degrades gracefully instead of
+    # hammering the API.
+    benzinga_api_key: str = os.environ.get("BENZINGA_API_KEY", "")
+    # Comma-separated provider slugs whose IngestionSource row seeds
+    # enabled=1 on FIRST boot against a database that has no row for them
+    # yet (see app/ingestion/providers/registry.py for the slug list).
+    # Defaults to "finnhub" so a deployment that predates the multi-source
+    # layer keeps exactly its current behavior after upgrading; the
+    # multi-source service sets the full list in its env. After first seed
+    # the DB row's `enabled` is the source of truth -- this setting never
+    # overrides an existing row.
+    ingestion_enabled_sources: str = os.environ.get("INGESTION_ENABLED_SOURCES", "finnhub")
+    # Exchange-announcement noise gate (app/filtering/exchange_noise.py) --
+    # NSE/BSE corporate filings are dominated by mechanically produced
+    # non-news (NAV declarations, trading-window closures, newspaper-copy
+    # attachments). Same shadow/enforce/off semantics as
+    # relevance_prefilter_mode above, and shadow-by-default for the same
+    # reason: the cost of a wrong reject is a real disclosure silently
+    # missing from the feed. The multi-source service runs "enforce".
+    exchange_noise_mode: str = os.environ.get("EXCHANGE_NOISE_MODE", "shadow")
+
+    @property
+    def ingestion_enabled_source_set(self) -> set[str]:
+        return {s.strip() for s in self.ingestion_enabled_sources.split(",") if s.strip()}
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound
