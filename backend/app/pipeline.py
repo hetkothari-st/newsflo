@@ -841,6 +841,8 @@ def _build_v3_router(session: Session, article: Article, groq_client):
         protected=protected, gemini_api_key=settings.gemini_paid_api_key or None,
         groq_client=groq_client, article_id=article.id,
         budget=ArticleBudget(article_id=article.id),
+        # Durable stage cache: retries replay completed stages for free.
+        session=session,
     )
 
 

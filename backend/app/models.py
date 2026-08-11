@@ -496,6 +496,27 @@ class ImpactEdge(Base):
     alert = relationship("Alert", back_populates="impact_edges")
 
 
+class LLMStageCache(Base):
+    """Durable per-stage LLM result cache (retry-burn fix, 2026-08-11).
+    A failed analysis retried later (second attempt, hourly retry sweep,
+    post-deploy re-queue) re-runs the SAME stage calls with byte-identical
+    inputs -- before this table, every retry re-billed Gemini for stages
+    that had already succeeded (measured: the bulk of one day's paid
+    spend produced zero feed articles). Keyed by a fingerprint of
+    stage + model + full prompt + schema, so any input drift is simply a
+    cache miss that pays normally -- correctness never depends on a hit.
+    Failures are never cached. Rows expire after STAGE_CACHE_TTL_DAYS."""
+    __tablename__ = "llm_stage_cache"
+
+    id = Column(Integer, primary_key=True)
+    fingerprint = Column(String, nullable=False, unique=True, index=True)
+    stage = Column(String, nullable=False)
+    article_id = Column(Integer, nullable=True)
+    model = Column(String, nullable=True)
+    result_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class CompanyNodeExposure(Base):
     """Stable (company, economic_node) relationship cache (token-opt spec
     P10/P24). Written from VERIFIED impact-graph results only: a company

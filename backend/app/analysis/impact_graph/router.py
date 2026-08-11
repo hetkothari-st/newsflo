@@ -19,13 +19,20 @@ explicitly configured, never pretending to be the premium path.
 The router carries the worst quality seen across a run; the engine stamps
 it onto the Alert (analysis_provider / analysis_quality columns).
 """
+import hashlib
 import json
 import logging
+from datetime import timedelta
 
 from app.analysis.impact_graph.gemini_json import GeminiJSONClient, GeminiJSONError
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Durable stage-result cache TTL. Retries span minutes-to-hours (second
+# attempt, hourly sweep, post-deploy re-queue); 3 days covers every retry
+# path with margin while keeping the table small.
+STAGE_CACHE_TTL_DAYS = 3
 
 FACT_STAGES = {"extract_facts"}
 SUMMARY_STAGES = {"reader_summary"}
@@ -39,14 +46,17 @@ class StageRouterError(Exception):
 
 class StageRouter:
     def __init__(self, *, protected: bool, gemini_api_key: str | None,
-                 groq_client=None, article_id: int | None = None, budget=None):
+                 groq_client=None, article_id: int | None = None, budget=None,
+                 session=None):
         self.protected = protected
         self.article_id = article_id
         self.budget = budget
         self._gemini = GeminiJSONClient(gemini_api_key) if gemini_api_key else None
         self._groq = groq_client
+        self._session = session  # durable stage cache; None (tests) = no caching
         self.provider = "gemini" if (protected and self._gemini) else "groq"
         self.quality = "authoritative"
+        self.stage_cache_hits = 0
 
     # -- public ----------------------------------------------------------
 
@@ -54,15 +64,90 @@ class StageRouter:
              dynamic_suffix: str, compact_suffix: str | None = None,
              thinking: str = "high", max_output_tokens: int = 8192) -> dict:
         """Run one stage call through the routing/degradation policy.
-        Returns the parsed dict; records the worst quality reached."""
+        Returns the parsed dict; records the worst quality reached.
+
+        Retry-burn fix: a byte-identical stage call that already succeeded
+        (this attempt, a prior failed attempt, the hourly retry sweep, or a
+        pre-deploy run) replays its stored result from llm_stage_cache with
+        ZERO provider traffic. Failures are never cached, and any input
+        drift is a plain miss that pays normally."""
+        fingerprint = self._fingerprint(stage, schema, static_prefix, dynamic_suffix)
+        cached = self._cache_get(fingerprint)
+        if cached is not None:
+            self.stage_cache_hits += 1
+            logger.info("impact-graph call_skipped stage=%s reason=stage_cache_hit article=%s",
+                        stage, self.article_id)
+            return cached
         if self.protected and self._gemini is not None:
-            return self._call_protected(
+            result = self._call_protected(
                 stage, schema=schema, static_prefix=static_prefix,
                 dynamic_suffix=dynamic_suffix, compact_suffix=compact_suffix,
                 thinking=thinking, max_output_tokens=max_output_tokens,
             )
-        return self._call_groq(stage, schema=schema, static_prefix=static_prefix,
-                               dynamic_suffix=dynamic_suffix)
+        else:
+            result = self._call_groq(stage, schema=schema, static_prefix=static_prefix,
+                                     dynamic_suffix=dynamic_suffix)
+        self._cache_put(fingerprint, stage, result)
+        return result
+
+    # -- durable stage cache ----------------------------------------------
+
+    def _fingerprint(self, stage: str, schema: dict, static_prefix: str,
+                     dynamic_suffix: str) -> str:
+        model, _ = self._model_for(stage) if (self.protected and self._gemini) \
+            else (settings.groq_aux_model, "")
+        payload = "\x1f".join([
+            stage, model, static_prefix, dynamic_suffix,
+            json.dumps(schema, sort_keys=True),
+        ])
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _cache_get(self, fingerprint: str) -> dict | None:
+        if self._session is None:
+            return None
+        try:
+            from app.models import LLMStageCache, utcnow
+
+            row = self._session.query(LLMStageCache).filter_by(fingerprint=fingerprint).one_or_none()
+            if row is None:
+                return None
+            age_limit = utcnow() - timedelta(days=STAGE_CACHE_TTL_DAYS)
+            created = row.created_at
+            if created is not None and created.tzinfo is None:
+                from datetime import timezone
+                created = created.replace(tzinfo=timezone.utc)
+            if created is not None and created < age_limit:
+                return None
+            return json.loads(row.result_json)
+        except Exception:  # noqa: BLE001 -- cache trouble must never fail an analysis
+            logger.warning("stage cache read failed", exc_info=True)
+            return None
+
+    def _cache_put(self, fingerprint: str, stage: str, result: dict) -> None:
+        if self._session is None:
+            return
+        try:
+            from app.models import LLMStageCache, utcnow
+
+            if self._session.query(LLMStageCache).filter_by(fingerprint=fingerprint).one_or_none() is None:
+                self._session.add(LLMStageCache(
+                    fingerprint=fingerprint, stage=stage, article_id=self.article_id,
+                    model=self._fingerprint_model(stage), result_json=json.dumps(result),
+                ))
+                # Opportunistic TTL sweep -- keeps the table bounded without
+                # its own scheduler job.
+                self._session.query(LLMStageCache).filter(
+                    LLMStageCache.created_at < utcnow() - timedelta(days=STAGE_CACHE_TTL_DAYS),
+                ).delete(synchronize_session=False)
+                self._session.commit()
+        except Exception:  # noqa: BLE001
+            self._session.rollback()
+            logger.warning("stage cache write failed", exc_info=True)
+
+    def _fingerprint_model(self, stage: str) -> str:
+        if self.protected and self._gemini is not None:
+            return self._model_for(stage)[0]
+        return settings.groq_aux_model
 
     def _degrade(self, quality: str) -> None:
         if _QUALITY_ORDER[quality] > _QUALITY_ORDER[self.quality]:
