@@ -571,6 +571,35 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
 
     state = _GraphState()
 
+    try:
+        _build_graph(router, session, facts, state, budget, article_id)
+    except Exception as exc:  # noqa: BLE001 -- never-fail contract (2026-08-11)
+        # A crash AFTER real work exists must not throw that work away: if
+        # any companies or edges were produced, ship them marked degraded
+        # instead of failing the whole alert. Only a crash with NOTHING to
+        # show propagates -- the retry path then replays completed stages
+        # free via the stage cache.
+        if not state.companies and not state.edges:
+            raise
+        logger.exception("impact-graph crashed mid-run for article=%s; shipping partial graph", article_id)
+        router.quality = "degraded" if router.quality == "authoritative" else router.quality
+
+    ranking = _rank(state) if state.companies else []
+
+    logger.info("impact-graph article=%s: %s nodes, %s edges, %s companies, budget=%s",
+                article_id, len(state.nodes), len(state.edges), len(state.companies),
+                budget.summary())
+
+    return ImpactGraphResult(
+        category=facts.category, event_type=facts.event_type, facts=facts.facts,
+        event_label=facts.event, companies=list(state.companies.values()),
+        edges=state.edges, gaps=state.gaps, ranking=ranking,
+        analysis_provider=router.provider, analysis_quality=router.quality,
+    )
+
+
+def _build_graph(router: StageRouter, session, facts: EventFacts,
+                 state: _GraphState, budget: ArticleBudget, article_id: int | None) -> None:
     # Stage 2 -- initial shocks + distance-1 nodes (the graph anchor).
     raw_shocks = router.call(
         "initial_shocks", schema=SCHEMA_SHOCKS,
@@ -719,15 +748,3 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         router.quality = "budget_exhausted"
         logger.warning("impact-graph hard budget overrun skipped verification at article=%s: %s",
                        article_id, budget.summary())
-    ranking = _rank(state) if state.companies else []
-
-    logger.info("impact-graph article=%s: %s nodes, %s edges, %s companies, budget=%s",
-                article_id, len(state.nodes), len(state.edges), len(state.companies),
-                budget.summary())
-
-    return ImpactGraphResult(
-        category=facts.category, event_type=facts.event_type, facts=facts.facts,
-        event_label=facts.event, companies=list(state.companies.values()),
-        edges=state.edges, gaps=state.gaps, ranking=ranking,
-        analysis_provider=router.provider, analysis_quality=router.quality,
-    )

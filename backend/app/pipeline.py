@@ -963,13 +963,24 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
 
             store_v3_cache(session, article, result)
 
-        entries = _v3_entries(session, result)
-        _persist_alert(
-            session, article, result.category, entries,
-            event_type=result.event_type, gaps=result.gaps, edges=_v3_edges(result),
-            client=claude_client, facts=result.facts,
-            analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
-        )
+        # Never-fail contract (2026-08-11): a persist-layer crash must cost
+        # exactly ONE article one retry cycle -- never the whole tick. The
+        # retry replays every completed LLM stage free (llm_stage_cache),
+        # so re-persisting after a transient DB/measurement error is cheap.
+        try:
+            entries = _v3_entries(session, result)
+            _persist_alert(
+                session, article, result.category, entries,
+                event_type=result.event_type, gaps=result.gaps, edges=_v3_edges(result),
+                client=claude_client, facts=result.facts,
+                analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
+            )
+        except Exception:
+            logger.exception("persist failed for article_id=%s; marked for retry", article.id)
+            session.rollback()
+            article.status = "ANALYSIS_FAILED"
+            session.commit()
+            continue
         alerts_created += 1
 
     return alerts_created
