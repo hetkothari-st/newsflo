@@ -650,11 +650,18 @@ def select_analysis_client(session: Session, article: Article, claude_client):
     if article.provider not in settings.gemini_paid_provider_set:
         return claude_client._default
 
+    day_start, _ = day_utc_window(today_ist())
     existing = session.query(GeminiPaidUsage).filter_by(article_id=article.id).one_or_none()
     if existing is not None:
-        return claude_client.granted or claude_client
+        # Same-day grant: retries reuse it (retry-proof accounting). A grant
+        # from a PREVIOUS day gets no paid Gemini at all -- the cap is
+        # strictly five articles per IST day, and a stale article must
+        # neither ride yesterday's grant nor consume one of today's five
+        # (its unique usage row also makes a re-grant impossible).
+        if _as_aware_utc(existing.used_at) >= day_start:
+            return claude_client.granted or claude_client
+        return claude_client._default
 
-    day_start, _ = day_utc_window(today_ist())
     used_today = session.query(GeminiPaidUsage).filter(GeminiPaidUsage.used_at >= day_start).count()
     if used_today >= settings.gemini_paid_daily_article_budget:
         return claude_client._default

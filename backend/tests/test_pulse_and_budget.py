@@ -95,6 +95,26 @@ def test_plain_client_passes_through_untouched(db_session):
     assert select_analysis_client(db_session, _article(db_session), plain) is plain
 
 
+def test_stale_grant_from_a_previous_day_gets_no_gemini_at_all(db_session, monkeypatch):
+    """The 5-article cap is per IST day, STRICTLY (user rule): an article
+    granted on a previous day must not ride the paid key again today
+    without counting against today's budget -- and since its unique usage
+    row already exists, it cannot be re-granted, so it runs the free
+    chain. No paid Gemini beyond today's five, ever."""
+    from datetime import timedelta
+    from app.models import utcnow
+
+    monkeypatch.setattr(settings, "gemini_paid_providers", "pulse_zerodha")
+    routed = _routed()
+    routed.granted = CallRoutedClient(_Chain("paid"), _Chain("free+paid"), frozenset({"extract_facts"}))
+    article = _article(db_session)
+    db_session.add(GeminiPaidUsage(article_id=article.id, used_at=utcnow() - timedelta(days=2)))
+    db_session.commit()
+
+    assert select_analysis_client(db_session, article, routed) is routed._default
+    assert db_session.query(GeminiPaidUsage).count() == 1  # no re-grant
+
+
 def test_granted_article_gets_the_granted_router(db_session, monkeypatch):
     """A budget-granted pulse article must run its WHOLE cascade on the
     granted router (cheap stages carry the paid-Gemini backstop) -- with
