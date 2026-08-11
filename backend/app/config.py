@@ -233,8 +233,13 @@ class Settings(BaseSettings):
     # estimated from LLM_MODEL_PRICING_USD_PER_MTOK when priced, else only
     # token ceilings apply. Exceeding a budget stops further expansion and
     # marks the analysis budget_exhausted -- it never silently continues.
-    gemini_max_input_tokens_per_article: int = int(os.environ.get("GEMINI_MAX_INPUT_TOKENS_PER_ARTICLE", "250000"))
-    gemini_max_output_tokens_per_article: int = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS_PER_ARTICLE", "60000"))
+    # Defaults tightened 2026-08-11 after the first live run: one wide event
+    # measured 74k in / 69k out on the Pro model under the old 250k/60k
+    # ceilings -- roughly $1-1.6 for a single article. These caps bound the
+    # damage; expansion stops (quality=budget_exhausted) rather than
+    # overrunning.
+    gemini_max_input_tokens_per_article: int = int(os.environ.get("GEMINI_MAX_INPUT_TOKENS_PER_ARTICLE", "100000"))
+    gemini_max_output_tokens_per_article: int = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS_PER_ARTICLE", "24000"))
     gemini_max_cost_per_article_usd: float = float(os.environ.get("GEMINI_MAX_COST_PER_ARTICLE", "0"))
 
 
@@ -552,7 +557,13 @@ def impact_thresholds_for_distance(distance: int) -> dict[str, float]:
 IMPACT_PARENT_TYPES = frozenset({"event", "economic_node", "sector", "commodity", "policy", "company"})
 IMPACT_CHILD_TYPES = frozenset({"economic_node", "sector", "commodity", "policy", "company"})
 
-# Gemini thinking budgets per level (tokens). "high" leans on the model's
-# dynamic thinking (-1 = model decides, the documented dynamic value);
-# low pins a small budget so extraction never burns reasoning tokens.
-GEMINI_THINKING_BUDGETS = {"minimal": 0, "low": 256, "medium": 2048, "high": -1}
+# Gemini thinking budgets per level (tokens). Measured 2026-08-11: dynamic
+# "high" thinking (-1) let ONE wide event burn 69k output tokens (~$1-1.6)
+# on gemini-3.1-pro-preview -- thinking bills as output, and the model
+# spends freely when unbounded. "high" is therefore a FIXED cap, generous
+# enough for real graph reasoning, never open-ended. Override via
+# GEMINI_THINKING_HIGH_BUDGET without a deploy.
+GEMINI_THINKING_BUDGETS = {
+    "minimal": 0, "low": 256, "medium": 1024,
+    "high": int(os.environ.get("GEMINI_THINKING_HIGH_BUDGET", "3072")),
+}

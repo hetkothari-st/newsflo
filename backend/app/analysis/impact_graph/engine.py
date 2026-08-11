@@ -36,12 +36,15 @@ logger = logging.getLogger(__name__)
 EVENT_NODE_ID = "event"
 
 # Bound how many candidate companies ride one company-mapping prompt --
-# same context-minimization rail the old cascade enforced.
-MAX_CANDIDATES_PER_CALL = 60
+# same context-minimization rail the old cascade enforced. 40 (was 60):
+# the tail of a market-cap-ordered candidate list almost never survives
+# verification, and each candidate costs prompt AND ticker-enum tokens.
+MAX_CANDIDATES_PER_CALL = 40
 # Bound frontier-node expansions per article, independent of depth --
-# breadth backstop against a pathological wide graph. Generous: real
-# graphs measured well under this.
-MAX_EXPANSIONS_PER_ARTICLE = 24
+# breadth backstop against a pathological wide graph. 12 (was 24): the
+# first live Hormuz run showed a wide event happily fills whatever room
+# it is given; 12 expansions still covers every major branch.
+MAX_EXPANSIONS_PER_ARTICLE = 12
 
 
 @dataclass
