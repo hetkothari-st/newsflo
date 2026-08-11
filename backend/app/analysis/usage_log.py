@@ -35,6 +35,15 @@ class CallUsage:
     output_tokens: Optional[int] = None
     cache_read_tokens: Optional[int] = None
     cache_write_tokens: Optional[int] = None
+    # -- Impact-graph v3 telemetry (spec 2026-08-11 §15). All optional and
+    # None for legacy call paths that don't report them.
+    stage: Optional[str] = None
+    thinking_level: Optional[str] = None
+    thinking_tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
+    retries: Optional[int] = None
+    estimated_cost_usd: Optional[float] = None
+    article_id: Optional[int] = None
 
     @property
     def cache_status(self) -> str:
@@ -68,10 +77,13 @@ def record_usage(usage: CallUsage) -> None:
             del _recent[:-_MAX_RECENT]
         logger.info(
             "llm_call call=%s provider=%s model=%s tier=%s input_tokens=%s output_tokens=%s "
-            "cache_read_tokens=%s cache_write_tokens=%s cache=%s",
+            "cache_read_tokens=%s cache_write_tokens=%s cache=%s stage=%s thinking=%s "
+            "thinking_tokens=%s latency_ms=%s retries=%s est_cost_usd=%s article_id=%s",
             usage.call_name, usage.provider, usage.model, usage.tier,
             usage.input_tokens, usage.output_tokens,
             usage.cache_read_tokens, usage.cache_write_tokens, usage.cache_status,
+            usage.stage, usage.thinking_level, usage.thinking_tokens,
+            usage.latency_ms, usage.retries, usage.estimated_cost_usd, usage.article_id,
         )
         if settings.llm_usage_db_logging:
             _persist(usage)
@@ -123,11 +135,14 @@ def usage_from_gemini(payload: dict, **fields) -> CallUsage:
     metadata = (payload or {}).get("usageMetadata") or {}
     # Gemini reports the cached slice as a subset of promptTokenCount, and
     # only when its implicit cache actually served part of the prompt.
+    # thoughtsTokenCount is the thinking-model reasoning spend, billed as
+    # output (spec 2026-08-11 §15 requires it tracked, not assumed).
     return CallUsage(
         provider="gemini",
         input_tokens=_int_or_none(metadata.get("promptTokenCount")),
         output_tokens=_int_or_none(metadata.get("candidatesTokenCount")),
         cache_read_tokens=_int_or_none(metadata.get("cachedContentTokenCount")),
+        thinking_tokens=_int_or_none(metadata.get("thoughtsTokenCount")),
         **fields,
     )
 

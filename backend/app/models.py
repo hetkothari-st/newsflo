@@ -333,6 +333,14 @@ class Alert(Base):
     # returned nothing.
     refinement_status = Column(String, nullable=True)
     refinement_attempts = Column(Integer, nullable=False, default=0)
+    # --- Impact-graph v3 provenance (spec 2026-08-11 §14): which provider
+    # produced the AUTHORITATIVE graph and at what quality. A Groq (or
+    # degraded-Gemini) result must never masquerade as the premium
+    # analysis -- these are the visible marks the spec requires.
+    # provider: gemini | groq. quality: authoritative | degraded | fallback
+    # | budget_exhausted. NULL on pre-v3 alerts.
+    analysis_provider = Column(String, nullable=True)
+    analysis_quality = Column(String, nullable=True)
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -400,6 +408,20 @@ class AlertCompany(Base):
     # only for companies with measurement_status == "ok"; NULL for a
     # ripple company with no real measured move (never fabricated).
     why = Column(Text, nullable=True)
+    # --- Impact-graph v3 (spec 2026-08-11). impact_level above stays the
+    # UI-facing legacy label, now DERIVED from causal_distance
+    # (1→direct, 2→indirect_l1, 3→indirect_l2, 4+→indirect_l3plus); the
+    # graph's own truth is the integer distance. All NULL on pre-v3 rows.
+    causal_distance = Column(Integer, nullable=True)
+    impact_strength = Column(Float, nullable=True)  # [0,1] size of the possible effect
+    confidence_f = Column(Float, nullable=True)     # [0,1] mechanism/exposure certainty
+    materiality = Column(Float, nullable=True)      # [0,1] worth showing at all
+    # The causal parent this company inherits impact from -- any node type,
+    # not only a company (that restriction was v2's parent_ticker model).
+    causal_parent_type = Column(String, nullable=True)  # config.IMPACT_PARENT_TYPES
+    causal_parent_id = Column(String, nullable=True)    # node id/label, e.g. "crude_oil_price"
+    # One-line economic mechanism connecting parent -> this company.
+    mechanism = Column(Text, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
@@ -453,6 +475,19 @@ class ImpactEdge(Base):
     source = Column(String, nullable=False)  # rulebook_verified | rulebook_pruned | llm_only
     confidence_score = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    # --- Impact-graph v3 (spec 2026-08-11) -- typed causal edge fields.
+    # from_node_kind/to_node_kind above keep carrying the legacy vocabulary
+    # for old rows; these carry the graph vocabulary (config.
+    # IMPACT_PARENT_TYPES / IMPACT_CHILD_TYPES) for engine-written rows.
+    # NULL on every pre-v3 row -- readers must tolerate absence.
+    parent_type = Column(String, nullable=True)   # event | economic_node | sector | commodity | policy | company
+    child_type = Column(String, nullable=True)    # economic_node | sector | commodity | policy | company
+    causal_distance = Column(Integer, nullable=True)  # child's distance from the event
+    impact_strength = Column(Float, nullable=True)    # [0,1]
+    confidence_f = Column(Float, nullable=True)       # [0,1] -- float twin of confidence_score
+    materiality = Column(Float, nullable=True)        # [0,1]
+    time_horizon = Column(String, nullable=True)      # Immediate | Short-Term | Medium-Term | Long-Term
+    verification_status = Column(String, nullable=True)  # verified | pruned | unverified
 
     alert = relationship("Alert", back_populates="impact_edges")
 

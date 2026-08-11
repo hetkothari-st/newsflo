@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 import app.pipeline as pipeline_module
-from app.analysis.schemas import AnalysisOutput, CompanyMention
+from app.analysis.impact_graph.schemas import GraphCompany, ImpactGraphResult
 from app.main import app
 from app.models import Article, Company
 from app.pipeline import process_new_articles
@@ -42,15 +42,16 @@ def test_pipeline_broadcasts_new_alert_to_connected_client(db_session, monkeypat
     ))
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     # Entering the TestClient context runs startup (captures manager.loop);
     # the nested websocket_connect registers a live client.

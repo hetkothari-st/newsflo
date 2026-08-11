@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
-from app.analysis.cascade import analyze_article
+from app.analysis.impact_graph.engine import analyze_article_v3
 from app.analysis.refinement import REFINEMENT_PENDING, refine_alert
 from app.analysis.schemas import AnalysisOutput, CATEGORIES
 from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
@@ -46,6 +46,24 @@ DEDUP_LOOKBACK_HOURS = 24
 # separate scoring path, so an indirect entry's confidence still reflects
 # real evidence/calibration signal, just discounted by distance.
 LEVEL_CONFIDENCE_MULTIPLIER = {"direct": 1.0, "indirect_l1": 0.7, "indirect_l2": 0.45}
+
+# Impact-graph v3: distances past the legacy 3-level map keep compounding
+# 0.7 per hop with a hard floor -- the failure-safe direction is aggressive
+# discounting, never the old `.get(level, 1.0)` default that scored an
+# unknown level like a direct mention.
+_DISTANCE_CONFIDENCE_FLOOR = 0.25
+
+
+def _confidence_multiplier(causal_distance: int | None, impact_level: str) -> float:
+    if causal_distance is not None and causal_distance >= 1:
+        if causal_distance == 1:
+            return 1.0
+        if causal_distance == 2:
+            return 0.7
+        if causal_distance == 3:
+            return 0.45
+        return max(_DISTANCE_CONFIDENCE_FLOOR, 0.45 * (0.7 ** (causal_distance - 3)))
+    return LEVEL_CONFIDENCE_MULTIPLIER.get(impact_level, 1.0)
 
 # Minimum confidence_score for an AlertCompany row to be persisted.
 #
@@ -93,6 +111,21 @@ def article_text(article: Article) -> str:
 
 def _content_hash(article: Article) -> str:
     return hashlib.sha256((article.title + "\n" + article_text(article)).encode()).hexdigest()
+
+
+def get_cached_v3(session: Session, article: Article):
+    """Impact-graph v3 twin of get_cached_analysis. Prefixed hash keyspace
+    so a v2 AnalysisOutput blob can never be mis-parsed as a v3 result."""
+    from app.analysis.impact_graph.schemas import ImpactGraphResult
+
+    cached = session.query(AnalysisCache).filter_by(content_hash="v3:" + _content_hash(article)).one_or_none()
+    if cached is None:
+        return None
+    return ImpactGraphResult.model_validate_json(cached.output_json)
+
+
+def store_v3_cache(session: Session, article: Article, result) -> None:
+    session.add(AnalysisCache(content_hash="v3:" + _content_hash(article), output_json=result.model_dump_json()))
 
 
 def get_cached_analysis(session: Session, article: Article) -> AnalysisOutput | None:
@@ -279,7 +312,7 @@ def _build_alert_company(
     )
 
     impact_level = entry.get("impact_level") or "direct"
-    level_multiplier = LEVEL_CONFIDENCE_MULTIPLIER.get(impact_level, 1.0)
+    level_multiplier = _confidence_multiplier(entry.get("causal_distance"), impact_level)
     confidence_score = round(result.score * level_multiplier)
     confidence_band = result.band if level_multiplier == 1.0 else band_for_score(confidence_score)
 
@@ -311,6 +344,14 @@ def _build_alert_company(
         contradiction_note=contradiction_note,
         impact_level=impact_level,
         parent_company_id=entry.get("parent_company_id"),
+        # Impact-graph v3 analytical fields -- None for legacy entries.
+        causal_distance=entry.get("causal_distance"),
+        impact_strength=entry.get("impact_strength"),
+        confidence_f=entry.get("confidence_f"),
+        materiality=entry.get("materiality"),
+        causal_parent_type=entry.get("causal_parent_type"),
+        causal_parent_id=entry.get("causal_parent_id"),
+        mechanism=entry.get("mechanism"),
     )
     return alert_company, result.score
 
@@ -459,6 +500,7 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
+    analysis_provider: str | None = None, analysis_quality: str | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -484,6 +526,8 @@ def _persist_alert(
         # _persist_alert call in a test or one-off script), which simply
         # falls refinement back to the article text.
         facts=facts,
+        analysis_provider=analysis_provider,
+        analysis_quality=analysis_quality,
     )
     session.add(alert)
     session.flush()
@@ -558,6 +602,13 @@ def _persist_alert(
             to_company_id=to_company_id,
             to_node_kind=edge["to"]["kind"], to_label=edge["to"]["label"],
             relation=edge["relation"], direction=edge["direction"], note=edge["note"], source=edge["source"],
+            # Impact-graph v3 typed-edge fields -- absent (None) on legacy
+            # cascade edges, carried through when the v3 adapter built them.
+            parent_type=edge.get("parent_type"), child_type=edge.get("child_type"),
+            causal_distance=edge.get("causal_distance"),
+            impact_strength=edge.get("impact_strength"), confidence_f=edge.get("confidence_f"),
+            materiality=edge.get("materiality"), time_horizon=edge.get("time_horizon"),
+            verification_status=edge.get("verification_status"),
         ))
 
     # Prefer a real story photo: a missing OR generic (publisher-logo)
@@ -626,6 +677,29 @@ def backfill_pulse_images(session: Session) -> None:
         session.commit()
 
 
+def grant_paid_analysis(session: Session, article: Article) -> bool:
+    """Impact-graph v3's boolean twin of select_analysis_client's budget
+    logic: True when THIS article may run its analysis on the paid Gemini
+    chain. Same accounting rows, same IST-day window, same retry-proof
+    same-day reuse, same stale-grant refusal -- one implementation, used by
+    both entry points."""
+    from app.ist_time import day_utc_window, today_ist
+    from app.models import GeminiPaidUsage
+
+    if article.provider not in settings.gemini_paid_provider_set:
+        return False
+    day_start, _ = day_utc_window(today_ist())
+    existing = session.query(GeminiPaidUsage).filter_by(article_id=article.id).one_or_none()
+    if existing is not None:
+        return _as_aware_utc(existing.used_at) >= day_start
+    used_today = session.query(GeminiPaidUsage).filter(GeminiPaidUsage.used_at >= day_start).count()
+    if used_today >= settings.gemini_paid_daily_article_budget:
+        return False
+    session.add(GeminiPaidUsage(article_id=article.id))
+    session.commit()
+    return True
+
+
 def select_analysis_client(session: Session, article: Article, claude_client):
     """The client this article's cascade may use. The PAID Gemini chain
     (CallRoutedClient) is granted ONLY to articles from an eligible
@@ -642,33 +716,133 @@ def select_analysis_client(session: Session, article: Article, claude_client):
     The budget day is the IST day, matching what "today's feed" means
     everywhere else in the app."""
     from app.analysis.claude_client import CallRoutedClient
-    from app.ist_time import day_utc_window, today_ist
-    from app.models import GeminiPaidUsage
 
     if not isinstance(claude_client, CallRoutedClient):
         return claude_client
-    if article.provider not in settings.gemini_paid_provider_set:
-        return claude_client._default
+    if grant_paid_analysis(session, article):
+        return claude_client.granted or claude_client
+    return claude_client._default
 
-    day_start, _ = day_utc_window(today_ist())
-    existing = session.query(GeminiPaidUsage).filter_by(article_id=article.id).one_or_none()
-    if existing is not None:
-        # Same-day grant: retries reuse it (retry-proof accounting). A grant
-        # from a PREVIOUS day gets no paid Gemini at all -- the cap is
-        # strictly five articles per IST day, and a stale article must
-        # neither ride yesterday's grant nor consume one of today's five
-        # (its unique usage row also makes a re-grant impossible).
-        if _as_aware_utc(existing.used_at) >= day_start:
-            return claude_client.granted or claude_client
-        return claude_client._default
 
-    used_today = session.query(GeminiPaidUsage).filter(GeminiPaidUsage.used_at >= day_start).count()
-    if used_today >= settings.gemini_paid_daily_article_budget:
-        return claude_client._default
+# --- Impact-graph v3 adapters (spec 2026-08-11) ---------------------------
 
-    session.add(GeminiPaidUsage(article_id=article.id))
-    session.commit()
-    return claude_client.granted or claude_client
+def _v3_legacy_level(distance: int | None) -> str:
+    if distance is None or distance <= 1:
+        return "direct"
+    if distance == 2:
+        return "indirect_l1"
+    # Distances >= 3 reuse indirect_l2 for the legacy UI label: the frontend
+    # coerces unknown values to "direct" (impactLevels.ts) -- rendering a
+    # deep ripple as DIRECT is the confidently-wrong failure this cap
+    # avoids. causal_distance carries the truth.
+    return "indirect_l2"
+
+
+def _v3_entries(session: Session, result) -> list[dict]:
+    """ImpactGraphResult.companies -> the entry dicts _persist_alert
+    consumes. Companies are already candidate-grounded, so resolution is a
+    direct ticker lookup; a ticker that no longer resolves is skipped
+    (omit rather than mismatch)."""
+    entries = []
+    for company in result.companies:
+        row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
+        if row is None:
+            logger.warning("v3 company %s did not resolve to a Company row; skipped", company.ticker)
+            continue
+        parent_company_id = None
+        if company.parent_type == "company":
+            parent = session.query(Company).filter_by(ticker=company.parent_id).one_or_none()
+            parent_company_id = parent.id if parent else None
+        # Magnitude band derived monotonically from impact_strength -- a
+        # placeholder the calibration blender overrides with measured
+        # event-volatility data wherever that exists (same override path
+        # the old cascade's LLM magnitudes went through).
+        magnitude_high = round(0.5 + 4.5 * company.impact_strength, 1)
+        magnitude_low = round(max(0.1, magnitude_high / 3), 1)
+        entries.append({
+            "company_id": row.id, "direction": company.direction if company.direction != "neutral" else "bullish",
+            "magnitude_low": magnitude_low, "magnitude_high": magnitude_high,
+            "rationale": company.rationale, "key_points": company.key_points,
+            "confidence_score": round(company.confidence * 100), "time_horizon": company.time_horizon,
+            "basis": "direct_mention", "reasons": company.reasons,
+            "evidence_refs": company.evidence_refs, "risks": [],
+            "assumptions": company.assumptions, "unknowns": company.unknowns,
+            "alternative_hypothesis": None,
+            "impact_level": _v3_legacy_level(company.causal_distance),
+            "parent_company_id": parent_company_id,
+            "causal_distance": company.causal_distance,
+            "impact_strength": company.impact_strength,
+            "confidence_f": company.confidence, "materiality": company.materiality,
+            "causal_parent_type": company.parent_type, "causal_parent_id": company.parent_id,
+            "mechanism": company.mechanism,
+        })
+    return entries
+
+
+def _v3_edges(result) -> list[dict]:
+    """GraphEdge list -> the edge dicts _persist_alert persists. Legacy
+    columns get the closest legacy vocabulary (charts keep working); the
+    typed v3 fields carry the graph truth. Company attachment edges (node ->
+    selected company) are appended deterministically so relation-keyed
+    consumers (ripple_layers' notes, the deck's graphs) see every company
+    connected."""
+    def _kind(node_type: str) -> str:
+        if node_type in ("company", "sector"):
+            return node_type
+        return "mechanism"
+
+    edges = []
+    for edge in result.edges:
+        edges.append({
+            "from": {"kind": _kind(edge.parent_type), "label": edge.parent_id},
+            "to": {"kind": _kind(edge.child_type), "label": edge.child_id},
+            "relation": "demand" if edge.child_type == "company" else "correlation",
+            "direction": edge.direction if edge.direction != "neutral" else "bullish",
+            "note": edge.mechanism, "source": "llm_only",
+            "parent_type": edge.parent_type, "child_type": edge.child_type,
+            "causal_distance": edge.causal_distance,
+            "impact_strength": edge.impact_strength, "confidence_f": edge.confidence,
+            "materiality": edge.materiality, "time_horizon": edge.time_horizon,
+            "verification_status": edge.verification_status,
+        })
+    for company in result.companies:
+        edges.append({
+            "from": {"kind": _kind(company.parent_type), "label": company.parent_id},
+            "to": {"kind": "company", "label": company.ticker},
+            "relation": "demand",
+            "direction": company.direction if company.direction != "neutral" else "bullish",
+            "note": company.mechanism or company.rationale, "source": "llm_only",
+            "parent_type": company.parent_type, "child_type": "company",
+            "causal_distance": company.causal_distance,
+            "impact_strength": company.impact_strength, "confidence_f": company.confidence,
+            "materiality": company.materiality, "time_horizon": company.time_horizon,
+            "verification_status": "verified" if company.verified else "unverified",
+        })
+    return edges
+
+
+def _build_v3_router(session: Session, article: Article, groq_client):
+    """One StageRouter per article: protected (paid-Gemini-owned) when the
+    article holds a paid grant, Groq-served otherwise -- same stage
+    contracts either way (spec doc 2 §2)."""
+    from app.analysis.impact_graph.budget import ArticleBudget
+    from app.analysis.impact_graph.router import StageRouter
+
+    protected = grant_paid_analysis(session, article) and bool(settings.gemini_paid_api_key)
+    return StageRouter(
+        protected=protected, gemini_api_key=settings.gemini_paid_api_key or None,
+        groq_client=groq_client, article_id=article.id,
+        budget=ArticleBudget(article_id=article.id),
+    )
+
+
+def _build_v3_groq_client():
+    from app.analysis.claude_client import GROQ_BASE_URL, GroqAdapter, RotatingClient
+
+    keys = settings.groq_api_keys
+    if not keys:
+        return None
+    return GroqAdapter(RotatingClient(keys, base_url=GROQ_BASE_URL))
 
 
 def process_new_articles(session: Session, claude_client, throttle_seconds: float = 0) -> int:
@@ -703,6 +877,10 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
     # while 83 re-queued articles starved the rest). Stable sort: order
     # within each group stays newest-first.
     pending.sort(key=lambda a: a.provider not in settings.gemini_paid_provider_set)
+
+    # Built lazily on first uncached article -- the test suite's mocked
+    # runs never construct a real Groq client.
+    v3_groq_client = None
 
     for article in pending:
         reusable_alert = _find_reusable_alert(session, article)
@@ -740,12 +918,20 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             alerts_created += 1
             continue
 
-        analysis = get_cached_analysis(session, article)
-        if analysis is None:
-            article_client = select_analysis_client(session, article, claude_client)
-            for attempt in range(2):  # try once, retry once
+        # --- Impact-graph v3: the ONE authoritative analysis path (spec
+        # 2026-08-11). The legacy cascade (analysis.cascade.analyze_article)
+        # is no longer wired here.
+        result = get_cached_v3(session, article)
+        if result is None:
+            if v3_groq_client is None:
+                v3_groq_client = _build_v3_groq_client()
+            router = _build_v3_router(session, article, v3_groq_client)
+            for attempt in range(2):  # try once, retry once (router retries internally per stage too)
                 try:
-                    analysis = analyze_article(article_client, article.title, article_text(article), session=session)
+                    result = analyze_article_v3(
+                        router, article.title, article_text(article),
+                        session=session, article_id=article.id,
+                    )
                     break
                 except Exception:
                     # Logged, not swallowed silently -- a burst of
@@ -753,26 +939,26 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                     # provider rate-limit storm undiagnosable in
                     # production.
                     logger.exception(
-                        "analyze_article attempt %s failed for article_id=%s", attempt + 1, article.id,
+                        "analyze_article_v3 attempt %s failed for article_id=%s", attempt + 1, article.id,
                     )
                     if attempt == 0:
                         time.sleep(throttle_seconds)
                     continue
             time.sleep(throttle_seconds)  # stay under the provider's rate limit before the next article
 
-            if analysis is None:
+            if result is None:
                 article.status = "ANALYSIS_FAILED"
                 session.commit()
                 continue
 
-            store_analysis_cache(session, article, analysis)
+            store_v3_cache(session, article, result)
 
-        anchor_sub_sectors = build_anchor_sub_sectors(session, analysis.companies)
-        resolved = resolve_companies(session, analysis.companies, anchor_sub_sectors=anchor_sub_sectors)
+        entries = _v3_entries(session, result)
         _persist_alert(
-            session, article, analysis.category, resolved,
-            event_type=analysis.event_type, gaps=analysis.gaps, edges=analysis.edges, client=claude_client,
-            facts=analysis.facts,
+            session, article, result.category, entries,
+            event_type=result.event_type, gaps=result.gaps, edges=_v3_edges(result),
+            client=claude_client, facts=result.facts,
+            analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
         )
         alerts_created += 1
 

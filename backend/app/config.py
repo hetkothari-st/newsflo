@@ -214,6 +214,29 @@ class Settings(BaseSettings):
     # restore the pre-rebuild substring resolver without a deploy.
     use_alias_matcher: bool = os.environ.get("USE_ALIAS_MATCHER", "true").lower() == "true"
 
+    # --- Impact-graph v3 model routing (spec 2026-08-11, docs 1-4) ---
+    # Stage-typed Gemini models for the causal impact graph. All defaults
+    # verified live against the paid key's ListModels on 2026-08-11 --
+    # change via env, never hardcode elsewhere. The reasoning model owns
+    # EVERY quality-critical stage for protected articles (shocks, graph,
+    # companies, ripples, verification, ranking); the fact model serves
+    # extraction only; the fallback model is the DEGRADED reasoning tier
+    # (never silently equivalent -- see analysis_quality on Alert).
+    gemini_fact_model: str = os.environ.get("GEMINI_FACT_MODEL", "gemini-3.5-flash-lite")
+    gemini_reasoning_model: str = os.environ.get("GEMINI_REASONING_MODEL", "gemini-3.1-pro-preview")
+    gemini_summary_model: str = os.environ.get("GEMINI_SUMMARY_MODEL", "gemini-3.6-flash")
+    gemini_fallback_model: str = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.6-flash")
+    groq_aux_model: str = os.environ.get("GROQ_AUX_MODEL", "llama-3.3-70b-versatile")
+    # Recursive expansion hard safety cap (spec: MAX_CAUSAL_DEPTH = 5).
+    max_causal_depth: int = int(os.environ.get("MAX_CAUSAL_DEPTH", "5"))
+    # Per-article Gemini budgets. 0 = unlimited (budget disabled). Cost is
+    # estimated from LLM_MODEL_PRICING_USD_PER_MTOK when priced, else only
+    # token ceilings apply. Exceeding a budget stops further expansion and
+    # marks the analysis budget_exhausted -- it never silently continues.
+    gemini_max_input_tokens_per_article: int = int(os.environ.get("GEMINI_MAX_INPUT_TOKENS_PER_ARTICLE", "250000"))
+    gemini_max_output_tokens_per_article: int = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS_PER_ARTICLE", "60000"))
+    gemini_max_cost_per_article_usd: float = float(os.environ.get("GEMINI_MAX_COST_PER_ARTICLE", "0"))
+
 
 settings = Settings()
 
@@ -499,3 +522,37 @@ UNUSUAL_VOLUME_MULTIPLE = 2.0
 # publisher boilerplate (a logo/default banner), not a story photo -- see
 # app.ingestion.image_filter. Real news photos are unique per story.
 GENERIC_IMAGE_REPEAT_THRESHOLD = 3
+
+# --- Impact-graph v3 (spec 2026-08-11) -----------------------------------
+# Distance-aware pruning thresholds: the farther an effect sits from the
+# event, the stronger its evidence must be, or the graph becomes an
+# "everything affects everything" network. Calibration starting points
+# (spec doc 1 §10), not final truths -- telemetry exists so they can be
+# re-tuned against labelled events. Applied deterministically in code
+# (engine._passes_thresholds), never by the LLM.
+IMPACT_DISTANCE_THRESHOLDS: dict[int, dict[str, float]] = {
+    1: {"materiality": 0.30, "confidence": 0.55},
+    2: {"materiality": 0.35, "confidence": 0.60},
+    3: {"materiality": 0.45, "confidence": 0.65},
+    4: {"materiality": 0.55, "confidence": 0.70},
+    5: {"materiality": 0.60, "confidence": 0.75},
+}
+
+
+def impact_thresholds_for_distance(distance: int) -> dict[str, float]:
+    """Thresholds for a causal distance; distances past the table reuse the
+    deepest row (they are already capped by max_causal_depth)."""
+    if distance < 1:
+        distance = 1
+    return IMPACT_DISTANCE_THRESHOLDS.get(distance, IMPACT_DISTANCE_THRESHOLDS[5])
+
+
+# Graph node/edge type vocabularies (spec docs 3 §14). Parent may be any
+# of these; a child is never the event itself.
+IMPACT_PARENT_TYPES = frozenset({"event", "economic_node", "sector", "commodity", "policy", "company"})
+IMPACT_CHILD_TYPES = frozenset({"economic_node", "sector", "commodity", "policy", "company"})
+
+# Gemini thinking budgets per level (tokens). "high" leans on the model's
+# dynamic thinking (-1 = model decides, the documented dynamic value);
+# low pins a small budget so extraction never burns reasoning tokens.
+GEMINI_THINKING_BUDGETS = {"minimal": 0, "low": 256, "medium": 2048, "high": -1}

@@ -1,4 +1,4 @@
-from app.analysis.schemas import AnalysisOutput, CompanyMention
+from app.analysis.impact_graph.schemas import GraphCompany, ImpactGraphResult
 from app.models import Company, MarketMove
 from app.pipeline import process_new_articles
 import app.pipeline as pipeline_module
@@ -23,12 +23,13 @@ def _article(db_session):
 
 
 def _fake_analysis():
-    return AnalysisOutput(
+    return ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases"], confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases"], reasons=["r1"],
         )],
     )
 
@@ -39,7 +40,7 @@ def test_persist_alert_writes_a_market_move_row_per_company(db_session, monkeypa
     db_session.commit()
     article = _article(db_session)
 
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: _fake_analysis())
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: _fake_analysis())
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -72,7 +73,7 @@ def test_persist_alert_does_not_crash_when_measurement_raises_no_data(db_session
     db_session.add(company)
     db_session.commit()
     article = _article(db_session)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: _fake_analysis())
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: _fake_analysis())
 
     created = process_new_articles(db_session, claude_client=object())
 

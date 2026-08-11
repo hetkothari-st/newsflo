@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import event
 
 import app.pipeline as pipeline_module
+from app.analysis.impact_graph.schemas import GraphCompany, GraphEdge, ImpactGraphResult
 from app.analysis.schemas import AnalysisOutput, CompanyMention
 from app.models import (
     Alert,
@@ -40,16 +41,16 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases", "Refining margins widen"],
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"], reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -62,8 +63,10 @@ def test_process_new_articles_creates_alert_end_to_end(db_session, monkeypatch):
     assert alert_companies[0].company_id == company.id
     # No calibration samples exist, so the alert falls back to the LLM's own estimate.
     assert alert_companies[0].confidence == "llm_estimate"
-    assert alert_companies[0].magnitude_low == 2.0
-    assert alert_companies[0].magnitude_high == 4.0
+    # v3 derives the band from impact_strength: high = round(0.5 + 4.5*0.6, 1)
+    # = 3.2, low = round(max(0.1, 3.2/3), 1) = 1.1.
+    assert alert_companies[0].magnitude_low == 1.1
+    assert alert_companies[0].magnitude_high == 3.2
     assert pipeline_module.decode_key_points(alert_companies[0]) == ["Crude eases", "Refining margins widen"]
     # confidence_score is now computed by the deterministic Confidence
     # Engine (app.reasoning.confidence), not the mocked LLM's old value of
@@ -93,16 +96,16 @@ def test_process_new_articles_reconciles_direction_to_measured_move(db_session, 
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases", "Refining margins widen"],
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"], reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     # The LLM guessed "bullish" before the market had reacted. The real,
     # measured move went the other way -- persisted direction must defer
@@ -134,16 +137,16 @@ def test_process_new_articles_keeps_llm_direction_when_unmeasured(db_session, mo
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases", "Refining margins widen"],
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"], reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
     # measure_company_move stays on conftest's autouse "no_data" stub.
 
     created = process_new_articles(db_session, claude_client=object())
@@ -167,19 +170,20 @@ def test_process_new_articles_uses_full_content_over_summary_when_available(db_s
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases"], confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases"], reasons=["r1"],
         )],
     )
     captured = {}
-    def fake_analyze(client, title, content, session=None):
+    def fake_analyze(router, title, content, session=None, article_id=None):
         captured["content"] = content
         return fake_output
-    monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", fake_analyze)
 
     process_new_articles(db_session, claude_client=object())
 
@@ -223,15 +227,15 @@ def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_se
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="Indian IT sector rally driven by Tech Mahindra Q1 beat and HCL",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=1.0, magnitude_high=2.0, rationale="x",
-            time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.3, confidence=0.5, materiality=0.3, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="x",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -262,15 +266,16 @@ def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_s
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -300,15 +305,16 @@ def test_process_new_articles_sends_email_notification_for_holder(db_session, mo
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -325,10 +331,10 @@ def test_process_new_articles_marks_analysis_failed_after_retries(db_session, mo
     db_session.add(article)
     db_session.commit()
 
-    def boom(client, title, content, session=None):
+    def boom(router, title, content, session=None, article_id=None):
         raise RuntimeError("api down")
 
-    monkeypatch.setattr(pipeline_module, "analyze_article", boom)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", boom)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -358,22 +364,22 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
     db_session.add_all([first, second])
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases", "Refining margins widen"],
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases", "Refining margins widen"], reasons=["r1"],
         )],
     )
     call_count = {"n": 0}
 
-    def counting_analyze(client, title, content, session=None):
+    def counting_analyze(router, title, content, session=None, article_id=None):
         call_count["n"] += 1
         return fake_output
 
-    monkeypatch.setattr(pipeline_module, "analyze_article", counting_analyze)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", counting_analyze)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -409,15 +415,16 @@ def test_process_new_articles_sets_image_url_from_og_image_fetch(db_session, mon
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
     monkeypatch.setattr(pipeline_module, "fetch_og_image", lambda url: "https://example.com/img.jpg")
 
     created = process_new_articles(db_session, claude_client=object())
@@ -439,7 +446,7 @@ def test_process_new_articles_ignores_filtered_articles(db_session, monkeypatch)
         session.commit()
 
     monkeypatch.setattr(pipeline_module, "filter_new_articles", fake_filter)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: (_ for _ in ()).throw(AssertionError("should not be called")))
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -524,6 +531,7 @@ def test_alert_broadcast_payload_uses_one_query_for_past_mentions_across_all_com
     assert past_mentions_queries == 1
 
 
+@pytest.mark.skip(reason="legacy cascade fan-out path unwired by impact-graph v3 (2026-08-11)")
 def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_session, monkeypatch):
     # A sector-wide fan-out mention now requires an anchor to return any
     # rows at all (resolve_companies no longer falls back to the whole
@@ -564,7 +572,7 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 
@@ -580,6 +588,7 @@ def test_sector_inference_fan_out_copies_confidence_and_horizon_to_every_row(db_
     assert all(r.time_horizon == "Medium-Term" for r in rows)
 
 
+@pytest.mark.skip(reason="legacy cascade fan-out path unwired by impact-graph v3 (2026-08-11)")
 def test_process_new_articles_anchors_fan_out_to_the_named_companys_sub_sector(db_session, monkeypatch):
     # Models the reported production bug directly: a crude-oil story's fmcg
     # fan-out pulled in Eternal (food delivery, fmcg/retail) alongside HUL
@@ -629,7 +638,7 @@ def test_process_new_articles_anchors_fan_out_to_the_named_companys_sub_sector(d
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 
@@ -653,21 +662,19 @@ def test_process_new_articles_persists_evidence_discipline_fields(db_session, mo
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas", event_type="crude_oil",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
             reasons=["Refining margins widen on crude spike."],
             evidence_refs=["RULE_CRUDE_OIL_UP"],
-            risks=["Margin reversal if crude falls back."],
             assumptions=["Crude stays elevated."],
             unknowns=["Duration of the spike."],
-            alternative_hypothesis="Already priced in.",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -681,7 +688,9 @@ def test_process_new_articles_persists_evidence_discipline_fields(db_session, mo
     assert pipeline_module._decode_json_list(ac.reasons_json) == ["Refining margins widen on crude spike."]
     assert pipeline_module._decode_json_list(ac.evidence_refs_json) == ["RULE_CRUDE_OIL_UP"]
     assert pipeline_module._decode_json_list(ac.rulebook_ids_json) == ["RULE_CRUDE_OIL_UP"]
-    assert ac.alternative_hypothesis == "Already priced in."
+    # GraphCompany has no alternative_hypothesis field -- the v3 adapter
+    # always persists None for it.
+    assert ac.alternative_hypothesis is None
     assert ac.confidence_band in {"LOW", "MODERATE", "HIGH", "VERY_HIGH"}
     assert pipeline_module._decode_json_list(ac.confidence_contributors_json) != [] or pipeline_module._decode_json_list(ac.confidence_penalties_json) != []
 
@@ -696,16 +705,16 @@ def test_process_new_articles_reuse_path_carries_evidence_fields(db_session, mon
     db_session.add_all([first, second])
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas", event_type="crude_oil",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
             reasons=["Refining margins widen."], evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 2
@@ -729,12 +738,13 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas", event_type="crude_oil",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            time_horizon="Short-Term", reasons=["Refining margins widen."],
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["Refining margins widen."],
             # A matched rule (plus the fully-cited claim) keeps this row's
             # confidence_score above CONFIDENCE_FLOOR despite the reasoning-
             # consistency penalty below, so the row this test asserts on is
@@ -744,7 +754,7 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
             evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
     monkeypatch.setattr(
         pipeline_module, "get_or_fetch_financial_snapshot",
         lambda session, ticker: {"price": 2500.0, "return_1m": -12.0, "return_3m": -20.0},
@@ -774,15 +784,15 @@ def test_process_new_articles_no_contradiction_when_snapshot_unavailable(db_sess
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="x",
-            time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="x",
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
 
     created = process_new_articles(db_session, claude_client=object())
@@ -807,31 +817,33 @@ def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confid
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="it", event_type="other",
         companies=[
-            # Both mentions carry a matched rule + fully-cited claim so their
+            # Both companies carry a matched rule + fully-cited claim so their
             # baseline confidence_score clears CONFIDENCE_FLOOR even after
-            # the indirect entry's 0.7x LEVEL_CONFIDENCE_MULTIPLIER discount
-            # below -- this test is about the discount being applied and
-            # being strictly smaller than the direct entry's score, not about
+            # the indirect entry's 0.7x causal-distance discount below --
+            # this test is about the discount being applied and being
+            # strictly smaller than the direct entry's score, not about
             # the floor, so both rows must actually survive to be compared.
-            CompanyMention(
-                name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
-                direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban hits Nvidia directly",
-                time_horizon="Short-Term", impact_level="direct",
+            GraphCompany(
+                ticker="NVDA.NS", name="Nvidia", direction="bearish",
+                impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+                time_horizon="Short-Term", mechanism="test mechanism",
+                rationale="export ban hits Nvidia directly",
                 reasons=["Export ban restricts chip shipments."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
-            CompanyMention(
-                name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
-                direction="bearish", magnitude_low=1.0, magnitude_high=2.0,
+            GraphCompany(
+                ticker="TSM.NS", name="TSMC", direction="bearish",
+                impact_strength=0.4, confidence=0.6, materiality=0.4, causal_distance=2,
+                time_horizon="Medium-Term", parent_type="company", parent_id="NVDA.NS",
+                mechanism="test mechanism",
                 rationale="TSMC fabs Nvidia's chips; lower Nvidia orders reduce TSMC's foundry revenue.",
-                time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
                 reasons=["Lower Nvidia orders reduce TSMC's foundry revenue."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
 
     created = process_new_articles(db_session, claude_client=object())
@@ -859,7 +871,7 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     db_session.add(older_article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="it",
         companies=[
             # Matched rule + fully-cited claim on both, same reasoning as
@@ -867,21 +879,22 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
             # above: keeps the indirect row's confidence_score above
             # CONFIDENCE_FLOOR after its 0.7x discount, so it survives to be
             # reused on the second (dedup) pass this test exercises.
-            CompanyMention(
-                name="Nvidia", ticker="NVDA.NS", is_direct=True, sector=None,
-                direction="bearish", magnitude_low=2.0, magnitude_high=4.0, rationale="export ban",
-                time_horizon="Short-Term", impact_level="direct",
+            GraphCompany(
+                ticker="NVDA.NS", name="Nvidia", direction="bearish",
+                impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+                time_horizon="Short-Term", mechanism="test mechanism", rationale="export ban",
                 reasons=["Export ban restricts chip shipments."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
-            CompanyMention(
-                name="TSMC", ticker="TSM.NS", is_direct=True, sector=None,
-                direction="bearish", magnitude_low=1.0, magnitude_high=2.0, rationale="fabs Nvidia chips",
-                time_horizon="Medium-Term", impact_level="indirect_l1", parent_ticker="NVDA.NS",
+            GraphCompany(
+                ticker="TSM.NS", name="TSMC", direction="bearish",
+                impact_strength=0.4, confidence=0.6, materiality=0.4, causal_distance=2,
+                time_horizon="Medium-Term", parent_type="company", parent_id="NVDA.NS",
+                mechanism="test mechanism", rationale="fabs Nvidia chips",
                 reasons=["Lower Nvidia orders reduce TSMC's foundry revenue."], evidence_refs=["RULE_EXPORT_RESTRICTION"],
             ),
         ],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
     monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
     assert process_new_articles(db_session, claude_client=object()) == 1
 
@@ -889,7 +902,7 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     newer_article = Article(source="test", url="https://example.com/indirect-b", title="Chip export ban announced")
     db_session.add(newer_article)
     db_session.commit()
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: (_ for _ in ()).throw(AssertionError("should not be called")))
     assert process_new_articles(db_session, claude_client=object()) == 1
 
     reused_indirect = (
@@ -924,17 +937,18 @@ def test_process_new_articles_cache_hit_skips_llm_call_and_throttle_sleep(db_ses
     db_session.add(article)
     db_session.commit()
 
-    cached_output = AnalysisOutput(category="oil_gas", companies=[CompanyMention(
-        name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-        direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-        key_points=["Crude eases"], time_horizon="Short-Term",
+    cached_output = ImpactGraphResult(category="oil_gas", companies=[GraphCompany(
+        ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+        impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+        time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+        key_points=["Crude eases"],
     )])
-    pipeline_module.store_analysis_cache(db_session, article, cached_output)
+    pipeline_module.store_v3_cache(db_session, article, cached_output)
     db_session.commit()
 
-    def fail_if_called(client, title, content, session=None):
-        raise AssertionError("analyze_article must not be called on a cache hit")
-    monkeypatch.setattr(pipeline_module, "analyze_article", fail_if_called)
+    def fail_if_called(router, title, content, session=None, article_id=None):
+        raise AssertionError("analyze_article_v3 must not be called on a cache hit")
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", fail_if_called)
 
     sleep_calls = {"n": 0}
     monkeypatch.setattr(pipeline_module.time, "sleep", lambda s: sleep_calls.__setitem__("n", sleep_calls["n"] + 1))
@@ -978,20 +992,21 @@ def test_process_new_articles_analysis_cache_deterministic(db_session, monkeypat
 
     call_count = {"n": 0}
     outputs = [
-        AnalysisOutput(category="oil_gas", companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases"], time_horizon="Short-Term",
+        ImpactGraphResult(category="oil_gas", companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases"],
         )]),
-        AnalysisOutput(category="other", companies=[]),  # DIFFERENT output -- must never be reached
+        ImpactGraphResult(category="other", companies=[]),  # DIFFERENT output -- must never be reached
     ]
 
-    def fake_analyze(client, title, content, session=None):
+    def fake_analyze(router, title, content, session=None, article_id=None):
         result = outputs[call_count["n"]]
         call_count["n"] += 1
         return result
 
-    monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", fake_analyze)
 
     created = process_new_articles(db_session, claude_client=object())
 
@@ -1150,24 +1165,28 @@ def test_process_new_articles_persists_edges_from_analysis(db_session, monkeypat
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector="oil_gas",
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="r",
-            key_points=["k"], time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="r",
+            key_points=["k"],
         )],
-        edges=[{
-            "from": {"kind": "sector", "label": "oil_gas"}, "to": {"kind": "company", "label": "RELIANCE.NS"},
-            "relation": "demand", "direction": "bullish", "note": "n", "source": "llm_only",
-        }],
+        edges=[GraphEdge(
+            parent_type="sector", parent_id="oil_gas", child_type="company", child_id="RELIANCE.NS",
+            direction="bullish", mechanism="n", causal_distance=1,
+            impact_strength=0.5, confidence=0.7, materiality=0.5,
+        )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     process_new_articles(db_session, claude_client=object())
 
     alert = db_session.query(Alert).one()
-    assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 1
+    # 1 graph edge from result.edges + 1 attachment edge the pipeline appends
+    # per company (parent node -> selected company).
+    assert db_session.query(ImpactEdge).filter_by(alert_id=alert.id).count() == 2
 
 
 from app.pipeline import CONFIDENCE_FLOOR

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.pipeline as pipeline_module
-from app.analysis.schemas import AnalysisOutput, CompanyMention
+from app.analysis.impact_graph.schemas import GraphCompany, ImpactGraphResult
 from app.companies.global_seed import GLOBAL_COMPANIES, load_global_companies
 from app.ingestion.poller import fetch_new_articles
 from app.models import CalibrationSample, Company, EmailNotification
@@ -31,15 +31,16 @@ def test_full_pipeline_from_rss_entry_to_alert(db_session, monkeypatch):
     inserted = fetch_new_articles(db_session, [{"source": "test_feed", "url": "http://feed.test/rss"}])
     assert inserted == 1
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -96,15 +97,16 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
     inserted = fetch_new_articles(db_session, [{"source": "test_feed", "url": "http://feed.test/rss"}])
     assert inserted == 1
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -163,15 +165,16 @@ def test_full_pipeline_notifies_holder_end_to_end(db_session, monkeypatch):
     assert inserted == 1
 
     # Run the pipeline with a mocked Claude analysis resolving to the held company.
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1
@@ -233,15 +236,16 @@ def test_feed_tabs_end_to_end(db_session, monkeypatch):
     inserted = fetch_new_articles(db_session, [{"source": "test_feed", "url": "http://feed.test/rss"}])
     assert inserted == 1
 
-    fake_output = AnalysisOutput(
+    fake_output = ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name="Reliance Industries", ticker="RELIANCE.NS", is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
         )],
     )
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
 
     created = process_new_articles(db_session, claude_client=object())
     assert created == 1

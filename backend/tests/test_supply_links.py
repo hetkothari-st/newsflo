@@ -16,7 +16,8 @@ import app.analysis.cascade as cascade_module
 import app.pipeline as pipeline_module
 from app import config
 from app.analysis.cascade import _identify_companies, _identify_companies_per_sector
-from app.analysis.schemas import AnalysisOutput, CompanyMention, SectorFinding
+from app.analysis.impact_graph.schemas import ImpactGraphResult
+from app.analysis.schemas import CompanyMention, SectorFinding
 from app.companies.supply_links import extract, fetchers, loader, prompting, snapshot
 from app.models import Alert, AlertCompany, Article, Company, CompanyAlias, ImpactEdge, SupplyLink
 
@@ -524,15 +525,15 @@ def test_supply_links_NEVER_create_alert_companies_without_llm_output(db_session
     db_session.add(article)
     db_session.commit()
 
-    # The company-identification LLM stage returns zero companies -- reuses
-    # test_pipeline.py's stub pattern of replacing analyze_article wholesale
-    # (that is the only seam every persist-path test in this codebase mocks
-    # at), so the stored SupplyLink row above is the ONLY thing that could
-    # possibly inject a company into this alert.
-    fake_output = AnalysisOutput(category="other", companies=[])
+    # The analysis LLM stage returns zero companies -- reuses
+    # test_pipeline.py's stub pattern of replacing analyze_article_v3
+    # wholesale (that is the only seam every persist-path test in this
+    # codebase mocks at), so the stored SupplyLink row above is the ONLY
+    # thing that could possibly inject a company into this alert.
+    fake_output = ImpactGraphResult(category="other", companies=[])
     monkeypatch.setattr(
-        pipeline_module, "analyze_article",
-        lambda client, title, content, session=None: fake_output,
+        pipeline_module, "analyze_article_v3",
+        lambda router, title, content, session=None, article_id=None: fake_output,
     )
 
     created = pipeline_module.process_new_articles(db_session, claude_client=object())
@@ -849,10 +850,12 @@ def test_supply_links_never_create_companies_via_the_real_grounded_identify_comp
     db_session.add(article)
     db_session.commit()
 
-    fake_output = AnalysisOutput(category="other", companies=mentions)
+    # `mentions` is proven [] above, so it feeds the v3 result verbatim --
+    # the persist path must see the real (empty) grounded-call output.
+    fake_output = ImpactGraphResult(category="other", companies=mentions)
     monkeypatch.setattr(
-        pipeline_module, "analyze_article",
-        lambda client, title, content, session=None: fake_output,
+        pipeline_module, "analyze_article_v3",
+        lambda router, title, content, session=None, article_id=None: fake_output,
     )
     created = pipeline_module.process_new_articles(db_session, claude_client=object())
 

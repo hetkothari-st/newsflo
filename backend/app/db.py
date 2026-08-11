@@ -112,6 +112,24 @@ _ADDED_COLUMNS = [
     ("articles", "url_hash", "VARCHAR"),
     ("articles", "raw_payload", "TEXT"),
     ("articles", "source_category", "VARCHAR"),
+    # -- Impact-graph v3 (2026-08-11) --
+    ("alerts", "analysis_provider", "VARCHAR"),
+    ("alerts", "analysis_quality", "VARCHAR"),
+    ("alert_companies", "causal_distance", "INTEGER"),
+    ("alert_companies", "impact_strength", "FLOAT"),
+    ("alert_companies", "confidence_f", "FLOAT"),
+    ("alert_companies", "materiality", "FLOAT"),
+    ("alert_companies", "causal_parent_type", "VARCHAR"),
+    ("alert_companies", "causal_parent_id", "VARCHAR"),
+    ("alert_companies", "mechanism", "TEXT"),
+    ("impact_edges", "parent_type", "VARCHAR"),
+    ("impact_edges", "child_type", "VARCHAR"),
+    ("impact_edges", "causal_distance", "INTEGER"),
+    ("impact_edges", "impact_strength", "FLOAT"),
+    ("impact_edges", "confidence_f", "FLOAT"),
+    ("impact_edges", "materiality", "FLOAT"),
+    ("impact_edges", "time_horizon", "VARCHAR"),
+    ("impact_edges", "verification_status", "VARCHAR"),
 ]
 
 

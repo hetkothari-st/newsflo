@@ -152,11 +152,12 @@ def test_paid_eligible_articles_analyze_before_the_backlog(db_session, monkeypat
 
     analyzed_order = []
 
-    def fake_analyze(client, title, content, session=None):
+    def fake_analyze(router, title, content, session=None, article_id=None):
         analyzed_order.append(title)
-        return AnalysisOutput(category="macro_policy", companies=[])
+        from app.analysis.impact_graph.schemas import ImpactGraphResult
+        return ImpactGraphResult(category="macro_policy")
 
-    monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", fake_analyze)
     monkeypatch.setattr(pipeline_module, "filter_new_articles", lambda *a, **k: None)
     monkeypatch.setattr(pipeline_module, "fetch_pending_full_text", lambda s: None)
     monkeypatch.setattr(pipeline_module, "backfill_pulse_images", lambda s: None)

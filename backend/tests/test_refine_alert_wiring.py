@@ -1,4 +1,4 @@
-from app.analysis.schemas import AnalysisOutput, CompanyMention
+from app.analysis.impact_graph.schemas import GraphCompany, ImpactGraphResult
 from app.models import Alert, AlertCompany, Article, Company, MarketMove, TimelineEffect
 from app.pipeline import process_new_articles
 import app.pipeline as pipeline_module
@@ -16,12 +16,13 @@ def _article(db_session, title="Oil prices surge on supply disruption"):
 
 
 def _fake_analysis(ticker="RELIANCE.NS"):
-    return AnalysisOutput(
+    return ImpactGraphResult(
         category="oil_gas",
-        companies=[CompanyMention(
-            name=f"Company {ticker}", ticker=ticker, is_direct=True, sector=None,
-            direction="bullish", magnitude_low=2.0, magnitude_high=4.0, rationale="refiner margin up",
-            key_points=["Crude eases"], confidence_score=85, time_horizon="Short-Term",
+        companies=[GraphCompany(
+            ticker=ticker, name=f"Company {ticker}", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            key_points=["Crude eases"], reasons=["r1"],
         )],
     )
 
@@ -40,7 +41,7 @@ def test_process_new_articles_populates_summary_and_why_when_measured(db_session
     db_session.add(company)
     db_session.commit()
     article = _article(db_session)
-    monkeypatch.setattr(pipeline_module, "analyze_article", lambda client, title, content, session=None: _fake_analysis())
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: _fake_analysis())
 
     def fake_measure(session, company_obj):
         from app.models import utcnow
