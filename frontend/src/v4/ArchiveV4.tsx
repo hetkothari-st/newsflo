@@ -8,12 +8,43 @@ import { getCalendarCounts, type CalendarCounts } from '../v3/api';
 const MONTH_TITLE = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' });
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-export default function ArchiveV4({ onPick }: { onPick: (date: string) => void }) {
+interface PulseDay {
+  date: string;
+  count: number;
+}
+
+const PULSE_DAY = new Intl.DateTimeFormat('en-IN', {
+  weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata',
+});
+
+export default function ArchiveV4({
+  onPick,
+  onPickPulse,
+}: {
+  onPick: (date: string) => void;
+  onPickPulse?: (date: string) => void;
+}) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-based
   const [counts, setCounts] = useState<CalendarCounts | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The pulse wire's own back days (IST) -- independent of the alert
+  // calendar above; the wire has items on days with no measured stories.
+  const [pulseDays, setPulseDays] = useState<PulseDay[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/pulse-live/dates')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((days: PulseDay[]) => {
+        if (!cancelled) setPulseDays(days);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +125,25 @@ export default function ArchiveV4({ onPick }: { onPick: (date: string) => void }
             );
           })}
         </div>
+      )}
+      {onPickPulse && pulseDays.length > 0 && (
+        <>
+          <h2 className="archsub">The pulse wire</h2>
+          <p className="psub">Raw wire days, unanalysed. Latest day lives on the Pulse tab.</p>
+          <div className="pulsedays">
+            {pulseDays.map((day) => (
+              <button
+                key={day.date}
+                className="pulseday"
+                onClick={() => onPickPulse(day.date)}
+                aria-label={`Open the ${day.date} pulse wire`}
+              >
+                <span>{PULSE_DAY.format(new Date(`${day.date}T12:00:00`))}</span>
+                <b>{day.count}</b>
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

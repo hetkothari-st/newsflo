@@ -43,14 +43,27 @@ function PulsePlate({ src }: { src: string | null }) {
   );
 }
 
-export default function PulseLiveV4() {
+const IST_DAY = new Intl.DateTimeFormat('en-IN', {
+  weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata',
+});
+
+export default function PulseLiveV4({
+  date = null,
+  onBackToLatest,
+}: {
+  // null = the latest day with items ("today's paper"); YYYY-MM-DD = a
+  // back day picked from the archive's pulse-wire list.
+  date?: string | null;
+  onBackToLatest?: () => void;
+}) {
   const [items, setItems] = useState<PulseItem[] | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    setItems(null);
     const load = () =>
-      fetch('/api/pulse-live?limit=80')
+      fetch(`/api/pulse-live?limit=200${date ? `&date=${date}` : ''}`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((data: PulseItem[]) => {
           if (alive) {
@@ -60,12 +73,13 @@ export default function PulseLiveV4() {
         })
         .catch(() => alive && setError(true));
     load();
-    const timer = window.setInterval(load, 60_000);
+    // A back day never changes -- only the live (latest) day re-polls.
+    const timer = date === null ? window.setInterval(load, 60_000) : null;
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearInterval(timer);
     };
-  }, []);
+  }, [date]);
 
   if (error && items === null) {
     return <p className="empty4">Pulse wire unavailable — retrying every minute.</p>;
@@ -76,6 +90,14 @@ export default function PulseLiveV4() {
 
   return (
     <div>
+      {date !== null && (
+        <div className="pulseback">
+          <span>{IST_DAY.format(new Date(`${date}T12:00:00`))}</span>
+          {onBackToLatest && (
+            <button onClick={onBackToLatest}>Latest wire →</button>
+          )}
+        </div>
+      )}
       {(items ?? []).map((item, index) => (
         <div key={item.id}>
           <a

@@ -61,6 +61,8 @@ export default function ShellV4() {
   const [info, setInfo] = useState<InfoV4Data | null>(null);
   // null = today's edition; set from the archive to reopen a back issue.
   const [feedDate, setFeedDate] = useState<string | null>(null);
+  // null = latest pulse day; set from the archive's pulse-wire list.
+  const [pulseDate, setPulseDate] = useState<string | null>(null);
   // Returning from the charts page: /v4?ripple=<id> reopens that story's
   // ripple section directly. Read once at mount.
   const [initialRipple, setInitialRipple] = useState<number | null>(() => {
@@ -222,7 +224,7 @@ export default function ShellV4() {
           onBandOpenChange={setBandOpen}
         />
       )}
-      {view === 'pulse' && <PulseLiveV4 />}
+      {view === 'pulse' && <PulseLiveV4 date={pulseDate} onBackToLatest={() => setPulseDate(null)} />}
       {view === 'disc' && <DiscoverV4 onOpenDeepDive={openDeepDive} />}
       {view === 'dir' && <DirectoryV4 onOpenDeepDive={openDeepDive} />}
       {view === 'pf' && <PortfolioV4 onOpenDeepDive={openDeepDive} />}
@@ -232,6 +234,10 @@ export default function ShellV4() {
           onPick={(date) => {
             setFeedDate(date);
             setView('feed');
+          }}
+          onPickPulse={(date) => {
+            setPulseDate(date);
+            setView('pulse');
           }}
         />
       )}

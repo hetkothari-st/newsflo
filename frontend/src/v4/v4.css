@@ -201,6 +201,34 @@ body:has(.nf4.dark) { background: #2a2722; }
    gone -- the tab itself says where you are). */
 .nf4 .storycard .ptime4 { font-size: 11px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); margin: 6px 0 10px; }
 
+/* Pulse back-day banner + archive pulse-wire day list. */
+.nf4 .pulseback {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ash);
+}
+.nf4 .pulseback button { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--ink); }
+.nf4 .archsub { font-family: var(--serif); font-weight: 400; font-size: 26px; margin: 32px 0 4px; }
+.nf4 .pulsedays { display: flex; flex-direction: column; }
+.nf4 .pulseday {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 2px;
+  border-top: 1px solid var(--hairline);
+  font-size: 14px;
+  text-align: left;
+}
+.nf4 .pulseday b { font-family: var(--serif); font-size: 16px; }
+
 /* ---------- STORY CARDS (every story = front-page treatment) ---------- */
 /* One full-viewport snap slot per card -- a flick lands square on the
    next story, Inshorts-style. Content-centered inside the slot. */
