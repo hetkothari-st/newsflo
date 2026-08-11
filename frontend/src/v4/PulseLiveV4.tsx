@@ -87,10 +87,10 @@ export default function PulseLiveV4() {
             style={{ textDecoration: 'none', color: 'inherit' }}
           >
             <div>
-              <div className="lmove">
-                PULSE · {item.published_at ? IST_TIME.format(new Date(item.published_at)) + ' IST' : 'LIVE'}
-              </div>
               <h1>{item.title}</h1>
+              {item.published_at && (
+                <div className="ptime4">{IST_TIME.format(new Date(item.published_at))} IST</div>
+              )}
               {item.summary && <p className="lgist">{item.summary}</p>}
             </div>
             <PulsePlate src={item.image_url} />

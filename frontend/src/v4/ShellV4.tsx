@@ -133,7 +133,7 @@ export default function ShellV4() {
     // open (mandatory snap fights scrolling through a tall band) and on
     // every non-feed section.
     <div
-      className={`nf4 ${view === 'feed' && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''} ${dark ? 'dark' : ''}`}
+      className={`nf4 ${(view === 'feed' || view === 'pulse') && !bandOpen ? 'snap' : ''} ${condensed ? 'cond' : ''} ${dark ? 'dark' : ''}`}
       style={{ '--barh': `${barHeight}px`, '--stackh': `${stackHeight}px` } as React.CSSProperties}
       onScroll={(event) => {
         const el = event.currentTarget;

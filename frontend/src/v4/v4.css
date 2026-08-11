@@ -197,6 +197,10 @@ body:has(.nf4.dark) { background: #2a2722; }
 }
 .nf4 .capf4 button.on { font-size: 18px; color: var(--ink); }
 
+/* Pulse card: quiet timestamp under the headline (the PULSE kicker is
+   gone -- the tab itself says where you are). */
+.nf4 .storycard .ptime4 { font-size: 11px; letter-spacing: -0.12px; text-transform: uppercase; color: var(--ash); margin: 6px 0 10px; }
+
 /* ---------- STORY CARDS (every story = front-page treatment) ---------- */
 /* One full-viewport snap slot per card -- a flick lands square on the
    next story, Inshorts-style. Content-centered inside the slot. */
