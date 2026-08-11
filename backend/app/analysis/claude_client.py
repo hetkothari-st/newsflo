@@ -660,6 +660,12 @@ class CallRoutedClient:
         self._protected = protected
         self._default = default
         self._protected_calls = frozenset(protected_calls)
+        # Sibling router handed ONLY to budget-granted articles (see
+        # pipeline.select_analysis_client): same protected routing, but the
+        # non-protected calls carry a paid-Gemini backstop behind the free
+        # chain. None on directly-constructed routers -- build_client wires
+        # it when a paid key exists.
+        self.granted = None
         self.chat = _RoutedChat(self)
 
     def _call(self, **kwargs):
@@ -694,6 +700,19 @@ def build_client(
         if gemini_api_key else groq_client
     )
     if gemini_paid_api_key:
-        protected_chain = FallbackClient(GeminiAdapter(gemini_paid_api_key), groq_client)
-        return CallRoutedClient(protected_chain, default_chain, LLM_PROTECTED_CALLS)
+        paid_adapter = GeminiAdapter(gemini_paid_api_key)
+        protected_chain = FallbackClient(paid_adapter, groq_client)
+        router = CallRoutedClient(protected_chain, default_chain, LLM_PROTECTED_CALLS)
+        # For the handful of budget-granted articles (default: 5 pulse
+        # articles/day) the free chain stays primary for cheap stages, but a
+        # Groq quota exhaustion no longer kills the article: those calls
+        # degrade to the paid key instead of failing. Everything NOT granted
+        # keeps the plain router, where the paid key never sees a cheap
+        # call. Measured 2026-08-11: Groq's 200k TPD died by mid-morning and
+        # every paid pulse article still failed at its first cheap stage --
+        # the whole point of the paid budget defeated by a free-tier cap.
+        router.granted = CallRoutedClient(
+            protected_chain, FallbackClient(default_chain, paid_adapter), LLM_PROTECTED_CALLS,
+        )
+        return router
     return default_chain

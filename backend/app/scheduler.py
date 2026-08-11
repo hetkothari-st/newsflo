@@ -26,7 +26,7 @@ from app.ingestion.collector import ensure_registry_rows, run_source
 from app.ingestion.providers.registry import PROVIDER_REGISTRY
 from app.outcomes.car import check_pending_car_outcomes
 from app.outcomes.tracker import check_pending_outcomes
-from app.pipeline import process_new_articles
+from app.pipeline import process_new_articles, remeasure_no_data_moves
 from app.translation.groq_translator import (
     RECOMMENDED_THROTTLE_SECONDS,
     TRANSLATION_PROVIDER,
@@ -196,6 +196,22 @@ def _run_analysis_retry() -> None:
             logger.info("Analysis retry: %s of today's failed articles re-queued", reset)
     except Exception:
         logger.exception("Analysis retry sweep failed")
+    finally:
+        session.close()
+
+
+def _run_remeasure() -> None:
+    """Re-measure recent no_data MarketMove rows (transient yfinance
+    failures at persist time) so their alerts become visible in the feed.
+    No LLM calls, a bounded number of price fetches per run. Any failure
+    is logged, never raised, same as every other scheduler job."""
+    session = SessionLocal()
+    try:
+        fixed = remeasure_no_data_moves(session)
+        if fixed:
+            logger.info("Re-measurement cycle: %s moves recovered", fixed)
+    except Exception:
+        logger.exception("Re-measurement cycle failed")
     finally:
         session.close()
 
@@ -610,6 +626,15 @@ def start_scheduler() -> None:
         trigger="interval",
         hours=1,
         id="analysis_retry",
+    )
+    scheduler.add_job(
+        _run_remeasure,
+        trigger="interval",
+        minutes=15,
+        # Soon after boot too: a deploy that follows a yfinance outage
+        # should recover its invisible alerts without waiting a cycle.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
+        id="remeasure_no_data",
     )
     scheduler.add_job(
         _run_market_cap_refresh,

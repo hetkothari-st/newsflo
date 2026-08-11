@@ -95,6 +95,23 @@ def test_plain_client_passes_through_untouched(db_session):
     assert select_analysis_client(db_session, _article(db_session), plain) is plain
 
 
+def test_granted_article_gets_the_granted_router(db_session, monkeypatch):
+    """A budget-granted pulse article must run its WHOLE cascade on the
+    granted router (cheap stages carry the paid-Gemini backstop) -- with
+    the plain router, a Groq daily-quota exhaustion kills the 5 paid
+    articles at their first non-protected stage (production 2026-08-11)."""
+    monkeypatch.setattr(settings, "gemini_paid_providers", "pulse_zerodha")
+    routed = _routed()
+    routed.granted = CallRoutedClient(_Chain("paid"), _Chain("free+paid"), frozenset({"extract_facts"}))
+    pulse = _article(db_session, url="https://ex.com/granted")
+    other = _article(db_session, provider="livemint", url="https://ex.com/plain")
+
+    assert select_analysis_client(db_session, pulse, routed) is routed.granted
+    # Retry keeps the grant -- and the granted router with it.
+    assert select_analysis_client(db_session, pulse, routed) is routed.granted
+    assert select_analysis_client(db_session, other, routed) is routed._default
+
+
 # --- llama salvage ---
 
 def _bad_request(failed_generation):

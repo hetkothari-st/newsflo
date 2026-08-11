@@ -21,7 +21,9 @@ from app.market.measure import measure_company_move
 from app.ingestion.full_text import fetch_pending_full_text
 from app.ingestion.image_filter import repeated_image_urls, resolve_article_image
 from app.ingestion.og_image import fetch_og_image
-from app.models import Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, utcnow
+from app.models import (
+    Alert, AlertCompany, AnalysisCache, Article, CascadeGap, Company, ImpactEdge, MarketMove, utcnow,
+)
 from app.reasoning.confidence import _band as band_for_score
 from app.reasoning.confidence import compute_confidence, source_credibility
 from app.reasoning.financial_context import detect_price_contradiction, get_or_fetch_financial_snapshot
@@ -389,6 +391,71 @@ def measure_and_reconcile_alert_companies(session: Session, alert_id: int, alert
     return market_moves
 
 
+# How far back a no_data move is still worth re-measuring. Short on
+# purpose: measure_company_move reads the LATEST daily bar, so re-measuring
+# a week-old alert would record today's move as if it were the event-day
+# reaction. Within this window the latest bar still IS the event's reaction
+# window (persist-time measurement has the same "latest bar at measurement
+# time" semantics).
+_REMEASURE_WINDOW_DAYS = 3
+_REMEASURE_BATCH = 40
+
+
+def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> int:
+    """Re-measure recent MarketMove rows stuck at measurement_status=
+    'no_data'. Measurement is one-shot at persist time, so a transient
+    price-fetch failure (yfinance burst rate-limit) used to orphan the
+    alert forever: the feed only shows measured alerts, and nothing ever
+    retried the measurement (production 2026-08-11: every alert on the
+    ingestion-v2 service invisible for exactly this reason). Updates rows
+    in place -- the (alert_id, company_id) unique constraint means a new
+    row was never an option -- and reconciles AlertCompany.direction with
+    the fresh measured move under the same rule as first-time measurement.
+    Returns how many rows became 'ok'."""
+    cutoff = utcnow() - timedelta(days=_REMEASURE_WINDOW_DAYS)
+    pending = (
+        session.query(MarketMove)
+        .join(Alert, MarketMove.alert_id == Alert.id)
+        .filter(MarketMove.measurement_status == "no_data", Alert.created_at >= cutoff)
+        .order_by(Alert.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    fixed = 0
+    for move in pending:
+        company = session.get(Company, move.company_id)
+        if company is None:
+            continue
+        fresh = measure_company_move(session, company)
+        if fresh.measurement_status != "ok":
+            continue  # still no data -- leave the honest no_data row alone
+        for column in (
+            "raw_move_pct", "sector_move_pct", "benchmark_ticker", "excess_move_pct",
+            "volume", "avg_volume_20d", "volume_multiple", "vol_normalized",
+            "materiality", "avg_traded_value", "measured_at", "measurement_status",
+        ):
+            setattr(move, column, getattr(fresh, column))
+        # move.category keeps its persist-time stamp (recategorization safety).
+        # Same reconcile rule as measure_and_reconcile_alert_companies: the
+        # measured reality overrides the LLM's pre-measurement guess, and
+        # prose arguing for the contradicted direction is dropped.
+        alert_company = (
+            session.query(AlertCompany)
+            .filter_by(alert_id=move.alert_id, company_id=move.company_id)
+            .one_or_none()
+        )
+        if alert_company is not None and move.excess_move_pct is not None:
+            measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+            if measured_direction != alert_company.direction:
+                alert_company.rationale = None
+                alert_company.key_points_json = json.dumps([])
+            alert_company.direction = measured_direction
+        fixed += 1
+    if fixed:
+        session.commit()
+    return fixed
+
+
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
@@ -567,8 +634,15 @@ def select_analysis_client(session: Session, article: Article, claude_client):
     (settings.gemini_paid_daily_article_budget) -- everything else gets
     the router's free default chain. Budget accounting is retry-proof: an
     article that already holds a gemini_paid_usage row reuses its grant
-    instead of consuming budget again."""
+    instead of consuming budget again.
+
+    A granted article gets the router's ``granted`` variant (cheap stages
+    keep Groq primary but degrade to the paid key instead of failing --
+    see build_client) so a dead free-tier quota cannot void the grant.
+    The budget day is the IST day, matching what "today's feed" means
+    everywhere else in the app."""
     from app.analysis.claude_client import CallRoutedClient
+    from app.ist_time import day_utc_window, today_ist
     from app.models import GeminiPaidUsage
 
     if not isinstance(claude_client, CallRoutedClient):
@@ -578,16 +652,16 @@ def select_analysis_client(session: Session, article: Article, claude_client):
 
     existing = session.query(GeminiPaidUsage).filter_by(article_id=article.id).one_or_none()
     if existing is not None:
-        return claude_client
+        return claude_client.granted or claude_client
 
-    day_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start, _ = day_utc_window(today_ist())
     used_today = session.query(GeminiPaidUsage).filter(GeminiPaidUsage.used_at >= day_start).count()
     if used_today >= settings.gemini_paid_daily_article_budget:
         return claude_client._default
 
     session.add(GeminiPaidUsage(article_id=article.id))
     session.commit()
-    return claude_client
+    return claude_client.granted or claude_client
 
 
 def process_new_articles(session: Session, claude_client, throttle_seconds: float = 0) -> int:

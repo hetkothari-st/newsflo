@@ -2,7 +2,11 @@
 ONLY protected calls may reach the paid chain."""
 from types import SimpleNamespace
 
-from app.analysis.claude_client import CallRoutedClient, build_client
+import httpx
+import pytest
+from openai import RateLimitError
+
+from app.analysis.claude_client import CallRoutedClient, FallbackClient, build_client
 from app.config import LLM_PROTECTED_CALLS
 
 
@@ -51,3 +55,58 @@ def test_build_client_returns_router_only_when_paid_key_present():
 
     assert isinstance(routed, CallRoutedClient)
     assert not isinstance(plain, CallRoutedClient)
+
+
+# --- the granted router: budget-granted articles' safety net ---
+
+class _ExplodingClient:
+    """Free chain whose every call rate-limits -- the Groq TPD-exhausted
+    production state of 2026-08-11."""
+
+    def __init__(self):
+        outer = self
+        self.calls = []
+
+        class _Completions:
+            def create(self, **kwargs):
+                outer.calls.append(kwargs.get("call_name"))
+                request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+                response = httpx.Response(status_code=429, request=request)
+                raise RateLimitError("rate limited", response=response, body=None)
+
+        self.chat = SimpleNamespace(completions=_Completions())
+
+
+def test_granted_router_backstops_cheap_calls_with_the_paid_chain():
+    paid, free = _RecordingClient("paid"), _ExplodingClient()
+    granted = CallRoutedClient(
+        paid, FallbackClient(free, paid), LLM_PROTECTED_CALLS,
+    )
+
+    granted.chat.completions.create(call_name="identify_sectors", tier="reasoning")
+
+    # Free chain was tried first (Groq stays primary for cheap work) and
+    # only its rate-limit pushed the call to the paid chain.
+    assert free.calls == ["identify_sectors"]
+    assert paid.calls == ["identify_sectors"]
+
+
+def test_plain_router_has_no_paid_backstop_for_cheap_calls():
+    paid, free = _RecordingClient("paid"), _ExplodingClient()
+    router = CallRoutedClient(paid, free, LLM_PROTECTED_CALLS)
+
+    with pytest.raises(RateLimitError):
+        router.chat.completions.create(call_name="identify_sectors", tier="reasoning")
+    assert paid.calls == []
+
+
+def test_build_client_attaches_a_granted_router_beside_the_plain_one():
+    routed = build_client(["gsk_x"], None, gemini_paid_api_key="paid-gemini")
+
+    assert isinstance(routed.granted, CallRoutedClient)
+    # Same protected chain object: the two routers cannot drift on what
+    # the paid key serves first.
+    assert routed.granted._protected is routed._protected
+    # The granted default is the free chain wrapped with a paid fallback.
+    assert isinstance(routed.granted._default, FallbackClient)
+    assert routed.granted._default._primary is routed._default
