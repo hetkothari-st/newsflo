@@ -41,18 +41,30 @@ class ArticleBudget:
         stage_bucket["cost"] += cost
         stage_bucket["calls"] += 1
 
-    @property
-    def exceeded(self) -> bool:
+    def _over(self, fraction: float) -> bool:
         max_in = settings.gemini_max_input_tokens_per_article
         max_out = settings.gemini_max_output_tokens_per_article
         max_cost = settings.gemini_max_cost_per_article_usd
-        if max_in and self.input_tokens >= max_in:
+        if max_in and self.input_tokens >= max_in * fraction:
             return True
-        if max_out and self.output_tokens >= max_out:
+        if max_out and self.output_tokens >= max_out * fraction:
             return True
-        if max_cost and self.estimated_cost_usd >= max_cost:
+        if max_cost and self.estimated_cost_usd >= max_cost * fraction:
             return True
         return False
+
+    @property
+    def exceeded(self) -> bool:
+        return self._over(1.0)
+
+    @property
+    def expansion_exhausted(self) -> bool:
+        """Soft stop at 75% of any ceiling: expansion (the unbounded part)
+        halts here so the REMAINING budget is reserved for verification and
+        ranking -- measured 2026-08-11: without the reserve, wide events
+        spent the whole budget on recall and skipped the precision stage,
+        shipping unverified 35-company lists."""
+        return self._over(0.75)
 
     def summary(self) -> dict:
         return {

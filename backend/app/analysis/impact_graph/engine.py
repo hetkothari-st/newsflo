@@ -399,15 +399,17 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
 
     # Stage 3 -- direct companies for every distance-1 node with candidates.
     for node in list(frontier):
-        if budget.exceeded:
+        if budget.expansion_exhausted:
             break
         _map_companies_for_node(router, session, facts, state, node)
 
     # Stages 4/5/6 -- recursive frontier expansion, one hop per call.
+    # Soft budget (75%) gates expansion so the reserve always covers
+    # verification + ranking -- precision must never be what the budget cuts.
     while frontier:
-        if budget.exceeded:
+        if budget.expansion_exhausted:
             router.quality = "budget_exhausted"
-            logger.warning("impact-graph budget exhausted at article=%s: %s",
+            logger.warning("impact-graph expansion budget exhausted at article=%s: %s",
                            article_id, budget.summary())
             break
         node = frontier.popleft()
@@ -466,10 +468,11 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
                 child = _node_from_edge(edge, raw_edge.get("child_label"), raw_edge.get("child_sector"))
                 state.nodes[child.node_id] = child
                 frontier.append(child)
-                if not budget.exceeded:
+                if not budget.expansion_exhausted:
                     _map_companies_for_node(router, session, facts, state, child)
 
-    # Stage 7/8 -- verification (skipped only when there is nothing to verify).
+    # Stage 7/8 -- verification runs out of the reserved budget slice; only
+    # a HARD overrun (past 100%) skips it.
     if not budget.exceeded:
         _verify_companies(router, facts, state)
         _verify_edges(router, facts, state)

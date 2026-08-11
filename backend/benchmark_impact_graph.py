@@ -121,11 +121,15 @@ def score(event, run) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--ids", default=None, help="comma-separated event ids to run")
     parser.add_argument("--old", action="store_true", help="run the legacy cascade instead of v3")
     parser.add_argument("--json", default=None, help="write full results to this path")
     args = parser.parse_args()
 
     events = json.loads((Path(__file__).parent / "benchmarks" / "impact_events.json").read_text())["events"]
+    if args.ids:
+        wanted = {s.strip() for s in args.ids.split(",")}
+        events = [e for e in events if e["id"] in wanted]
     if args.limit:
         events = events[: args.limit]
 
