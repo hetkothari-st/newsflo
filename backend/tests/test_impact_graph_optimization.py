@@ -173,3 +173,41 @@ def test_static_prefix_rides_contents_head_for_implicit_cache(monkeypatch):
     parts = captured["body"]["contents"][0]["parts"]
     assert parts[0]["text"] == "STATIC-RULES"  # cacheable head, byte-stable
     assert "systemInstruction" not in captured["body"]
+
+
+def test_triage_narrow_event_gets_small_graph_and_tight_budget(db_session):
+    """Deterministic triage (cost-target 2026-08-11): a non-macro
+    event_type runs depth-capped with tier token ceilings; a broad type
+    keeps the full graph. Zero extra LLM calls either way."""
+    from app.config import IMPACT_TRIAGE_TIERS
+    narrow_facts = dict(FACTS, event_type="earnings")
+    counter = {"n": 0}
+
+    class Router(FakeRouter):
+        def call(self, stage, **kwargs):
+            if stage == "ripple_discovery":
+                counter["n"] += 1
+                return {"children": [_edge(f"m{counter['n']}", f"m{counter['n']+1}",
+                                           child_type="economic_node", mat=0.9, conf=0.95)]}                     if counter["n"] == 1 else {"children": []}
+            return super().call(stage, **kwargs)
+
+    router = Router({
+        "extract_facts": narrow_facts,
+        "initial_shocks": {"shocks": [{"shock_id": "m1", "label": "m1", "direction": "bearish",
+                                       "mechanism": "m", "confidence": 0.9, "materiality": 0.9,
+                                       "impact_strength": 0.9}], "direct_nodes": []},
+    })
+    result = analyze_article_v3(router, "t", "c", session=db_session)
+    # narrow tier: max_depth 2 -> nothing past distance 2
+    assert max((e.causal_distance for e in result.edges), default=0) <= IMPACT_TRIAGE_TIERS["narrow"]["max_depth"]
+    # tier ceilings applied to the budget
+    assert router.budget.max_output_override == IMPACT_TRIAGE_TIERS["narrow"]["max_output_tokens"]
+
+
+def test_triage_broad_event_keeps_full_budget(db_session):
+    router = FakeRouter({
+        "extract_facts": FACTS,  # geopolitical_conflict -> broad
+        "initial_shocks": {"shocks": [], "direct_nodes": []},
+    })
+    analyze_article_v3(router, "t", "c", session=db_session)
+    assert router.budget.max_output_override is None

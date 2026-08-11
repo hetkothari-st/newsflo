@@ -569,10 +569,25 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         raw_facts["category"] = "other"
     facts = EventFacts.model_validate(raw_facts)
 
+    # Event-size triage (cost-target work 2026-08-11): DETERMINISTIC and
+    # free -- the facts stage already classified event_type. Broad macro
+    # types keep the deep graph the quality spec demands; everything else
+    # (most pulse items) runs a small graph under tight token ceilings.
+    from app.config import IMPACT_BROAD_EVENT_TYPES, IMPACT_TRIAGE_TIERS
+
+    tier = "broad" if facts.event_type in IMPACT_BROAD_EVENT_TYPES else "narrow"
+    tier_caps = IMPACT_TRIAGE_TIERS[tier]
+    budget.max_input_override = tier_caps["max_input_tokens"]
+    budget.max_output_override = tier_caps["max_output_tokens"]
+    logger.info("impact-graph triage article=%s tier=%s event_type=%s caps=%s",
+                article_id, tier, facts.event_type, tier_caps)
+
     state = _GraphState()
 
     try:
-        _build_graph(router, session, facts, state, budget, article_id)
+        _build_graph(router, session, facts, state, budget, article_id,
+                     max_depth=tier_caps["max_depth"] or settings.max_causal_depth,
+                     max_expansions=tier_caps["max_expansions"] or MAX_EXPANSIONS_PER_ARTICLE)
     except Exception as exc:  # noqa: BLE001 -- never-fail contract (2026-08-11)
         # A crash AFTER real work exists must not throw that work away: if
         # any companies or edges were produced, ship them marked degraded
@@ -599,7 +614,10 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
 
 
 def _build_graph(router: StageRouter, session, facts: EventFacts,
-                 state: _GraphState, budget: ArticleBudget, article_id: int | None) -> None:
+                 state: _GraphState, budget: ArticleBudget, article_id: int | None,
+                 max_depth: int | None = None, max_expansions: int | None = None) -> None:
+    max_depth = max_depth or settings.max_causal_depth
+    max_expansions = max_expansions or MAX_EXPANSIONS_PER_ARTICLE
     # Stage 2 -- initial shocks + distance-1 nodes (the graph anchor).
     raw_shocks = router.call(
         "initial_shocks", schema=SCHEMA_SHOCKS,
@@ -653,15 +671,15 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
         if node.node_id in state.expanded:
             _skip("ripple_discovery", "already_expanded", node=node.node_id)
             continue
-        if node.distance >= settings.max_causal_depth:
-            _skip("ripple_discovery", "max_depth", node=node.node_id)
+        if node.distance >= max_depth:
+            _skip("ripple_discovery", "max_depth", node=node.node_id, cap=max_depth)
             continue
         if not _passes(node.distance, node.materiality, node.confidence):
             _skip("ripple_discovery", "below_thresholds", node=node.node_id,
                   materiality=round(node.materiality, 2), confidence=round(node.confidence, 2))
             continue  # dead branch: no LLM call
-        if state.expansions >= MAX_EXPANSIONS_PER_ARTICLE:
-            _skip("ripple_discovery", "expansion_cap", node=node.node_id)
+        if state.expansions >= max_expansions:
+            _skip("ripple_discovery", "expansion_cap", node=node.node_id, cap=max_expansions)
             break
 
         # Gather same-parent siblings for one batched call.

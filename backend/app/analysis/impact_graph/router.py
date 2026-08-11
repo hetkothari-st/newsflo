@@ -156,6 +156,9 @@ class StageRouter:
     # -- protected ladder -------------------------------------------------
 
     def _model_for(self, stage: str) -> tuple[str, str]:
+        override = settings.gemini_stage_model_override_map.get(stage)
+        if override:
+            return override, "high"
         if stage in FACT_STAGES:
             return settings.gemini_fact_model, "low"
         if stage in SUMMARY_STAGES:

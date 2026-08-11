@@ -227,6 +227,22 @@ class Settings(BaseSettings):
     gemini_summary_model: str = os.environ.get("GEMINI_SUMMARY_MODEL", "gemini-3.6-flash")
     gemini_fallback_model: str = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.6-flash")
     groq_aux_model: str = os.environ.get("GROQ_AUX_MODEL", "llama-3.3-70b-versatile")
+    # Per-stage Gemini model overrides, e.g.
+    # "ripple_discovery=gemini-3.6-flash,map_companies=gemini-3.6-flash".
+    # Empty (default) = every reasoning stage rides gemini_reasoning_model.
+    # The hybrid cost lever (2026-08-11): move a PROVEN-equivalent stage to
+    # Flash without touching the others -- never a silent global downgrade.
+    gemini_stage_model_overrides: str = os.environ.get("GEMINI_STAGE_MODEL_OVERRIDES", "")
+
+    @property
+    def gemini_stage_model_override_map(self) -> dict[str, str]:
+        result = {}
+        for pair in self.gemini_stage_model_overrides.split(","):
+            if "=" in pair:
+                stage, model = pair.split("=", 1)
+                if stage.strip() and model.strip():
+                    result[stage.strip()] = model.strip()
+        return result
     # Recursive expansion hard safety cap (spec: MAX_CAUSAL_DEPTH = 5).
     max_causal_depth: int = int(os.environ.get("MAX_CAUSAL_DEPTH", "5"))
     # Per-article Gemini budgets. 0 = unlimited (budget disabled). Cost is
@@ -560,10 +576,44 @@ IMPACT_CHILD_TYPES = frozenset({"economic_node", "sector", "commodity", "policy"
 # Gemini thinking budgets per level (tokens). Measured 2026-08-11: dynamic
 # "high" thinking (-1) let ONE wide event burn 69k output tokens (~$1-1.6)
 # on gemini-3.1-pro-preview -- thinking bills as output, and the model
-# spends freely when unbounded. "high" is therefore a FIXED cap, generous
-# enough for real graph reasoning, never open-ended. Override via
-# GEMINI_THINKING_HIGH_BUDGET without a deploy.
+# spends freely when unbounded. "high" is therefore a FIXED cap. Default
+# dropped 3072 -> 1024 (cost-target work, same day): thinking measured as
+# ~40-50% of output spend and the 3072 runs showed no visible quality
+# edge over the capped ones. Override via GEMINI_THINKING_HIGH_BUDGET.
 GEMINI_THINKING_BUDGETS = {
-    "minimal": 0, "low": 256, "medium": 1024,
-    "high": int(os.environ.get("GEMINI_THINKING_HIGH_BUDGET", "3072")),
+    "minimal": 0, "low": 256, "medium": 512,
+    "high": int(os.environ.get("GEMINI_THINKING_HIGH_BUDGET", "1024")),
+}
+
+# --- Event-size triage (cost-target work, 2026-08-11) --------------------
+# Deterministic, ZERO-cost triage: the facts stage already classifies
+# event_type; broad macro types get the deep graph, everything else (most
+# pulse items -- single-company earnings, deals, product news) gets a
+# small one. Same set the legacy cascade used for fan-out gating.
+IMPACT_BROAD_EVENT_TYPES = frozenset(
+    s.strip() for s in os.environ.get(
+        "IMPACT_BROAD_EVENT_TYPES",
+        "repo_rate_change,inflation,macro_data,fiscal_policy,monsoon_weather,"
+        "crude_oil,commodity_price,currency_move,global_rates,trade_policy,"
+        "geopolitical_conflict",
+    ).split(",") if s.strip()
+)
+
+# Per-tier engine caps. Token ceilings are the ENFORCED cost mechanism
+# (exact, no pricing-table dependence): at ~$12/M Pro output, 5k output
+# tokens ~= Rs 5 for a narrow article; broad events get the full budget
+# the quality spec demands (their ceiling is the global per-article one).
+IMPACT_TRIAGE_TIERS = {
+    "narrow": {
+        "max_depth": int(os.environ.get("IMPACT_NARROW_MAX_DEPTH", "2")),
+        "max_expansions": int(os.environ.get("IMPACT_NARROW_MAX_EXPANSIONS", "4")),
+        "max_output_tokens": int(os.environ.get("IMPACT_NARROW_MAX_OUTPUT_TOKENS", "6000")),
+        "max_input_tokens": int(os.environ.get("IMPACT_NARROW_MAX_INPUT_TOKENS", "40000")),
+    },
+    "broad": {
+        "max_depth": None,          # settings.max_causal_depth
+        "max_expansions": None,     # engine default
+        "max_output_tokens": None,  # settings.gemini_max_output_tokens_per_article
+        "max_input_tokens": None,
+    },
 }
