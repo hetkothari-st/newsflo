@@ -625,6 +625,13 @@ def start_scheduler() -> None:
         _run_analysis_retry,
         trigger="interval",
         hours=1,
+        # Also shortly after boot: a deploy that follows a provider quota
+        # storm (the exact situation a fix-deploy ships into) re-queues
+        # today's failed articles immediately instead of waiting the full
+        # hour -- the 2026-08-11 granted-router fix would otherwise have
+        # sat idle for an hour with all five paid pulse articles stuck in
+        # ANALYSIS_FAILED.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4),
         id="analysis_retry",
     )
     scheduler.add_job(
