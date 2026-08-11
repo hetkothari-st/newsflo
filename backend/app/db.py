@@ -130,6 +130,8 @@ _ADDED_COLUMNS = [
     ("impact_edges", "materiality", "FLOAT"),
     ("impact_edges", "time_horizon", "VARCHAR"),
     ("impact_edges", "verification_status", "VARCHAR"),
+    # -- Token optimization (2026-08-11) --
+    ("alert_companies", "channels_json", "TEXT"),
 ]
 
 

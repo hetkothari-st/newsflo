@@ -31,10 +31,18 @@ def _clamp(value, low=0.0, high=1.0) -> float:
 
 # --- Stage 1: fact extraction -------------------------------------------
 
+class FactItem(BaseModel):
+    fact_id: str  # F1, F2, ... -- stable within the article
+    text: str
+
+
 class EventFacts(BaseModel):
     event: str
     event_status: str = "confirmed"  # confirmed | unconfirmed | rumor | denied
     facts: str  # canonical prose event record (rich, not a tiny summary)
+    # Canonical fact store (token-opt spec §6): downstream calls send
+    # these compact numbered lines, never the prose block + evidence.
+    fact_items: list[FactItem] = Field(default_factory=list)
     quantities: list[str] = Field(default_factory=list)
     named_entities: list[str] = Field(default_factory=list)
     stated_causes: list[str] = Field(default_factory=list)
@@ -43,6 +51,13 @@ class EventFacts(BaseModel):
     category: str
     event_type: str
 
+    def compact_lines(self, limit: int = 14) -> str:
+        """The downstream-call fact block: numbered canonical facts, or a
+        clipped prose fallback for pre-optimization cached results."""
+        if self.fact_items:
+            return "\n".join(f"{f.fact_id}: {f.text}" for f in self.fact_items[:limit])
+        return self.facts[:1200]
+
 
 SCHEMA_FACTS = {
     "type": "object",
@@ -50,6 +65,14 @@ SCHEMA_FACTS = {
         "event": {"type": "string"},
         "event_status": {"type": "string", "enum": ["confirmed", "unconfirmed", "rumor", "denied"]},
         "facts": {"type": "string"},
+        "fact_items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"fact_id": {"type": "string"}, "text": {"type": "string"}},
+                "required": ["fact_id", "text"],
+            },
+        },
         "quantities": {"type": "array", "items": {"type": "string"}},
         "named_entities": {"type": "array", "items": {"type": "string"}},
         "stated_causes": {"type": "array", "items": {"type": "string"}},
@@ -58,7 +81,7 @@ SCHEMA_FACTS = {
         "category": {"type": "string", "enum": CATEGORIES},
         "event_type": {"type": "string", "enum": EVENT_TYPES},
     },
-    "required": ["event", "event_status", "facts", "category", "event_type"],
+    "required": ["event", "event_status", "facts", "fact_items", "category", "event_type"],
 }
 
 
@@ -172,6 +195,9 @@ SCHEMA_RIPPLE = {
 
 # --- Stages 3/5: company mapping ----------------------------------------
 
+NET_DIRECTIONS = ["bullish", "bearish", "mixed", "uncertain", "neutral"]
+
+
 class GraphCompany(BaseModel):
     ticker: str
     name: str
@@ -191,6 +217,14 @@ class GraphCompany(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     verified: bool = False
+    # Net-effect reasoning (token-opt spec P12 -- a QUALITY requirement):
+    # competing channels considered before the direction call. mixed /
+    # uncertain are valid net outcomes; relative_beneficiary marks "better
+    # off than peers" without claiming absolute benefit.
+    positive_channels: list[str] = Field(default_factory=list)
+    negative_channels: list[str] = Field(default_factory=list)
+    net_direction: str = ""  # NET_DIRECTIONS; "" on legacy rows
+    relative_beneficiary: bool = False
 
     def clamp(self) -> "GraphCompany":
         self.impact_strength = _clamp(self.impact_strength)
@@ -202,7 +236,13 @@ class GraphCompany(BaseModel):
 def schema_companies(valid_tickers: list[str]) -> dict:
     """Company schema with ticker enum-locked to THIS call's candidates --
     the grounding rail (spec doc 1 §8): free-form ticker generation is
-    structurally impossible, not merely discouraged."""
+    structurally impossible, not merely discouraged.
+
+    COMPACT contract (token-opt P23): required fields are only what the
+    product needs -- ticker, direction, scores, mechanism, horizon,
+    rationale plus the net-effect channels. Everything else is optional;
+    the model writes it only when it has something real (output tokens
+    measured as ~half the per-article bill)."""
     return {
         "type": "object",
         "properties": {
@@ -220,15 +260,19 @@ def schema_companies(valid_tickers: list[str]) -> dict:
                         "time_horizon": {"type": "string", "enum": TIME_HORIZONS},
                         "mechanism": {"type": "string"},
                         "rationale": {"type": "string"},
+                        "positive_channels": {"type": "array", "items": {"type": "string"}},
+                        "negative_channels": {"type": "array", "items": {"type": "string"}},
+                        "net_direction": {"type": "string", "enum": NET_DIRECTIONS},
+                        "relative_beneficiary": {"type": "boolean"},
                         "key_points": {"type": "array", "items": {"type": "string"}},
                         "reasons": {"type": "array", "items": {"type": "string"}},
                         "evidence_refs": {"type": "array", "items": {"type": "string"}},
                         "assumptions": {"type": "array", "items": {"type": "string"}},
                         "unknowns": {"type": "array", "items": {"type": "string"}},
                     },
-                    "required": ["ticker", "name", "direction", "impact_strength",
+                    "required": ["ticker", "direction", "impact_strength",
                                  "confidence", "materiality", "time_horizon",
-                                 "mechanism", "rationale", "key_points", "reasons"],
+                                 "mechanism", "rationale", "net_direction"],
                 },
             },
         },
@@ -236,28 +280,43 @@ def schema_companies(valid_tickers: list[str]) -> dict:
     }
 
 
-# --- Stage 7: company verification --------------------------------------
+# --- Stage 7: company verification (DIFF contract, token-opt P17) --------
 
 def schema_company_verdicts(valid_tickers: list[str]) -> dict:
+    """accept[] / reject[] / corrections{} -- the verifier never repeats
+    accepted records, never invents companies (enums), never writes prose
+    beyond per-rejection one-liners."""
     return {
         "type": "object",
         "properties": {
-            "verdicts": {
+            "accept": {"type": "array", "items": {"type": "string", "enum": valid_tickers}},
+            "reject": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
                         "ticker": {"type": "string", "enum": valid_tickers},
-                        "belongs": {"type": "boolean"},
-                        "corrected_distance": {"type": "integer"},
-                        "corrected_direction": {"type": "string", "enum": DIRECTIONS},
                         "reason": {"type": "string"},
                     },
-                    "required": ["ticker", "belongs"],
+                    "required": ["ticker"],
+                },
+            },
+            "corrections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string", "enum": valid_tickers},
+                        "direction": {"type": "string", "enum": DIRECTIONS},
+                        "causal_distance": {"type": "integer"},
+                        "materiality": {"type": "number"},
+                        "confidence": {"type": "number"},
+                    },
+                    "required": ["ticker"],
                 },
             },
         },
-        "required": ["verdicts"],
+        "required": ["accept", "reject"],
     }
 
 

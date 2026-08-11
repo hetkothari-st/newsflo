@@ -31,8 +31,7 @@ class FakeRouter:
             if stage == "map_companies":
                 return {"companies": []}
             if stage in ("verify_companies",):
-                return {"verdicts": [{"ticker": t, "belongs": True}
-                                     for t in _tickers_from(kwargs)]}
+                return {"accept": _tickers_from(kwargs), "reject": []}
             if stage == "verify_edges":
                 return {"verdicts": []}
             if stage == "rank_companies":
@@ -45,8 +44,8 @@ class FakeRouter:
 
 def _tickers_from(kwargs) -> list[str]:
     schema = kwargs.get("schema") or {}
-    items = schema.get("properties", {}).get("verdicts", {}).get("items", {})
-    return items.get("properties", {}).get("ticker", {}).get("enum", [])
+    accept = schema.get("properties", {}).get("accept", {})
+    return accept.get("items", {}).get("enum", [])
 
 
 FACTS = {
@@ -118,9 +117,10 @@ def test_event_to_economic_node_to_sector_to_company(db_session):
     assert company.parent_type == "sector" and company.parent_id == "railways_transport"
     # The chain exists as typed edges, no company-to-company link required.
     ids = {(e.parent_id, e.child_id) for e in result.edges}
+    # Node ids are normalized: crude_oil_price -> crude_price.
     assert ("event", "crude_supply_disruption") in ids
-    assert ("crude_supply_disruption", "crude_oil_price") in ids
-    assert ("crude_oil_price", "railways_transport") in ids
+    assert ("crude_supply_disruption", "crude_price") in ids
+    assert ("crude_price", "railways_transport") in ids
     assert result.ranking[0]["bucket"] == "adversely_affected"
     assert result.analysis_provider == "gemini"
     assert result.analysis_quality == "authoritative"
@@ -162,24 +162,24 @@ def test_recursion_stops_at_max_causal_depth(db_session, monkeypatch):
 def test_cycle_and_duplicate_prevention(db_session):
     router = FakeRouter({
         "extract_facts": FACTS,
-        "initial_shocks": {"shocks": [{"shock_id": "a", "label": "a", "direction": "bearish",
+        "initial_shocks": {"shocks": [{"shock_id": "na", "label": "na", "direction": "bearish",
                                        "mechanism": "m", "confidence": 0.9, "materiality": 0.9,
                                        "impact_strength": 0.9}], "direct_nodes": []},
         "ripple_discovery": [
             {"children": [
-                _edge("a", "b", child_type="economic_node", mat=0.8, conf=0.8),
-                _edge("a", "b", child_type="economic_node", mat=0.8, conf=0.8),  # duplicate
-                _edge("a", "a", child_type="economic_node", mat=0.8, conf=0.8),  # self-loop
+                _edge("na", "nb", child_type="economic_node", mat=0.8, conf=0.8),
+                _edge("na", "nb", child_type="economic_node", mat=0.8, conf=0.8),  # duplicate
+                _edge("na", "na", child_type="economic_node", mat=0.8, conf=0.8),  # self-loop
             ]},
-            {"children": [_edge("b", "a", child_type="economic_node", mat=0.9, conf=0.9)]},  # back-edge
+            {"children": [_edge("nb", "na", child_type="economic_node", mat=0.9, conf=0.9)]},  # back-edge
             {"children": []},
         ],
     })
     result = analyze_article_v3(router, "t", "c", session=db_session)
     keys = [(e.parent_id, e.child_id) for e in result.edges]
-    assert keys.count(("a", "b")) == 1
-    assert ("a", "a") not in keys
-    assert ("b", "a") not in keys  # a exists at distance 1 <= b's distance -> pruned
+    assert keys.count(("na", "nb")) == 1
+    assert ("na", "na") not in keys
+    assert ("nb", "na") not in keys  # na exists at distance 1 <= b's distance -> pruned
 
 
 # 10: distance-aware thresholds prune; dead branch never expands (13)
@@ -247,11 +247,11 @@ def test_verification_rejects_and_corrects(db_session):
             _company_entry("A.NS", "A"), _company_entry("B.NS", "B", direction="bullish"),
         ]},
         "ripple_discovery": [{"children": []}],
-        "verify_companies": {"verdicts": [
-            {"ticker": "A.NS", "belongs": False, "reason": "no real exposure"},
-            {"ticker": "B.NS", "belongs": True, "corrected_distance": 2,
-             "corrected_direction": "bearish"},
-        ]},
+        "verify_companies": {
+            "accept": ["B.NS"],
+            "reject": [{"ticker": "A.NS", "reason": "no real exposure to this shock"}],
+            "corrections": [{"ticker": "B.NS", "causal_distance": 2, "direction": "bearish"}],
+        },
     })
     result = analyze_article_v3(router, "t", "c", session=db_session)
     assert [c.ticker for c in result.companies] == ["B.NS"]

@@ -352,6 +352,7 @@ def _build_alert_company(
         causal_parent_type=entry.get("causal_parent_type"),
         causal_parent_id=entry.get("causal_parent_id"),
         mechanism=entry.get("mechanism"),
+        channels_json=entry.get("channels_json"),
     )
     return alert_company, result.score
 
@@ -775,6 +776,13 @@ def _v3_entries(session: Session, result) -> list[dict]:
             "confidence_f": company.confidence, "materiality": company.materiality,
             "causal_parent_type": company.parent_type, "causal_parent_id": company.parent_id,
             "mechanism": company.mechanism,
+            "channels_json": json.dumps({
+                "positive_channels": company.positive_channels,
+                "negative_channels": company.negative_channels,
+                "net_direction": company.net_direction or company.direction,
+                "relative_beneficiary": company.relative_beneficiary,
+            }) if (company.positive_channels or company.negative_channels
+                   or company.net_direction) else None,
         })
     return entries
 

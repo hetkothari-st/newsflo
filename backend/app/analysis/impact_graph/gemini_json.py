@@ -48,9 +48,16 @@ class GeminiJSONClient:
         """One structured-output call. Returns the parsed JSON dict.
         Raises GeminiJSONError on any failure -- retries/degradation are the
         router's job, not this client's."""
+        # The static prefix rides the HEAD OF CONTENTS, not systemInstruction:
+        # Gemini's implicit cache keys on the byte-identical contents prefix,
+        # and cached_tokens measured 0 on every call while the prefix sat in
+        # systemInstruction (live telemetry 2026-08-11). Two parts keep the
+        # boundary clean; only the second varies between calls of a stage.
         body = {
-            "contents": [{"role": "user", "parts": [{"text": dynamic_suffix}]}],
-            "systemInstruction": {"parts": [{"text": static_prefix}]},
+            "contents": [{"role": "user", "parts": [
+                {"text": static_prefix},
+                {"text": f"\n\n---\n\n{dynamic_suffix}"},
+            ]}],
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "responseSchema": schema,
@@ -72,6 +79,12 @@ class GeminiJSONClient:
         latency_ms = int((time.monotonic() - started) * 1000)
 
         if response.status_code != 200:
+            from app.analysis.usage_log import CallUsage
+            record_usage(CallUsage(
+                provider="gemini", call_name=stage, model=model, stage=stage,
+                thinking_level=thinking, latency_ms=latency_ms,
+                article_id=article_id, success=False,
+            ))
             raise GeminiJSONError(
                 f"Gemini returned {response.status_code}: {response.text[:500]}",
                 status_code=response.status_code,
@@ -81,7 +94,7 @@ class GeminiJSONClient:
         usage = usage_from_gemini(
             data, call_name=stage, model=model, tier="reasoning",
             stage=stage, thinking_level=thinking, latency_ms=latency_ms,
-            article_id=article_id,
+            article_id=article_id, success=True,
         )
         record_usage(usage)
         if budget is not None:

@@ -422,6 +422,10 @@ class AlertCompany(Base):
     causal_parent_id = Column(String, nullable=True)    # node id/label, e.g. "crude_oil_price"
     # One-line economic mechanism connecting parent -> this company.
     mechanism = Column(Text, nullable=True)
+    # Net-effect reasoning (token-opt spec P12): JSON dict with
+    # positive_channels/negative_channels/net_direction/
+    # relative_beneficiary. NULL on pre-optimization rows.
+    channels_json = Column(Text, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
@@ -490,6 +494,31 @@ class ImpactEdge(Base):
     verification_status = Column(String, nullable=True)  # verified | pruned | unverified
 
     alert = relationship("Alert", back_populates="impact_edges")
+
+
+class CompanyNodeExposure(Base):
+    """Stable (company, economic_node) relationship cache (token-opt spec
+    P10/P24). Written from VERIFIED impact-graph results only: a company
+    the verifier accepted for a normalized node stores a positive row
+    (exposure_exists=1, base mechanism); a rejected company stores a
+    negative row (exposure_exists=0), which lets future analyses skip
+    re-evaluating that dead relationship entirely. Base exposure only --
+    the event-specific magnitude/direction is always re-judged by the
+    model, which may override a stale row. Invalidated (ignored) when the
+    company's metadata is newer than verified_at."""
+    __tablename__ = "company_node_exposures"
+    __table_args__ = (UniqueConstraint("company_id", "node_key", name="uq_company_node_exposure"),)
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    node_key = Column(String, nullable=False)  # normalized economic-node id
+    exposure_exists = Column(Integer, nullable=False)  # 1 positive | 0 negative
+    strength = Column(Float, nullable=True)  # last verified impact_strength
+    mechanism = Column(Text, nullable=True)  # base-exposure mechanism, one line
+    verified_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    source_alert_id = Column(Integer, nullable=True)
+
+    company = relationship("Company")
 
 
 class CalibrationSample(Base):

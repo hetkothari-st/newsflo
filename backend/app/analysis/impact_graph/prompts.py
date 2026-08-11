@@ -201,6 +201,11 @@ If the article contains a quantitative or company-specific fact that could affec
 
 Also classify category and event_type using the provided enums.
 
+Additionally emit fact_items: the canonical numbered fact store (F1, F2, ...).
+Each fact_item is ONE self-contained factual sentence carrying its concrete
+specifics (numbers, names, dates). Downstream reasoning stages read ONLY
+these numbered facts, so any specific you omit from them is lost.
+
 The article itself defines the event.
 Verified company information supplied later defines company exposure."""
 

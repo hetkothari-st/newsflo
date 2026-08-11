@@ -44,6 +44,8 @@ class CallUsage:
     retries: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
     article_id: Optional[int] = None
+    success: Optional[bool] = None    # None = legacy path that didn't report
+    fallback: Optional[bool] = None   # True when a non-primary rung served it
 
     @property
     def cache_status(self) -> str:
@@ -85,6 +87,9 @@ def record_usage(usage: CallUsage) -> None:
             usage.stage, usage.thinking_level, usage.thinking_tokens,
             usage.latency_ms, usage.retries, usage.estimated_cost_usd, usage.article_id,
         )
+        if usage.success is False:
+            logger.warning("llm_call FAILED call=%s provider=%s model=%s stage=%s",
+                           usage.call_name, usage.provider, usage.model, usage.stage)
         if settings.llm_usage_db_logging:
             _persist(usage)
     except Exception:  # pragma: no cover - defensive, telemetry never breaks a run
