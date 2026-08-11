@@ -12,7 +12,7 @@ from app.config import settings
 from app.filtering.relevance import filter_new_articles
 from app.main import app
 from app.models import Article, GeminiPaidUsage
-from app.pipeline import backfill_pulse_images, select_analysis_client
+from app.pipeline import backfill_pulse_images, process_new_articles, select_analysis_client
 from app.routers.articles import get_db
 
 
@@ -130,6 +130,40 @@ def test_granted_article_gets_the_granted_router(db_session, monkeypatch):
     # Retry keeps the grant -- and the granted router with it.
     assert select_analysis_client(db_session, pulse, routed) is routed.granted
     assert select_analysis_client(db_session, other, routed) is routed._default
+
+
+def test_paid_eligible_articles_analyze_before_the_backlog(db_session, monkeypatch):
+    """Pulse (paid-eligible) articles must jump the analysis queue: the
+    pipeline runs newest-first, so during a provider quota storm dozens of
+    newer, doomed-to-fail articles each burn retry time ahead of the five
+    granted articles -- measured 2026-08-11: one pulse alert in six hours
+    while 83 re-queued articles starved the rest."""
+    import app.pipeline as pipeline_module
+    from datetime import datetime, timezone
+    from app.analysis.schemas import AnalysisOutput
+
+    monkeypatch.setattr(settings, "gemini_paid_providers", "pulse_zerodha")
+    old_pulse = _article(db_session, url="https://ex.com/pulse-old", status="CATEGORIZED",
+                         title="older pulse story",
+                         published_at=datetime(2026, 8, 11, 4, 30, tzinfo=timezone.utc))
+    newer_other = _article(db_session, provider="livemint", url="https://ex.com/other-new",
+                           status="CATEGORIZED", title="newer wire story",
+                           published_at=datetime(2026, 8, 11, 6, 0, tzinfo=timezone.utc))
+
+    analyzed_order = []
+
+    def fake_analyze(client, title, content, session=None):
+        analyzed_order.append(title)
+        return AnalysisOutput(category="macro_policy", companies=[])
+
+    monkeypatch.setattr(pipeline_module, "analyze_article", fake_analyze)
+    monkeypatch.setattr(pipeline_module, "filter_new_articles", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline_module, "fetch_pending_full_text", lambda s: None)
+    monkeypatch.setattr(pipeline_module, "backfill_pulse_images", lambda s: None)
+
+    process_new_articles(db_session, claude_client=object())
+
+    assert analyzed_order == ["older pulse story", "newer wire story"]
 
 
 # --- llama salvage ---

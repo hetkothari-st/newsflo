@@ -696,6 +696,13 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
         .order_by(Article.published_at.desc().nullslast(), Article.id.desc())
         .all()
     )
+    # ...but paid-eligible (pulse) articles jump the whole queue. During a
+    # provider quota storm the newest-first order makes dozens of newer,
+    # doomed-to-fail articles each burn retry time ahead of the five
+    # granted articles (measured 2026-08-11: one pulse alert in six hours
+    # while 83 re-queued articles starved the rest). Stable sort: order
+    # within each group stays newest-first.
+    pending.sort(key=lambda a: a.provider not in settings.gemini_paid_provider_set)
 
     for article in pending:
         reusable_alert = _find_reusable_alert(session, article)
