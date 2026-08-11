@@ -408,9 +408,11 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
     # verification + ranking -- precision must never be what the budget cuts.
     while frontier:
         if budget.expansion_exhausted:
-            router.quality = "budget_exhausted"
-            logger.warning("impact-graph expansion budget exhausted at article=%s: %s",
-                           article_id, budget.summary())
+            # A soft stop is the budget working as designed, not a quality
+            # degradation -- the reserve still funds verification below.
+            # Only a hard overrun that SKIPS verification marks the result.
+            logger.info("impact-graph expansion soft-stopped at article=%s: %s",
+                        article_id, budget.summary())
             break
         node = frontier.popleft()
         if node.node_id in state.expanded:
@@ -472,10 +474,16 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
                     _map_companies_for_node(router, session, facts, state, child)
 
     # Stage 7/8 -- verification runs out of the reserved budget slice; only
-    # a HARD overrun (past 100%) skips it.
+    # a HARD overrun (past 100%) skips it, and ONLY that skip marks the
+    # analysis budget_exhausted (an unverified recall set is genuinely a
+    # lower-quality artifact; a soft-stopped-but-verified graph is not).
     if not budget.exceeded:
         _verify_companies(router, facts, state)
         _verify_edges(router, facts, state)
+    else:
+        router.quality = "budget_exhausted"
+        logger.warning("impact-graph hard budget overrun skipped verification at article=%s: %s",
+                       article_id, budget.summary())
     ranking = _rank(router, facts, state) if state.companies else []
 
     logger.info("impact-graph article=%s: %s nodes, %s edges, %s companies, budget=%s",
