@@ -761,7 +761,11 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
             )
             node_blocks.append(
                 "ARTICLE SUBJECT COMPANIES (named by the article itself -- evaluate "
-                "each against the most causally relevant node above):\n"
+                "each against the most causally relevant node above). For a "
+                "company-specific event (downgrade, earnings, order win, management "
+                "change), the subject company is normally MATERIALLY AFFECTED by its "
+                "own event -- include it with the event's direction and forward-looking "
+                "mechanism unless the effect is genuinely neutral:\n"
                 + _candidate_profile_lines(stray_subjects, {})
             )
     if not node_blocks:
