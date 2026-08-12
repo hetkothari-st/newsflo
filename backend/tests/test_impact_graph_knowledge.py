@@ -196,6 +196,7 @@ def test_escalation_result_replaces_flagged_entries(db_session):
 
 def test_archetype_mapping_dedups_equivalent_exposures(db_session, monkeypatch):
     _company(db_session, "ONGC.NS", "ONGC", "oil_gas", sub_sector="upstream_exploration")
+    seed_company_exposures(db_session)  # eligibility gate needs verified exposure rows
     # Two mechanisms artificially pointed at the SAME (archetype, dimension,
     # effect) -- only one mapping call may fire.
     import app.analysis.impact_graph.knowledge as knowledge
@@ -310,3 +311,80 @@ def test_knowledge_mode_off_is_pure_dynamic_path(db_session, monkeypatch):
 
 def test_domain_batching_defaults_off():
     assert config.DOMAIN_BATCHING is False
+
+
+# --- eligibility directive (2026-08-12) ------------------------------------
+
+def test_eligible_candidates_gate_excludes_unknown_exposure(db_session):
+    from app.analysis.impact_graph.knowledge import MECHANISMS, eligible_candidates
+
+    exposed = _company(db_session, "PAINTED.NS", "Painted", "chemicals", desc="paint and coating maker")
+    unknown = _company(db_session, "MYSTERY.NS", "Mystery", "chemicals", desc="paint distribution")
+    seed_company_exposures(db_session)
+    # Remove the seeded row for MYSTERY so its exposure is genuinely unknown.
+    from app.models import CompanyExposure
+    db_session.query(CompanyExposure).filter_by(company_id=unknown.id).delete()
+    db_session.commit()
+    mech = {**MECHANISMS["paints_input_cost"], "mechanism_id": "paints_input_cost"}
+    eligible, pool = eligible_candidates(db_session, mech, "paint_input_cost")
+    tickers = [c.ticker for c in eligible]
+    assert "PAINTED.NS" in tickers      # seeded crude_linked_inputs HIGH
+    assert "MYSTERY.NS" not in tickers  # UNKNOWN exposure -> not eligible
+    assert pool == 2
+
+
+def test_eligible_candidates_verified_relationship_escape(db_session):
+    from app.analysis.impact_graph.knowledge import MECHANISMS, eligible_candidates
+    from app.models import CompanyNodeExposure, utcnow
+
+    quiet = _company(db_session, "QUIET.NS", "Quiet", "chemicals", desc="paint maker")
+    from app.models import CompanyExposure
+    db_session.query(CompanyExposure).delete()
+    db_session.add(CompanyNodeExposure(company_id=quiet.id, node_key="paint_input_cost",
+                                       exposure_exists=1, strength=0.7,
+                                       mechanism="verified earlier", verified_at=utcnow()))
+    db_session.commit()
+    mech = {**MECHANISMS["paints_input_cost"], "mechanism_id": "paints_input_cost"}
+    eligible, _ = eligible_candidates(db_session, mech, "paint_input_cost")
+    assert [c.ticker for c in eligible] == ["QUIET.NS"]
+
+
+def test_fertilizer_excluded_from_petrochemical_archetype(db_session):
+    _company(db_session, "DEEPFERT.NS", "Deepak Fert", "chemicals",
+             desc="fertilisers and petrochemicals producer")
+    _company(db_session, "PETCHEM.NS", "PetChem", "chemicals", desc="petrochemical polymers")
+    tickers = [c.ticker for c in companies_for_archetype(db_session, "petrochemical_producer")]
+    assert "PETCHEM.NS" in tickers
+    assert "DEEPFERT.NS" not in tickers  # exclusion rule (directive §15)
+
+
+def test_refiner_mechanism_is_mixed_not_automatic():
+    assert MECHANISMS["refiner_marketing_margin"]["effect"] == "mixed"  # directive §7
+    assert MECHANISMS["refiner_marketing_margin"].get("min_exposure") == "HIGH"
+
+
+def test_weak_priors_below_confidence_floor_are_skipped():
+    assert MECHANISMS["auto_fuel_demand"]["confidence_baseline"] < config.IMPACT_MIN_MECHANISM_CONFIDENCE
+    assert MECHANISMS["two_wheeler_fuel_demand"]["confidence_baseline"] < config.IMPACT_MIN_MECHANISM_CONFIDENCE
+    assert MECHANISMS["vehicle_financier_stress"]["confidence_baseline"] < config.IMPACT_MIN_MECHANISM_CONFIDENCE
+    # EV relative-substitution mechanism survives -- distinct chain, §6.
+    assert MECHANISMS["ev_relative_advantage"]["confidence_baseline"] >= config.IMPACT_MIN_MECHANISM_CONFIDENCE
+
+
+def test_neutral_without_channels_is_pruned(db_session):
+    from app.analysis.impact_graph.engine import _final_materiality_prune
+    from app.analysis.impact_graph.schemas import GraphCompany
+
+    state = _GraphState()
+    state.companies["WEAK.NS"] = GraphCompany(
+        ticker="WEAK.NS", name="Weak", direction="neutral", net_direction="neutral",
+        impact_strength=0.5, confidence=0.9, materiality=0.6, causal_distance=1,
+        parent_type="event", parent_id="event").clamp()
+    state.companies["OFFSET.NS"] = GraphCompany(
+        ticker="OFFSET.NS", name="Offset", direction="neutral", net_direction="neutral",
+        impact_strength=0.5, confidence=0.9, materiality=0.6, causal_distance=1,
+        parent_type="event", parent_id="event",
+        positive_channels=["export gains"], negative_channels=["input costs"]).clamp()
+    _final_materiality_prune(state)
+    assert "WEAK.NS" not in state.companies   # weak association, no analysis
+    assert "OFFSET.NS" in state.companies     # genuine offsetting channels

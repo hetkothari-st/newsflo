@@ -13,7 +13,7 @@ from app.analysis.schemas import SECTOR_DEFINITIONS
 # 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
 # fingerprint, so a prompt change is an explicit, visible cache
 # invalidation instead of a silent one. Bump on ANY prompt-text change.
-IMPACT_PROMPT_VERSION = "kg-1"
+IMPACT_PROMPT_VERSION = "kg-2"
 
 # Shared output-compression discipline (cost-opt spec P11): analytical
 # decisions stay; repeated prose goes. Defined before first use -- several
@@ -27,13 +27,9 @@ Your task is to construct a causal economic impact graph from a news event.
 
 IMPORTANT: The objective is NOT to find only directly affected companies.
 
-The objective is to identify the complete set of economically meaningful:
-1. direct effects,
-2. first-order consequences,
-3. second-order consequences,
-4. further ripple effects,
+The objective is to identify the MAJOR economically meaningful direct, indirect, and ripple effects that a professional equity analyst would consider relevant to this event, and the companies materially exposed to those effects.
 
-and the companies that are materially exposed to those effects.
+The objective is NOT an exhaustive causal dependency graph. materiality > causal depth; economic significance > graph completeness. A causally valid relationship is not automatically a display-worthy relationship. Before including any downstream branch, ask: "If this were omitted from a professional market-impact analysis of this event, would that omission be meaningful?" If no, leave it out.
 
 Think in terms of a causal graph:
 
@@ -92,16 +88,16 @@ A ripple does NOT require a supplier/customer relationship with a previously sel
 
 Company-to-company relationships are valid only when an actual supplier, customer, competitor, counterparty, distribution, financing, infrastructure, or other concrete business relationship exists.
 
-BREADTH
+BREADTH AND DEPTH
 
-Be exhaustive within the boundaries of economic defensibility.
-
-Do not return a representative sample.
+Cover every MAJOR channel; do not return a representative sample.
 If 12 companies genuinely qualify, return 12.
 If only 2 qualify, return 2.
 If none qualify, return none.
 
 Do not add companies merely to make the result look comprehensive.
+
+Do NOT recursively drill through every downstream input, supplier, customer, or industry relationship. Do not prioritize: tertiary input relationships, niche downstream industries, minor supplier links, generic operating-cost effects, weak sector associations, or chains requiring several additional assumptions. A normally-downstream sector belongs ONLY when THIS event makes it central (e.g. a gas-supply shock makes fertilizer feedstock central; a generic crude move does not).
 
 MATERIALITY
 
@@ -233,12 +229,15 @@ consumer_behavior, asset_values, government_response"""
 
 # Recall-first discovery discipline (spec §26): appended to DISCOVERY stage
 # prompts only -- evaluation/verification stages keep the strict framing.
-DISCOVERY_MODE = """DISCOVERY MODE -- prioritize recall.
-Enumerate ALL economically defensible branches. Do NOT prune merely because
-materiality is uncertain -- report the branch with honest low materiality/
-confidence scores and let the later evaluation stage prune it. Discovery may
-reject only: impossible mechanisms, contradictory mechanisms, duplicate
-nodes, purely semantic associations, absurdly remote relationships."""
+DISCOVERY_MODE = """DISCOVERY MODE -- recall of MAJOR effects, controlled depth.
+Enumerate every MAJOR economically defensible branch -- the consequences a
+professional analyst would consider important for THIS event. Do NOT prune a
+major branch merely because materiality is uncertain -- report it with honest
+low scores and let evaluation decide. But do NOT chase niche, tertiary, or
+multi-assumption chains: stop a branch when the next hop is niche, weakly
+exposed, redundant with its parent's effect, or would not meaningfully change
+a professional market-impact analysis if omitted. Also reject: impossible
+mechanisms, contradictions, duplicates, purely semantic associations."""
 
 # Doc 3 §5 -- stage 2 initial economic shock.
 SHOCKS_PROMPT = """Given the article facts, identify the INITIAL ECONOMIC SHOCKS created by this event.
@@ -280,7 +279,7 @@ Do NOT include downstream consequences here merely because they are plausible.
 
 Do NOT use causal distance > 1 in this stage.
 
-Be exhaustive across genuine first-order channels.
+Cover every MAJOR genuine first-order channel.
 
 Report each direct sector/economic node as a graph edge in `direct_nodes`: parent is the event or one of your shocks, child is the sector/economic node, with direction, economic_effect, mechanism, impact_strength, confidence, materiality and time_horizon.
 

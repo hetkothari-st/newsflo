@@ -637,6 +637,12 @@ IMPACT_MAPPING_ESCALATION = os.environ.get("IMPACT_MAPPING_ESCALATION", "true").
 # candidates fill remaining space only; never a permanent discard -- the
 # escalation pass may still reach them.
 IMPACT_TIER_CAP = int(os.environ.get("IMPACT_TIER_CAP", "25"))
+# Mechanism prior-confidence floor (user directive 2026-08-12): archetype
+# mapping SKIPS mechanisms whose registry confidence_baseline sits below
+# this -- weak second-order priors (generic auto demand, financier stress)
+# are not force-mapped on every event; the dynamic path and completeness
+# audit can still surface them when an event genuinely activates them.
+IMPACT_MIN_MECHANISM_CONFIDENCE = float(os.environ.get("IMPACT_MIN_MECHANISM_CONFIDENCE", "0.65"))
 # Spec P16: unrelated-domain batching stays OFF. Placeholder flag only --
 # no batching code ships behind it yet; flipping it without an implemented,
 # benchmarked path does nothing.

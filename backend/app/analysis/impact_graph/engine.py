@@ -586,6 +586,8 @@ def _archetype_mapping(router: StageRouter, session, facts: EventFacts,
                 best, best_overlap = candidate_node, overlap
         return best if best_overlap >= 0.4 else None
 
+    from app.config import IMPACT_MIN_MECHANISM_CONFIDENCE
+
     for mech in mechanisms:
         if budget.expansion_exhausted:
             _skip("archetype_mapping", "budget_soft_stop", article=article_id)
@@ -593,6 +595,15 @@ def _archetype_mapping(router: StageRouter, session, facts: EventFacts,
         if state.company_calls >= IMPACT_MAX_COMPANY_MAP_CALLS:
             _skip("archetype_mapping", "company_call_cap", mechanism=mech["mechanism_id"])
             break
+        # Prior-confidence floor (eligibility directive): weak second-order
+        # priors are not force-mapped on every archetype event -- the
+        # dynamic path and completeness audit can still surface them when
+        # THIS event genuinely activates them.
+        if mech["confidence_baseline"] < IMPACT_MIN_MECHANISM_CONFIDENCE:
+            _skip("archetype_mapping", "below_prior_confidence_floor",
+                  mechanism=mech["mechanism_id"],
+                  baseline=mech["confidence_baseline"])
+            continue
         dimension = MECHANISM_DIMENSIONS.get(mech["mechanism_id"], "general")
         dedup_key = (mech["child_exposure"], dimension, mech["oriented_effect"])
         if dedup_key in state.evaluated_exposures:
@@ -630,11 +641,22 @@ def _archetype_mapping(router: StageRouter, session, facts: EventFacts,
                 continue
         state.evaluated_nodes.add(node.node_id)
 
-        candidates = [c for c in companies_for_archetype(session, mech["child_exposure"])
+        # ELIGIBILITY gate (directive §2/§3/§16): archetype membership is
+        # only candidacy; the company's VERIFIED exposure on the mechanism's
+        # required dimension must clear the mechanism's threshold. UNKNOWN
+        # is not eligible (a verified node relationship is the one escape).
+        from app.analysis.impact_graph.knowledge import eligible_candidates
+
+        eligible, pool_size = eligible_candidates(session, mech, node_id)
+        candidates = [c for c in eligible
                       if c.ticker not in state.companies
                       and c.ticker not in state.rejected_tickers]
+        if pool_size and len(eligible) < pool_size:
+            _skip("archetype_mapping", "eligibility_gate_trimmed",
+                  mechanism=mech["mechanism_id"], eligible=len(eligible), pool=pool_size)
         if not candidates:
-            _skip("archetype_mapping", "no_candidates", mechanism=mech["mechanism_id"])
+            _skip("archetype_mapping", "no_eligible_candidates",
+                  mechanism=mech["mechanism_id"], pool=pool_size)
             continue
         tier_a, tier_b, tier_c = _priority_tiers(session, candidates, dimension)
         high_impact = mech["confidence_baseline"] >= 0.75
@@ -729,7 +751,15 @@ def _final_materiality_prune(state: _GraphState) -> None:
         ok_materiality = company.materiality >= thresholds["materiality"]
         ok_confidence = mixed or company.confidence >= thresholds["confidence"]
         parent_alive = company.parent_id == EVENT_NODE_ID or company.parent_id in state.nodes
-        if not (ok_materiality and ok_confidence and parent_alive):
+        # Neutral is not a garbage category (eligibility directive §11): a
+        # neutral company without articulated competing channels is a weak
+        # association, not an offsetting analysis -- prune it. A genuine
+        # offset carries both channel lists.
+        neutral_garbage = (
+            company.economic_effect == "neutral"
+            and not (company.positive_channels and company.negative_channels)
+        )
+        if not (ok_materiality and ok_confidence and parent_alive) or neutral_garbage:
             state.companies.pop(ticker)
             state.rejected_tickers.add(ticker)
             state.metrics["companies_pruned_final"] += 1
@@ -1350,6 +1380,14 @@ def _expand_frontier(router: StageRouter, session, facts: EventFacts,
             _skip("ripple_discovery", "below_discovery_floor", node=node.node_id,
                   materiality=round(node.materiality, 2), confidence=round(node.confidence, 2))
             continue  # dead branch: no LLM call
+        # Controlled depth (breadth-without-depth directive 2026-08-12):
+        # only MAJOR branches deepen past distance 2 -- a node at d>=3 must
+        # already clear its FINAL distance thresholds to earn an expansion
+        # call. Depth is not the objective; materiality > causal depth.
+        if node.distance >= 3 and not _passes(node.distance, node.materiality, node.confidence):
+            _skip("ripple_discovery", "not_major_enough_to_deepen", node=node.node_id,
+                  distance=node.distance, materiality=round(node.materiality, 2))
+            continue
         if state.expansions >= max_expansions:
             _skip("ripple_discovery", "expansion_cap", node=node.node_id, cap=max_expansions)
             break

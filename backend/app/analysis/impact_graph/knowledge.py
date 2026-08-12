@@ -33,7 +33,7 @@ from app.models import Company
 
 # Bump on ANY change to archetypes/mechanisms/event templates: rides the
 # semantic-cache fingerprint, so registry edits are explicit invalidations.
-KNOWLEDGE_REGISTRY_VERSION = "kg-1"
+KNOWLEDGE_REGISTRY_VERSION = "kg-2"
 
 
 # --- P4: exposure archetypes ----------------------------------------------
@@ -50,7 +50,9 @@ EXPOSURE_ARCHETYPES: dict[str, dict] = {
     "lubricant_producer": {"sector": "oil_gas", "desc_keywords": ["lubricant", "base oil", "grease"]},
     "petrochemical_producer": {"sector": "chemicals",
                                "desc_keywords": ["petrochemical", "polymer", "phenol",
-                                                 "carbon black", "resin"]},
+                                                 "carbon black", "resin"],
+                               "exclude_desc_keywords": ["fertiliser", "fertilizer",
+                                                          "agrochemical"]},
     "specialty_chemical_producer": {"sector": "chemicals", "sub_sectors": ["specialty_chemicals"]},
     "commodity_chemical_producer": {"sector": "chemicals", "sub_sectors": ["commodity_chemicals"]},
     "paint_producer": {"desc_keywords": ["paint", "coating"]},
@@ -117,9 +119,9 @@ MECHANISMS: dict[str, dict] = {
     },
     "refiner_marketing_margin": {
         "parent_variable": "crude_price_up", "child_exposure": "oil_refiner_marketer",
-        "effect": "negative", "distance": 1, "time_horizon": "Short-Term",
-        "confidence_baseline": 0.8, "provenance": _PROV_VERIFIED,
-        "mechanism": "Higher crude feedstock cost squeezes refining/marketing margins where retail pass-through lags; inventory gains can partly offset -- judge net per event.",
+        "effect": "mixed", "distance": 1, "time_horizon": "Short-Term",
+        "confidence_baseline": 0.8, "provenance": _PROV_VERIFIED, "min_exposure": "HIGH",
+        "mechanism": "Crude is BOTH feedstock cost and realization driver for refiners: net effect depends on refining spreads, marketing pass-through and inventory position -- never automatically bullish or bearish; judge the spread per event.",
     },
     "lubricant_base_oil_cost": {
         "parent_variable": "crude_price_up", "child_exposure": "lubricant_producer",
@@ -166,13 +168,13 @@ MECHANISMS: dict[str, dict] = {
     "auto_fuel_demand": {
         "parent_variable": "crude_price_up", "child_exposure": "auto_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
-        "confidence_baseline": 0.7, "provenance": _PROV_VERIFIED,
+        "confidence_baseline": 0.6, "provenance": _PROV_VERIFIED,
         "mechanism": "Higher retail fuel prices raise total cost of ownership for ICE vehicles, weighing on demand, sharpest in price-sensitive segments.",
     },
     "two_wheeler_fuel_demand": {
         "parent_variable": "crude_price_up", "child_exposure": "two_wheeler_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
-        "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
+        "confidence_baseline": 0.6, "provenance": _PROV_CURATED,
         "mechanism": "Two-wheeler buyers are the most fuel-price-sensitive segment; running-cost inflation defers purchases.",
     },
     "ev_relative_advantage": {
@@ -706,5 +708,50 @@ def companies_for_archetype(session: Session, archetype_id: str, limit: int = 40
         clauses.append(Company.business_desc.ilike(f"%{keyword}%"))
     if clauses:
         query = query.filter(or_(*clauses))
+    # Explicit exclusion rules (eligibility directive §15): a broad desc
+    # keyword must not leak adjacent businesses into the archetype (e.g. a
+    # fertilizer maker whose description mentions petrochemicals).
+    for keyword in spec.get("exclude_desc_keywords", []):
+        query = query.filter(~Company.business_desc.ilike(f"%{keyword}%"))
     return (query.order_by(Company.market_cap.desc().nullslast(), Company.ticker.asc())
             .limit(limit).all())
+
+
+def eligible_candidates(session: Session, mech: dict, mechanism_node_id: str,
+                        limit: int = 40) -> tuple[list[Company], int]:
+    """Company ELIGIBILITY for one mechanism (eligibility directive 2026-08-12
+    §2/§3/§16): sector/archetype membership is only the CANDIDATE pool; a
+    company enters the Gemini call only when its verified exposure on the
+    mechanism's required dimension meets the mechanism's threshold.
+
+    UNKNOWN/missing exposure is NOT eligible by default -- the one escape
+    hatch is a verified positive CompanyNodeExposure relationship for this
+    exact mechanism node (an earlier event's independently verified
+    exposure justifies candidacy even where the seeded registry is silent).
+
+    Returns (eligible companies, pool_size_before_gate) so telemetry can
+    show how much the gate trimmed."""
+    from app.models import CompanyNodeExposure
+
+    pool = companies_for_archetype(session, mech["child_exposure"], limit=200)
+    if not pool:
+        return [], 0
+    dimension = MECHANISM_DIMENSIONS.get(mech["mechanism_id"], "general")
+    min_rank = _LEVEL_ORDER.get(mech.get("min_exposure", "MEDIUM"), 2)
+    levels = exposure_levels_for(session, [c.id for c in pool])
+    verified_ids = {
+        row.company_id
+        for row in session.query(CompanyNodeExposure)
+        .filter(CompanyNodeExposure.node_key == mechanism_node_id,
+                CompanyNodeExposure.exposure_exists == 1,
+                CompanyNodeExposure.company_id.in_([c.id for c in pool]))
+        .all()
+    }
+    eligible = []
+    for company in pool:
+        level = levels.get((company.id, dimension))
+        if level is not None and level != "UNKNOWN" and _LEVEL_ORDER[level] >= min_rank:
+            eligible.append(company)
+        elif company.id in verified_ids:
+            eligible.append(company)  # verified relationship overrides silence
+    return eligible[:limit], len(pool)

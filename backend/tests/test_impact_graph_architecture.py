@@ -125,7 +125,8 @@ def test_unemployment_discovery_carries_multiple_channels(db_session):
     assert "channel_audit" in SCHEMA_SHOCKS["required"]
     shocks_prompt = router.prompts["initial_shocks"][0]["static_prefix"]
     assert "ECONOMIC CHANNEL ONTOLOGY" in shocks_prompt
-    assert "Do NOT prune merely because" in shocks_prompt
+    assert "merely because" in shocks_prompt  # recall discipline present
+    assert "controlled depth" in shocks_prompt  # bounded-depth directive present
 
 
 # --- B: crude shock channels ----------------------------------------------
