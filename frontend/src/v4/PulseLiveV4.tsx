@@ -49,11 +49,14 @@ const IST_DAY = new Intl.DateTimeFormat('en-IN', {
 
 export default function PulseLiveV4({
   date = null,
+  onCount,
   onBackToLatest,
 }: {
   // null = the latest day with items ("today's paper"); YYYY-MM-DD = a
   // back day picked from the archive's pulse-wire list.
   date?: string | null;
+  // Reports the loaded wire's item count up to the shell's ticker.
+  onCount?: (count: number | null) => void;
   onBackToLatest?: () => void;
 }) {
   const [items, setItems] = useState<PulseItem[] | null>(null);
@@ -62,6 +65,7 @@ export default function PulseLiveV4({
   useEffect(() => {
     let alive = true;
     setItems(null);
+    onCount?.(null);
     const load = () =>
       fetch(`/api/pulse-live?limit=200${date ? `&date=${date}` : ''}`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -69,6 +73,7 @@ export default function PulseLiveV4({
           if (alive) {
             setItems(data);
             setError(false);
+            onCount?.(data.length);
           }
         })
         .catch(() => alive && setError(true));

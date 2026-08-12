@@ -55,6 +55,9 @@ export default function ShellV4() {
     });
   };
   const [edition, setEdition] = useState<{ count: number; date: string | null } | null>(null);
+  // Pulse-wire item count for the ticker while the Pulse tab is active;
+  // null until the wire has loaded.
+  const [pulseCount, setPulseCount] = useState<number | null>(null);
   const [bandOpen, setBandOpen] = useState(false);
   const [deepDive, setDeepDive] = useState<{ ticker: string; alertId?: number } | null>(null);
   // The (i) glance popup -- separate from the deep dive: glance and stay.
@@ -122,12 +125,20 @@ export default function ShellV4() {
 
   // edition.date is non-null when today was empty and the feed fell back
   // to the most recent day with stories -- the ticker says so.
-  const editionLabel =
+  const feedLabel =
     edition === null
       ? 'MEASURING THE TAPE'
       : edition.date !== null
         ? `LATEST EDITION — ${IST_DATE.format(new Date(`${edition.date}T12:00:00`)).toUpperCase()}`
         : `${edition.count} MEASURED ${edition.count === 1 ? 'STORY' : 'STORIES'}`;
+  // On the Pulse tab the same ticker slot counts the raw wire instead --
+  // pulse items are unmeasured by design, so "measured stories" would lie.
+  const editionLabel =
+    view === 'pulse'
+      ? pulseCount === null
+        ? 'READING THE WIRE'
+        : `${pulseCount} WIRE ${pulseCount === 1 ? 'STORY' : 'STORIES'}`
+      : feedLabel;
 
   return (
     // Inshorts-style paging on the feed: the shell is the scroll container
@@ -224,7 +235,13 @@ export default function ShellV4() {
           onBandOpenChange={setBandOpen}
         />
       )}
-      {view === 'pulse' && <PulseLiveV4 date={pulseDate} onBackToLatest={() => setPulseDate(null)} />}
+      {view === 'pulse' && (
+        <PulseLiveV4
+          date={pulseDate}
+          onCount={setPulseCount}
+          onBackToLatest={() => setPulseDate(null)}
+        />
+      )}
       {view === 'disc' && <DiscoverV4 onOpenDeepDive={openDeepDive} />}
       {view === 'dir' && <DirectoryV4 onOpenDeepDive={openDeepDive} />}
       {view === 'pf' && <PortfolioV4 onOpenDeepDive={openDeepDive} />}
