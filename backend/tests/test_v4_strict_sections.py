@@ -158,6 +158,66 @@ def test_legacy_mode_ignores_gate_fields_entirely(db_session, legacy_mode):
     assert layers[0]["title"] == "Winners — upstream"
 
 
+# --- closed-world explanations (Phase 6, spec §32, INV-014) ---------------
+
+def test_strict_refine_uses_validated_mechanism_as_why(db_session, monkeypatch, strict_mode):
+    """Strict mode: the per-company 'why' IS the gate-validated mechanism
+    -- no LLM call invents a story for the measured move, and the section
+    LLM (whose output strict rendering ignores) is not paid for."""
+    from app.analysis import refinement
+
+    alert = _seed_alert(db_session)
+    company, ac = _add_company(db_session, alert, "MRF.NS", "MRF", "auto",
+                               economic_effect="negative", excess=+1.0,
+                               mechanism="crude-linked rubber input costs")
+    article = db_session.get(Article, alert.article_id)
+    move = db_session.query(MarketMove).filter_by(alert_id=alert.id).one()
+
+    called = {"whys": 0, "layers": 0, "summary": 0, "timeline": 0}
+    monkeypatch.setattr(refinement, "generate_event_summary",
+                        lambda *a, **k: called.__setitem__("summary", called["summary"] + 1)
+                        or {"summary_short": "s", "summary_long": "l", "is_unconfirmed": False})
+    monkeypatch.setattr(refinement, "generate_impact_whys",
+                        lambda *a, **k: called.__setitem__("whys", called["whys"] + 1) or {})
+    monkeypatch.setattr(refinement, "generate_ripple_layers",
+                        lambda *a, **k: called.__setitem__("layers", called["layers"] + 1) or [])
+    monkeypatch.setattr(refinement, "generate_timeline_effects",
+                        lambda *a, **k: called.__setitem__("timeline", called["timeline"] + 1) or [])
+
+    refinement.refine_alert(object(), db_session, alert, article, [ac], [move])
+
+    assert ac.why == "crude-linked rubber input costs"
+    assert called["whys"] == 0     # market-move rationalization call never made
+    assert called["layers"] == 0   # section LLM not paid for in strict mode
+    assert called["summary"] == 1  # summaries still generated
+    assert called["timeline"] == 1
+
+
+def test_legacy_refine_still_calls_whys_and_layers(db_session, monkeypatch, legacy_mode):
+    from app.analysis import refinement
+
+    alert = _seed_alert(db_session)
+    company, ac = _add_company(db_session, alert, "MRF.NS", "MRF", "auto",
+                               display_tier=None, gate_state=None, excess=+1.0)
+    article = db_session.get(Article, alert.article_id)
+    move = db_session.query(MarketMove).filter_by(alert_id=alert.id).one()
+
+    called = {"whys": 0, "layers": 0}
+    monkeypatch.setattr(refinement, "generate_event_summary",
+                        lambda *a, **k: {"summary_short": "s", "summary_long": "l",
+                                         "is_unconfirmed": False})
+    monkeypatch.setattr(refinement, "generate_impact_whys",
+                        lambda *a, **k: called.__setitem__("whys", called["whys"] + 1) or {})
+    monkeypatch.setattr(refinement, "generate_ripple_layers",
+                        lambda *a, **k: called.__setitem__("layers", called["layers"] + 1) or [])
+    monkeypatch.setattr(refinement, "generate_timeline_effects", lambda *a, **k: [])
+
+    refinement.refine_alert(object(), db_session, alert, article, [ac], [move])
+
+    assert called["whys"] == 1
+    assert called["layers"] == 1
+
+
 # --- stale-section prevention (unconditional) -----------------------------
 
 def test_refine_alert_rerun_does_not_duplicate_layers_and_timeline(db_session, monkeypatch):

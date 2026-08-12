@@ -30,7 +30,10 @@ EVENT_SUMMARY_FRAMING = (
     "matters, not whether to trade on it. Set is_unconfirmed to true ONLY "
     "when the event is an unverified report, rumor, or speculation, or "
     "when a named party has denied it -- an officially announced or "
-    "confirmed event is false."
+    "confirmed event is false. Closed world: describe ONLY what the "
+    "supplied facts state. Never introduce companies, numbers, causes, "
+    "or consequences the facts do not contain; if the facts are too thin "
+    "to summarize, return nothing rather than guessing."
 )
 
 
@@ -428,7 +431,10 @@ TIMELINE_FRAMING = (
     "nothing genuinely distinct to add for it -- zero, one, or several "
     "entries are all correct depending on the story. Plain language, no "
     "jargon, no percentage, price, or buy/sell/hold language -- describe "
-    "what unfolds, not whether to trade on it."
+    "what unfolds, not whether to trade on it. Closed world: reason only "
+    "from the supplied facts. Never name companies, figures, or causal "
+    "chains the facts do not support; skipping every horizon is a valid "
+    "answer when the facts say nothing about how the effect unfolds."
 )
 
 
@@ -563,27 +569,40 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
         if summary.get("is_unconfirmed") is not None:
             alert.is_unconfirmed = 1 if summary["is_unconfirmed"] else 0
 
-    moves_by_company_id = {m.company_id: m for m in market_moves}
-    measured = []
-    for ac in alert_companies:
-        move = moves_by_company_id.get(ac.company_id)
-        if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
-            company = session.get(Company, ac.company_id)
-            if company is not None:
-                measured.append({
-                    "ticker": company.ticker, "name": company.name,
-                    "direction": ac.direction, "excess_move_pct": move.excess_move_pct,
-                    "_alert_company": ac,
-                })
+    # V4 strict closed-world explanations (spec §32, INV-014): the
+    # per-company "why" IS the gate-validated mechanism -- already
+    # company-specific, one line, and derived from evidence. The legacy
+    # impact_whys call (which handed the model the measured direction and
+    # asked it to invent a story for it) is exactly the market-move
+    # rationalization the spec forbids, so it never runs in strict mode.
+    strict_gated = settings.impact_engine_v4_strict and any(
+        ac.display_tier for ac in alert_companies)
+    if strict_gated:
+        for ac in alert_companies:
+            if ac.display_tier in ("primary", "secondary") and ac.mechanism:
+                ac.why = ac.mechanism
+    else:
+        moves_by_company_id = {m.company_id: m for m in market_moves}
+        measured = []
+        for ac in alert_companies:
+            move = moves_by_company_id.get(ac.company_id)
+            if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
+                company = session.get(Company, ac.company_id)
+                if company is not None:
+                    measured.append({
+                        "ticker": company.ticker, "name": company.name,
+                        "direction": ac.direction, "excess_move_pct": move.excess_move_pct,
+                        "_alert_company": ac,
+                    })
 
-    if measured:
-        whys = generate_impact_whys(client, article.title, facts, [
-            {k: v for k, v in m.items() if k != "_alert_company"} for m in measured
-        ])
-        for m in measured:
-            why = whys.get(m["ticker"])
-            if why:
-                m["_alert_company"].why = why
+        if measured:
+            whys = generate_impact_whys(client, article.title, facts, [
+                {k: v for k, v in m.items() if k != "_alert_company"} for m in measured
+            ])
+            for m in measured:
+                why = whys.get(m["ticker"])
+                if why:
+                    m["_alert_company"].why = why
 
     # Delete-before-insert (INV-009, 2026-08-12): refine_alert used to
     # append, so any re-run (manual re-refinement, a retried deferred pass,
@@ -604,6 +623,11 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     # (app.market.ripple_layers.compute_ripple_layers), so it would also
     # bypass the SECTOR_WIDE routing. Fan-out rows always fall through to
     # the SECTOR_WIDE bucket at read time.
+    # Strict mode renders sections deterministically from the gate output
+    # (app.market.ripple_layers._strict_sections) -- an LLM-authored
+    # section would never be read, so the call is simply not paid for.
+    if strict_gated:
+        return
     layer_companies = []
     for ac in alert_companies:
         if ac.basis == "sector_inference":
