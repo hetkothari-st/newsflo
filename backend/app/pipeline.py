@@ -415,6 +415,12 @@ def measure_and_reconcile_alert_companies(session: Session, alert_id: int, alert
     # overwrites when a real measurement exists (measurement_status == "ok");
     # an unmeasured/exposure-only company keeps the LLM's own call, since
     # there is no measured reality yet to defer to.
+    # V4 strict (spec §2.4/§40, INV-001): market reaction is an observation,
+    # never an authority over the fundamental call. `direction` and the
+    # fundamental prose stay untouched; the measured move lives on the
+    # MarketMove row and is serialized separately.
+    if settings.impact_engine_v4_strict:
+        return market_moves
     moves_by_company_id = {m.company_id: m for m in market_moves}
     for alert_company in alert_companies:
         move = moves_by_company_id.get(alert_company.company_id)
@@ -482,17 +488,20 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
         # Same reconcile rule as measure_and_reconcile_alert_companies: the
         # measured reality overrides the LLM's pre-measurement guess, and
         # prose arguing for the contradicted direction is dropped.
-        alert_company = (
-            session.query(AlertCompany)
-            .filter_by(alert_id=move.alert_id, company_id=move.company_id)
-            .one_or_none()
-        )
-        if alert_company is not None and move.excess_move_pct is not None:
-            measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
-            if measured_direction != alert_company.direction:
-                alert_company.rationale = None
-                alert_company.key_points_json = json.dumps([])
-            alert_company.direction = measured_direction
+        # V4 strict: same separation as measure_and_reconcile_alert_companies
+        # -- the late measurement updates the MarketMove row only.
+        if not settings.impact_engine_v4_strict:
+            alert_company = (
+                session.query(AlertCompany)
+                .filter_by(alert_id=move.alert_id, company_id=move.company_id)
+                .one_or_none()
+            )
+            if alert_company is not None and move.excess_move_pct is not None:
+                measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
+                if measured_direction != alert_company.direction:
+                    alert_company.rationale = None
+                    alert_company.key_points_json = json.dumps([])
+                alert_company.direction = measured_direction
         fixed += 1
     if fixed:
         session.commit()
@@ -762,8 +771,16 @@ def _v3_entries(session: Session, result) -> list[dict]:
         # the old cascade's LLM magnitudes went through).
         magnitude_high = round(0.5 + 4.5 * company.impact_strength, 1)
         magnitude_low = round(max(0.1, magnitude_high / 3), 1)
+        # Legacy coercion: pre-strict consumers assume direction is binary,
+        # so neutral historically flattened to bullish at this boundary.
+        # Strict mode persists the truthful value (spec §19: mixed/uncertain
+        # must survive every stage; they render as direction "neutral").
+        if settings.impact_engine_v4_strict:
+            persisted_direction = company.direction
+        else:
+            persisted_direction = company.direction if company.direction != "neutral" else "bullish"
         entries.append({
-            "company_id": row.id, "direction": company.direction if company.direction != "neutral" else "bullish",
+            "company_id": row.id, "direction": persisted_direction,
             "magnitude_low": magnitude_low, "magnitude_high": magnitude_high,
             "rationale": company.rationale, "key_points": company.key_points,
             "confidence_score": round(company.confidence * 100), "time_horizon": company.time_horizon,
@@ -803,13 +820,20 @@ def _v3_edges(result) -> list[dict]:
             return node_type
         return "mechanism"
 
+    def _edge_direction(direction: str) -> str:
+        # Same boundary rule as _v3_entries: strict mode persists the
+        # truthful value; legacy consumers get the historical coercion.
+        if settings.impact_engine_v4_strict:
+            return direction
+        return direction if direction != "neutral" else "bullish"
+
     edges = []
     for edge in result.edges:
         edges.append({
             "from": {"kind": _kind(edge.parent_type), "label": edge.parent_id},
             "to": {"kind": _kind(edge.child_type), "label": edge.child_id},
             "relation": "demand" if edge.child_type == "company" else "correlation",
-            "direction": edge.direction if edge.direction != "neutral" else "bullish",
+            "direction": _edge_direction(edge.direction),
             "note": edge.mechanism, "source": "llm_only",
             "parent_type": edge.parent_type, "child_type": edge.child_type,
             "causal_distance": edge.causal_distance,
@@ -823,7 +847,7 @@ def _v3_edges(result) -> list[dict]:
             "from": {"kind": _kind(company.parent_type), "label": company.parent_id},
             "to": {"kind": "company", "label": company.ticker},
             "relation": "demand",
-            "direction": company.direction if company.direction != "neutral" else "bullish",
+            "direction": _edge_direction(company.direction),
             "note": company.mechanism or company.rationale, "source": "llm_only",
             "parent_type": company.parent_type, "child_type": "company",
             "causal_distance": company.causal_distance,

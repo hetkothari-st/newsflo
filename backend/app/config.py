@@ -254,6 +254,15 @@ class Settings(BaseSettings):
     # call + ONE batched companies call instead of 6-8 staged calls.
     # Verification escalates risk-based. Broad events always stay staged.
     impact_narrow_single_call: bool = os.environ.get("IMPACT_NARROW_SINGLE_CALL", "true").lower() == "true"
+    # V4 strict impact engine (spec 2026-08-12). Master flag for the
+    # precision-first truth model: fundamental economic impact and observed
+    # market reaction are SEPARATE truths -- measurement never overwrites
+    # `AlertCompany.direction`, never deletes fundamental prose, sections
+    # derive deterministically from validated mechanisms, and the
+    # publication gate fails closed. Off by default: the legacy
+    # measurement-reconciled behavior stays byte-identical until the strict
+    # engine passes its shadow benchmark (spec §54).
+    impact_engine_v4_strict: bool = os.environ.get("IMPACT_ENGINE_V4_STRICT", "false").lower() == "true"
 
     @property
     def gemini_stage_model_override_map(self) -> dict[str, str]:

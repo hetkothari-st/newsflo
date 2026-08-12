@@ -25,6 +25,7 @@ from app.analysis.impact_graph.router import StageRouter, StageRouterError
 from app.analysis.impact_graph.schemas import (
     CHILD_TYPES, PARENT_TYPES, SCHEMA_EDGE_VERDICTS, SCHEMA_FACTS, SCHEMA_RIPPLE,
     SCHEMA_SHOCKS, EventFacts, GraphCompany, GraphEdge, ImpactGraphResult,
+    direction_to_effect, effect_to_direction,
     schema_companies, schema_company_verdicts, schema_ranking,
 )
 from app.analysis.schemas import CATEGORIES, SECTORS
@@ -782,6 +783,33 @@ _STRUCTURAL_REJECT_MARKERS = (
 )
 
 
+def _apply_company_correction(company: GraphCompany, correction: dict) -> None:
+    """Apply one verifier correction, keeping `direction` and
+    `economic_effect` consistent. A direction flip re-derives the effect;
+    a correction to "neutral" leaves mixed/uncertain effects alone, since
+    those already render as neutral direction -- flattening them would
+    destroy the mixed-channel truth (spec §42)."""
+    direction = correction.get("direction")
+    if direction in ("bullish", "bearish", "neutral"):
+        company.direction = direction
+        if effect_to_direction(company.economic_effect or "") != direction:
+            company.economic_effect = direction_to_effect(direction)
+        # net_direction shares direction vocabulary plus mixed/uncertain;
+        # mixed/uncertain render as neutral, so only a real inconsistency
+        # (e.g. net "bullish" under a "bearish" correction) is rewritten.
+        net = company.net_direction
+        net_as_direction = net if net in ("bullish", "bearish") else "neutral"
+        if net and net_as_direction != direction:
+            company.net_direction = direction
+    distance = correction.get("causal_distance")
+    if isinstance(distance, int) and 1 <= distance <= settings.max_causal_depth:
+        company.causal_distance = distance
+    for field in ("materiality", "confidence"):
+        value = correction.get(field)
+        if isinstance(value, (int, float)):
+            setattr(company, field, max(0.0, min(1.0, float(value))))
+
+
 def _verify_companies(router: StageRouter, session, facts: EventFacts,
                       state: _GraphState, alert_id: int | None = None) -> None:
     """Diff-contract verification (token-opt P17): the verifier returns
@@ -851,16 +879,7 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
         company = state.companies.get(correction.get("ticker"))
         if company is None:
             continue
-        direction = correction.get("direction")
-        if direction in ("bullish", "bearish", "neutral"):
-            company.direction = direction
-        distance = correction.get("causal_distance")
-        if isinstance(distance, int) and 1 <= distance <= settings.max_causal_depth:
-            company.causal_distance = distance
-        for field in ("materiality", "confidence"):
-            value = correction.get(field)
-            if isinstance(value, (int, float)):
-                setattr(company, field, max(0.0, min(1.0, float(value))))
+        _apply_company_correction(company, correction)
     for ticker in accepted:
         state.companies[ticker].verified = True
     # A company with neither verdict is KEPT (omission is not rejection).
