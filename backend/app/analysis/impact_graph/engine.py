@@ -703,10 +703,10 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
 
     # Batched company mapping: one call covering every sector node.
     sector_nodes = [n for n in state.nodes.values() if n.sector is not None]
-    if session is None or not sector_nodes:
-        _skip("narrow_companies", "no_sector_nodes", article=article_id)
+    subjects = _subject_companies(session, facts) if session is not None else []
+    if session is None or (not sector_nodes and not subjects):
+        _skip("narrow_companies", "no_sector_nodes_no_subjects", article=article_id)
         return
-    subjects = _subject_companies(session, facts)
     node_blocks, union_tickers, node_by_id = [], [], {}
     placed_subjects = set()
     for node in sector_nodes:
@@ -742,13 +742,28 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
     # causally relevant node via parent_id.
     stray_subjects = [s for s in subjects if s.ticker not in placed_subjects
                       and s.ticker not in state.rejected_tickers]
-    if stray_subjects and node_by_id:
-        union_tickers.extend(s.ticker for s in stray_subjects if s.ticker not in union_tickers)
-        node_blocks.append(
-            "ARTICLE SUBJECT COMPANIES (named by the article itself -- evaluate "
-            "each against the most causally relevant node above):\n"
-            + _candidate_profile_lines(stray_subjects, {})
-        )
+    if stray_subjects:
+        # A single-stock story often builds a shocks-only graph (no sector
+        # nodes -- measured live: ideaForge's downgrade). The article's own
+        # subjects must still be evaluable: the distance-1 shock nodes
+        # become valid parents.
+        if not node_by_id:
+            for node in state.nodes.values():
+                if node.distance == 1:
+                    node_by_id[node.node_id] = node
+        if node_by_id:
+            union_tickers.extend(s.ticker for s in stray_subjects if s.ticker not in union_tickers)
+            shock_lines = "\n".join(
+                f"NODE {n.node_id} (distance {n.distance}): {n.label}" for n in node_by_id.values()
+            )
+            node_blocks.append(
+                f"{shock_lines}\n\n" if not sector_nodes else ""
+            )
+            node_blocks.append(
+                "ARTICLE SUBJECT COMPANIES (named by the article itself -- evaluate "
+                "each against the most causally relevant node above):\n"
+                + _candidate_profile_lines(stray_subjects, {})
+            )
     if not node_blocks:
         _skip("narrow_companies", "no_candidates", article=article_id)
         return
