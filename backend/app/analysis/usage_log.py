@@ -46,6 +46,14 @@ class CallUsage:
     article_id: Optional[int] = None
     success: Optional[bool] = None    # None = legacy path that didn't report
     fallback: Optional[bool] = None   # True when a non-primary rung served it
+    # -- Knowledge-architecture telemetry (cost-opt spec 2026-08-12 P1) --
+    parent_node: Optional[str] = None     # graph node the call served
+    mechanism_id: Optional[str] = None    # registry mechanism, when routed by one
+    candidate_count: Optional[int] = None  # candidates offered to the model
+    returned_count: Optional[int] = None   # entries the model returned
+    cache_hit: Optional[bool] = None       # True = stage-cache replay, zero cost
+    prompt_version: Optional[str] = None
+    schema_version: Optional[str] = None
 
     @property
     def cache_status(self) -> str:
@@ -115,6 +123,11 @@ def _persist(usage: CallUsage) -> None:
             thinking_level=usage.thinking_level, thinking_tokens=usage.thinking_tokens,
             latency_ms=usage.latency_ms,
             success=(None if usage.success is None else (1 if usage.success else 0)),
+            parent_node=usage.parent_node, mechanism_id=usage.mechanism_id,
+            candidate_count=usage.candidate_count, returned_count=usage.returned_count,
+            cache_hit=(None if usage.cache_hit is None else (1 if usage.cache_hit else 0)),
+            prompt_version=usage.prompt_version, schema_version=usage.schema_version,
+            estimated_cost_usd=usage.estimated_cost_usd,
         ))
         session.commit()
     except Exception:

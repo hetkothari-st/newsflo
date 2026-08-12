@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 
 from app.analysis.schemas import CATEGORIES, EVENT_TYPES
 
+# Version stamp for the structured-output schemas (cost-opt spec P1/P12):
+# telemetry + cache-fingerprint component. Bump on ANY schema change.
+IMPACT_SCHEMA_VERSION = "kg-1"
+
 TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
 PARENT_TYPES = ["event", "economic_node", "sector", "commodity", "policy", "company"]
 CHILD_TYPES = ["economic_node", "sector", "commodity", "policy", "company"]

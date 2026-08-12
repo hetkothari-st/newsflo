@@ -62,7 +62,8 @@ class StageRouter:
 
     def call(self, stage: str, *, schema: dict, static_prefix: str,
              dynamic_suffix: str, compact_suffix: str | None = None,
-             thinking: str = "high", max_output_tokens: int = 8192) -> dict:
+             thinking: str = "high", max_output_tokens: int = 8192,
+             context: dict | None = None, cache_seed: str | None = None) -> dict:
         """Run one stage call through the routing/degradation policy.
         Returns the parsed dict; records the worst quality reached.
 
@@ -70,19 +71,33 @@ class StageRouter:
         (this attempt, a prior failed attempt, the hourly retry sweep, or a
         pre-deploy run) replays its stored result from llm_stage_cache with
         ZERO provider traffic. Failures are never cached, and any input
-        drift is a plain miss that pays normally."""
-        fingerprint = self._fingerprint(stage, schema, static_prefix, dynamic_suffix)
+        drift is a plain miss that pays normally.
+
+        `cache_seed` (cost-opt spec P12): the caller's STABLE semantic key
+        for this call -- node id + candidates + facts -- used for the cache
+        fingerprint INSTEAD of the raw prompt bytes, so volatile prompt
+        annotations (e.g. relationship-cache "[KNOWN BASE EXPOSURE]" lines
+        that appear after a verify pass) can no longer invalidate the cache
+        for a semantically identical call. `context` rides every telemetry
+        row (parent_node, mechanism_id, candidate_count)."""
+        context = dict(context or {})
+        context.setdefault("prompt_version", self._prompt_version())
+        context.setdefault("schema_version", self._schema_version())
+        fingerprint = self._fingerprint(stage, schema, static_prefix,
+                                        cache_seed or dynamic_suffix)
         cached = self._cache_get(fingerprint)
         if cached is not None:
             self.stage_cache_hits += 1
             logger.info("impact-graph call_skipped stage=%s reason=stage_cache_hit article=%s",
                         stage, self.article_id)
+            self._record_cache_hit(stage, context)
             return cached
         if self.protected and self._gemini is not None:
             result = self._call_protected(
                 stage, schema=schema, static_prefix=static_prefix,
                 dynamic_suffix=dynamic_suffix, compact_suffix=compact_suffix,
                 thinking=thinking, max_output_tokens=max_output_tokens,
+                context=context,
             )
         else:
             result = self._call_groq(stage, schema=schema, static_prefix=static_prefix,
@@ -90,14 +105,51 @@ class StageRouter:
         self._cache_put(fingerprint, stage, result)
         return result
 
+    @staticmethod
+    def _prompt_version() -> str:
+        from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+        return IMPACT_PROMPT_VERSION
+
+    @staticmethod
+    def _schema_version() -> str:
+        from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+        return IMPACT_SCHEMA_VERSION
+
+    def _record_cache_hit(self, stage: str, context: dict) -> None:
+        """A stage-cache replay is a real analytical event with ZERO cost --
+        recorded so per-article accounting can prove it did not double-bill
+        (cost-opt spec P1)."""
+        try:
+            from app.analysis.usage_log import CallUsage, record_usage
+            record_usage(CallUsage(
+                provider="cache", call_name=stage, stage=stage,
+                model=self._fingerprint_model(stage), article_id=self.article_id,
+                input_tokens=0, output_tokens=0, thinking_tokens=0,
+                estimated_cost_usd=0.0, success=True, cache_hit=True,
+                **{k: v for k, v in context.items() if k in (
+                    "parent_node", "mechanism_id", "candidate_count",
+                    "prompt_version", "schema_version")},
+            ))
+        except Exception:  # noqa: BLE001 -- telemetry never breaks analysis
+            logger.warning("cache-hit telemetry failed", exc_info=True)
+
     # -- durable stage cache ----------------------------------------------
 
     def _fingerprint(self, stage: str, schema: dict, static_prefix: str,
-                     dynamic_suffix: str) -> str:
+                     seed: str) -> str:
+        """Semantic-cache key (cost-opt spec P12): stage + model + prompt/
+        schema/knowledge versions + static prefix + the caller's semantic
+        seed (or raw suffix when no seed was supplied). Version components
+        make every prompt/registry change an EXPLICIT invalidation."""
         model, _ = self._model_for(stage) if (self.protected and self._gemini) \
             else (settings.groq_aux_model, "")
+        try:
+            from app.analysis.impact_graph.knowledge import KNOWLEDGE_REGISTRY_VERSION
+        except ImportError:
+            KNOWLEDGE_REGISTRY_VERSION = ""
         payload = "\x1f".join([
-            stage, model, static_prefix, dynamic_suffix,
+            stage, model, self._prompt_version(), self._schema_version(),
+            KNOWLEDGE_REGISTRY_VERSION, static_prefix, seed,
             json.dumps(schema, sort_keys=True),
         ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -166,7 +218,8 @@ class StageRouter:
         return settings.gemini_reasoning_model, "high"
 
     def _call_protected(self, stage, *, schema, static_prefix, dynamic_suffix,
-                        compact_suffix, thinking, max_output_tokens) -> dict:
+                        compact_suffix, thinking, max_output_tokens,
+                        context: dict | None = None) -> dict:
         model, default_thinking = self._model_for(stage)
         thinking = thinking or default_thinking
         attempts = [
@@ -185,7 +238,7 @@ class StageRouter:
                     model=attempt_model, schema=schema, static_prefix=static_prefix,
                     dynamic_suffix=suffix, thinking=level,
                     max_output_tokens=max_output_tokens, stage=stage,
-                    article_id=self.article_id, budget=self.budget,
+                    article_id=self.article_id, budget=self.budget, context=context,
                 )
                 if degrade_to:
                     self._degrade(degrade_to)

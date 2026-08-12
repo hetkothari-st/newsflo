@@ -74,6 +74,10 @@ class _GraphState:
     gaps: list = field(default_factory=list)
     expansions: int = 0
     company_calls: int = 0
+    # P9 canonical exposure dedup: (exposure_archetype, dimension, effect)
+    # keys already evaluated this article -- an economically equivalent
+    # node never re-buys the same company-level evaluation.
+    evaluated_exposures: set = field(default_factory=set)
     # Observability (spec §30) -- graph-quality counters, logged and shipped
     # on ImpactGraphResult.metrics.
     metrics: dict = field(default_factory=lambda: {
@@ -398,41 +402,25 @@ def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
               + _candidate_profile_lines(candidates[:20], cached_positive),
     )
     state.company_calls += 1
+    # Semantic cache seed (cost-opt P12): node + candidates + facts. The
+    # raw suffix also carries relationship-cache annotations that change
+    # after every verify pass -- they must not invalidate the cache for a
+    # semantically identical call (measured leak: Rs ~4/retry).
+    cache_seed = "|".join([
+        node.node_id, ",".join(sorted(tickers)), facts.compact_lines(limit=8),
+    ])
     try:
-        raw = router.call(
-            "map_companies", schema=schema_companies(tickers),
-            static_prefix=prompts.static_prefix(stage_prompt),
-            dynamic_suffix=suffix, compact_suffix=compact,
+        entries = _judge_candidates(
+            router, state, stage_prompt=stage_prompt, suffix=suffix, compact=compact,
+            tickers=tickers,
+            context={"parent_node": node.node_id, "candidate_count": len(candidates)},
+            cache_seed=cache_seed,
         )
     except StageRouterError as exc:
         state.gaps.append({"sector": node.sector, "impact_level": _legacy_level(node.distance),
                            "parent_ticker": None, "attempts": 4, "last_error": str(exc)[:500]})
         return
-
-    allowed = set(tickers)
-    for entry in raw.get("companies", []):
-        ticker = entry.get("ticker")
-        if ticker not in allowed:
-            logger.warning("impact-graph dropped off-candidate ticker %r", ticker)
-            continue
-        try:
-            company = GraphCompany(
-                **{**entry, "causal_distance": node.distance,
-                   "parent_type": node.node_type, "parent_id": node.node_id},
-            ).clamp()
-        except ValidationError as exc:
-            logger.warning("impact-graph company entry rejected by schema: %s", exc)
-            continue
-        state.metrics["companies_considered"] += 1
-        # DISCOVERY gate only (architecture upgrade 2026-08-12): the strict
-        # distance-scaled thresholds -- and the mixed/uncertain handling --
-        # run once, in _final_materiality_prune, after completeness.
-        if not _passes_discovery(company.materiality, company.confidence):
-            state.rejected_tickers.add(ticker)
-            continue
-        held = state.companies.get(ticker)
-        if held is None or company.impact_strength > held.impact_strength:
-            state.companies[ticker] = company
+    _register_company_entries(state, entries, node)
 
 
 def _legacy_level(distance: int) -> str:
@@ -444,6 +432,253 @@ def _legacy_level(distance: int) -> str:
     if distance == 2:
         return "indirect_l1"
     return "indirect_l2"
+
+
+# --- knowledge-architecture mapping (cost-opt spec 2026-08-12) ------------
+
+def _priority_tiers(session, candidates, dimension: str):
+    """P8 deterministic candidate prioritization: exposure-registry level on
+    the mechanism's dimension x data quality. Returns candidates ordered
+    Tier A (HIGH+), then B (MEDIUM/UNKNOWN -- the safety band), then C
+    (LOW/NONE). A ROUTING order only -- Tier C is trimmed by the per-call
+    cap, never permanently discarded (escalation may still reach it)."""
+    from app.analysis.impact_graph.knowledge import exposure_levels_for, level_rank
+
+    levels = exposure_levels_for(session, [c.id for c in candidates])
+    scored = []
+    for company in candidates:
+        rank = level_rank(levels.get((company.id, dimension)))
+        quality = 1 if getattr(company, "business_desc", None) else 0
+        scored.append((rank, quality, company))
+    scored.sort(key=lambda t: (-t[0], -t[1], t[2].ticker))
+    tier_a = [c for r, _, c in scored if r >= 3]
+    tier_b = [c for r, _, c in scored if r in (1, 2)]
+    tier_c = [c for r, _, c in scored if r == 0]
+    return tier_a, tier_b, tier_c
+
+
+def _escalation_tickers(entries: list[dict], candidate_count: int,
+                        prior_effect: str | None) -> list[str]:
+    """P10 escalation triggers: which returned entries deserve a HIGH-
+    thinking re-judgement. Empty list = the medium result stands."""
+    flagged = []
+    big_call = candidate_count > 30 or len(entries) > 8
+    for entry in entries:
+        ticker = entry.get("ticker")
+        if not ticker:
+            continue
+        confidence = float(entry.get("confidence") or 0)
+        materiality = float(entry.get("materiality") or 0)
+        net = entry.get("net_direction") or ""
+        conflicts_prior = (
+            prior_effect in ("positive", "negative")
+            and entry.get("direction") in ("bullish", "bearish")
+            and entry["direction"] != ("bullish" if prior_effect == "positive" else "bearish")
+        )
+        near_threshold = abs(materiality - impact_thresholds_for_distance(
+            int(entry.get("causal_distance") or 2))["materiality"]) <= 0.05
+        if (confidence < 0.6 or net in ("mixed", "uncertain") or conflicts_prior
+                or near_threshold or big_call):
+            flagged.append(ticker)
+    return flagged[:12]
+
+
+def _judge_candidates(router: StageRouter, state: _GraphState, *, stage_prompt: str,
+                      suffix: str, compact: str | None, tickers: list[str],
+                      context: dict, cache_seed: str, prior_effect: str | None = None,
+                      candidate_lines: str = "") -> list[dict]:
+    """One mapping call, MEDIUM-first with selective HIGH escalation (spec
+    P10). Returns the raw entry dicts; the caller validates/registers.
+    Escalation re-judges only the flagged subset -- never the whole call --
+    and its (high-thinking) result replaces those entries."""
+    from app.config import IMPACT_MAPPING_ESCALATION, IMPACT_MAPPING_THINKING
+
+    raw = router.call(
+        "map_companies", schema=schema_companies(tickers),
+        static_prefix=prompts.static_prefix(stage_prompt),
+        dynamic_suffix=suffix, compact_suffix=compact,
+        thinking=IMPACT_MAPPING_THINKING, context=context, cache_seed=cache_seed,
+    )
+    entries = [e for e in raw.get("companies", []) if e.get("ticker") in set(tickers)]
+    if not IMPACT_MAPPING_ESCALATION or router.budget is None or router.budget.exceeded:
+        return entries
+    flagged = _escalation_tickers(entries, len(tickers), prior_effect)
+    if not flagged:
+        return entries
+    _skip("map_companies", "escalating_to_high", count=len(flagged))
+    try:
+        escalated = router.call(
+            "map_companies_escalation", schema=schema_companies(flagged),
+            static_prefix=prompts.static_prefix(prompts.ESCALATION_PROMPT),
+            dynamic_suffix=(f"{suffix}\n\nRE-JUDGE ONLY THESE FLAGGED CANDIDATES "
+                            f"(low confidence / competing channels / near threshold / "
+                            f"prior conflict): {', '.join(flagged)}"),
+            thinking="high",
+            context={**context, "candidate_count": len(flagged)},
+            cache_seed=f"{cache_seed}|escalation",
+        )
+    except StageRouterError:
+        return entries  # medium result stands; escalation is best-effort
+    replacements = {e.get("ticker"): e for e in escalated.get("companies", [])
+                    if e.get("ticker") in set(flagged)}
+    merged = [replacements.get(e.get("ticker"), e) for e in entries]
+    # A flagged candidate the escalation DROPPED stays dropped -- high
+    # thinking judged it out; also admit escalation-only additions.
+    merged = [e for e in merged if e.get("ticker") not in set(flagged)
+              or e.get("ticker") in replacements]
+    return merged
+
+
+def _register_company_entries(state: _GraphState, entries: list[dict], node: _Node,
+                              mechanism_id: str | None = None) -> None:
+    """Shared validation/registration for mapping results (discovery floor
+    only -- final prune stays the single strict gate)."""
+    for entry in entries:
+        ticker = entry.get("ticker")
+        try:
+            company = GraphCompany(
+                **{**{k: v for k, v in entry.items() if k in GraphCompany.model_fields},
+                   "causal_distance": node.distance,
+                   "parent_type": node.node_type, "parent_id": node.node_id},
+            ).clamp()
+        except ValidationError as exc:
+            logger.warning("impact-graph company entry rejected by schema: %s", exc)
+            continue
+        state.metrics["companies_considered"] += 1
+        if not _passes_discovery(company.materiality, company.confidence):
+            state.rejected_tickers.add(ticker)
+            continue
+        held = state.companies.get(ticker)
+        if held is None or company.impact_strength > held.impact_strength:
+            state.companies[ticker] = company
+
+
+def _archetype_mapping(router: StageRouter, session, facts: EventFacts,
+                       state: _GraphState, budget: ArticleBudget,
+                       article_id: int | None, archetype_id: str, direction: str) -> None:
+    """P5/P7 knowledge-driven mapping: the matched event archetype's
+    mechanism slice replaces open-ended rediscovery. Each mechanism becomes
+    a graph node hung off its trigger shock, retrieves its archetype's
+    candidate universe deterministically, priority-tiers it, and runs ONE
+    small mapping call whose prompt carries the mechanism PRIOR -- Gemini
+    judges applicability to THIS event and may override the prior."""
+    from app.analysis.impact_graph.knowledge import (
+        MECHANISM_DIMENSIONS, companies_for_archetype, oriented_mechanisms,
+    )
+    from app.analysis.impact_graph.normalize import normalize_node_id
+    from app.config import IMPACT_MAX_COMPANY_MAP_CALLS, IMPACT_TIER_CAP
+
+    mechanisms = oriented_mechanisms(archetype_id, direction)
+    mechanisms.sort(key=lambda m: -m["confidence_baseline"])
+    logger.info("impact-graph archetype=%s direction=%s mechanisms=%s article=%s",
+                archetype_id, direction, len(mechanisms), article_id)
+    state.metrics["event_archetype"] = archetype_id
+
+    def _trigger_node(parent_variable: str) -> _Node | None:
+        target = set(normalize_node_id(parent_variable).split("_"))
+        best, best_overlap = None, 0.0
+        for candidate_node in state.nodes.values():
+            if candidate_node.node_type != "economic_node":
+                continue
+            tokens = set(candidate_node.node_id.replace("shock_", "").split("_"))
+            overlap = len(target & tokens) / max(1, len(target | tokens))
+            if overlap > best_overlap:
+                best, best_overlap = candidate_node, overlap
+        return best if best_overlap >= 0.4 else None
+
+    for mech in mechanisms:
+        if budget.expansion_exhausted:
+            _skip("archetype_mapping", "budget_soft_stop", article=article_id)
+            break
+        if state.company_calls >= IMPACT_MAX_COMPANY_MAP_CALLS:
+            _skip("archetype_mapping", "company_call_cap", mechanism=mech["mechanism_id"])
+            break
+        dimension = MECHANISM_DIMENSIONS.get(mech["mechanism_id"], "general")
+        dedup_key = (mech["child_exposure"], dimension, mech["oriented_effect"])
+        if dedup_key in state.evaluated_exposures:
+            _skip("archetype_mapping", "canonical_exposure_dedup",
+                  mechanism=mech["mechanism_id"], key="|".join(dedup_key))
+            continue
+        state.evaluated_exposures.add(dedup_key)
+
+        parent = _trigger_node(mech["parent_variable"])
+        if parent is None:
+            # Shock stage did not surface the trigger variable -- honor the
+            # model's event-specific judgment; do not force the template.
+            _skip("archetype_mapping", "trigger_shock_absent",
+                  mechanism=mech["mechanism_id"], variable=mech["parent_variable"])
+            continue
+        # The archetype slice IS this trigger's ripple set -- generic ripple
+        # discovery must not re-buy the same universe (cost-opt P9/P16).
+        state.expanded.add(parent.node_id)
+
+        node_id = normalize_node_id(mech["mechanism_id"])
+        edge = GraphEdge(
+            parent_type="economic_node", parent_id=parent.node_id,
+            child_type="economic_node", child_id=node_id,
+            economic_effect=mech["oriented_effect"], mechanism=mech["mechanism"],
+            impact_strength=mech["confidence_baseline"] * 0.8,
+            confidence=mech["confidence_baseline"], materiality=0.6,
+            time_horizon=mech["time_horizon"],
+        )
+        if _register_edge(state, edge):
+            node = _node_from_edge(edge, mech["mechanism_id"].replace("_", " "), None)
+            state.nodes[node.node_id] = node
+        else:
+            node = state.nodes.get(edge.child_id)
+            if node is None:
+                continue
+        state.evaluated_nodes.add(node.node_id)
+
+        candidates = [c for c in companies_for_archetype(session, mech["child_exposure"])
+                      if c.ticker not in state.companies
+                      and c.ticker not in state.rejected_tickers]
+        if not candidates:
+            _skip("archetype_mapping", "no_candidates", mechanism=mech["mechanism_id"])
+            continue
+        tier_a, tier_b, tier_c = _priority_tiers(session, candidates, dimension)
+        high_impact = mech["confidence_baseline"] >= 0.75
+        chosen = (tier_a + tier_b) if high_impact else (tier_a + tier_b[:10])
+        chosen = (chosen + tier_c)[:IMPACT_TIER_CAP]
+        if len(chosen) < len(candidates):
+            _skip("archetype_mapping", "tier_trimmed", mechanism=mech["mechanism_id"],
+                  offered=len(chosen), pool=len(candidates))
+
+        tickers = [c.ticker for c in chosen]
+        prior_line = (
+            f"MECHANISM PRIOR (from the verified registry -- judge whether it applies to "
+            f"THIS event; override freely if the event's facts differ):\n"
+            f"- id: {mech['mechanism_id']}\n"
+            f"- expected effect on this exposure class: {mech['oriented_effect']}\n"
+            f"- mechanism: {mech['mechanism']}\n"
+            f"- typical horizon: {mech['time_horizon']}"
+        )
+        candidate_lines = _candidate_profile_lines(chosen, {})
+        suffix = _compact_suffix(
+            facts,
+            extra=(f"PARENT NODE: {parent.node_id} (causal distance {parent.distance})\n\n"
+                   f"{prior_line}\n\n"
+                   "CANDIDATE COMPANIES -- choose ONLY from this list; selecting none is "
+                   "correct when the mechanism does not genuinely apply:\n" + candidate_lines),
+        )
+        cache_seed = "|".join([
+            str(article_id), mech["mechanism_id"], mech["oriented_effect"],
+            ",".join(sorted(tickers)), facts.compact_lines(limit=8),
+        ])
+        state.company_calls += 1
+        try:
+            entries = _judge_candidates(
+                router, state, stage_prompt=prompts.MECHANISM_MAPPING_PROMPT,
+                suffix=suffix, compact=None, tickers=tickers,
+                context={"parent_node": node.node_id, "mechanism_id": mech["mechanism_id"],
+                         "candidate_count": len(tickers)},
+                cache_seed=cache_seed, prior_effect=mech["oriented_effect"],
+            )
+        except StageRouterError as exc:
+            state.gaps.append({"sector": mech["child_exposure"], "impact_level": _legacy_level(node.distance),
+                               "parent_ticker": None, "attempts": 4, "last_error": str(exc)[:500]})
+            continue
+        _register_company_entries(state, entries, node, mechanism_id=mech["mechanism_id"])
 
 
 # --- final materiality pruning (spec §15) ---------------------------------
@@ -564,6 +799,7 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
             "verify_companies", schema=schema_company_verdicts(tickers),
             static_prefix=prompts.static_prefix(prompts.VERIFY_COMPANIES_PROMPT),
             dynamic_suffix=suffix,
+            context={"candidate_count": len(to_verify)},
         )
     except StageRouterError as exc:
         logger.warning("impact-graph company verification unavailable, keeping recall set: %s", exc)
@@ -1020,6 +1256,22 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
             state.nodes[node.node_id] = node
             frontier.append(node)
 
+    # Knowledge architecture (cost-opt spec P5/P6): a matched event
+    # archetype maps its mechanism slice FIRST -- deterministic candidate
+    # universes + mechanism priors, small medium-thinking calls. Trigger
+    # shocks covered by the archetype are marked expanded so generic ripple
+    # discovery does not re-buy the same universe. No match, or the flag
+    # off -> the dynamic path below runs exactly as before.
+    from app.config import IMPACT_KNOWLEDGE_MODE
+
+    if IMPACT_KNOWLEDGE_MODE and session is not None:
+        from app.analysis.impact_graph.knowledge import match_event_archetype
+
+        match = match_event_archetype(facts)
+        if match is not None:
+            _archetype_mapping(router, session, facts, state, budget, article_id,
+                               match[0], match[1])
+
     # Stage 3 -- direct companies for every distance-1 node with candidates.
     for node in list(frontier):
         if budget.expansion_exhausted:
@@ -1144,6 +1396,7 @@ def _expand_frontier(router: StageRouter, session, facts: EventFacts,
                 "ripple_discovery", schema=SCHEMA_RIPPLE,
                 static_prefix=prompts.static_prefix(prompts.RIPPLE_PROMPT),
                 dynamic_suffix=suffix, compact_suffix=compact,
+                context={"parent_node": ",".join(batch_ids)},
             )
         except StageRouterError as exc:
             state.gaps.append({"sector": node.sector or node.node_id,
@@ -1176,21 +1429,74 @@ def _expand_frontier(router: StageRouter, session, facts: EventFacts,
                     _map_companies_for_node(router, session, facts, state, child)
 
 
+# Channel -> node-vocabulary hints for the deterministic coverage matrix
+# (cost-opt spec P13). A channel counts as COVERED when any graph node's id
+# or label carries one of its tokens -- code decides coverage; Gemini is
+# asked only about the channels code could not find.
+_CHANNEL_NODE_HINTS: dict[str, list[str]] = {
+    "demand": ["demand", "consumption", "spending", "purchas"],
+    "supply": ["supply", "production", "output", "capacity"],
+    "price": ["price", "pricing", "realization", "tariff"],
+    "input_costs": ["cost", "input", "feedstock", "raw_material"],
+    "margins": ["margin", "spread", "profitab"],
+    "financing": ["financ", "funding", "borrow", "capital"],
+    "credit_quality": ["credit", "asset_quality", "npa", "default"],
+    "interest_rates": ["rate", "repo", "yield", "monetary"],
+    "currency_fx": ["currency", "rupee", "fx", "exchange", "dollar"],
+    "imports": ["import"],
+    "exports": ["export"],
+    "trade_flows": ["trade", "shipping", "freight", "route"],
+    "substitution": ["substitut", "alternative", "switch", "relative"],
+    "competition": ["competit", "market_share"],
+    "capex": ["capex", "investment", "expansion"],
+    "inventory": ["inventory", "stock", "working_capital"],
+    "employment": ["employment", "unemploy", "job", "wage", "income"],
+    "regulation": ["regulat", "policy", "compliance"],
+    "fiscal_policy": ["fiscal", "budget", "subsid", "government_spending"],
+    "monetary_policy": ["monetary", "rbi", "central_bank", "inflation"],
+    "consumer_behavior": ["consumer", "household", "discretionary", "sentiment"],
+    "government_response": ["government", "intervention", "response"],
+}
+
+
+def _coverage_matrix(state: _GraphState) -> tuple[list[str], list[str]]:
+    """(covered, missing) channels, decided deterministically from the
+    graph's node vocabulary -- zero LLM cost."""
+    haystack = " ".join(
+        f"{node_id} {node.label}".lower().replace(" ", "_")
+        for node_id, node in state.nodes.items()
+    )
+    covered, missing = [], []
+    for channel, hints in _CHANNEL_NODE_HINTS.items():
+        (covered if any(h in haystack for h in hints) else missing).append(channel)
+    return covered, missing
+
+
 def _completeness_audit(router: StageRouter, session, facts: EventFacts,
                         state: _GraphState, article_id: int | None) -> list:
-    """One audit round (spec §13): an ACTIVE search for missing branches
-    against the channel ontology. Accepted branches become real nodes and
-    are returned so the caller can re-enter them into the frontier. Not a
-    verifier -- it never touches existing edges."""
+    """One audit round (spec §13): an ACTIVE search for missing branches.
+    Deterministic-first (cost-opt P13): code builds the coverage matrix and
+    Gemini is asked ONLY about the channels code found missing -- never the
+    whole ontology against the whole graph. All channels covered = no call
+    at all. Accepted branches become real nodes and are returned so the
+    caller can re-enter them into the frontier."""
     from app.analysis.impact_graph.normalize import normalize_node_id
     from app.analysis.impact_graph.schemas import SCHEMA_COMPLETENESS
 
+    covered, missing = _coverage_matrix(state)
+    if not missing:
+        _skip("completeness_audit", "coverage_matrix_complete", article=article_id)
+        return []
     company_line = ", ".join(sorted(state.companies)) or "(none yet)"
     suffix = _compact_suffix(
         facts,
         extra=(
             f"CURRENT GRAPH:\n{_graph_outline(state, limit=60)}\n\n"
             f"COMPANIES ALREADY MAPPED: {company_line}\n\n"
+            f"CHANNELS ALREADY COVERED (deterministic audit -- do NOT re-propose): "
+            f"{', '.join(covered)}\n"
+            f"INVESTIGATE ONLY THESE MISSING CHANNELS (propose a branch only where "
+            f"one is genuinely, materially relevant to THIS event): {', '.join(missing)}\n\n"
             f"Existing node ids (propose only branches NOT already represented): "
             f"{', '.join(sorted(state.nodes))}"
         ),

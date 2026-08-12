@@ -142,6 +142,15 @@ _ADDED_COLUMNS = [
     ("llm_call_usage", "thinking_tokens", "INTEGER"),
     ("llm_call_usage", "latency_ms", "INTEGER"),
     ("llm_call_usage", "success", "INTEGER"),
+    # -- Knowledge-architecture telemetry (cost-opt 2026-08-12 P1) --
+    ("llm_call_usage", "parent_node", "VARCHAR"),
+    ("llm_call_usage", "mechanism_id", "VARCHAR"),
+    ("llm_call_usage", "candidate_count", "INTEGER"),
+    ("llm_call_usage", "returned_count", "INTEGER"),
+    ("llm_call_usage", "cache_hit", "INTEGER"),
+    ("llm_call_usage", "prompt_version", "VARCHAR"),
+    ("llm_call_usage", "schema_version", "VARCHAR"),
+    ("llm_call_usage", "estimated_cost_usd", "FLOAT"),
 ]
 
 

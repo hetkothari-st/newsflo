@@ -890,6 +890,30 @@ class TranslationFailure(Base):
     last_attempted_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class CompanyExposure(Base):
+    """One (company, exposure-dimension) ordinal rating (cost-opt spec
+    2026-08-12 P3). Levels are ORDINAL by design -- NONE/LOW/MEDIUM/HIGH/
+    VERY_HIGH/UNKNOWN -- never fake percentages. Rows come from
+    deterministic archetype seeding (source='archetype:<version>') and from
+    verified production learning folded out of CompanyNodeExposure
+    (source='learned'); manual curation may override (source='manual',
+    which seeding never overwrites)."""
+    __tablename__ = "company_exposures"
+    __table_args__ = (
+        UniqueConstraint("company_id", "dimension", name="uq_company_exposure_dimension"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    dimension = Column(String, nullable=False)  # e.g. crude_linked_inputs, consumer_demand
+    level = Column(String, nullable=False)      # NONE|LOW|MEDIUM|HIGH|VERY_HIGH|UNKNOWN
+    source = Column(String, nullable=False)     # archetype:<ver> | learned | manual
+    version = Column(String, nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    company = relationship("Company", foreign_keys=[company_id])
+
+
 class LLMCallUsage(Base):
     """One row per LLM call: which call it was, which model and tier served
     it, and what it actually cost in tokens (docs: cost-optimization phase
@@ -932,3 +956,15 @@ class LLMCallUsage(Base):
     thinking_tokens = Column(Integer, nullable=True)
     latency_ms = Column(Integer, nullable=True)
     success = Column(Integer, nullable=True)  # 1 | 0 | NULL (legacy path)
+    # Knowledge-architecture telemetry (cost-opt spec 2026-08-12 P1): what
+    # the call was FOR, not just what it cost. cache_hit=1 rows are
+    # zero-token stage-cache replays -- excluded from spend sums by
+    # construction (their token fields are 0).
+    parent_node = Column(String, nullable=True)
+    mechanism_id = Column(String, nullable=True)
+    candidate_count = Column(Integer, nullable=True)
+    returned_count = Column(Integer, nullable=True)
+    cache_hit = Column(Integer, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    schema_version = Column(String, nullable=True)
+    estimated_cost_usd = Column(Float, nullable=True)

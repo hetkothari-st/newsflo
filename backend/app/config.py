@@ -1,3 +1,4 @@
+import json
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -165,6 +166,11 @@ class Settings(BaseSettings):
     def ingestion_enabled_source_set(self) -> set[str]:
         return {s.strip() for s in self.ingestion_enabled_sources.split(",") if s.strip()}
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
+    # Zerodha Kite Connect developer app for live portfolio import. Empty
+    # disables the OAuth connect flow (the UI then offers CSV import only)
+    # -- same empty-means-off convention as brandfetch_client_id.
+    kite_api_key: str = os.environ.get("KITE_API_KEY", "")
+    kite_api_secret: str = os.environ.get("KITE_API_SECRET", "")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound
     # WebSocket connection unless this is explicitly set.
@@ -333,7 +339,24 @@ def resolve_tier(call_name: str) -> str:
 #
 # The measurement harness always reports real token counts; it reports cost
 # only for models priced here, and names the ones it had no price for.
-LLM_MODEL_PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {}
+#
+# Cost-opt spec 2026-08-12 P1 requires accurate per-call cost accounting, so
+# the paid-Gemini models the impact graph actually uses are seeded here with
+# the rates the session's cost ledger has been reconciled against
+# (Rs 87/USD arithmetic verified against ai.studio/spend by the user).
+# Override per model via GEMINI_PRICING_JSON, e.g.
+#   GEMINI_PRICING_JSON={"gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0}}
+LLM_MODEL_PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
+    "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
+    "gemini-3.5-flash-lite": {"input": 0.10, "output": 0.40},
+    "gemini-3.6-flash": {"input": 0.30, "output": 2.50},
+}
+try:
+    LLM_MODEL_PRICING_USD_PER_MTOK.update(
+        {k: dict(v) for k, v in json.loads(os.environ.get("GEMINI_PRICING_JSON", "{}")).items()}
+    )
+except (ValueError, AttributeError, TypeError):
+    pass  # malformed override -> keep the seeded rates; ceilings still bound spend
 
 # --- Relevance pre-filter rules (docs: cost-optimization phase 3) ---
 # The pre-filter's whole job is to skip the relevance LLM call on articles
@@ -590,6 +613,24 @@ IMPACT_DISCOVERY_MIN_CONFIDENCE = float(os.environ.get("IMPACT_DISCOVERY_MIN_CON
 # eligible nodes grew -- this bounds the per-article call count the same
 # way MAX_EXPANSIONS_PER_ARTICLE bounds ripple discovery.
 IMPACT_MAX_COMPANY_MAP_CALLS = int(os.environ.get("IMPACT_MAX_COMPANY_MAP_CALLS", "12"))
+
+# --- Knowledge architecture (cost-opt spec 2026-08-12) --------------------
+# Master switch: archetype matching + mechanism priors + priority tiers +
+# canonical exposure dedup. false = the pre-knowledge dynamic pipeline,
+# byte-for-byte -- the spec's required rollback path.
+IMPACT_KNOWLEDGE_MODE = os.environ.get("IMPACT_KNOWLEDGE_MODE", "true").lower() == "true"
+# Mapping thinking level (spec P10): medium-first; escalation re-judges
+# flagged entries at high. Initial shocks/verification keep their levels.
+IMPACT_MAPPING_THINKING = os.environ.get("IMPACT_MAPPING_THINKING", "medium")
+IMPACT_MAPPING_ESCALATION = os.environ.get("IMPACT_MAPPING_ESCALATION", "true").lower() == "true"
+# Candidate cap per mapping call AFTER priority tiering (spec P8). Tier-C
+# candidates fill remaining space only; never a permanent discard -- the
+# escalation pass may still reach them.
+IMPACT_TIER_CAP = int(os.environ.get("IMPACT_TIER_CAP", "25"))
+# Spec P16: unrelated-domain batching stays OFF. Placeholder flag only --
+# no batching code ships behind it yet; flipping it without an implemented,
+# benchmarked path does nothing.
+DOMAIN_BATCHING = os.environ.get("DOMAIN_BATCHING", "false").lower() == "true"
 
 
 # Graph node/edge type vocabularies (spec docs 3 §14). Parent may be any

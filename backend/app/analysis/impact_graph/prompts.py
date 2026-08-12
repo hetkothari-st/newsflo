@@ -9,6 +9,17 @@ spliced into these constants.
 """
 from app.analysis.schemas import SECTOR_DEFINITIONS
 
+# Version stamp for every impact-graph prompt in this module (cost-opt spec
+# 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
+# fingerprint, so a prompt change is an explicit, visible cache
+# invalidation instead of a silent one. Bump on ANY prompt-text change.
+IMPACT_PROMPT_VERSION = "kg-1"
+
+# Shared output-compression discipline (cost-opt spec P11): analytical
+# decisions stay; repeated prose goes. Defined before first use -- several
+# prompt constants below concatenate it at module import time.
+OUTPUT_DISCIPLINE = """OUTPUT DISCIPLINE: mechanism <= 20 words, rationale <= 25 words, both specific to THIS company and THIS event. Do NOT restate the article, the parent mechanism, sector definitions, or the company's profile -- those are already known to the system. Channels lists: short phrases, not sentences."""
+
 # Doc 3 §3 -- global system prompt for all impact-analysis reasoning calls.
 SYSTEM_PROMPT = """You are a senior global equity-research analyst and economic-impact analyst.
 
@@ -229,7 +240,6 @@ confidence scores and let the later evaluation stage prune it. Discovery may
 reject only: impossible mechanisms, contradictory mechanisms, duplicate
 nodes, purely semantic associations, absurdly remote relationships."""
 
-
 # Doc 3 §5 -- stage 2 initial economic shock.
 SHOCKS_PROMPT = """Given the article facts, identify the INITIAL ECONOMIC SHOCKS created by this event.
 
@@ -312,7 +322,9 @@ Example:
 
 Return every company that genuinely qualifies, not a representative sample.
 
-Return zero when no candidate qualifies."""
+Return zero when no candidate qualifies.
+
+""" + OUTPUT_DISCIPLINE
 
 
 # Doc 3 §7 -- stage 4 ripple discovery.
@@ -424,7 +436,9 @@ Do not create company-to-company links unless a genuine company relationship exi
 
 Use only candidates from the supplied database.
 
-Return zero if none qualify."""
+Return zero if none qualify.
+
+""" + OUTPUT_DISCIPLINE
 
 
 # Doc 3 §10 -- stage 7 company verification.
@@ -603,6 +617,34 @@ For each company: exact mechanism through its parent node, competing channels (p
 Set parent_id to the company's sector node id. A company sits AT its parent node's causal distance.
 
 SELF-CHECK before answering: for each company -- concrete causal link? direction logically correct? actually exposed? material enough? If any answer is no, leave it out; do not include companies to look thorough. Returning few or zero companies is a correct answer."""
+
+
+# Knowledge-architecture mapping (cost-opt spec P5/P25): candidates arrive
+# through a VERIFIED mechanism prior; the model judges event-specific
+# applicability instead of rediscovering the mechanism universe.
+MECHANISM_MAPPING_PROMPT = """You are evaluating candidate companies against ONE known economic mechanism for the current event.
+
+The mechanism prior comes from a verified registry. Your task is EVENT-SPECIFIC judgment, not rediscovery:
+
+1. Does this mechanism actually apply to THIS event, at THIS magnitude? (An event too small to move the variable meaningfully = few or zero companies.)
+2. For each candidate: is the company genuinely exposed through this mechanism? Judge the RELEVANT segment for diversified companies.
+3. Weigh competing channels (positive_channels / negative_channels) and report the NET direction -- mixed and uncertain are valid.
+4. Override the prior freely when the event's facts differ from the typical case (price controls, subsidies, inventory positions, pass-through changes, company disclosures in the facts).
+5. Score impact_strength, confidence, materiality for THIS event, not for the mechanism in general.
+
+Choose ONLY from the candidate list. Selecting none is a correct answer when the mechanism does not genuinely apply.
+
+""" + OUTPUT_DISCIPLINE
+
+ESCALATION_PROMPT = """You are re-judging a small set of FLAGGED candidates with maximum care. They were flagged for: low confidence, competing positive/negative channels, direction ambiguity, proximity to the materiality threshold, or conflict with a verified exposure prior.
+
+For each flagged candidate, reason carefully through the full causal path and the competing channels, then either:
+- return it with corrected direction/scores and a decisive net_direction (mixed/uncertain allowed when genuinely unresolvable), or
+- omit it entirely if it does not belong.
+
+Choose ONLY from the candidate list. Omission is a valid verdict.
+
+""" + OUTPUT_DISCIPLINE
 
 
 def static_prefix(extra: str = "") -> str:

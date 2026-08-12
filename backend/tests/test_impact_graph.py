@@ -87,7 +87,11 @@ def _company_entry(ticker, name, direction="bearish", impact=0.7, conf=0.8, mat=
 
 
 # 1/2: event -> economic node -> sector -> company, no parent_ticker anywhere
-def test_event_to_economic_node_to_sector_to_company(db_session):
+def test_event_to_economic_node_to_sector_to_company(db_session, monkeypatch):
+    # This test exercises the DYNAMIC discovery path; the knowledge
+    # architecture (archetype priors) has its own tests.
+    import app.config as config
+    monkeypatch.setattr(config, "IMPACT_KNOWLEDGE_MODE", False)
     _company(db_session, "INDIGO.NS", "InterGlobe Aviation", "railways_transport")
     router = FakeRouter({
         "extract_facts": FACTS,
