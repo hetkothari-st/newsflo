@@ -4,11 +4,21 @@ over price/volume bars; nothing calls an LLM. Built on
 app.companies.price_series.fetch_daily_bars and
 app.market.sector_indices.benchmark_ticker_for_sector.
 """
+from datetime import date as _date
+
 from sqlalchemy.orm import Session
 
 from app.companies.price_series import fetch_daily_bars
-from app.market.sector_indices import benchmark_ticker_for_sector
+from app.market.sector_indices import NIFTY50_TICKER, benchmark_ticker_for_sector
 from app.models import Company, MarketMove, utcnow
+
+# Max calendar days between the last two bars for them to count as
+# "consecutive sessions" (a long weekend + holiday cluster fits; a data
+# hole does not). Yahoo's NSE sector-index feeds go dark for weeks at a
+# time -- ^CNXAUTO once gapped Jul 17 -> Aug 12 and the naive
+# close-to-close read reported "+8.35% today", corrupting every auto
+# company's excess move by ~-8pp (measured live 2026-08-12).
+_MAX_BAR_GAP_DAYS = 5
 
 
 def compute_excess_move_pct(raw_move_pct: float, sector_move_pct: float) -> float:
@@ -29,8 +39,15 @@ def compute_volume_multiple(day_volume: float, avg_volume_20d: float | None) -> 
 
 def _daily_return_pct(bars: list[dict]) -> float | None:
     """Latest day's own % close-to-close move from a fetch_daily_bars()
-    series, or None if fewer than 2 points exist or the prior close is 0."""
+    series, or None if fewer than 2 points exist, the prior close is 0,
+    or the last two bars are not consecutive sessions (a multi-week feed
+    hole must never masquerade as a one-day move)."""
     if len(bars) < 2:
+        return None
+    gap_days = (
+        _date.fromisoformat(bars[-1]["date"]) - _date.fromisoformat(bars[-2]["date"])
+    ).days
+    if gap_days > _MAX_BAR_GAP_DAYS:
         return None
     prev_close = bars[-2]["close"]
     last_close = bars[-1]["close"]
@@ -99,14 +116,25 @@ def measure_company_move(session: Session, company: Company) -> MarketMove:
     company_bars = fetch_daily_bars(company.ticker, period="2mo")
     benchmark_bars = fetch_daily_bars(benchmark_ticker, period="2mo")
 
-    if not company_bars or not benchmark_bars:
+    if not company_bars:
         return MarketMove(
             company_id=company.id, benchmark_ticker=benchmark_ticker,
             measurement_status="no_data", measured_at=utcnow(),
         )
 
     raw_move_pct = _daily_return_pct(company_bars)
-    sector_move_pct = _daily_return_pct(benchmark_bars)
+    sector_move_pct = _daily_return_pct(benchmark_bars) if benchmark_bars else None
+    # A sector index whose feed is stale/gappy (the guard above returns
+    # None) must not sink the measurement -- degrade to the Nifty 50
+    # benchmark, exactly like sectors with no index of their own. The
+    # stored benchmark_ticker changes with it, so the UI honestly says
+    # "vs Nifty 50".
+    if sector_move_pct is None and benchmark_ticker != NIFTY50_TICKER:
+        nifty_bars = fetch_daily_bars(NIFTY50_TICKER, period="2mo")
+        nifty_move = _daily_return_pct(nifty_bars) if nifty_bars else None
+        if nifty_move is not None:
+            benchmark_ticker = NIFTY50_TICKER
+            sector_move_pct = nifty_move
     if raw_move_pct is None or sector_move_pct is None:
         return MarketMove(
             company_id=company.id, benchmark_ticker=benchmark_ticker,

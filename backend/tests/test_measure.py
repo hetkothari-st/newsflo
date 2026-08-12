@@ -111,3 +111,44 @@ def test_measure_company_move_fallback_benchmark_recorded_for_unmapped_sector(mo
 
     assert move.benchmark_ticker == "^NSEI"
     assert move.measurement_status == "ok"
+
+
+def test_daily_return_none_when_bars_span_a_feed_hole():
+    """Yahoo's NSE sector-index feeds go dark for weeks (^CNXAUTO gapped
+    Jul 17 -> Aug 12 live); the close-to-close read must refuse to call
+    that a one-day move."""
+    bars = _bars([27099.75, 29363.05], [0.0, 0.0], ["2026-07-17", "2026-08-12"])
+
+    assert measure._daily_return_pct(bars) is None
+
+
+def test_daily_return_tolerates_a_long_weekend():
+    bars = _bars([100.0, 102.0], [0.0, 0.0], ["2026-01-01", "2026-01-05"])
+
+    assert measure._daily_return_pct(bars) == pytest.approx(2.0)
+
+
+def test_measure_falls_back_to_nifty_when_sector_index_is_gappy(monkeypatch):
+    """A stale sector index must not corrupt excess (raw - 8.35pp fake
+    sector move) OR sink the row to no_data -- it degrades to the Nifty
+    50 benchmark and says so via benchmark_ticker."""
+    company = _FakeCompany(ticker="TVSSRICHAK.NS", sector="auto")
+
+    def fake_fetch_daily_bars(ticker, period):
+        if ticker == "TVSSRICHAK.NS":
+            return _bars([3944.7, 3868.2], [10.0, 10.0], ["2026-08-11", "2026-08-12"])
+        if ticker == "^CNXAUTO":  # month-long hole
+            return _bars([27099.75, 29363.05], [0.0, 0.0], ["2026-07-17", "2026-08-12"])
+        if ticker == "^NSEI":  # healthy
+            return _bars([24500.0, 24402.0], [0.0, 0.0], ["2026-08-11", "2026-08-12"])
+        raise AssertionError(f"unexpected ticker {ticker}")
+
+    monkeypatch.setattr(measure, "fetch_daily_bars", fake_fetch_daily_bars)
+
+    move = measure.measure_company_move(session=None, company=company)
+
+    assert move.measurement_status == "ok"
+    assert move.benchmark_ticker == "^NSEI"
+    assert move.raw_move_pct == pytest.approx(-1.94, abs=0.01)
+    assert move.sector_move_pct == pytest.approx(-0.4, abs=0.01)
+    assert move.excess_move_pct == pytest.approx(-1.54, abs=0.02)
