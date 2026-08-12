@@ -585,9 +585,12 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
     state = _GraphState()
 
     try:
-        _build_graph(router, session, facts, state, budget, article_id,
-                     max_depth=tier_caps["max_depth"] or settings.max_causal_depth,
-                     max_expansions=tier_caps["max_expansions"] or MAX_EXPANSIONS_PER_ARTICLE)
+        if tier == "narrow" and settings.impact_narrow_single_call:
+            _narrow_single_call(router, session, facts, state, budget, article_id)
+        else:
+            _build_graph(router, session, facts, state, budget, article_id,
+                         max_depth=tier_caps["max_depth"] or settings.max_causal_depth,
+                         max_expansions=tier_caps["max_expansions"] or MAX_EXPANSIONS_PER_ARTICLE)
     except Exception as exc:  # noqa: BLE001 -- never-fail contract (2026-08-11)
         # A crash AFTER real work exists must not throw that work away: if
         # any companies or edges were produced, ship them marked degraded
@@ -611,6 +614,139 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         edges=state.edges, gaps=state.gaps, ranking=ranking,
         analysis_provider=router.provider, analysis_quality=router.quality,
     )
+
+
+def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
+                        state: _GraphState, budget: ArticleBudget,
+                        article_id: int | None) -> None:
+    """Narrow-tier consolidated path (2026-08-11): ONE graph call (shocks +
+    depth<=2 edges + channel audit) and ONE batched companies call replace
+    the staged loop -- validated manually via the v2.1 anti-omission
+    prompt. Every deterministic rail stays identical: _register_edge
+    normalization/dedup/thresholds, candidate grounding with ticker enums,
+    net-effect discipline, deterministic ranking. Verification escalates
+    RISK-BASED: an independent verify call fires only when the result
+    carries high-impact / low-confidence / many companies; otherwise the
+    in-call self-check stands (and no exposure-cache rows are written --
+    the cache only ever learns from independently verified results)."""
+    from app.analysis.impact_graph.schemas import SCHEMA_NARROW_GRAPH, schema_companies_batched
+
+    raw = router.call(
+        "narrow_graph", schema=SCHEMA_NARROW_GRAPH,
+        static_prefix=prompts.static_prefix(prompts.NARROW_GRAPH_PROMPT),
+        dynamic_suffix=_facts_suffix(facts),
+        compact_suffix=_compact_suffix(facts),
+        max_output_tokens=4096,
+    )
+    for shock in raw.get("shocks", []):
+        edge = GraphEdge(
+            parent_type="event", parent_id=EVENT_NODE_ID, child_type="economic_node",
+            child_id=str(shock.get("shock_id") or shock.get("label", "shock")),
+            direction=shock.get("direction", "neutral"), mechanism=shock.get("mechanism", ""),
+            impact_strength=shock.get("impact_strength", 0.5),
+            confidence=shock.get("confidence", 0.0), materiality=shock.get("materiality", 0.5),
+            time_horizon=shock.get("time_horizon", "Short-Term"),
+        )
+        if _register_edge(state, edge):
+            node = _node_from_edge(edge, shock.get("label"), None)
+            state.nodes[node.node_id] = node
+    # Two passes so an edge whose parent arrives later in the list still
+    # registers -- the graph is at most depth 2 here.
+    pending_edges = list(raw.get("edges", []))
+    for _ in range(2):
+        remaining = []
+        for raw_edge in pending_edges:
+            try:
+                edge = GraphEdge(**{k: v for k, v in raw_edge.items() if k in GraphEdge.model_fields})
+            except ValidationError:
+                continue
+            if _register_edge(state, edge):
+                node = _node_from_edge(edge, raw_edge.get("child_label"), raw_edge.get("child_sector"))
+                state.nodes[node.node_id] = node
+            else:
+                remaining.append(raw_edge)
+        pending_edges = remaining
+        if not pending_edges:
+            break
+
+    # Batched company mapping: one call covering every sector node.
+    sector_nodes = [n for n in state.nodes.values() if n.sector is not None]
+    if session is None or not sector_nodes:
+        _skip("narrow_companies", "no_sector_nodes", article=article_id)
+        return
+    node_blocks, union_tickers, node_by_id = [], [], {}
+    for node in sector_nodes:
+        state.evaluated_nodes.add(node.node_id)
+        candidates = candidate_companies(session, [node.sector])
+        candidates = [c for c in candidates if c.ticker not in state.rejected_tickers]
+        tickers_to_ids = {c.ticker: c.id for c in candidates}
+        cached_positive, cached_negative = _exposure_cache(session, node.node_id, tickers_to_ids)
+        if cached_negative:
+            _skip("narrow_companies", "negative_relationship_cache", node=node.node_id,
+                  skipped=len(cached_negative))
+            candidates = [c for c in candidates if c.ticker not in cached_negative]
+        candidates = candidates[:MAX_CANDIDATES_PER_CALL]
+        if not candidates:
+            continue
+        node_by_id[node.node_id] = node
+        union_tickers.extend(c.ticker for c in candidates if c.ticker not in union_tickers)
+        parent_edge = next((e for e in state.edges if e.child_id == node.node_id), None)
+        node_blocks.append(
+            f"NODE {node.node_id} (distance {node.distance}, "
+            f"{parent_edge.direction if parent_edge else 'n/a'}): "
+            f"{parent_edge.mechanism if parent_edge else facts.event}\n"
+            + _candidate_profile_lines(candidates, cached_positive)
+        )
+    if not node_blocks:
+        _skip("narrow_companies", "no_candidates", article=article_id)
+        return
+
+    raw_companies = router.call(
+        "narrow_companies",
+        schema=schema_companies_batched(union_tickers, list(node_by_id)),
+        static_prefix=prompts.static_prefix(prompts.NARROW_COMPANIES_PROMPT),
+        dynamic_suffix=_compact_suffix(facts, extra="\n\n".join(node_blocks)),
+        compact_suffix=_compact_suffix(facts, extra="\n\n".join(node_blocks[:2])),
+    )
+    allowed = set(union_tickers)
+    for entry in raw_companies.get("companies", []):
+        ticker = entry.get("ticker")
+        node = node_by_id.get(entry.get("parent_id") or "")
+        if ticker not in allowed or node is None:
+            logger.warning("narrow single-call dropped entry ticker=%r parent=%r",
+                           ticker, entry.get("parent_id"))
+            continue
+        try:
+            company = GraphCompany(
+                **{**entry, "causal_distance": node.distance,
+                   "parent_type": node.node_type, "parent_id": node.node_id},
+            ).clamp()
+        except ValidationError as exc:
+            logger.warning("narrow single-call company rejected by schema: %s", exc)
+            continue
+        if company.net_direction in ("mixed", "uncertain"):
+            company.confidence = min(company.confidence, 0.55)
+        if not _passes(company.causal_distance, company.materiality, company.confidence):
+            state.rejected_tickers.add(ticker)
+            continue
+        company.verified = True  # in-call self-check; independent verify below when risky
+        held = state.companies.get(ticker)
+        if held is None or company.impact_strength > held.impact_strength:
+            state.companies[ticker] = company
+
+    # Risk-based escalation (token-opt spec P18): independent verification
+    # when the result is large, high-impact, or shaky.
+    companies = list(state.companies.values())
+    risky = (
+        len(companies) > 8
+        or any(c.impact_strength >= 0.7 for c in companies)
+        or any(c.confidence < 0.6 for c in companies)
+        or any(c.causal_distance >= 3 for c in companies)
+    )
+    if companies and risky and not budget.exceeded:
+        for company in companies:
+            company.verified = False
+        _verify_companies(router, session, facts, state, alert_id=article_id)
 
 
 def _build_graph(router: StageRouter, session, facts: EventFacts,

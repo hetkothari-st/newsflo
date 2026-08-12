@@ -174,6 +174,50 @@ SCHEMA_SHOCKS = {
 }
 
 
+# --- Narrow-tier single-call graph (shocks + edges + channel audit) ------
+
+SCHEMA_NARROW_GRAPH = {
+    "type": "object",
+    "properties": {
+        "shocks": SCHEMA_SHOCKS["properties"]["shocks"],
+        "channel_audit": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string"},
+                    "verdict": {"type": "string", "enum": ["kept", "discarded"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["channel", "verdict"],
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": dict(_EDGE_PROPS),
+                "required": ["parent_type", "parent_id", "child_type", "child_id",
+                             "direction", "mechanism", "confidence", "materiality"],
+            },
+        },
+    },
+    "required": ["shocks", "edges"],
+}
+
+
+def schema_companies_batched(valid_tickers: list[str], node_ids: list[str]) -> dict:
+    """Company schema for the narrow single-call mode: same grounding rails
+    as schema_companies plus a required parent_id enum-locked to THIS
+    graph's sector nodes -- the model maps every company to the node whose
+    mechanism reaches it."""
+    schema = schema_companies(valid_tickers)
+    item = schema["properties"]["companies"]["items"]
+    item["properties"]["parent_id"] = {"type": "string", "enum": node_ids}
+    item["required"] = list(item["required"]) + ["parent_id"]
+    return schema
+
+
 # --- Stage 4: ripple discovery (one hop from the frontier) ---------------
 
 SCHEMA_RIPPLE = {

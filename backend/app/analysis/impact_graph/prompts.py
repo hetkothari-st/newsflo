@@ -512,6 +512,30 @@ Do not manufacture winners.
 If a category has no defensible companies, leave it empty."""
 
 
+# Narrow-tier single-call mode (2026-08-11, validated via the manual v2.1
+# anti-omission test): two consolidated calls replace the staged loop for
+# non-macro articles. The channel checklist is the anti-silent-omission
+# scaffold -- every transmission channel must be kept or discarded with a
+# reason, never skipped.
+NARROW_GRAPH_PROMPT = """This is a NARROW event (not an economy-wide macro shock). Build its causal graph in ONE response.
+
+STEP 1 - INITIAL SHOCKS: the concrete economic variables this event changes (distance 1). A modest delta in a headline variable is still a directional shock; let materiality carry the size.
+
+STEP 2 - CHANNEL AUDIT: walk the transmission channels genuinely plausible for THIS event type (demand, pricing, costs, credit, competition, suppliers, customers, distribution, regulation). Mark each channel kept or discarded with a one-line reason in channel_audit -- discarding is fine, silent omission is not.
+
+STEP 3 - EDGES: convert kept channels into graph edges, one new mechanism per hop, maximum causal distance 2. DISTANCE CONVENTION: an intermediate node that merely restates its parent's mechanism is NOT a hop -- collapse it. Do not include downstream consequences beyond distance 2; a narrow event rarely deserves them, and a later analyst pass handles exceptions.
+
+Report sectors as child_type "sector" with the exact sector slug as child_id."""
+
+NARROW_COMPANIES_PROMPT = """For EVERY sector node listed, evaluate EVERY candidate company supplied for it, in ONE response.
+
+For each company: exact mechanism through its parent node, competing channels (positive_channels / negative_channels), NET direction (mixed and uncertain are valid; a relative beneficiary is not an absolute winner), impact_strength, confidence, materiality, time_horizon. Judge diversified companies at the relevant segment.
+
+Set parent_id to the company's sector node id. A company sits AT its parent node's causal distance.
+
+SELF-CHECK before answering: for each company -- concrete causal link? direction logically correct? actually exposed? material enough? If any answer is no, leave it out; do not include companies to look thorough. Returning few or zero companies is a correct answer."""
+
+
 def static_prefix(extra: str = "") -> str:
     """The cacheable request prefix: global system prompt + stable sector
     definitions (+ an optional stage prompt). Byte-identical across calls of

@@ -175,11 +175,13 @@ def test_static_prefix_rides_contents_head_for_implicit_cache(monkeypatch):
     assert "systemInstruction" not in captured["body"]
 
 
-def test_triage_narrow_event_gets_small_graph_and_tight_budget(db_session):
+def test_triage_narrow_event_gets_small_graph_and_tight_budget(db_session, monkeypatch):
     """Deterministic triage (cost-target 2026-08-11): a non-macro
     event_type runs depth-capped with tier token ceilings; a broad type
-    keeps the full graph. Zero extra LLM calls either way."""
-    from app.config import IMPACT_TRIAGE_TIERS
+    keeps the full graph. Zero extra LLM calls either way. Staged-narrow
+    path pinned (single-call mode covered by its own tests)."""
+    from app.config import IMPACT_TRIAGE_TIERS, settings as _settings
+    monkeypatch.setattr(_settings, "impact_narrow_single_call", False)
     narrow_facts = dict(FACTS, event_type="earnings")
     counter = {"n": 0}
 
@@ -211,3 +213,82 @@ def test_triage_broad_event_keeps_full_budget(db_session):
     })
     analyze_article_v3(router, "t", "c", session=db_session)
     assert router.budget.max_output_override is None
+
+
+def test_narrow_single_call_uses_two_llm_calls(db_session):
+    """Narrow tier + single-call mode: facts + narrow_graph +
+    narrow_companies -- never the staged loop."""
+    _company(db_session, "NARROW.NS", "Narrow Co", "fmcg")
+    router = FakeRouter({
+        "extract_facts": dict(FACTS, event_type="earnings"),
+        "narrow_graph": {
+            "shocks": [{"shock_id": "demand_hit", "label": "Demand hit", "direction": "bearish",
+                        "mechanism": "m", "confidence": 0.85, "materiality": 0.7,
+                        "impact_strength": 0.6}],
+            "edges": [_edge("demand_hit", "fmcg", child_type="sector", mat=0.6, conf=0.8)],
+            "channel_audit": [{"channel": "demand", "verdict": "kept"}],
+        },
+        "narrow_companies": {"companies": [
+            dict(_company_entry("NARROW.NS", "Narrow Co", impact=0.5, conf=0.8),
+                 parent_id="fmcg", net_direction="bearish"),
+        ]},
+    })
+    result = analyze_article_v3(router, "t", "c", session=db_session)
+    assert router.calls == ["extract_facts", "narrow_graph", "narrow_companies"]
+    assert [c.ticker for c in result.companies] == ["NARROW.NS"]
+    company = result.companies[0]
+    assert company.causal_distance == 2  # sits AT the sector node's distance
+    assert company.verified is True      # low-risk: self-check stands
+    assert result.ranking[0]["bucket"] == "adversely_affected"
+
+
+def test_narrow_single_call_escalates_risky_results_to_verification(db_session):
+    _company(db_session, "BIGIMP.NS", "Big Impact Co", "fmcg")
+    router = FakeRouter({
+        "extract_facts": dict(FACTS, event_type="earnings"),
+        "narrow_graph": {
+            "shocks": [{"shock_id": "demand_hit", "label": "d", "direction": "bearish",
+                        "mechanism": "m", "confidence": 0.85, "materiality": 0.7,
+                        "impact_strength": 0.6}],
+            "edges": [_edge("demand_hit", "fmcg", child_type="sector", mat=0.6, conf=0.8)],
+        },
+        "narrow_companies": {"companies": [
+            dict(_company_entry("BIGIMP.NS", "Big Impact Co", impact=0.9, conf=0.8),
+                 parent_id="fmcg", net_direction="bearish"),  # impact >= 0.7 -> risky
+        ]},
+        "verify_companies": {"accept": ["BIGIMP.NS"], "reject": []},
+    })
+    result = analyze_article_v3(router, "t", "c", session=db_session)
+    assert "verify_companies" in router.calls
+    assert result.companies[0].verified is True
+
+
+def test_broad_events_never_use_single_call_mode(db_session):
+    router = FakeRouter({
+        "extract_facts": FACTS,  # geopolitical_conflict -> broad tier
+        "initial_shocks": {"shocks": [], "direct_nodes": []},
+    })
+    analyze_article_v3(router, "t", "c", session=db_session)
+    assert "narrow_graph" not in router.calls
+    assert "initial_shocks" in router.calls
+
+
+def test_narrow_single_call_stays_candidate_grounded(db_session):
+    _company(db_session, "GROUND.NS", "Grounded Co", "fmcg")
+    router = FakeRouter({
+        "extract_facts": dict(FACTS, event_type="earnings"),
+        "narrow_graph": {
+            "shocks": [{"shock_id": "demand_hit", "label": "d", "direction": "bearish",
+                        "mechanism": "m", "confidence": 0.85, "materiality": 0.7,
+                        "impact_strength": 0.6}],
+            "edges": [_edge("demand_hit", "fmcg", child_type="sector", mat=0.6, conf=0.8)],
+        },
+        "narrow_companies": {"companies": [
+            dict(_company_entry("INVENTED.NS", "Invented Co"), parent_id="fmcg",
+                 net_direction="bearish"),
+            dict(_company_entry("GROUND.NS", "Grounded Co"), parent_id="fmcg",
+                 net_direction="bearish"),
+        ]},
+    })
+    result = analyze_article_v3(router, "t", "c", session=db_session)
+    assert [c.ticker for c in result.companies] == ["GROUND.NS"]

@@ -233,6 +233,11 @@ class Settings(BaseSettings):
     # The hybrid cost lever (2026-08-11): move a PROVEN-equivalent stage to
     # Flash without touching the others -- never a silent global downgrade.
     gemini_stage_model_overrides: str = os.environ.get("GEMINI_STAGE_MODEL_OVERRIDES", "")
+    # Narrow-tier single-call mode (validated manually 2026-08-11 via the
+    # v2.1 anti-omission prompt): narrow articles run facts + ONE graph
+    # call + ONE batched companies call instead of 6-8 staged calls.
+    # Verification escalates risk-based. Broad events always stay staged.
+    impact_narrow_single_call: bool = os.environ.get("IMPACT_NARROW_SINGLE_CALL", "true").lower() == "true"
 
     @property
     def gemini_stage_model_override_map(self) -> dict[str, str]:
