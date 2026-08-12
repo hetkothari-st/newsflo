@@ -7,14 +7,16 @@
    experiment runs. */
 import { useEffect, useRef, useState } from 'react';
 import './v4.css';
+import AccountV4 from './AccountV4';
 import ArchiveV4 from './ArchiveV4';
 import DeepDiveV4 from './DeepDiveV4';
 import FeedV4 from './FeedV4';
 import InfoV4, { type InfoV4Data } from './InfoV4';
 import PulseLiveV4 from './PulseLiveV4';
 import { DirectoryV4, DiscoverV4, PortfolioV4, ReviewV4 } from './SectionsV4';
+import { useAuth } from '../lib/auth';
 
-type View = 'feed' | 'pulse' | 'disc' | 'dir' | 'pf' | 'car' | 'arch';
+type View = 'feed' | 'pulse' | 'disc' | 'dir' | 'pf' | 'car' | 'arch' | 'account';
 
 const NAV_ITEMS: Array<{ view: View; label: string }> = [
   { view: 'feed', label: 'Feed' },
@@ -36,6 +38,7 @@ const IST_DATE = new Intl.DateTimeFormat('en-IN', {
 
 export default function ShellV4() {
   const [view, setView] = useState<View>('feed');
+  const { token, email } = useAuth();
   // Scroll settle-assist: iOS sometimes rests between the homepage and
   // card two (half of card one visible) despite mandatory snapping --
   // after the scroll goes idle in that dead zone, finish the trip home.
@@ -213,9 +216,22 @@ export default function ShellV4() {
               </button>
             ))}
           </nav>
-          <button className="themebtn" onClick={toggleDark} aria-label="Toggle theme" title="Light / dark">
-            ◐
-          </button>
+          <div className="topctl">
+            <button
+              className={`acctbtn ${view === 'account' ? 'on' : ''}`}
+              onClick={() => setView('account')}
+              aria-label="Account"
+              title={token ? (email ?? 'Account') : 'Sign in'}
+            >
+              <span className="acctdot" aria-hidden="true">
+                {token ? (email ?? '?').slice(0, 1).toUpperCase() : '○'}
+              </span>
+              {token ? (email?.split('@')[0] ?? 'Account') : 'Sign in'}
+            </button>
+            <button className="themebtn" onClick={toggleDark} aria-label="Toggle theme" title="Light / dark">
+              ◐
+            </button>
+          </div>
         </div>
         {view === 'feed' && feedDate !== null && (
           <div className="dateline">
@@ -244,8 +260,11 @@ export default function ShellV4() {
       )}
       {view === 'disc' && <DiscoverV4 onOpenDeepDive={openDeepDive} />}
       {view === 'dir' && <DirectoryV4 onOpenDeepDive={openDeepDive} />}
-      {view === 'pf' && <PortfolioV4 onOpenDeepDive={openDeepDive} />}
-      {view === 'car' && <ReviewV4 />}
+      {view === 'pf' && (
+        <PortfolioV4 onOpenDeepDive={openDeepDive} onSignIn={() => setView('account')} />
+      )}
+      {view === 'car' && <ReviewV4 onSignIn={() => setView('account')} />}
+      {view === 'account' && <AccountV4 />}
       {view === 'arch' && (
         <ArchiveV4
           onPick={(date) => {

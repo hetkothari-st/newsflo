@@ -76,7 +76,6 @@ export default function PortfolioManageV4({
 
   return (
     <div className="manage4">
-      <h2 className="archsub">Your holdings</h2>
       {rows !== null && rows.length === 0 && (
         <p className="psub">Nothing held yet — add a position below or connect a broker.</p>
       )}

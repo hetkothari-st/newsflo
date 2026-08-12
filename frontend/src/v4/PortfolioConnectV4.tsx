@@ -65,7 +65,6 @@ export default function PortfolioConnectV4({
 
   return (
     <div className="connect4">
-      <h2 className="archsub">Connect a broker</h2>
       <p className="psub">
         Pick your provider. Every broker's console exports a holdings file — drop it here and the
         positions land in your portfolio. Zerodha can also connect live.

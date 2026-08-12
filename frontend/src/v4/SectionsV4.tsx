@@ -16,7 +16,6 @@ import {
   type DiscoveryEntry,
   type DiscoveryTab,
 } from '../v3/api';
-import AuthV4 from './AuthV4';
 import FilterMenuV4 from './FilterMenuV4';
 import LogoV4 from './LogoV4';
 import PortfolioConnectV4 from './PortfolioConnectV4';
@@ -368,9 +367,41 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
   );
 }
 
+/* ---------- SIGN-IN GATE (shared by Portfolio and Review) ---------- */
+
+/* Auth itself lives on the Account page -- gated sections show a quiet
+   invitation with a redirect, never an embedded form. */
+function SignInGate({
+  heading,
+  blurb,
+  onSignIn,
+}: {
+  heading: string;
+  blurb: string;
+  onSignIn: () => void;
+}) {
+  return (
+    <div className="page4">
+      <h1 className="phead">{heading}</h1>
+      <div className="gate4">
+        <p>{blurb}</p>
+        <button type="button" className="authsubmit" onClick={onSignIn}>
+          Sign in or create account →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- PORTFOLIO ---------- */
 
-export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string, alertId?: number) => void }) {
+export function PortfolioV4({
+  onOpenDeepDive,
+  onSignIn,
+}: {
+  onOpenDeepDive: (ticker: string, alertId?: number) => void;
+  onSignIn: () => void;
+}) {
   const { token } = useAuth();
   const [overlay, setOverlay] = useState<Awaited<ReturnType<typeof getPortfolioOverlay>> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -418,9 +449,11 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
 
   if (!token) {
     return (
-      <div className="page4">
-        <AuthV4 purpose="Your holdings, and which of today's news touches them — sign in to switch this section on." />
-      </div>
+      <SignInGate
+        heading="Portfolio"
+        blurb="Your holdings, and which of today's news touches them. Sign in to add positions, connect your broker, and light up the portfolio thread across the feed."
+        onSignIn={onSignIn}
+      />
     );
   }
 
@@ -430,41 +463,53 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
       <p className="psub">Your holdings, and which of today's news touches them.</p>
       {kiteNote !== null && <p className="psub">{kiteNote}</p>}
       {error !== null && <p className="empty4">{error}</p>}
-      {token && overlay !== null && (
-        <>
-          <p className="pfcount">
-            {overlay.affected_count}
-            <small> / {overlay.holdings.length} holdings touched by today's news</small>
-          </p>
-          {overlay.holdings.length === 0 && (
-            <p className="empty4">
-              No holdings yet. Add positions below or connect your broker to light up the
-              portfolio thread across the feed.
+
+      <section className="pfsec">
+        <h2 className="secthd">Today's touch</h2>
+        {overlay !== null && (
+          <>
+            <p className="pfcount">
+              {overlay.affected_count}
+              <small> / {overlay.holdings.length} holdings touched by today's news</small>
             </p>
-          )}
-          {overlay.holdings.map((holding) => (
-            <div
-              className="entry4"
-              key={holding.ticker}
-              onClick={() => onOpenDeepDive(holding.ticker, holding.affected_alert_id ?? undefined)}
-            >
-              <LogoV4 logoUrl={holding.logo_url} ticker={holding.ticker} name={holding.name} />
-              <div className="ebody">
-                <div className="etop">
-                  <span className="ename">{holding.name}</span>
-                  <span className="emetric">{holding.quantity} sh</span>
-                </div>
-                <p className="ewhy">{holding.affected_headline ?? 'No news today.'}</p>
-                <div className="emeta">
-                  <span>{holding.ticker}</span>
+            {overlay.holdings.length === 0 && (
+              <p className="empty4">
+                No holdings yet — add positions or connect your broker below.
+              </p>
+            )}
+            {overlay.holdings.map((holding) => (
+              <div
+                className="entry4"
+                key={holding.ticker}
+                onClick={() => onOpenDeepDive(holding.ticker, holding.affected_alert_id ?? undefined)}
+              >
+                <LogoV4 logoUrl={holding.logo_url} ticker={holding.ticker} name={holding.name} />
+                <div className="ebody">
+                  <div className="etop">
+                    <span className="ename">{holding.name}</span>
+                    <span className="emetric">{holding.quantity} sh</span>
+                  </div>
+                  <p className="ewhy">{holding.affected_headline ?? 'No news today.'}</p>
+                  <div className="emeta">
+                    <span>{holding.ticker}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </>
-      )}
-      <PortfolioManageV4 token={token} version={version} onChanged={bump} />
-      <PortfolioConnectV4 token={token} onImported={bump} />
+            ))}
+          </>
+        )}
+      </section>
+
+      <section className="pfsec">
+        <h2 className="secthd">Your holdings</h2>
+        <PortfolioManageV4 token={token} version={version} onChanged={bump} />
+      </section>
+
+      <section className="pfsec">
+        <h2 className="secthd">Connect a broker</h2>
+        <PortfolioConnectV4 token={token} onImported={bump} />
+      </section>
+
       <p className="emeta" style={{ marginTop: 24 }}>
         Broker files are parsed for tickers and quantities only — nothing else is read or stored.
       </p>
@@ -482,10 +527,23 @@ const OUTCOME_LABELS: Record<CarReviewRow['outcome_label'], string> = {
   FLAT: 'Flat',
 };
 
-export function ReviewV4() {
+export function ReviewV4({ onSignIn }: { onSignIn: () => void }) {
   const { token } = useAuth();
   const [rows, setRows] = useState<CarReviewRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // One alert produces a row per measured company -- grouped by story so
+  // the headline prints once with its companies beneath, not repeated.
+  const groups = useMemo(() => {
+    const map = new Map<string, CarReviewRow[]>();
+    for (const row of rows ?? []) {
+      const key = `${row.article_title}::${row.alert_created_at}`;
+      const bucket = map.get(key);
+      if (bucket) bucket.push(row);
+      else map.set(key, [row]);
+    }
+    return Array.from(map.values());
+  }, [rows]);
 
   useEffect(() => {
     if (!token) return;
@@ -504,9 +562,11 @@ export function ReviewV4() {
 
   if (!token) {
     return (
-      <div className="page4">
-        <AuthV4 purpose="Did a flagged reaction hold or reverse? Sign in to review how each one played out." />
-      </div>
+      <SignInGate
+        heading="Reaction review"
+        blurb="Did a flagged reaction hold or reverse? Sign in to review how each measured story played out, company by company."
+        onSignIn={onSignIn}
+      />
     );
   }
 
@@ -515,48 +575,53 @@ export function ReviewV4() {
       <h1 className="phead">Reaction review</h1>
       <p className="psub">Did a flagged reaction hold or reverse? Cumulative abnormal return, −1 to +3 days.</p>
       {error !== null && <p className="empty4">{error}</p>}
-      {token && rows !== null && rows.length === 0 && (
+      {rows !== null && rows.length === 0 && (
         <p className="empty4">
           No completed reaction windows yet — outcomes appear a few trading days after each alert.
         </p>
       )}
-      {token &&
-        rows?.map((row) => {
-          const series = row.car_series;
-          const max = series ? Math.max(...series.map((value) => Math.abs(value)), 0.001) : null;
-          return (
-            <div className="carrow4" key={row.id}>
-              <p className="chl">{row.article_title}</p>
-              <div className="emeta" style={{ marginBottom: 12 }}>
-                <span>{row.ticker}</span>
-                <span className="gtag">{OUTCOME_LABELS[row.outcome_label]}</span>
-                <span className={row.car_pct >= 0 ? 'up' : 'down'}>CAR {fmtPct(row.car_pct)}</span>
+      {groups.map((group) => (
+        <div className="carrow4" key={group[0].id}>
+          <p className="chl">{group[0].article_title}</p>
+          {group.map((row) => {
+            const series = row.car_series;
+            const max = series ? Math.max(...series.map((value) => Math.abs(value)), 0.001) : null;
+            return (
+              <div className="carcase" key={row.id}>
+                <div className="carmeta">
+                  <span className="mtick">{row.ticker}</span>
+                  <span className="gtag">{OUTCOME_LABELS[row.outcome_label]}</span>
+                  <span className={`carval ${row.car_pct >= 0 ? 'up' : 'down'}`}>
+                    CAR {fmtPct(row.car_pct)}
+                  </span>
+                </div>
+                {series !== null && max !== null && (
+                  <>
+                    <div className="cartrack4">
+                      {series.map((value, index) => (
+                        <div key={index} style={{ justifyContent: value >= 0 ? 'flex-end' : 'flex-start' }}>
+                          <div
+                            className={`carbar4 ${value >= 0 ? 'up' : 'down'}`}
+                            style={{
+                              height: `${(Math.abs(value) / max) * 100}%`,
+                              background: value >= 0 ? 'var(--data-up)' : 'var(--data-down)',
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="carlbl4">
+                      {DAY_LABELS.slice(0, series.length).map((label) => (
+                        <span key={label}>{label}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-              {series !== null && max !== null && (
-                <>
-                  <div className="cartrack4">
-                    {series.map((value, index) => (
-                      <div key={index} style={{ justifyContent: value >= 0 ? 'flex-end' : 'flex-start' }}>
-                        <div
-                          className={`carbar4 ${value >= 0 ? 'up' : 'down'}`}
-                          style={{
-                            height: `${(Math.abs(value) / max) * 100}%`,
-                            background: value >= 0 ? 'var(--data-up)' : 'var(--data-down)',
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="carlbl4">
-                    {DAY_LABELS.slice(0, series.length).map((label) => (
-                      <span key={label}>{label}</span>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+      ))}
       <p className="emeta" style={{ marginTop: 24 }}>
         Used to back-validate intensity weights — not a recommendation.
       </p>
