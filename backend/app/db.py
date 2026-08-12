@@ -155,6 +155,8 @@ _ADDED_COLUMNS = [
     ("alert_companies", "display_tier", "VARCHAR"),
     ("alert_companies", "gate_state", "VARCHAR"),
     ("company_node_exposures", "provenance_type", "VARCHAR"),
+    ("market_moves", "last_bar_date", "VARCHAR"),
+    ("market_moves", "bar_complete", "INTEGER"),
 ]
 
 

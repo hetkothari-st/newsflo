@@ -10,7 +10,7 @@ from app.companies.branding import logo_url
 from app.ist_time import day_utc_window, today_ist
 from app.market.breadth import compute_breadth_score
 from app.market.intensity import compute_intensity
-from app.market.sector_indices import is_fallback_benchmark
+from app.market.sector_indices import NIFTY50_TICKER, is_fallback_benchmark
 from app.market.verdict import compute_verdict
 from app.models import Alert, Company, MarketMove
 
@@ -132,7 +132,15 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
         "sector_move_pct": peak.sector_move_pct,
         "volume_multiple": peak.volume_multiple,
         "benchmark_ticker": peak.benchmark_ticker,
-        "is_fallback_benchmark": is_fallback_benchmark(peak_company.sector),
+        # Honest flag (2026-08-12 fix): derived from the benchmark ACTUALLY
+        # used, not from the sector's default mapping -- the stale-sector-
+        # index degrade (app.market.measure) can swap a sector-indexed
+        # company onto ^NSEI, and the sector-derived flag then lied
+        # ("vs sector index") about a Nifty-measured move.
+        "is_fallback_benchmark": (
+            peak.benchmark_ticker == NIFTY50_TICKER
+            or is_fallback_benchmark(peak_company.sector)
+        ),
         "peak_ticker": peak_company.ticker,
         "peak_company_id": peak_company.id,
         "peak_company_name": peak_company.name,

@@ -61,7 +61,7 @@ def test_persist_alert_does_not_crash_when_measurement_raises_no_data(db_session
     # crash and must still create the Alert + AlertCompany rows.
     from app.models import MarketMove, utcnow
 
-    def fake_measure_real_no_data(session, company):
+    def fake_measure_real_no_data(session, company, **kwargs):
         return MarketMove(
             company_id=company.id, benchmark_ticker="^CNXENERGY",
             measurement_status="no_data", measured_at=utcnow(),

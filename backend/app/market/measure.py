@@ -4,13 +4,21 @@ over price/volume bars; nothing calls an LLM. Built on
 app.companies.price_series.fetch_daily_bars and
 app.market.sector_indices.benchmark_ticker_for_sector.
 """
-from datetime import date as _date
+import os
+from datetime import (
+    date as _date, datetime, time as _time, timedelta as _timedelta,
+    timezone as _timezone,
+)
 
 from sqlalchemy.orm import Session
 
 from app.companies.price_series import fetch_daily_bars
 from app.market.sector_indices import NIFTY50_TICKER, benchmark_ticker_for_sector
 from app.models import Company, MarketMove, utcnow
+
+# IST defined locally, NOT imported from app.ist_time -- that module
+# imports app.pipeline, which imports this one (circular).
+IST = _timezone(_timedelta(hours=5, minutes=30))
 
 # Max calendar days between the last two bars for them to count as
 # "consecutive sessions" (a long weekend + holiday cluster fits; a data
@@ -19,6 +27,44 @@ from app.models import Company, MarketMove, utcnow
 # close-to-close read reported "+8.35% today", corrupting every auto
 # company's excess move by ~-8pp (measured live 2026-08-12).
 _MAX_BAR_GAP_DAYS = 5
+
+# A feed whose LAST bar is older than this vs today (IST) is a dead/stale
+# feed: its close must not pass as "today's move". 4 calendar days covers
+# any weekend + one holiday; anything older is a data problem. Writes the
+# long-defined but never-used measurement_status="stale" (spec §21).
+_STALE_BAR_MAX_AGE_DAYS = 4
+
+# Meaningful-move dead zone (spec §22): |excess| below this is market
+# noise and classifies as "flat", never a confident direction. Applies to
+# REACTION classification only -- excess_move_pct itself stays exact, and
+# fundamental analysis is untouched by definition.
+MARKET_REACTION_DEAD_ZONE_PCT = float(os.environ.get("MARKET_REACTION_DEAD_ZONE_PCT", "0.25"))
+
+# NSE cash session (IST). No holiday calendar is wired; weekends + the
+# stale-bar guard + bar-vs-event ordering cover the failure modes that
+# actually occurred. A real exchange calendar is a known open seam.
+_SESSION_OPEN = _time(9, 15)
+_SESSION_CLOSE = _time(15, 30)
+
+
+def market_session_state(now_ist: datetime) -> str:
+    """"open" during the NSE cash session (Mon-Fri 09:15-15:30 IST),
+    "closed" otherwise."""
+    if now_ist.weekday() >= 5:
+        return "closed"
+    return "open" if _SESSION_OPEN <= now_ist.time() <= _SESSION_CLOSE else "closed"
+
+
+def classify_reaction(excess_move_pct: float | None) -> str:
+    """Deterministic market-reaction class: positive/negative beyond the
+    dead zone, flat inside it, unknown when unmeasured. This is the ONLY
+    sanctioned excess->direction mapping; it never feeds back into
+    fundamental analysis (spec §22/§25)."""
+    if excess_move_pct is None:
+        return "unknown"
+    if abs(excess_move_pct) < MARKET_REACTION_DEAD_ZONE_PCT:
+        return "flat"
+    return "positive" if excess_move_pct > 0 else "negative"
 
 
 def compute_excess_move_pct(raw_move_pct: float, sector_move_pct: float) -> float:
@@ -104,14 +150,24 @@ def compute_materiality(
     return excess_traded_value / market_cap
 
 
-def measure_company_move(session: Session, company: Company) -> MarketMove:
+def measure_company_move(session: Session, company: Company,
+                         event_time: datetime | None = None,
+                         now: datetime | None = None) -> MarketMove:
     """Fetch real price/volume bars for ``company`` and its sector
     benchmark, compute the measured facts, and return an unattached
     MarketMove row (caller must set alert_id and session.add it). Never
     raises -- any missing upstream data produces measurement_status=
     'no_data' with null metric columns rather than a fabricated number or
     a crashed alert.
+
+    Integrity guards (spec §21): a feed whose last bar is older than
+    _STALE_BAR_MAX_AGE_DAYS returns "stale"; an event newer than the last
+    bar (weekend/after-hours alert) returns "no_data" -- Friday's close is
+    not Saturday's reaction; a bar measured mid-session is labeled
+    bar_complete=0.
     """
+    now = now or datetime.now(_timezone.utc)
+    now_ist = now.astimezone(IST)
     benchmark_ticker = benchmark_ticker_for_sector(company.sector)
     company_bars = fetch_daily_bars(company.ticker, period="2mo")
     benchmark_bars = fetch_daily_bars(benchmark_ticker, period="2mo")
@@ -121,6 +177,25 @@ def measure_company_move(session: Session, company: Company) -> MarketMove:
             company_id=company.id, benchmark_ticker=benchmark_ticker,
             measurement_status="no_data", measured_at=utcnow(),
         )
+
+    last_bar_date = _date.fromisoformat(company_bars[-1]["date"])
+    if (now_ist.date() - last_bar_date).days > _STALE_BAR_MAX_AGE_DAYS:
+        return MarketMove(
+            company_id=company.id, benchmark_ticker=benchmark_ticker,
+            measurement_status="stale", measured_at=utcnow(),
+            last_bar_date=last_bar_date.isoformat(),
+        )
+    if event_time is not None:
+        event_ist_date = event_time.astimezone(IST).date()
+        if last_bar_date < event_ist_date:
+            # The market has not traded since the event: recording this
+            # bar would present a PRE-event close as the reaction. Honest
+            # no_data; the remeasure sweep retries once a session exists.
+            return MarketMove(
+                company_id=company.id, benchmark_ticker=benchmark_ticker,
+                measurement_status="no_data", measured_at=utcnow(),
+                last_bar_date=last_bar_date.isoformat(),
+            )
 
     raw_move_pct = _daily_return_pct(company_bars)
     sector_move_pct = _daily_return_pct(benchmark_bars) if benchmark_bars else None
@@ -165,4 +240,9 @@ def measure_company_move(session: Session, company: Company) -> MarketMove:
         avg_traded_value=compute_avg_traded_value(company_bars),
         measured_at=utcnow(),
         measurement_status="ok",
+        last_bar_date=last_bar_date.isoformat(),
+        # A bar measured during its own session is a partial snapshot,
+        # not a completed daily reaction -- labeled, never hidden.
+        bar_complete=0 if (last_bar_date == now_ist.date()
+                           and market_session_state(now_ist) == "open") else 1,
     )

@@ -49,7 +49,7 @@ def test_remeasure_updates_no_data_rows_in_place_and_reconciles_direction(db_ses
     alert, company, alert_company, move = _seed(db_session, direction="bullish")
     import app.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, "measure_company_move",
-                        lambda session, c: _ok_move(c, excess=-2.5))
+                        lambda session, c, **kw: _ok_move(c, excess=-2.5))
 
     fixed = remeasure_no_data_moves(db_session)
 
@@ -73,7 +73,7 @@ def test_remeasure_leaves_row_untouched_when_data_is_still_missing(db_session, m
     import app.pipeline as pipeline_module
     monkeypatch.setattr(
         pipeline_module, "measure_company_move",
-        lambda session, c: MarketMove(company_id=c.id, benchmark_ticker="^NSEI",
+        lambda session, c, **kw: MarketMove(company_id=c.id, benchmark_ticker="^NSEI",
                                       measurement_status="no_data", measured_at=utcnow()),
     )
 
@@ -89,7 +89,7 @@ def test_remeasure_skips_old_alerts(db_session, monkeypatch):
     _seed(db_session, created_at=utcnow() - timedelta(days=10))
     import app.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, "measure_company_move",
-                        lambda session, c: _ok_move(c))
+                        lambda session, c, **kw: _ok_move(c))
 
     # An old no_data alert is history, not a pending repair -- re-measuring
     # it now would write TODAY's bar as if it were the event-day reaction.

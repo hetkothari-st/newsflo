@@ -43,7 +43,7 @@ def test_process_new_articles_populates_summary_and_why_when_measured(db_session
     article = _article(db_session)
     monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: _fake_analysis())
 
-    def fake_measure(session, company_obj):
+    def fake_measure(session, company_obj, **kwargs):
         from app.models import utcnow
         return MarketMove(
             company_id=company_obj.id, benchmark_ticker="^CNXENERGY",
@@ -91,7 +91,7 @@ def test_persist_alert_survives_refine_alert_raising(db_session, monkeypatch):
         "time_horizon": "Short-Term",
     }]
 
-    def fake_measure(session, company_obj):
+    def fake_measure(session, company_obj, **kwargs):
         from app.models import utcnow
         return MarketMove(
             company_id=company_obj.id, benchmark_ticker="^CNXENERGY",

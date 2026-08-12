@@ -110,7 +110,7 @@ def test_process_new_articles_reconciles_direction_to_measured_move(db_session, 
     # The LLM guessed "bullish" before the market had reacted. The real,
     # measured move went the other way -- persisted direction must defer
     # to the measured fact, not the pre-measurement LLM guess.
-    def fake_measure(session, company_obj):
+    def fake_measure(session, company_obj, **kwargs):
         return MarketMove(
             company_id=company_obj.id, benchmark_ticker="^NSEI",
             measurement_status="ok", excess_move_pct=-3.1, measured_at=utcnow(),
@@ -1315,7 +1315,7 @@ def _stub_measurement(monkeypatch, excess_move_pct):
     and by test_market_move_wiring.py."""
     from app.models import MarketMove, utcnow
 
-    def fake_measure(session, company_obj):
+    def fake_measure(session, company_obj, **kwargs):
         return MarketMove(
             company_id=company_obj.id, benchmark_ticker="^NSEI",
             measurement_status="ok", excess_move_pct=excess_move_pct, measured_at=utcnow(),

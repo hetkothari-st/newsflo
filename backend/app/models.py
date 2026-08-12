@@ -716,6 +716,12 @@ class MarketMove(Base):
     avg_traded_value = Column(Float, nullable=True)
     measured_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     measurement_status = Column(String, nullable=False)  # ok | no_data | stale
+    # Bar-integrity transparency (spec 2026-08-12 §21): the market date of
+    # the bar this measurement read, and whether that bar was a completed
+    # session (0 = measured mid-session, a partial intraday snapshot).
+    # NULL on rows measured before these shipped.
+    last_bar_date = Column(String, nullable=True)  # ISO date
+    bar_complete = Column(Integer, nullable=True)  # 1 complete | 0 partial
 
     alert = relationship("Alert")
     company = relationship("Company")

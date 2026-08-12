@@ -398,11 +398,15 @@ def measure_and_reconcile_alert_companies(session: Session, alert_id: int, alert
     alert_row = session.get(Alert, alert_id)
     alert_category = alert_row.category if alert_row is not None else None
 
+    # Event time anchors the bar-vs-event ordering guard (spec §21): a
+    # weekend/after-hours alert must not record the last PRE-event bar as
+    # its reaction.
+    event_time = _as_aware_utc(alert_row.created_at) if alert_row is not None else None
     market_moves = []
     for alert_company in alert_companies:
         company_obj = session.get(Company, alert_company.company_id)
         if company_obj is not None:
-            move = measure_company_move(session, company_obj)
+            move = measure_company_move(session, company_obj, event_time=event_time)
             move.alert_id = alert_id
             move.category = alert_category
             session.add(move)
@@ -478,13 +482,16 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
         company = session.get(Company, move.company_id)
         if company is None:
             continue
-        fresh = measure_company_move(session, company)
+        alert_row = session.get(Alert, move.alert_id)
+        event_time = _as_aware_utc(alert_row.created_at) if alert_row is not None else None
+        fresh = measure_company_move(session, company, event_time=event_time)
         if fresh.measurement_status != "ok":
             continue  # still no data -- leave the honest no_data row alone
         for column in (
             "raw_move_pct", "sector_move_pct", "benchmark_ticker", "excess_move_pct",
             "volume", "avg_volume_20d", "volume_multiple", "vol_normalized",
             "materiality", "avg_traded_value", "measured_at", "measurement_status",
+            "last_bar_date", "bar_complete",
         ):
             setattr(move, column, getattr(fresh, column))
         # move.category keeps its persist-time stamp (recategorization safety).

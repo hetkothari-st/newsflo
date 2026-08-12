@@ -417,7 +417,7 @@ def test_reanalysis_reconciles_direction_the_same_way_the_live_pipeline_does(db_
         lambda client, title, content, session=None: _fake_analysis_with_company("FFF.NS", direction="bullish"),
     )
 
-    def fake_measure_bearish(session, company_obj):
+    def fake_measure_bearish(session, company_obj, **kwargs):
         return MarketMove(
             company_id=company_obj.id, benchmark_ticker="^CNXENERGY",
             measurement_status="ok", measured_at=_utcnow(),

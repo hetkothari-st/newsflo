@@ -98,7 +98,7 @@ def _no_real_market_move_fetch(monkeypatch):
     # precedence over this autouse default.
     from app.models import MarketMove, utcnow
 
-    def fake_measure(session, company):
+    def fake_measure(session, company, **kwargs):
         return MarketMove(
             company_id=company.id, benchmark_ticker="^NSEI",
             measurement_status="no_data", measured_at=utcnow(),

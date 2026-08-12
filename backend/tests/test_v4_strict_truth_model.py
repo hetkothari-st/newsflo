@@ -77,7 +77,7 @@ def test_strict_measurement_never_overwrites_fundamental_direction(
                                           move_status=None)
     import app.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, "measure_company_move",
-                        lambda session, c: _ok_move(c, excess=-2.5))
+                        lambda session, c, **kw: _ok_move(c, excess=-2.5))
 
     moves = measure_and_reconcile_alert_companies(
         db_session, alert.id, [alert_company])
@@ -98,7 +98,7 @@ def test_legacy_measurement_still_overwrites(db_session, monkeypatch, legacy_mod
                                           move_status=None)
     import app.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, "measure_company_move",
-                        lambda session, c: _ok_move(c, excess=-2.5))
+                        lambda session, c, **kw: _ok_move(c, excess=-2.5))
 
     measure_and_reconcile_alert_companies(db_session, alert.id, [alert_company])
 
@@ -115,7 +115,7 @@ def test_strict_remeasure_updates_move_but_not_direction(
     alert, company, alert_company = _seed(db_session, direction="bullish")
     import app.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, "measure_company_move",
-                        lambda session, c: _ok_move(c, excess=-2.5))
+                        lambda session, c, **kw: _ok_move(c, excess=-2.5))
 
     assert remeasure_no_data_moves(db_session) == 1
     move = db_session.query(MarketMove).filter_by(alert_id=alert.id).one()
@@ -130,7 +130,7 @@ def test_legacy_remeasure_still_overwrites(db_session, monkeypatch, legacy_mode)
     alert, company, alert_company = _seed(db_session, direction="bullish")
     import app.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, "measure_company_move",
-                        lambda session, c: _ok_move(c, excess=-2.5))
+                        lambda session, c, **kw: _ok_move(c, excess=-2.5))
 
     assert remeasure_no_data_moves(db_session) == 1
     db_session.refresh(alert_company)

@@ -1,7 +1,14 @@
+from datetime import datetime
+
 import pytest
 
 from app.market import measure
 from app.models import Company
+
+# Fixture bars use fixed 2026-01 dates; anchor "now" beside them so the
+# stale-bar guard (measured against today) doesn't fire on old fixtures.
+_NOW_JAN22 = datetime(2026, 1, 22, 18, 0, tzinfo=measure.IST)
+_NOW_JAN02 = datetime(2026, 1, 2, 18, 0, tzinfo=measure.IST)
 
 
 class _FakeCompany:
@@ -53,7 +60,7 @@ def test_measure_company_move_ok_path(monkeypatch):
 
     monkeypatch.setattr(measure, "fetch_daily_bars", fake_fetch_daily_bars)
 
-    move = measure.measure_company_move(session=None, company=company)
+    move = measure.measure_company_move(session=None, company=company, now=_NOW_JAN22)
 
     assert move.measurement_status == "ok"
     assert move.company_id == 1
@@ -93,7 +100,7 @@ def test_measure_company_move_no_data_when_benchmark_bars_missing(monkeypatch):
 
     monkeypatch.setattr(measure, "fetch_daily_bars", fake_fetch_daily_bars)
 
-    move = measure.measure_company_move(session=None, company=company)
+    move = measure.measure_company_move(session=None, company=company, now=_NOW_JAN02)
 
     assert move.measurement_status == "no_data"
     assert move.excess_move_pct is None
@@ -107,7 +114,7 @@ def test_measure_company_move_fallback_benchmark_recorded_for_unmapped_sector(mo
 
     monkeypatch.setattr(measure, "fetch_daily_bars", fake_fetch_daily_bars)
 
-    move = measure.measure_company_move(session=None, company=company)
+    move = measure.measure_company_move(session=None, company=company, now=_NOW_JAN02)
 
     assert move.benchmark_ticker == "^NSEI"
     assert move.measurement_status == "ok"
