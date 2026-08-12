@@ -468,26 +468,29 @@ export function PortfolioV4({
     );
   }
 
+  // First run (no holdings): the touch/manage sections would be three
+  // stacked empties -- omit them (house rule) and lead with connect.
+  const hasHoldings = overlay !== null && overlay.holdings.length > 0;
+
   return (
     <div className="page4">
       <h1 className="phead">Portfolio</h1>
-      <p className="psub">Your holdings, and which of today's news touches them.</p>
+      <p className="psub">
+        {hasHoldings
+          ? "Your holdings, and which of today's news touches them."
+          : 'Bring your positions in from your broker — the feed then flags every story that touches something you hold.'}
+      </p>
       {kiteNote !== null && <p className="psub">{kiteNote}</p>}
       {error !== null && <p className="empty4">{error}</p>}
 
-      <section className="pfsec">
-        <h2 className="secthd">Today's touch</h2>
-        {overlay !== null && (
-          <>
+      {hasHoldings && (
+        <>
+          <section className="pfsec">
+            <h2 className="secthd">Today's touch</h2>
             <p className="pfcount">
               {overlay.affected_count}
               <small> / {overlay.holdings.length} holdings touched by today's news</small>
             </p>
-            {overlay.holdings.length === 0 && (
-              <p className="empty4">
-                No holdings yet — add positions or connect your broker below.
-              </p>
-            )}
             {overlay.holdings.map((holding) => (
               <div
                 className="entry4"
@@ -507,14 +510,14 @@ export function PortfolioV4({
                 </div>
               </div>
             ))}
-          </>
-        )}
-      </section>
+          </section>
 
-      <section className="pfsec">
-        <h2 className="secthd">Your holdings</h2>
-        <PortfolioManageV4 token={token} version={version} onChanged={bump} />
-      </section>
+          <section className="pfsec">
+            <h2 className="secthd">Your holdings</h2>
+            <PortfolioManageV4 token={token} version={version} onChanged={bump} />
+          </section>
+        </>
+      )}
 
       <section className="pfsec">
         <h2 className="secthd">Connect a broker</h2>
