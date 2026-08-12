@@ -245,6 +245,15 @@ def reanalyze_alert(session, client, alert: Alert, force: bool, allow_empty: boo
     # therefore invisible to GET /api/feed-v2, which requires a peak
     # MarketMove to include an alert at all; see app/routers/feed_v2.py).
     session.query(MarketMove).filter_by(alert_id=alert.id).delete(synchronize_session=False)
+    # AlertRippleLayer / TimelineEffect are derived from the OLD analysis's
+    # company set and prose -- leaving them meant a reanalyzed alert kept
+    # card-back sections written for companies it may no longer have
+    # (stale-artifact bug, 2026-08-12 / INV-009). refine_alert regenerates
+    # both when it runs; deterministic strict-mode sections don't need
+    # persisted rows at all.
+    from app.models import AlertRippleLayer, TimelineEffect
+    session.query(AlertRippleLayer).filter_by(alert_id=alert.id).delete(synchronize_session=False)
+    session.query(TimelineEffect).filter_by(alert_id=alert.id).delete(synchronize_session=False)
     session.flush()
 
     alert_companies = []

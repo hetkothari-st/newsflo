@@ -585,6 +585,11 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
             if why:
                 m["_alert_company"].why = why
 
+    # Delete-before-insert (INV-009, 2026-08-12): refine_alert used to
+    # append, so any re-run (manual re-refinement, a retried deferred pass,
+    # fix_direction_contradiction-style scripts) duplicated every timeline
+    # row and card-back section. Regeneration replaces, never accumulates.
+    session.query(TimelineEffect).filter_by(alert_id=alert.id).delete()
     for effect in generate_timeline_effects(client, article.title, facts):
         session.add(TimelineEffect(alert_id=alert.id, horizon=effect["horizon"], description=effect["description"]))
 
@@ -611,6 +616,7 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
             "sector": company.sector, "sub_sector": company.sub_sector,
             "direction": ac.direction, "why": ac.why,
         })
+    session.query(AlertRippleLayer).filter_by(alert_id=alert.id).delete()
     for position, layer in enumerate(generate_ripple_layers(client, article.title, facts, layer_companies)):
         session.add(AlertRippleLayer(
             alert_id=alert.id, position=position,

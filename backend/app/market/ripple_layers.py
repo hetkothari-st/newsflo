@@ -14,6 +14,7 @@ import json
 from sqlalchemy.orm import Session
 
 from app.companies.branding import logo_url
+from app.config import settings
 from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
 from app.market.alert_measurement import _intensity_for_company_move
@@ -54,6 +55,87 @@ _SECTOR_LABELS = {
     "media_entertainment": "media", "chemicals": "chemicals",
     "textiles": "textiles", "other": "other companies",
 }
+
+
+# Controlled taxonomy labels for strict-mode sections (spec §23): keyed by
+# the causal parent node the gate validated. Fallback prettifies the node
+# id -- deterministic either way, never LLM-authored.
+_TAXONOMY_LABELS = {
+    "crude_price": "crude-linked",
+    "tyre_input_cost": "tyre input costs",
+    "aviation_fuel_cost": "aviation fuel costs",
+    "paint_input_cost": "paint input costs",
+    "refining_margin": "refining & marketing",
+    "repo_rate": "rate-sensitive",
+    "inr_depreciation": "currency-exposed",
+    "road_freight_fuel_cost": "freight fuel costs",
+}
+
+_EFFECT_PREFIX = {
+    "positive": "Positive", "negative": "Negative",
+    "mixed": "Mixed", "uncertain": "Uncertain", "neutral": "Neutral",
+}
+_EFFECT_ICON = {"positive": "win", "negative": "lose"}
+_DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative"}
+
+
+def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
+    """Deterministic section assembly for gate-validated alerts (spec
+    §23-§26): direction comes from economic_effect, membership from the
+    publication gate's tier, labels from the controlled taxonomy. Returns
+    None for legacy alerts (no gate output) so the 3-tier path renders
+    them unchanged -- and the 3-tier code itself is never touched."""
+    gated = [
+        (alert_company, rows_flat[i])
+        for i, alert_company in enumerate(alert.companies)
+        if alert_company.display_tier in ("primary", "secondary")
+    ]
+    if not gated:
+        return None
+
+    def _effect(alert_company) -> str:
+        return (alert_company.economic_effect
+                or _DIRECTION_TO_EFFECT.get(alert_company.direction, "mixed"))
+
+    def _row_sort_key(pair):
+        alert_company, row = pair
+        return (-(alert_company.materiality or 0.0), row["ticker"])
+
+    sections: dict[tuple[str, str], list] = {}
+    secondary: list = []
+    for alert_company, row in gated:
+        if alert_company.display_tier == "secondary":
+            secondary.append((alert_company, row))
+        else:
+            key = (_effect(alert_company), alert_company.causal_parent_id or "event")
+            sections.setdefault(key, []).append((alert_company, row))
+
+    layers = []
+    ordered = sorted(
+        sections.items(),
+        key=lambda kv: -max((ac.materiality or 0.0) for ac, _ in kv[1]),
+    )
+    for (effect, parent_id), members in ordered:
+        members = sorted(members, key=_row_sort_key)
+        label = _TAXONOMY_LABELS.get(parent_id, parent_id.replace("_", " "))
+        top_mechanism = members[0][0].mechanism
+        layers.append({
+            "title": f"{_EFFECT_PREFIX.get(effect, 'Mixed')} — {label}",
+            "relationship": f"MECH:{parent_id}",
+            "icon": _EFFECT_ICON.get(effect, "side"),
+            "note": top_mechanism,
+            "rows": [row for _, row in members],
+        })
+    if secondary:
+        members = sorted(secondary, key=_row_sort_key)
+        layers.append({
+            "title": "Secondary — indirect exposure",
+            "relationship": "SECONDARY",
+            "icon": "side",
+            "note": None,
+            "rows": [row for _, row in members],
+        })
+    return layers
 
 
 def _layer_icon(rows: list[dict]) -> str:
@@ -197,6 +279,14 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             direction=alert_company.direction,
             impact_level=alert_company.impact_level,
         ))
+
+    # V4 strict (spec §23): gate-validated alerts render deterministic
+    # taxonomy sections; legacy alerts (None) fall through to the 3-tier
+    # path below, which stays byte-identical for flag-off rendering.
+    if settings.impact_engine_v4_strict:
+        strict_layers = _strict_sections(alert, rows_flat)
+        if strict_layers is not None:
+            return strict_layers
 
     def _sorted(rows: list[dict]) -> list[dict]:
         return sorted(rows, key=lambda r: r["intensity"]["score"] if r["intensity"] else -1, reverse=True)
