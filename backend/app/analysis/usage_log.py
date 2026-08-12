@@ -111,6 +111,10 @@ def _persist(usage: CallUsage) -> None:
             call_name=usage.call_name, provider=usage.provider, model=usage.model,
             tier=usage.tier, input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
             cache_read_tokens=usage.cache_read_tokens, cache_write_tokens=usage.cache_write_tokens,
+            article_id=usage.article_id, stage=usage.stage,
+            thinking_level=usage.thinking_level, thinking_tokens=usage.thinking_tokens,
+            latency_ms=usage.latency_ms,
+            success=(None if usage.success is None else (1 if usage.success else 0)),
         ))
         session.commit()
     except Exception:

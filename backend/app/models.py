@@ -922,3 +922,13 @@ class LLMCallUsage(Base):
     # means "unknown", a zero means "measured, nothing cached".
     cache_read_tokens = Column(Integer, nullable=True)
     cache_write_tokens = Column(Integer, nullable=True)
+    # Per-call observability (architecture upgrade 2026-08-12 §30): stage,
+    # thinking spend, latency and the article the call served -- what the
+    # cost-audit table is built from. All NULL on legacy rows and on
+    # providers that don't report the field.
+    article_id = Column(Integer, nullable=True)
+    stage = Column(String, nullable=True)
+    thinking_level = Column(String, nullable=True)
+    thinking_tokens = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    success = Column(Integer, nullable=True)  # 1 | 0 | NULL (legacy path)

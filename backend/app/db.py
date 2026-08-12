@@ -135,6 +135,13 @@ _ADDED_COLUMNS = [
     # -- Architecture upgrade (2026-08-12): 5-way fundamental effect --
     ("alert_companies", "economic_effect", "VARCHAR"),
     ("impact_edges", "economic_effect", "VARCHAR"),
+    # -- Per-call cost observability (2026-08-12 §30) --
+    ("llm_call_usage", "article_id", "INTEGER"),
+    ("llm_call_usage", "stage", "VARCHAR"),
+    ("llm_call_usage", "thinking_level", "VARCHAR"),
+    ("llm_call_usage", "thinking_tokens", "INTEGER"),
+    ("llm_call_usage", "latency_ms", "INTEGER"),
+    ("llm_call_usage", "success", "INTEGER"),
 ]
 
 
