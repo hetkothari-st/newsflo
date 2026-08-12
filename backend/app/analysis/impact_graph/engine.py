@@ -200,6 +200,33 @@ def _graph_outline(state: _GraphState, limit: int = 40) -> str:
 
 # --- company mapping ------------------------------------------------------
 
+def _subject_companies(session, facts: EventFacts) -> list:
+    """Companies the article ITSELF names, resolved deterministically via
+    the alias matcher (2026-08-12 fix): candidate lists are top-N by market
+    cap per sector, so a small-cap article subject (ideaForge, measured
+    live) could be structurally absent from its own story's candidates.
+    Subjects are prepended to candidate lists and never count against the
+    per-call cap. Free -- no LLM involvement."""
+    from app.companies.matching.matcher import resolve
+    from app.models import Company as CompanyRow
+
+    if session is None:
+        return []
+    subjects, seen = [], set()
+    for entity in (facts.named_entities or [])[:12]:
+        try:
+            match = resolve(session, None, entity)
+        except Exception:  # noqa: BLE001 -- matcher trouble never blocks analysis
+            continue
+        if match is None or match.company_id in seen:
+            continue
+        row = session.get(CompanyRow, match.company_id)
+        if row is not None and row.market == "INDIA" and row.tradeability == "NORMAL":
+            seen.add(match.company_id)
+            subjects.append(row)
+    return subjects
+
+
 def _candidate_profile_lines(candidates, cached_by_ticker: dict) -> str:
     """Compact exposure-profile lines (token-opt P8): ticker | name |
     sub_sector | clipped business line -- never the full biography. A
@@ -264,6 +291,11 @@ def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
     if session is None or node.sector is None:
         return  # companies attach where a sector pool exists; economic nodes fan into sector children
     candidates = candidate_companies(session, [node.sector])
+    # Article-subject seeding: companies the article names always ride the
+    # list for their own sector, cap or no cap.
+    for subject in _subject_companies(session, facts):
+        if subject.sector == node.sector and all(c.ticker != subject.ticker for c in candidates):
+            candidates.insert(0, subject)
     candidates = [
         c for c in candidates
         if c.ticker not in state.companies and c.ticker not in state.rejected_tickers
@@ -674,10 +706,16 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
     if session is None or not sector_nodes:
         _skip("narrow_companies", "no_sector_nodes", article=article_id)
         return
+    subjects = _subject_companies(session, facts)
     node_blocks, union_tickers, node_by_id = [], [], {}
+    placed_subjects = set()
     for node in sector_nodes:
         state.evaluated_nodes.add(node.node_id)
         candidates = candidate_companies(session, [node.sector])
+        for subject in subjects:
+            if subject.sector == node.sector and all(c.ticker != subject.ticker for c in candidates):
+                candidates.insert(0, subject)
+                placed_subjects.add(subject.ticker)
         candidates = [c for c in candidates if c.ticker not in state.rejected_tickers]
         tickers_to_ids = {c.ticker: c.id for c in candidates}
         cached_positive, cached_negative = _exposure_cache(session, node.node_id, tickers_to_ids)
@@ -696,6 +734,20 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
             f"{parent_edge.direction if parent_edge else 'n/a'}): "
             f"{parent_edge.mechanism if parent_edge else facts.event}\n"
             + _candidate_profile_lines(candidates, cached_positive)
+        )
+    # Subjects whose sector has no node of its own still must be
+    # selectable -- the article is ABOUT them (the ideaForge case: a
+    # small-cap infra-classified drone maker whose story built it/defense
+    # nodes). They ride a dedicated block; the model maps them to the most
+    # causally relevant node via parent_id.
+    stray_subjects = [s for s in subjects if s.ticker not in placed_subjects
+                      and s.ticker not in state.rejected_tickers]
+    if stray_subjects and node_by_id:
+        union_tickers.extend(s.ticker for s in stray_subjects if s.ticker not in union_tickers)
+        node_blocks.append(
+            "ARTICLE SUBJECT COMPANIES (named by the article itself -- evaluate "
+            "each against the most causally relevant node above):\n"
+            + _candidate_profile_lines(stray_subjects, {})
         )
     if not node_blocks:
         _skip("narrow_companies", "no_candidates", article=article_id)
