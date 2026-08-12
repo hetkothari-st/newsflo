@@ -851,6 +851,93 @@ body:has(.nf4.dark) { background: #2a2722; }
   padding: 4px 8px;
 }
 
+/* ---------- AUTH (sign in / create account, broadsheet form) ---------- */
+.nf4 .authv4 { max-width: 420px; }
+.nf4 .authform { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
+.nf4 .authform label { display: flex; flex-direction: column; gap: 5px; }
+.nf4 .authform .lab {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ash);
+}
+.nf4 .authform input {
+  font-family: var(--serif);
+  font-size: 18px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--midstone);
+  padding: 6px 0;
+}
+.nf4 .authform input:focus { outline: none; border-bottom-color: var(--ink); }
+.nf4 .authsubmit {
+  align-self: flex-start;
+  font-family: var(--grotesque);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.12px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.nf4 .authsubmit:disabled { color: var(--pebble); border-color: var(--pebble); cursor: default; }
+.nf4 .autherr { color: var(--data-down); font-size: 13px; }
+
+/* ---------- PORTFOLIO MANAGE ---------- */
+.nf4 .manage4 { margin-top: 28px; border-top: 1px solid var(--ink); padding-top: 12px; }
+.nf4 .mrow { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+.nf4 .mrow .mname { font-family: var(--serif); font-size: 17px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nf4 .mrow .mtick { font-size: 11px; letter-spacing: -0.11px; text-transform: uppercase; color: var(--ash); }
+.nf4 .mrow input {
+  font-family: var(--grotesque);
+  font-size: 14px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--midstone);
+  width: 84px;
+  text-align: right;
+  padding: 2px 0;
+}
+.nf4 .mrow input:focus { outline: none; border-bottom-color: var(--ink); }
+.nf4 .mdel { font-size: 13px; color: var(--ash); cursor: pointer; }
+.nf4 .mdel:hover { color: var(--data-down); }
+.nf4 .madd { border-bottom: none; margin-top: 4px; gap: 10px; }
+.nf4 .madd input[type="text"] { width: 200px; text-align: left; }
+
+/* ---------- BROKER CONNECT ---------- */
+.nf4 .connect4 { margin-top: 28px; border-top: 1px solid var(--ink); padding-top: 12px; }
+.nf4 .brokergrid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.nf4 .brokercell {
+  font-family: var(--grotesque);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.11px;
+  text-transform: uppercase;
+  color: var(--ash);
+  background: transparent;
+  border: 1px solid var(--midstone);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.nf4 .brokercell:hover { color: var(--ink); border-color: var(--ink); }
+.nf4 .brokercell.on { color: var(--ink); border-color: var(--ink); background: var(--hairline); }
+.nf4 .brokerpanel { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px 16px; margin: 8px 0 12px; }
+.nf4 .brokerpanel h3 { font-family: var(--serif); font-size: 20px; margin: 0 0 4px; }
+.nf4 .filedrop { display: block; border: 1px dashed var(--midstone); border-radius: var(--radius); padding: 18px; text-align: center; cursor: pointer; margin-top: 12px; color: var(--ash); font-size: 13px; }
+.nf4 .filedrop:hover { border-color: var(--ink); color: var(--ink); }
+.nf4 .filedrop input { display: none; }
+.nf4 .importreport { font-size: 13px; margin-top: 8px; }
+.nf4 .importreport .skiprow { color: var(--ash); font-size: 12px; margin: 2px 0; }
+
 /* Editorial filter dropdown (FilterMenuV4) -- native select's open list
    is OS-rendered and can't match paper/ink; this one is a ruled index
    like the search dropdown. Selection is marked with an em-dash and

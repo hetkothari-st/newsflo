@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.holdings.csv_loader import load_holdings_from_csv
+from app.holdings.import_parse import parse_and_match
 from app.models import Company, Holding, User
 from app.routers.articles import get_db
 
@@ -52,6 +53,45 @@ def upload_holdings_csv(
 ):
     loaded = load_holdings_from_csv(db, current_user.id, file.file)
     return {"loaded": loaded}
+
+
+@router.post("/import")
+def import_holdings(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Provider-agnostic import: any Indian broker's holdings CSV export
+    (Zerodha console, Groww, Upstox, Angel One, ...). Rows resolve by
+    ISIN first, then NSE/BSE ticker; unmatched rows come back in the
+    report instead of being silently dropped."""
+    matches, report = parse_and_match(db, file.file.read())
+    for company, quantity in matches:
+        _upsert_holding(db, current_user.id, company.id, quantity)
+        report.imported.append({
+            "ticker": company.ticker, "name": company.name, "quantity": quantity,
+        })
+    return report.as_dict()
+
+
+@router.delete("/{ticker}", status_code=204)
+def delete_holding(
+    ticker: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    company = db.query(Company).filter_by(ticker=ticker).one_or_none()
+    if company is None:
+        raise HTTPException(status_code=404, detail="Unknown ticker")
+    holding = (
+        db.query(Holding)
+        .filter_by(user_id=current_user.id, company_id=company.id)
+        .one_or_none()
+    )
+    if holding is None:
+        raise HTTPException(status_code=404, detail="Not held")
+    db.delete(holding)
+    db.commit()
 
 
 @router.get("")

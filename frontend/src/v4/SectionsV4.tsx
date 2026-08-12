@@ -4,7 +4,7 @@
    uppercase meta lines, hairline rules, no chips except outlined ghost
    tags, active tabs emphasised by scale only. */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   getCarReview,
   getDirectory,
@@ -16,9 +16,13 @@ import {
   type DiscoveryEntry,
   type DiscoveryTab,
 } from '../v3/api';
+import AuthV4 from './AuthV4';
 import FilterMenuV4 from './FilterMenuV4';
 import LogoV4 from './LogoV4';
+import PortfolioConnectV4 from './PortfolioConnectV4';
+import PortfolioManageV4 from './PortfolioManageV4';
 import { displaySector } from '../v3/directoryFilters';
+import { kiteImport } from './portfolioApi';
 import { formatMarketCap } from './directoryLiveCaps';
 import { useDirectoryLiveCaps } from './useDirectoryLiveCaps';
 import { useAuth } from '../lib/auth';
@@ -370,6 +374,32 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
   const { token } = useAuth();
   const [overlay, setOverlay] = useState<Awaited<ReturnType<typeof getPortfolioOverlay>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped on any holdings mutation (manual edit, CSV/Kite import) --
+  // refreshes both the manage list and the news overlay.
+  const [version, setVersion] = useState(0);
+  const bump = () => setVersion((prev) => prev + 1);
+  const [kiteNote, setKiteNote] = useState<string | null>(null);
+
+  // Kite Connect redirect lands back on the app with ?request_token=...
+  // -- exchange it once, then strip the param so a refresh can't replay.
+  useEffect(() => {
+    if (!token) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestToken = params.get('request_token');
+    if (requestToken === null) return;
+    params.delete('request_token');
+    params.delete('action');
+    params.delete('status');
+    const query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+    setKiteNote('Importing your Zerodha holdings…');
+    kiteImport(token, requestToken)
+      .then((report) => {
+        setKiteNote(`Zerodha import: ${report.imported.length} holdings landed.`);
+        bump();
+      })
+      .catch((err: Error) => setKiteNote(`Zerodha import failed: ${err.message}`));
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -384,17 +414,21 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, version]);
+
+  if (!token) {
+    return (
+      <div className="page4">
+        <AuthV4 purpose="Your holdings, and which of today's news touches them — sign in to switch this section on." />
+      </div>
+    );
+  }
 
   return (
     <div className="page4">
       <h1 className="phead">Portfolio</h1>
       <p className="psub">Your holdings, and which of today's news touches them.</p>
-      {!token && (
-        <p className="empty4">
-          <Link to="/login">Sign in</Link> to see which of today's news touches your holdings.
-        </p>
-      )}
+      {kiteNote !== null && <p className="psub">{kiteNote}</p>}
       {error !== null && <p className="empty4">{error}</p>}
       {token && overlay !== null && (
         <>
@@ -404,7 +438,7 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
           </p>
           {overlay.holdings.length === 0 && (
             <p className="empty4">
-              No holdings yet. <Link to="/holdings">Add your holdings</Link> to light up the
+              No holdings yet. Add positions below or connect your broker to light up the
               portfolio thread across the feed.
             </p>
           )}
@@ -429,9 +463,10 @@ export function PortfolioV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: strin
           ))}
         </>
       )}
+      <PortfolioManageV4 token={token} version={version} onChanged={bump} />
+      <PortfolioConnectV4 token={token} onImported={bump} />
       <p className="emeta" style={{ marginTop: 24 }}>
-        Holdings sync each morning via Account Aggregator (Sahamati) consent — never PAN scraping.
-        Encrypted at rest and in transit.
+        Broker files are parsed for tickers and quantities only — nothing else is read or stored.
       </p>
     </div>
   );
@@ -467,15 +502,18 @@ export function ReviewV4() {
     };
   }, [token]);
 
+  if (!token) {
+    return (
+      <div className="page4">
+        <AuthV4 purpose="Did a flagged reaction hold or reverse? Sign in to review how each one played out." />
+      </div>
+    );
+  }
+
   return (
     <div className="page4">
       <h1 className="phead">Reaction review</h1>
       <p className="psub">Did a flagged reaction hold or reverse? Cumulative abnormal return, −1 to +3 days.</p>
-      {!token && (
-        <p className="empty4">
-          <Link to="/login">Sign in</Link> to review how flagged reactions played out.
-        </p>
-      )}
       {error !== null && <p className="empty4">{error}</p>}
       {token && rows !== null && rows.length === 0 && (
         <p className="empty4">

@@ -28,8 +28,8 @@ from app.models import Company
 from app.prices.kite_ws_client import run_hub_client
 from app.prices.live_price import LIVE_PRICE_CACHE
 from app.routers import (
-    alerts, articles, auth, calendar, car_review, categories, companies, feed_v2, holdings, pulse_live,
-    source_health, stock_deep_dive, translation, watchlist, ws,
+    alerts, articles, auth, calendar, car_review, categories, companies, feed_v2, holdings,
+    portfolio_connect, pulse_live, source_health, stock_deep_dive, translation, watchlist, ws,
 )
 from app.scheduler import start_scheduler
 from app.ws.manager import manager
@@ -50,6 +50,7 @@ app.include_router(feed_v2.router)
 app.include_router(calendar.router)
 app.include_router(auth.router)
 app.include_router(holdings.router)
+app.include_router(portfolio_connect.router)
 app.include_router(companies.router)
 app.include_router(categories.router)
 app.include_router(watchlist.router)
