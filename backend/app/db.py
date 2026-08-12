@@ -132,6 +132,9 @@ _ADDED_COLUMNS = [
     ("impact_edges", "verification_status", "VARCHAR"),
     # -- Token optimization (2026-08-11) --
     ("alert_companies", "channels_json", "TEXT"),
+    # -- Architecture upgrade (2026-08-12): 5-way fundamental effect --
+    ("alert_companies", "economic_effect", "VARCHAR"),
+    ("impact_edges", "economic_effect", "VARCHAR"),
 ]
 
 

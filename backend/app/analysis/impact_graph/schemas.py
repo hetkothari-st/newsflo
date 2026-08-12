@@ -20,6 +20,29 @@ TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
 PARENT_TYPES = ["event", "economic_node", "sector", "commodity", "policy", "company"]
 CHILD_TYPES = ["economic_node", "sector", "commodity", "policy", "company"]
 DIRECTIONS = ["bullish", "bearish", "neutral"]
+# Canonical fundamental-effect vocabulary (architecture upgrade 2026-08-12
+# §11): the graph describes ECONOMIC effect; mixed and uncertain are valid
+# and must survive every stage. The legacy 3-way `direction` is DERIVED
+# from this, never independently generated.
+ECONOMIC_EFFECTS = ["positive", "negative", "mixed", "uncertain", "neutral"]
+# Channel-audit verdicts (spec §5): the audit exists for coverage, so the
+# vocabulary distinguishes "not applicable" from "plausible but uncertain"
+# -- uncertain is NOT a discard.
+CHANNEL_VERDICTS = ["material", "potential", "not_applicable", "uncertain"]
+
+_EFFECT_TO_DIRECTION = {
+    "positive": "bullish", "negative": "bearish",
+    "mixed": "neutral", "uncertain": "neutral", "neutral": "neutral",
+}
+_DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative", "neutral": "neutral"}
+
+
+def effect_to_direction(effect: str) -> str:
+    return _EFFECT_TO_DIRECTION.get(effect, "neutral")
+
+
+def direction_to_effect(direction: str) -> str:
+    return _DIRECTION_TO_EFFECT.get(direction, "neutral")
 
 
 def _clamp(value, low=0.0, high=1.0) -> float:
@@ -99,7 +122,11 @@ class GraphEdge(BaseModel):
     parent_id: str
     child_type: str
     child_id: str
-    direction: str
+    direction: str = ""
+    # Fundamental economic effect (spec §11) -- the canonical field; the
+    # 3-way `direction` derives from it. Either may arrive from the model;
+    # reconcile() fills whichever is missing, deterministically.
+    economic_effect: str = ""
     mechanism: str
     # 0 = "engine has not assigned it yet": _register_edge always overwrites
     # with parent_distance + 1, never trusting the model's own number.
@@ -114,6 +141,16 @@ class GraphEdge(BaseModel):
         self.impact_strength = _clamp(self.impact_strength)
         self.confidence = _clamp(self.confidence)
         self.materiality = _clamp(self.materiality)
+        return self.reconcile_effect()
+
+    def reconcile_effect(self) -> "GraphEdge":
+        """economic_effect is truth; direction is the derived legacy view.
+        Mixed/uncertain are preserved in economic_effect even though the
+        3-way direction collapses them to neutral."""
+        if self.economic_effect not in ECONOMIC_EFFECTS:
+            self.economic_effect = direction_to_effect(self.direction)
+        if self.direction not in DIRECTIONS:
+            self.direction = effect_to_direction(self.economic_effect)
         return self
 
     @property
@@ -129,11 +166,28 @@ _EDGE_PROPS = {
     "child_label": {"type": "string"},
     "child_sector": {"type": "string"},
     "direction": {"type": "string", "enum": DIRECTIONS},
+    "economic_effect": {"type": "string", "enum": ECONOMIC_EFFECTS},
     "mechanism": {"type": "string"},
     "impact_strength": {"type": "number"},
     "confidence": {"type": "number"},
     "materiality": {"type": "number"},
     "time_horizon": {"type": "string", "enum": TIME_HORIZONS},
+}
+
+# Structured channel audit (spec §5/§7): systematic coverage scaffold for
+# discovery stages. Verdicts use the 4-way vocabulary -- an `uncertain`
+# channel is a candidate for a branch, not a discard.
+_CHANNEL_AUDIT = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "channel": {"type": "string"},
+            "verdict": {"type": "string", "enum": CHANNEL_VERDICTS},
+            "reason": {"type": "string"},
+        },
+        "required": ["channel", "verdict"],
+    },
 }
 
 
@@ -169,8 +223,12 @@ SCHEMA_SHOCKS = {
                              "direction", "mechanism", "confidence", "materiality"],
             },
         },
+        # Coverage scaffold (spec §5): every ontology channel must be
+        # classified, so a channel the model did not think of first is a
+        # visible verdict, never a silent absence.
+        "channel_audit": _CHANNEL_AUDIT,
     },
-    "required": ["shocks", "direct_nodes"],
+    "required": ["shocks", "direct_nodes", "channel_audit"],
 }
 
 
@@ -180,18 +238,7 @@ SCHEMA_NARROW_GRAPH = {
     "type": "object",
     "properties": {
         "shocks": SCHEMA_SHOCKS["properties"]["shocks"],
-        "channel_audit": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "channel": {"type": "string"},
-                    "verdict": {"type": "string", "enum": ["kept", "discarded"]},
-                    "reason": {"type": "string"},
-                },
-                "required": ["channel", "verdict"],
-            },
-        },
+        "channel_audit": _CHANNEL_AUDIT,
         "edges": {
             "type": "array",
             "items": {
@@ -245,7 +292,7 @@ NET_DIRECTIONS = ["bullish", "bearish", "mixed", "uncertain", "neutral"]
 class GraphCompany(BaseModel):
     ticker: str
     name: str
-    direction: str
+    direction: str = ""
     impact_strength: float = 0.0
     confidence: float = 0.0
     materiality: float = 0.0
@@ -269,11 +316,30 @@ class GraphCompany(BaseModel):
     negative_channels: list[str] = Field(default_factory=list)
     net_direction: str = ""  # NET_DIRECTIONS; "" on legacy rows
     relative_beneficiary: bool = False
+    # Fundamental economic effect (spec §11/§12) -- canonical 5-way field.
+    # Derived from net_direction/direction when the model omits it; the
+    # legacy 3-way direction stays the market-facing view.
+    economic_effect: str = ""
 
     def clamp(self) -> "GraphCompany":
         self.impact_strength = _clamp(self.impact_strength)
         self.confidence = _clamp(self.confidence)
         self.materiality = _clamp(self.materiality)
+        return self.reconcile_effect()
+
+    def reconcile_effect(self) -> "GraphCompany":
+        """Fill economic_effect from net_direction (which already carries
+        mixed/uncertain) or direction; never overwrite a model-supplied
+        value. Direction falls back to the effect-derived legacy view."""
+        if self.economic_effect not in ECONOMIC_EFFECTS:
+            if self.net_direction in ("mixed", "uncertain", "neutral"):
+                self.economic_effect = self.net_direction
+            elif self.net_direction in ("bullish", "bearish"):
+                self.economic_effect = direction_to_effect(self.net_direction)
+            else:
+                self.economic_effect = direction_to_effect(self.direction)
+        if self.direction not in DIRECTIONS:
+            self.direction = effect_to_direction(self.economic_effect)
         return self
 
 
@@ -307,6 +373,7 @@ def schema_companies(valid_tickers: list[str]) -> dict:
                         "positive_channels": {"type": "array", "items": {"type": "string"}},
                         "negative_channels": {"type": "array", "items": {"type": "string"}},
                         "net_direction": {"type": "string", "enum": NET_DIRECTIONS},
+                        "economic_effect": {"type": "string", "enum": ECONOMIC_EFFECTS},
                         "relative_beneficiary": {"type": "boolean"},
                         "key_points": {"type": "array", "items": {"type": "string"}},
                         "reasons": {"type": "array", "items": {"type": "string"}},
@@ -387,6 +454,34 @@ SCHEMA_EDGE_VERDICTS = {
 }
 
 
+# --- Completeness audit (architecture upgrade 2026-08-12, spec §13) ------
+# The auditor actively searches for MISSING branches; it is not an edge
+# verifier. Each missing branch is a full edge proposal plus reason_missing;
+# accepted branches re-enter the expansion frontier in code.
+
+SCHEMA_COMPLETENESS = {
+    "type": "object",
+    "properties": {
+        "missing_branches": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    **dict(_EDGE_PROPS),
+                    "reason_missing": {"type": "string"},
+                },
+                "required": ["parent_type", "parent_id", "child_type", "child_id",
+                             "mechanism", "confidence", "materiality", "reason_missing"],
+            },
+        },
+        # Forced coverage: every ontology channel classified, so a skipped
+        # channel is impossible to hide.
+        "channel_audit": _CHANNEL_AUDIT,
+    },
+    "required": ["missing_branches", "channel_audit"],
+}
+
+
 # --- Stage 9: ranking -----------------------------------------------------
 
 def schema_ranking(valid_tickers: list[str]) -> dict:
@@ -428,3 +523,7 @@ class ImpactGraphResult(BaseModel):
     ranking: list[dict] = Field(default_factory=list)  # [{ticker, bucket, rank_reason}]
     analysis_provider: str = "gemini"
     analysis_quality: str = "authoritative"  # authoritative | degraded | fallback | budget_exhausted
+    # Observability (spec §30): per-run graph-quality counters --
+    # nodes/edges discovered vs pruned, completeness branches, companies
+    # considered vs retained, duplicates removed, verification failures.
+    metrics: dict = Field(default_factory=dict)

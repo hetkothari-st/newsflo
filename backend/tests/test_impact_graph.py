@@ -104,7 +104,14 @@ def test_event_to_economic_node_to_sector_to_company(db_session):
                                 mat=0.7, conf=0.8, mech="ATF costs rise with crude")]},
             {"children": []}, {"children": []},
         ],
-        "map_companies": {"companies": [_company_entry("INDIGO.NS", "InterGlobe Aviation")]},
+        # Exposure-based retrieval (architecture upgrade 2026-08-12) now maps
+        # candidates at the ECONOMIC nodes too ("crude" hints at transport
+        # sectors), so the shock and crude-price nodes each get a call; the
+        # model declines there and selects INDIGO at the sector node.
+        "map_companies": [
+            {"companies": []}, {"companies": []},
+            {"companies": [_company_entry("INDIGO.NS", "InterGlobe Aviation")]},
+        ],
         "rank_companies": {"ranked": [{"ticker": "INDIGO.NS", "bucket": "adversely_affected"}]},
     })
     result = analyze_article_v3(router, "Hormuz closes", "body", session=db_session, article_id=1)

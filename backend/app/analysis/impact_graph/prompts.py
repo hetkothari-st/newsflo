@@ -210,6 +210,26 @@ The article itself defines the event.
 Verified company information supplied later defines company exposure."""
 
 
+# Economic-channel ontology (architecture upgrade 2026-08-12 §5): the
+# structured coverage checklist discovery and completeness stages must
+# classify. One flat list, stable text -- it rides the static prefix.
+CHANNEL_ONTOLOGY = """ECONOMIC CHANNEL ONTOLOGY (classify EVERY channel as material / potential / not_applicable / uncertain):
+demand, supply, price, volume, revenue, input_costs, margins, working_capital,
+financing, credit_quality, interest_rates, currency_fx, imports, exports,
+trade_flows, substitution, competition, capex, capacity, inventory,
+employment, wages, regulation, fiscal_policy, monetary_policy,
+consumer_behavior, asset_values, government_response"""
+
+# Recall-first discovery discipline (spec §26): appended to DISCOVERY stage
+# prompts only -- evaluation/verification stages keep the strict framing.
+DISCOVERY_MODE = """DISCOVERY MODE -- prioritize recall.
+Enumerate ALL economically defensible branches. Do NOT prune merely because
+materiality is uncertain -- report the branch with honest low materiality/
+confidence scores and let the later evaluation stage prune it. Discovery may
+reject only: impossible mechanisms, contradictory mechanisms, duplicate
+nodes, purely semantic associations, absurdly remote relationships."""
+
+
 # Doc 3 §5 -- stage 2 initial economic shock.
 SHOCKS_PROMPT = """Given the article facts, identify the INITIAL ECONOMIC SHOCKS created by this event.
 
@@ -252,7 +272,13 @@ Do NOT use causal distance > 1 in this stage.
 
 Be exhaustive across genuine first-order channels.
 
-Report each direct sector/economic node as a graph edge in `direct_nodes`: parent is the event or one of your shocks, child is the sector/economic node, with direction, mechanism, impact_strength, confidence, materiality and time_horizon."""
+Report each direct sector/economic node as a graph edge in `direct_nodes`: parent is the event or one of your shocks, child is the sector/economic node, with direction, economic_effect, mechanism, impact_strength, confidence, materiality and time_horizon.
+
+""" + CHANNEL_ONTOLOGY + """
+
+Walk the ontology systematically and report your classification of every channel in `channel_audit` -- a channel you did not think of first must still receive an explicit verdict. Channels classified material or potential should normally appear as shocks or direct_nodes; uncertain is a valid verdict and is NOT a discard.
+
+""" + DISCOVERY_MODE
 
 
 # Doc 3 §6 -- stage 3 direct company mapping.
@@ -327,16 +353,24 @@ Each arrow is a separate causal edge.
 
 Do not force a fixed number of ripple nodes.
 
-Continue discovering consequences until the next hop becomes:
+For EACH frontier node, audit systematically before answering -- do not simply return the first consequences you think of:
+1. economic channels (see ontology below),
+2. sector exposure,
+3. commodity exposure,
+4. policy/regulatory exposure,
+5. second-order economic variables,
+6. substitution and competition effects,
+7. BOTH positive and negative mechanisms.
+
+""" + CHANNEL_ONTOLOGY + """
+
+Stop expanding a branch only when the next hop becomes:
 - generic,
-- speculative,
-- immaterial,
+- purely speculative,
 - redundant,
-- or too uncertain to defend.
+- or economically indefensible.
 
-A theoretically possible relationship is not enough.
-
-Prioritize economic materiality over breadth for its own sake."""
+""" + DISCOVERY_MODE
 
 
 # Doc 3 §8 -- stage 5 ripple company mapping.
@@ -396,6 +430,10 @@ Return zero if none qualify."""
 # Doc 3 §10 -- stage 7 company verification.
 VERIFY_COMPANIES_PROMPT = """You are the final precision and causal-integrity reviewer.
 
+Verify the proposed companies. Do NOT assume the set is complete -- completeness is a separate stage's job; yours is correctness of what is proposed. Do not reject a company for reasons of coverage.
+
+Where a causal path is supplied, verify the FULL path: every transition along it must be independently defensible, and the path must not depend on an unsupported assumption. A broken intermediate step invalidates the company's inclusion at that distance.
+
 The previous stages intentionally optimized for recall.
 
 For EVERY proposed company, independently verify:
@@ -448,7 +486,9 @@ When a distance or direction is wrong but the company otherwise belongs, keep be
 
 
 # Doc 3 §11 -- stage 8 edge verification.
-VERIFY_EDGES_PROMPT = """For every proposed edge:
+VERIFY_EDGES_PROMPT = """Verify the proposed graph edges. Do NOT assume the graph is complete -- completeness auditing happens elsewhere; verify only what is proposed here.
+
+For every proposed edge:
 
 PARENT -> CHILD
 
@@ -482,6 +522,35 @@ Hormuz closure
 Do not approve a multi-step jump merely because the endpoints are economically related.
 
 Company-to-company edges are permitted only where a real relationship exists."""
+
+
+# Graph completeness audit (architecture upgrade 2026-08-12 §13) -- an
+# ACTIVE search for missing branches, distinct from edge verification.
+COMPLETENESS_PROMPT = """You are the graph COMPLETENESS auditor.
+
+Assume the current graph MAY BE INCOMPLETE. Actively search for missing economically meaningful branches. This is not verification -- do not judge the existing edges; find what is ABSENT.
+
+""" + CHANNEL_ONTOLOGY + """
+
+Walk every ontology channel against the event and the current graph:
+1. Is this channel economically affected by the event or by any existing node?
+2. If yes, does the current graph represent that effect?
+3. If not represented, propose the missing branch.
+
+Also check for:
+- missing sectors with genuine exposure to existing economic nodes,
+- missing second-order economic variables,
+- missing substitution/competition effects,
+- missing positive branches when the graph is all-negative (and vice versa),
+- missing policy/government-response branches.
+
+For every missing branch report: parent (an existing node id or "event"), child, mechanism, economic_effect, confidence, materiality, and reason_missing (why the graph plausibly omitted it).
+
+Report your channel-by-channel classification in channel_audit.
+
+Propose only economically defensible branches -- a branch must have a concrete mechanism, not a thematic association. Uncertain materiality is acceptable; score it honestly. An empty missing_branches list is a valid answer when the graph is genuinely complete.
+
+""" + DISCOVERY_MODE
 
 
 # Doc 3 §12 -- stage 9 final ranking.
@@ -521,9 +590,9 @@ NARROW_GRAPH_PROMPT = """This is a NARROW event (not an economy-wide macro shock
 
 STEP 1 - INITIAL SHOCKS: the concrete economic variables this event changes (distance 1). A modest delta in a headline variable is still a directional shock; let materiality carry the size.
 
-STEP 2 - CHANNEL AUDIT: walk the transmission channels genuinely plausible for THIS event type (demand, pricing, costs, credit, competition, suppliers, customers, distribution, regulation). Mark each channel kept or discarded with a one-line reason in channel_audit -- discarding is fine, silent omission is not.
+STEP 2 - CHANNEL AUDIT: walk the transmission channels genuinely plausible for THIS event type (demand, pricing, costs, credit, competition, suppliers, customers, distribution, regulation). Classify each channel in channel_audit as material, potential, not_applicable, or uncertain, with a one-line reason -- not_applicable is fine, silent omission is not. Uncertain is NOT a discard: a plausible-but-uncertain channel still becomes an edge with honest low scores.
 
-STEP 3 - EDGES: convert kept channels into graph edges, one new mechanism per hop, maximum causal distance 2. DISTANCE CONVENTION: an intermediate node that merely restates its parent's mechanism is NOT a hop -- collapse it. Do not include downstream consequences beyond distance 2; a narrow event rarely deserves them, and a later analyst pass handles exceptions.
+STEP 3 - EDGES: convert material/potential (and defensible uncertain) channels into graph edges, one new mechanism per hop, maximum causal distance 2. DISTANCE CONVENTION: an intermediate node that merely restates its parent's mechanism is NOT a hop -- collapse it. Do not include downstream consequences beyond distance 2; a narrow event rarely deserves them, and a later analyst pass handles exceptions.
 
 Report sectors as child_type "sector" with the exact sector slug as child_id."""
 

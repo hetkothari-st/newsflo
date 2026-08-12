@@ -566,11 +566,30 @@ IMPACT_DISTANCE_THRESHOLDS: dict[int, dict[str, float]] = {
 
 
 def impact_thresholds_for_distance(distance: int) -> dict[str, float]:
-    """Thresholds for a causal distance; distances past the table reuse the
-    deepest row (they are already capped by max_causal_depth)."""
+    """FINAL-prune thresholds for a causal distance; distances past the
+    table reuse the deepest row (they are already capped by
+    max_causal_depth). Applied AFTER completeness expansion (architecture
+    upgrade 2026-08-12) -- discovery uses the looser floors below."""
     if distance < 1:
         distance = 1
     return IMPACT_DISTANCE_THRESHOLDS.get(distance, IMPACT_DISTANCE_THRESHOLDS[5])
+
+
+# Discovery-time floors (architecture upgrade 2026-08-12: DISCOVER BROADLY
+# FIRST -> AUDIT -> THEN PRUNE). During graph construction an edge only has
+# to clear these -- structural checks (types, dedup, cycles) plus a floor
+# that rejects the clearly nonsensical. The distance-scaled table above is
+# applied once, deterministically, after the completeness audit has had its
+# chance to re-open missing branches. Uncertain materiality alone must
+# never kill a branch at discovery time.
+IMPACT_DISCOVERY_MIN_MATERIALITY = float(os.environ.get("IMPACT_DISCOVERY_MIN_MATERIALITY", "0.15"))
+IMPACT_DISCOVERY_MIN_CONFIDENCE = float(os.environ.get("IMPACT_DISCOVERY_MIN_CONFIDENCE", "0.35"))
+
+# Company-mapping call cap per article: exposure-based candidate pools let
+# economic nodes (not just sector nodes) map companies, so the number of
+# eligible nodes grew -- this bounds the per-article call count the same
+# way MAX_EXPANSIONS_PER_ARTICLE bounds ripple discovery.
+IMPACT_MAX_COMPANY_MAP_CALLS = int(os.environ.get("IMPACT_MAX_COMPANY_MAP_CALLS", "12"))
 
 
 # Graph node/edge type vocabularies (spec docs 3 §14). Parent may be any
@@ -614,11 +633,20 @@ IMPACT_TRIAGE_TIERS = {
         "max_expansions": int(os.environ.get("IMPACT_NARROW_MAX_EXPANSIONS", "4")),
         "max_output_tokens": int(os.environ.get("IMPACT_NARROW_MAX_OUTPUT_TOKENS", "6000")),
         "max_input_tokens": int(os.environ.get("IMPACT_NARROW_MAX_INPUT_TOKENS", "40000")),
+        # Narrow articles keep the in-call channel-audit scaffold as their
+        # coverage mechanism; a staged completeness loop would break the
+        # Rs-5 cost target. 0 by default, env-tunable.
+        "completeness_rounds": int(os.environ.get("IMPACT_NARROW_COMPLETENESS_ROUNDS", "0")),
     },
     "broad": {
         "max_depth": None,          # settings.max_causal_depth
         "max_expansions": None,     # engine default
         "max_output_tokens": None,  # settings.gemini_max_output_tokens_per_article
         "max_input_tokens": None,
+        # Completeness audit rounds (architecture upgrade 2026-08-12):
+        # after discovery + company mapping, an auditor searches for
+        # missing branches; found branches re-enter the frontier. Loop
+        # stops early when a round adds nothing material.
+        "completeness_rounds": int(os.environ.get("IMPACT_BROAD_COMPLETENESS_ROUNDS", "2")),
     },
 }

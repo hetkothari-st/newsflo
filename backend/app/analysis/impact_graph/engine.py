@@ -73,6 +73,17 @@ class _GraphState:
     evaluated_nodes: set = field(default_factory=set)  # node_ids whose companies were mapped
     gaps: list = field(default_factory=list)
     expansions: int = 0
+    company_calls: int = 0
+    # Observability (spec §30) -- graph-quality counters, logged and shipped
+    # on ImpactGraphResult.metrics.
+    metrics: dict = field(default_factory=lambda: {
+        "nodes_discovered": 0, "edges_discovered": 0,
+        "edges_rejected_discovery": 0, "edges_pruned_final": 0,
+        "nodes_pruned_final": 0, "duplicate_nodes_removed": 0,
+        "companies_considered": 0, "companies_retained": 0,
+        "companies_pruned_final": 0, "completeness_rounds_run": 0,
+        "completeness_branches_found": 0, "verification_failures": 0,
+    })
 
 
 def _facts_suffix(facts: EventFacts, extra: str = "") -> str:
@@ -129,14 +140,28 @@ def _skip(stage: str, reason: str, **context) -> None:
 
 
 def _passes(distance: int, materiality: float, confidence: float) -> bool:
+    """FINAL-prune gate: the distance-scaled thresholds. Applied after the
+    completeness audit, never during discovery (architecture upgrade
+    2026-08-12: discover broadly first, prune later)."""
     thresholds = impact_thresholds_for_distance(distance)
     return materiality >= thresholds["materiality"] and confidence >= thresholds["confidence"]
 
 
+def _passes_discovery(materiality: float, confidence: float) -> bool:
+    """Discovery-time floor: reject only the clearly nonsensical. Uncertain
+    materiality is explicitly NOT a discovery-time rejection reason."""
+    from app.config import IMPACT_DISCOVERY_MIN_CONFIDENCE, IMPACT_DISCOVERY_MIN_MATERIALITY
+
+    return (materiality >= IMPACT_DISCOVERY_MIN_MATERIALITY
+            and confidence >= IMPACT_DISCOVERY_MIN_CONFIDENCE)
+
+
 def _register_edge(state: _GraphState, edge: GraphEdge) -> bool:
-    """Deterministic edge gate: schema-valid types, real parent, no dupes,
-    no cycles (a child that already exists at <= parent distance is a
-    back-edge), thresholds for its distance. Returns True when persisted.
+    """Deterministic edge gate at DISCOVERY time: schema-valid types, real
+    parent, no dupes, no cycles (a child that already exists at <= parent
+    distance is a back-edge), and the loose discovery floor. The strict
+    distance-scaled thresholds run later in _final_materiality_prune, after
+    the completeness audit had its chance to re-open branches.
 
     Node ids are NORMALIZED first (token-opt P7): "higher crude prices"
     and "crude price rises" collapse to one canonical id, so a synonym
@@ -158,18 +183,22 @@ def _register_edge(state: _GraphState, edge: GraphEdge) -> bool:
     if edge.child_id == edge.parent_id or edge.child_id == EVENT_NODE_ID:
         return False
     if edge.key in state.edge_keys:
+        state.metrics["duplicate_nodes_removed"] += 1
         return False
     existing = state.nodes.get(edge.child_id)
     if existing is not None and existing.distance <= _parent_distance(state, edge):
         # Already reached at least this directly -- re-adding it deeper is
         # either a duplicate or a cycle; both are pruned.
+        state.metrics["duplicate_nodes_removed"] += 1
         return False
     edge.clamp()
     edge.causal_distance = _parent_distance(state, edge) + 1
-    if not _passes(edge.causal_distance, edge.materiality, edge.confidence):
+    if not _passes_discovery(edge.materiality, edge.confidence):
+        state.metrics["edges_rejected_discovery"] += 1
         return False
     state.edges.append(edge)
     state.edge_keys.add(edge.key)
+    state.metrics["edges_discovered"] += 1
     return True
 
 
@@ -279,23 +308,53 @@ def _exposure_cache(session, node_key: str, tickers_to_ids: dict) -> tuple[dict,
     return positive, negative
 
 
+def _candidate_pool(session, facts: EventFacts, state: _GraphState, node: _Node) -> list:
+    """Exposure-based candidate pool (spec §9): sector nodes keep their
+    sector pool; economic/commodity/policy nodes retrieve through the
+    exposure ontology (node vocabulary -> exposed sectors) PLUS any company
+    whose exposure to this exact node key was verified on an earlier event
+    (relationship cache as retrieval index). Sector membership is no longer
+    the only road to candidacy."""
+    from app.analysis.impact_graph.exposure import cached_exposed_companies, sectors_for_node
+
+    if node.sector is not None:
+        candidates = candidate_companies(session, [node.sector])
+        subject_sector = node.sector
+    else:
+        hinted = sectors_for_node(node.node_id, node.label)
+        candidates = candidate_companies(session, hinted) if hinted else []
+        subject_sector = None
+        # Cache-verified exposures ride the pool regardless of sector.
+        for cached in cached_exposed_companies(session, node.node_id):
+            if all(c.ticker != cached.ticker for c in candidates):
+                candidates.insert(0, cached)
+    # Article-subject seeding: companies the article names always ride the
+    # list for their own sector, cap or no cap.
+    for subject in _subject_companies(session, facts):
+        if (subject_sector is None or subject.sector == subject_sector) \
+                and all(c.ticker != subject.ticker for c in candidates):
+            candidates.insert(0, subject)
+    return candidates
+
+
 def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
                             state: _GraphState, node: _Node) -> None:
     """Stage 3 (distance 1) / stage 5 (ripples): candidate-grounded company
     mapping for one graph node. Deterministic no-call gates run first and
     every skip is logged (token-opt P4)."""
+    from app.config import IMPACT_MAX_COMPANY_MAP_CALLS
+
     if node.node_id in state.evaluated_nodes:
         _skip("map_companies", "node_already_evaluated", node=node.node_id)
         return
     state.evaluated_nodes.add(node.node_id)
-    if session is None or node.sector is None:
-        return  # companies attach where a sector pool exists; economic nodes fan into sector children
-    candidates = candidate_companies(session, [node.sector])
-    # Article-subject seeding: companies the article names always ride the
-    # list for their own sector, cap or no cap.
-    for subject in _subject_companies(session, facts):
-        if subject.sector == node.sector and all(c.ticker != subject.ticker for c in candidates):
-            candidates.insert(0, subject)
+    if session is None:
+        return
+    if state.company_calls >= IMPACT_MAX_COMPANY_MAP_CALLS:
+        _skip("map_companies", "company_call_cap", node=node.node_id,
+              cap=IMPACT_MAX_COMPANY_MAP_CALLS)
+        return
+    candidates = _candidate_pool(session, facts, state, node)
     candidates = [
         c for c in candidates
         if c.ticker not in state.companies and c.ticker not in state.rejected_tickers
@@ -338,6 +397,7 @@ def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
         extra=f"{parent_desc}\n\nCANDIDATE COMPANIES:\n"
               + _candidate_profile_lines(candidates[:20], cached_positive),
     )
+    state.company_calls += 1
     try:
         raw = router.call(
             "map_companies", schema=schema_companies(tickers),
@@ -363,11 +423,11 @@ def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
         except ValidationError as exc:
             logger.warning("impact-graph company entry rejected by schema: %s", exc)
             continue
-        # Net-effect discipline: an unresolved net effect never ships as a
-        # confident directional call (token-opt P12).
-        if company.net_direction in ("mixed", "uncertain"):
-            company.confidence = min(company.confidence, 0.55)
-        if not _passes(company.causal_distance, company.materiality, company.confidence):
+        state.metrics["companies_considered"] += 1
+        # DISCOVERY gate only (architecture upgrade 2026-08-12): the strict
+        # distance-scaled thresholds -- and the mixed/uncertain handling --
+        # run once, in _final_materiality_prune, after completeness.
+        if not _passes_discovery(company.materiality, company.confidence):
             state.rejected_tickers.add(ticker)
             continue
         held = state.companies.get(ticker)
@@ -384,6 +444,64 @@ def _legacy_level(distance: int) -> str:
     if distance == 2:
         return "indirect_l1"
     return "indirect_l2"
+
+
+# --- final materiality pruning (spec §15) ---------------------------------
+
+def _final_materiality_prune(state: _GraphState) -> None:
+    """The ONE place the strict distance-scaled thresholds apply -- runs
+    after completeness expansion, before LLM verification (so verification
+    tokens are never spent on branches code can prune deterministically).
+
+    Order: edges below threshold go; nodes no longer reachable from the
+    event go; companies below threshold or orphaned by node pruning go.
+    Mixed/uncertain net effects are gated on MATERIALITY ONLY -- an honest
+    "we cannot call the direction" must survive to the product (spec §11);
+    its display confidence is then capped so it never reads as a confident
+    directional call (net-effect discipline, token-opt P12)."""
+    kept_edges = []
+    for edge in state.edges:
+        if _passes(edge.causal_distance, edge.materiality, edge.confidence):
+            kept_edges.append(edge)
+        else:
+            state.metrics["edges_pruned_final"] += 1
+
+    # Reachability over surviving edges: a branch whose trunk was pruned is
+    # gone entirely, not left dangling.
+    children_of: dict[str, list] = {}
+    for edge in kept_edges:
+        children_of.setdefault(edge.parent_id, []).append(edge)
+    reachable: set[str] = set()
+    queue = deque([EVENT_NODE_ID])
+    while queue:
+        current = queue.popleft()
+        for edge in children_of.get(current, []):
+            if edge.child_id not in reachable:
+                reachable.add(edge.child_id)
+                queue.append(edge.child_id)
+    kept_edges = [e for e in kept_edges
+                  if e.parent_id == EVENT_NODE_ID or e.parent_id in reachable]
+    state.edges = kept_edges
+    state.edge_keys = {e.key for e in kept_edges}
+    for node_id in set(state.nodes) - reachable:
+        state.nodes.pop(node_id, None)
+        state.metrics["nodes_pruned_final"] += 1
+
+    for ticker in list(state.companies):
+        company = state.companies[ticker]
+        thresholds = impact_thresholds_for_distance(company.causal_distance)
+        mixed = company.net_direction in ("mixed", "uncertain")
+        ok_materiality = company.materiality >= thresholds["materiality"]
+        ok_confidence = mixed or company.confidence >= thresholds["confidence"]
+        parent_alive = company.parent_id == EVENT_NODE_ID or company.parent_id in state.nodes
+        if not (ok_materiality and ok_confidence and parent_alive):
+            state.companies.pop(ticker)
+            state.rejected_tickers.add(ticker)
+            state.metrics["companies_pruned_final"] += 1
+            continue
+        if mixed:
+            company.confidence = min(company.confidence, 0.55)
+    state.metrics["companies_retained"] = len(state.companies)
 
 
 # --- verification ---------------------------------------------------------
@@ -424,10 +542,20 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
         return
 
     tickers = [c.ticker for c in to_verify]
+
+    def _company_path(company: GraphCompany) -> str:
+        """Full causal path for path-verification (spec §17): event -> ... ->
+        parent node -> company, one clipped line."""
+        parent = state.nodes.get(company.parent_id)
+        if parent is None:
+            return "(direct from event)"
+        return _ancestor_path(state, parent) + f"\n  d{company.causal_distance} {company.parent_id} -> {company.ticker}"
+
     listing = "\n".join(
         f"- {c.ticker} ({c.name}) d{c.causal_distance} {c.direction} net={c.net_direction or '-'} "
         f"impact={c.impact_strength:.2f} conf={c.confidence:.2f} mat={c.materiality:.2f} "
-        f"parent={c.parent_type}:{c.parent_id} :: {c.mechanism[:140]}"
+        f"parent={c.parent_type}:{c.parent_id} :: {c.mechanism[:140]}\n"
+        f"  path: {_company_path(c)}"
         for c in to_verify
     )
     suffix = _compact_suffix(facts, extra=f"PROPOSED COMPANIES:\n{listing}")
@@ -448,6 +576,7 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
         if company is None:
             continue
         state.rejected_tickers.add(ticker)
+        state.metrics["verification_failures"] += 1
         reason = (rejection.get("reason") or "").lower()
         if session is not None and any(marker in reason for marker in _STRUCTURAL_REJECT_MARKERS):
             _write_exposure_cache(session, company, exposure_exists=False, alert_id=alert_id)
@@ -547,6 +676,7 @@ def _verify_edges(router: StageRouter, facts: EventFacts, state: _GraphState) ->
             edge.verification_status = "verified"
         else:
             edge.verification_status = "pruned"
+            state.metrics["verification_failures"] += 1
             missing = verdict.get("missing_intermediate")
             if missing:
                 edge.mechanism = f"{edge.mechanism} [PRUNED: missing step: {missing}]"
@@ -622,7 +752,8 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         else:
             _build_graph(router, session, facts, state, budget, article_id,
                          max_depth=tier_caps["max_depth"] or settings.max_causal_depth,
-                         max_expansions=tier_caps["max_expansions"] or MAX_EXPANSIONS_PER_ARTICLE)
+                         max_expansions=tier_caps["max_expansions"] or MAX_EXPANSIONS_PER_ARTICLE,
+                         completeness_rounds=tier_caps.get("completeness_rounds", 0))
     except Exception as exc:  # noqa: BLE001 -- never-fail contract (2026-08-11)
         # A crash AFTER real work exists must not throw that work away: if
         # any companies or edges were produced, ship them marked degraded
@@ -635,16 +766,18 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         router.quality = "degraded" if router.quality == "authoritative" else router.quality
 
     ranking = _rank(state) if state.companies else []
+    state.metrics["companies_retained"] = len(state.companies)
 
-    logger.info("impact-graph article=%s: %s nodes, %s edges, %s companies, budget=%s",
+    logger.info("impact-graph article=%s: %s nodes, %s edges, %s companies, budget=%s metrics=%s",
                 article_id, len(state.nodes), len(state.edges), len(state.companies),
-                budget.summary())
+                budget.summary(), state.metrics)
 
     return ImpactGraphResult(
         category=facts.category, event_type=facts.event_type, facts=facts.facts,
         event_label=facts.event, companies=list(state.companies.values()),
         edges=state.edges, gaps=state.gaps, ranking=ranking,
         analysis_provider=router.provider, analysis_quality=router.quality,
+        metrics=dict(state.metrics),
     )
 
 
@@ -795,15 +928,21 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         except ValidationError as exc:
             logger.warning("narrow single-call company rejected by schema: %s", exc)
             continue
-        if company.net_direction in ("mixed", "uncertain"):
-            company.confidence = min(company.confidence, 0.55)
-        if not _passes(company.causal_distance, company.materiality, company.confidence):
+        state.metrics["companies_considered"] += 1
+        # DISCOVERY floor only here; the strict distance thresholds -- and
+        # mixed/uncertain survival handling -- run in the final prune below.
+        if not _passes_discovery(company.materiality, company.confidence):
             state.rejected_tickers.add(ticker)
             continue
         company.verified = True  # in-call self-check; independent verify below when risky
         held = state.companies.get(ticker)
         if held is None or company.impact_strength > held.impact_strength:
             state.companies[ticker] = company
+
+    # FINAL materiality pruning (spec §15): strict thresholds once, after
+    # all discovery. Mixed/uncertain gate on materiality only.
+    state.metrics["nodes_discovered"] = len(state.nodes)
+    _final_materiality_prune(state)
 
     # Deterministic subject fallback (2026-08-12): a single-stock story
     # whose mapping call returned nothing must not ship an invisible
@@ -843,17 +982,20 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
 
 def _build_graph(router: StageRouter, session, facts: EventFacts,
                  state: _GraphState, budget: ArticleBudget, article_id: int | None,
-                 max_depth: int | None = None, max_expansions: int | None = None) -> None:
+                 max_depth: int | None = None, max_expansions: int | None = None,
+                 completeness_rounds: int = 0) -> None:
     max_depth = max_depth or settings.max_causal_depth
     max_expansions = max_expansions or MAX_EXPANSIONS_PER_ARTICLE
-    # Stage 2 -- initial shocks + distance-1 nodes (the graph anchor).
+    # Stage 2 -- initial shocks + distance-1 nodes (the graph anchor). The
+    # schema now forces a channel_audit: every ontology channel classified,
+    # so first-order coverage is systematic, not the model's first ideas.
     raw_shocks = router.call(
         "initial_shocks", schema=SCHEMA_SHOCKS,
         static_prefix=prompts.static_prefix(prompts.SHOCKS_PROMPT),
         dynamic_suffix=_facts_suffix(facts),
         compact_suffix=_facts_suffix(EventFacts(**{**facts.model_dump(), "article_evidence": []})),
     )
-    frontier: deque[_Node] = deque()
+    frontier: list[_Node] = []
     for shock in raw_shocks.get("shocks", []):
         edge = GraphEdge(
             parent_type="event", parent_id=EVENT_NODE_ID, child_type="economic_node",
@@ -884,26 +1026,76 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
             break
         _map_companies_for_node(router, session, facts, state, node)
 
-    # Stages 4/5/6 -- recursive frontier expansion. RELATED frontier nodes
-    # (same parent, same distance) are batched into one call, up to
-    # MAX_FRONTIER_BATCH -- never a giant whole-graph request (token-opt
-    # P15: the bundling-regression lesson stands; only overlapping-context
-    # siblings share a call). Soft budget (75%) gates expansion so the
-    # reserve always covers verification + ranking.
+    # Stages 4/5/6 -- recursive frontier expansion.
+    _expand_frontier(router, session, facts, state, budget, article_id,
+                     frontier, max_depth, max_expansions)
+
+    # Completeness audit + missing-branch expansion (spec §13/§14): assume
+    # the graph is incomplete, actively search for omitted branches, feed
+    # what is found back into the SAME expansion machinery. Rounds are
+    # config-bounded and stop early when an audit finds nothing new.
+    for _ in range(max(0, completeness_rounds)):
+        if budget.expansion_exhausted:
+            _skip("completeness_audit", "budget_soft_stop", article=article_id)
+            break
+        state.metrics["completeness_rounds_run"] += 1
+        new_nodes = _completeness_audit(router, session, facts, state, article_id)
+        if not new_nodes:
+            break
+        for node in new_nodes:
+            if budget.expansion_exhausted:
+                break
+            _map_companies_for_node(router, session, facts, state, node)
+        _expand_frontier(router, session, facts, state, budget, article_id,
+                         list(new_nodes), max_depth, max_expansions)
+
+    # FINAL materiality pruning (spec §15) -- the strict distance-scaled
+    # thresholds run exactly once, here, after completeness. Deterministic,
+    # zero-cost, and BEFORE LLM verification so verification tokens are not
+    # spent on prunable branches.
+    state.metrics["nodes_discovered"] = len(state.nodes)
+    _final_materiality_prune(state)
+
+    # Stage 7/8 -- verification runs out of the reserved budget slice; only
+    # a HARD overrun (past 100%) skips it, and ONLY that skip marks the
+    # analysis budget_exhausted (an unverified recall set is genuinely a
+    # lower-quality artifact; a soft-stopped-but-verified graph is not).
+    if not budget.exceeded:
+        _verify_companies(router, session, facts, state, alert_id=article_id)
+        _verify_edges(router, facts, state)
+    else:
+        router.quality = "budget_exhausted"
+        logger.warning("impact-graph hard budget overrun skipped verification at article=%s: %s",
+                       article_id, budget.summary())
+
+
+def _expand_frontier(router: StageRouter, session, facts: EventFacts,
+                     state: _GraphState, budget: ArticleBudget, article_id: int | None,
+                     frontier: list, max_depth: int, max_expansions: int) -> None:
+    """Recursive one-hop expansion of a frontier. PRIORITY-ordered: the
+    strongest (materiality x confidence) node expands first, so expansion
+    caps trim the weakest tail, never an arbitrary FIFO tail. RELATED
+    frontier nodes (same parent, same distance) are batched into one call,
+    up to MAX_FRONTIER_BATCH -- never a giant whole-graph request
+    (token-opt P15: the bundling-regression lesson stands). Soft budget
+    (75%) gates expansion so the reserve always covers verification.
+    Expansion eligibility uses the DISCOVERY floor -- strict thresholds
+    only apply at final pruning."""
     while frontier:
         if budget.expansion_exhausted:
             logger.info("impact-graph expansion soft-stopped at article=%s: %s",
                         article_id, budget.summary())
             break
-        node = frontier.popleft()
+        frontier.sort(key=lambda n: (n.materiality * n.confidence, -n.distance))
+        node = frontier.pop()
         if node.node_id in state.expanded:
             _skip("ripple_discovery", "already_expanded", node=node.node_id)
             continue
         if node.distance >= max_depth:
             _skip("ripple_discovery", "max_depth", node=node.node_id, cap=max_depth)
             continue
-        if not _passes(node.distance, node.materiality, node.confidence):
-            _skip("ripple_discovery", "below_thresholds", node=node.node_id,
+        if not _passes_discovery(node.materiality, node.confidence):
+            _skip("ripple_discovery", "below_discovery_floor", node=node.node_id,
                   materiality=round(node.materiality, 2), confidence=round(node.confidence, 2))
             continue  # dead branch: no LLM call
         if state.expansions >= max_expansions:
@@ -919,7 +1111,7 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
             if (sibling.distance == node.distance
                     and parent_of.get(sibling.node_id) == parent_of.get(node.node_id)
                     and sibling.node_id not in state.expanded
-                    and _passes(sibling.distance, sibling.materiality, sibling.confidence)):
+                    and _passes_discovery(sibling.materiality, sibling.confidence)):
                 frontier.remove(sibling)
                 batch.append(sibling)
         for member in batch:
@@ -983,14 +1175,54 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
                 if not budget.expansion_exhausted:
                     _map_companies_for_node(router, session, facts, state, child)
 
-    # Stage 7/8 -- verification runs out of the reserved budget slice; only
-    # a HARD overrun (past 100%) skips it, and ONLY that skip marks the
-    # analysis budget_exhausted (an unverified recall set is genuinely a
-    # lower-quality artifact; a soft-stopped-but-verified graph is not).
-    if not budget.exceeded:
-        _verify_companies(router, session, facts, state, alert_id=article_id)
-        _verify_edges(router, facts, state)
-    else:
-        router.quality = "budget_exhausted"
-        logger.warning("impact-graph hard budget overrun skipped verification at article=%s: %s",
-                       article_id, budget.summary())
+
+def _completeness_audit(router: StageRouter, session, facts: EventFacts,
+                        state: _GraphState, article_id: int | None) -> list:
+    """One audit round (spec §13): an ACTIVE search for missing branches
+    against the channel ontology. Accepted branches become real nodes and
+    are returned so the caller can re-enter them into the frontier. Not a
+    verifier -- it never touches existing edges."""
+    from app.analysis.impact_graph.normalize import normalize_node_id
+    from app.analysis.impact_graph.schemas import SCHEMA_COMPLETENESS
+
+    company_line = ", ".join(sorted(state.companies)) or "(none yet)"
+    suffix = _compact_suffix(
+        facts,
+        extra=(
+            f"CURRENT GRAPH:\n{_graph_outline(state, limit=60)}\n\n"
+            f"COMPANIES ALREADY MAPPED: {company_line}\n\n"
+            f"Existing node ids (propose only branches NOT already represented): "
+            f"{', '.join(sorted(state.nodes))}"
+        ),
+    )
+    try:
+        raw = router.call(
+            "completeness_audit", schema=SCHEMA_COMPLETENESS,
+            static_prefix=prompts.static_prefix(prompts.COMPLETENESS_PROMPT),
+            dynamic_suffix=suffix,
+        )
+    except StageRouterError as exc:
+        logger.warning("impact-graph completeness audit unavailable for article=%s: %s",
+                       article_id, exc)
+        return []
+
+    new_nodes = []
+    for raw_branch in raw.get("missing_branches", []):
+        try:
+            edge = GraphEdge(**{k: v for k, v in raw_branch.items()
+                                if k in GraphEdge.model_fields})
+        except ValidationError:
+            continue
+        if edge.parent_id != EVENT_NODE_ID and edge.parent_type not in ("company", "sector"):
+            edge.parent_id = normalize_node_id(edge.parent_id)
+        if edge.parent_id != EVENT_NODE_ID and edge.parent_id not in state.nodes:
+            continue  # a missing branch must hang off the real graph
+        if _register_edge(state, edge):
+            node = _node_from_edge(edge, raw_branch.get("child_label"),
+                                   raw_branch.get("child_sector"))
+            state.nodes[node.node_id] = node
+            new_nodes.append(node)
+            state.metrics["completeness_branches_found"] += 1
+    logger.info("impact-graph completeness_audit article=%s found=%s",
+                article_id, len(new_nodes))
+    return new_nodes

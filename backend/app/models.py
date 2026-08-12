@@ -426,6 +426,11 @@ class AlertCompany(Base):
     # positive_channels/negative_channels/net_direction/
     # relative_beneficiary. NULL on pre-optimization rows.
     channels_json = Column(Text, nullable=True)
+    # Fundamental economic effect (architecture upgrade 2026-08-12 §11):
+    # positive | negative | mixed | uncertain | neutral. The canonical
+    # 5-way truth; `direction` above stays the market-facing legacy view
+    # derived from it. NULL on pre-upgrade rows.
+    economic_effect = Column(String, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
@@ -491,6 +496,9 @@ class ImpactEdge(Base):
     confidence_f = Column(Float, nullable=True)       # [0,1] -- float twin of confidence_score
     materiality = Column(Float, nullable=True)        # [0,1]
     time_horizon = Column(String, nullable=True)      # Immediate | Short-Term | Medium-Term | Long-Term
+    # 5-way fundamental effect (architecture upgrade 2026-08-12 §11);
+    # NULL on pre-upgrade rows.
+    economic_effect = Column(String, nullable=True)
     verification_status = Column(String, nullable=True)  # verified | pruned | unverified
 
     alert = relationship("Alert", back_populates="impact_edges")
