@@ -388,3 +388,74 @@ def test_neutral_without_channels_is_pruned(db_session):
     _final_materiality_prune(state)
     assert "WEAK.NS" not in state.companies   # weak association, no analysis
     assert "OFFSET.NS" in state.companies     # genuine offsetting channels
+
+
+# --- final spec §43: banned patterns must never regress ---------------------
+
+def test_banned_pattern_no_generic_sector_to_direction_rules():
+    """The registry must never encode `crude -> all <sector> -> direction`.
+    Every mechanism must carry a specific exposure archetype (never a bare
+    sector), a concrete mechanism sentence, and an exposure dimension."""
+    for mechanism_id, mech in MECHANISMS.items():
+        assert mech["child_exposure"] in EXPOSURE_ARCHETYPES, mechanism_id
+        assert len(mech["mechanism"]) > 40, f"{mechanism_id}: mechanism too generic"
+        assert mechanism_id in MECHANISM_DIMENSIONS, mechanism_id
+    # No mechanism may target the broad chemical/fertilizer catch-alls with
+    # a confident directional prior.
+    for mechanism_id, mech in MECHANISMS.items():
+        if mech["child_exposure"] in ("specialty_chemical_producer",
+                                      "commodity_chemical_producer",
+                                      "fertilizer_agrochemical"):
+            assert mech["parent_variable"] != "crude_price_up", \
+                f"{mechanism_id}: generic crude->chemical/fertilizer rule is banned"
+
+
+def test_banned_pattern_prompts_carry_business_model_validation():
+    from app.analysis.impact_graph import prompts
+
+    for prompt in (prompts.MECHANISM_MAPPING_PROMPT, prompts.DIRECT_COMPANIES_PROMPT,
+                   prompts.RIPPLE_COMPANIES_PROMPT, prompts.NARROW_COMPANIES_PROMPT):
+        assert "BUSINESS-MODEL VALIDATION" in prompt
+    assert "Never automatic winners or losers" in prompts.MECHANISM_MAPPING_PROMPT
+    assert "never automatic losers" in prompts.SPECIAL_CASE_RULES  # EVs
+    assert "business model" in prompts.VERIFY_COMPANIES_PROMPT.lower()
+
+
+def test_banned_pattern_market_move_never_overwrites_economic_effect(db_session):
+    """Measurement reconciliation may overwrite the legacy market-facing
+    direction column, but the fundamental economic_effect must survive as
+    stored (final spec §15/§19)."""
+    from app.analysis.impact_graph.schemas import GraphCompany, ImpactGraphResult
+    from app.pipeline import _v3_entries
+
+    _company(db_session, "REL.NS", "Rel", "oil_gas")
+    result = ImpactGraphResult(
+        category="oil_gas",
+        companies=[GraphCompany(ticker="REL.NS", name="Rel", direction="neutral",
+                                net_direction="mixed", impact_strength=0.6,
+                                confidence=0.8, materiality=0.6, causal_distance=1,
+                                parent_type="event", parent_id="event",
+                                positive_channels=["realization"],
+                                negative_channels=["feedstock"],
+                                offsetting_channels=["inventory gains vs cost"]).clamp()],
+    )
+    entries = _v3_entries(db_session, result)
+    assert entries[0]["economic_effect"] == "mixed"
+    import json as _json
+    channels = _json.loads(entries[0]["channels_json"])
+    assert channels["offsetting_channels"] == ["inventory gains vs cost"]
+    assert channels["net_direction"] == "mixed"
+
+
+def test_offsetting_channels_rescue_genuine_neutral(db_session):
+    from app.analysis.impact_graph.engine import _final_materiality_prune
+    from app.analysis.impact_graph.schemas import GraphCompany
+
+    state = _GraphState()
+    state.companies["GEN.NS"] = GraphCompany(
+        ticker="GEN.NS", name="Gen", direction="neutral", net_direction="neutral",
+        impact_strength=0.5, confidence=0.9, materiality=0.6, causal_distance=1,
+        parent_type="event", parent_id="event",
+        offsetting_channels=["import cost rise offsets export gain"]).clamp()
+    _final_materiality_prune(state)
+    assert "GEN.NS" in state.companies  # articulated offset = genuine neutral

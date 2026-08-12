@@ -13,7 +13,20 @@ from app.analysis.schemas import SECTOR_DEFINITIONS
 # 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
 # fingerprint, so a prompt change is an explicit, visible cache
 # invalidation instead of a silent one. Bump on ANY prompt-text change.
-IMPACT_PROMPT_VERSION = "kg-2"
+IMPACT_PROMPT_VERSION = "kg-3"
+
+# Business-model validation (final spec §9/§13): shared by every company
+# stage. Sector labels, names and tickers are candidacy, never proof.
+BUSINESS_MODEL_VALIDATION = """BUSINESS-MODEL VALIDATION: before including any company, verify from its supplied profile what business it ACTUALLY conducts. Never classify from its name, ticker, sector label, or semantic similarity -- a company named "X Energy" may not consume energy; a "chemicals" company may not touch the affected feedstock. If the supplied profile does not establish the claimed exposure, leave the company out."""
+
+# Sector special-case discipline (final spec §26) -- static, cacheable.
+SPECIAL_CASE_RULES = """SPECIAL CASES:
+- Refiners/OMCs: crude is BOTH feedstock cost and realization; net = refining spread + marketing pass-through + inventory + working capital. Never automatic winners or losers.
+- Chemicals: exposure must be product/feedstock-specific; "chemical company" alone proves nothing about crude.
+- Fertilizers: include only when the specific feedstock relationship (e.g. gas) is genuinely affected by THIS event.
+- EVs: evaluate BOTH the fuel-substitution benefit AND affordability/inflation/financing pressure; never automatic losers on fuel-cost logic.
+- Financials: judge through loan demand, funding cost, NIM, credit quality and provisions -- not generic sentiment.
+- Consumer companies: distinguish essentials / everyday / premium / discretionary / luxury -- demand shocks hit these very differently."""
 
 # Shared output-compression discipline (cost-opt spec P11): analytical
 # decisions stay; repeated prose goes. Defined before first use -- several
@@ -323,6 +336,10 @@ Return every company that genuinely qualifies, not a representative sample.
 
 Return zero when no candidate qualifies.
 
+""" + BUSINESS_MODEL_VALIDATION + """
+
+""" + SPECIAL_CASE_RULES + """
+
 """ + OUTPUT_DISCIPLINE
 
 
@@ -437,6 +454,10 @@ Use only candidates from the supplied database.
 
 Return zero if none qualify.
 
+""" + BUSINESS_MODEL_VALIDATION + """
+
+""" + SPECIAL_CASE_RULES + """
+
 """ + OUTPUT_DISCIPLINE
 
 
@@ -451,8 +472,8 @@ The previous stages intentionally optimized for recall.
 
 For EVERY proposed company, independently verify:
 
-A. COMPANY EXPOSURE
-Does this company actually have the stated business exposure?
+A. COMPANY EXPOSURE AND BUSINESS MODEL
+Does this company ACTUALLY conduct the business the mechanism assumes? Reject classifications that rest on the company's name, ticker, sector label, or semantic similarity rather than its real business model.
 
 B. CAUSAL LINK
 Does the proposed parent -> mechanism -> company relationship genuinely hold?
@@ -615,7 +636,9 @@ For each company: exact mechanism through its parent node, competing channels (p
 
 Set parent_id to the company's sector node id. A company sits AT its parent node's causal distance.
 
-SELF-CHECK before answering: for each company -- concrete causal link? direction logically correct? actually exposed? material enough? If any answer is no, leave it out; do not include companies to look thorough. Returning few or zero companies is a correct answer."""
+SELF-CHECK before answering: for each company -- concrete causal link? direction logically correct? actually exposed? material enough? If any answer is no, leave it out; do not include companies to look thorough. Returning few or zero companies is a correct answer.
+
+""" + BUSINESS_MODEL_VALIDATION
 
 
 # Knowledge-architecture mapping (cost-opt spec P5/P25): candidates arrive
@@ -632,6 +655,12 @@ The mechanism prior comes from a verified registry. Your task is EVENT-SPECIFIC 
 5. Score impact_strength, confidence, materiality for THIS event, not for the mechanism in general.
 
 Choose ONLY from the candidate list. Selecting none is a correct answer when the mechanism does not genuinely apply.
+
+Where positive and negative channels substantially cancel, list them in offsetting_channels -- that is what makes a mixed/neutral verdict an analysis rather than a weak association.
+
+""" + BUSINESS_MODEL_VALIDATION + """
+
+""" + SPECIAL_CASE_RULES + """
 
 """ + OUTPUT_DISCIPLINE
 

@@ -758,6 +758,7 @@ def _final_materiality_prune(state: _GraphState) -> None:
         neutral_garbage = (
             company.economic_effect == "neutral"
             and not (company.positive_channels and company.negative_channels)
+            and not company.offsetting_channels
         )
         if not (ok_materiality and ok_confidence and parent_alive) or neutral_garbage:
             state.companies.pop(ticker)

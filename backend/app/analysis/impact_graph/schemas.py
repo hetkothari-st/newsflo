@@ -318,6 +318,10 @@ class GraphCompany(BaseModel):
     # off than peers" without claiming absolute benefit.
     positive_channels: list[str] = Field(default_factory=list)
     negative_channels: list[str] = Field(default_factory=list)
+    # Channels that substantially cancel each other for THIS company (final
+    # spec §18): what makes a mixed/neutral verdict an ANALYSIS instead of
+    # a weak association.
+    offsetting_channels: list[str] = Field(default_factory=list)
     net_direction: str = ""  # NET_DIRECTIONS; "" on legacy rows
     relative_beneficiary: bool = False
     # Fundamental economic effect (spec §11/§12) -- canonical 5-way field.
@@ -376,6 +380,7 @@ def schema_companies(valid_tickers: list[str]) -> dict:
                         "rationale": {"type": "string"},
                         "positive_channels": {"type": "array", "items": {"type": "string"}},
                         "negative_channels": {"type": "array", "items": {"type": "string"}},
+                        "offsetting_channels": {"type": "array", "items": {"type": "string"}},
                         "net_direction": {"type": "string", "enum": NET_DIRECTIONS},
                         "economic_effect": {"type": "string", "enum": ECONOMIC_EFFECTS},
                         "relative_beneficiary": {"type": "boolean"},

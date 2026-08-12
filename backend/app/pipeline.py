@@ -782,6 +782,7 @@ def _v3_entries(session: Session, result) -> list[dict]:
             "channels_json": json.dumps({
                 "positive_channels": company.positive_channels,
                 "negative_channels": company.negative_channels,
+                "offsetting_channels": company.offsetting_channels,
                 "net_direction": company.net_direction or company.direction,
                 "relative_beneficiary": company.relative_beneficiary,
             }) if (company.positive_channels or company.negative_channels
