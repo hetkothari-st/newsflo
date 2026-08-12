@@ -69,24 +69,35 @@ export async function importHoldingsFile(token: string, file: File): Promise<Imp
   return (await res.json()) as ImportReport;
 }
 
-export async function getConnectStatus(): Promise<{ kite_configured: boolean }> {
-  const res = await expectOk(await fetch('/api/portfolio/connect/status'));
-  return (await res.json()) as { kite_configured: boolean };
+export interface ConnectStatus {
+  providers: Record<string, boolean>;
+  flows: Record<string, 'redirect' | 'token'>;
 }
 
-export async function getKiteLoginUrl(token: string): Promise<string> {
+export async function getConnectStatus(): Promise<ConnectStatus> {
+  const res = await expectOk(await fetch('/api/portfolio/connect/status'));
+  return (await res.json()) as ConnectStatus;
+}
+
+export async function getProviderLoginUrl(token: string, provider: string): Promise<string> {
   const res = await expectOk(
-    await fetch('/api/portfolio/connect/kite/login-url', { headers: authHeaders(token) }),
+    await fetch(`/api/portfolio/connect/${encodeURIComponent(provider)}/login-url`, {
+      headers: authHeaders(token),
+    }),
   );
   return ((await res.json()) as { url: string }).url;
 }
 
-export async function kiteImport(token: string, requestToken: string): Promise<ImportReport> {
+export async function providerImport(
+  token: string,
+  provider: string,
+  params: Record<string, string>,
+): Promise<ImportReport> {
   const res = await expectOk(
-    await fetch('/api/portfolio/connect/kite/import', {
+    await fetch(`/api/portfolio/connect/${encodeURIComponent(provider)}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
-      body: JSON.stringify({ request_token: requestToken }),
+      body: JSON.stringify({ params }),
     }),
   );
   return (await res.json()) as ImportReport;

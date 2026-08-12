@@ -9,25 +9,28 @@ export interface Broker {
   slug: string;
   name: string;
   hint: string;
-  live?: 'kite';
+  // Connector slug in the backend registry (app/portfolio_connect) --
+  // present when a live API connector exists for this broker; whether
+  // it's actually usable comes from /api/portfolio/connect/status.
+  live?: string;
 }
 
 const CONSOLE_HINT = 'Log in to the web console → Portfolio / Holdings → Download or Export as CSV.';
 
 export const BROKERS: Broker[] = [
-  { slug: 'zerodha', name: 'Zerodha', live: 'kite', hint: 'Console (console.zerodha.com) → Portfolio → Holdings → Download CSV. Or connect live below.' },
+  { slug: 'zerodha', name: 'Zerodha', live: 'zerodha', hint: 'Console (console.zerodha.com) → Portfolio → Holdings → Download CSV. Or connect live below.' },
   { slug: 'groww', name: 'Groww', hint: 'Stocks → Holdings → Download statement. If it downloads as XLSX, open and save as CSV first.' },
-  { slug: 'upstox', name: 'Upstox', hint: 'Account → Reports → Holdings → Download CSV.' },
-  { slug: 'angelone', name: 'Angel One', hint: 'Reports → Holdings statement → Export CSV.' },
-  { slug: 'icicidirect', name: 'ICICI Direct', hint: 'Portfolio → Equity → View Demat Holdings → Export.' },
+  { slug: 'upstox', name: 'Upstox', live: 'upstox', hint: 'Account → Reports → Holdings → Download CSV. Or connect live below.' },
+  { slug: 'angelone', name: 'Angel One', live: 'angelone', hint: 'Reports → Holdings statement → Export CSV. Or connect live below.' },
+  { slug: 'icicidirect', name: 'ICICI Direct', live: 'icicidirect', hint: 'Portfolio → Equity → View Demat Holdings → Export. Or connect live below.' },
   { slug: 'hdfcsky', name: 'HDFC Sky / Securities', hint: CONSOLE_HINT },
   { slug: 'kotak', name: 'Kotak Securities', hint: 'Reports → Holdings → Download. Save as CSV if offered XLSX.' },
   { slug: 'sbi', name: 'SBI Securities', hint: CONSOLE_HINT },
   { slug: 'motilal', name: 'Motilal Oswal', hint: CONSOLE_HINT },
   { slug: 'sharekhan', name: 'Sharekhan', hint: CONSOLE_HINT },
   { slug: '5paisa', name: '5paisa', hint: CONSOLE_HINT },
-  { slug: 'dhan', name: 'Dhan', hint: 'Statements → Holdings → Download CSV.' },
-  { slug: 'fyers', name: 'Fyers', hint: 'My Account → Reports → Holdings → Export.' },
+  { slug: 'dhan', name: 'Dhan', live: 'dhan', hint: 'My Profile → DhanHQ Trading APIs → generate an access token, paste it below. Or export a holdings CSV.' },
+  { slug: 'fyers', name: 'Fyers', live: 'fyers', hint: 'My Account → Reports → Holdings → Export. Or connect live below.' },
   { slug: 'paytmmoney', name: 'Paytm Money', hint: CONSOLE_HINT },
   { slug: 'indmoney', name: 'INDmoney', hint: 'Indian Stocks → Holdings → Export report.' },
   { slug: 'axisdirect', name: 'Axis Direct', hint: CONSOLE_HINT },

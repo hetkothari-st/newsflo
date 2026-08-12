@@ -1,15 +1,17 @@
 /* Broker connect panel: a ruled directory of Indian providers. Every
-   provider connects through the format-agnostic holdings-file import
-   (the backend parser reads any console's CSV export); Zerodha also
-   offers a live Kite Connect import when the server has API keys.
-   After Kite's redirect lands back with ?request_token, PortfolioV4
-   posts it here via onKiteToken -> kiteImport. */
+   provider connects through the format-agnostic holdings-file import;
+   brokers with a live connector (Zerodha, Upstox, Fyers, Angel One,
+   ICICI Direct via redirect; Dhan via pasted token) additionally offer
+   it when the server is configured for them. Redirect callbacks land in
+   PortfolioV4, which posts the params to the provider import. */
 import { useEffect, useRef, useState } from 'react';
 import { BROKERS, type Broker } from './brokers';
 import {
   getConnectStatus,
-  getKiteLoginUrl,
+  getProviderLoginUrl,
   importHoldingsFile,
+  providerImport,
+  type ConnectStatus,
   type ImportReport,
 } from './portfolioApi';
 
@@ -21,22 +23,29 @@ export default function PortfolioConnectV4({
   onImported: () => void;
 }) {
   const [selected, setSelected] = useState<Broker | null>(null);
-  const [kiteConfigured, setKiteConfigured] = useState(false);
+  const [status, setStatus] = useState<ConnectStatus | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pasteToken, setPasteToken] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getConnectStatus()
-      .then((status) => setKiteConfigured(status.kite_configured))
-      .catch(() => setKiteConfigured(false));
+      .then(setStatus)
+      .catch(() => setStatus(null));
   }, []);
 
   const pick = (broker: Broker) => {
     setSelected(broker.slug === selected?.slug ? null : broker);
     setReport(null);
     setError(null);
+    setPasteToken('');
+  };
+
+  const finish = (result: ImportReport) => {
+    setReport(result);
+    if (result.imported.length > 0) onImported();
   };
 
   const upload = async (file: File) => {
@@ -44,9 +53,7 @@ export default function PortfolioConnectV4({
     setError(null);
     setReport(null);
     try {
-      const result = await importHoldingsFile(token, file);
-      setReport(result);
-      if (result.imported.length > 0) onImported();
+      finish(await importHoldingsFile(token, file));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed — try again.');
     } finally {
@@ -55,19 +62,37 @@ export default function PortfolioConnectV4({
     }
   };
 
-  const connectKite = async () => {
+  const connectLive = async (provider: string) => {
     try {
-      window.location.href = await getKiteLoginUrl(token);
+      window.location.href = await getProviderLoginUrl(token, provider);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Zerodha connect unavailable.');
+      setError(err instanceof Error ? err.message : 'Live connect unavailable.');
     }
   };
+
+  const importToken = async (provider: string) => {
+    if (!pasteToken.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      finish(await providerImport(token, provider, { access_token: pasteToken.trim() }));
+      setPasteToken('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed — try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const liveSlug = selected?.live;
+  const liveConfigured = liveSlug !== undefined && status?.providers[liveSlug] === true;
+  const liveFlow = liveSlug !== undefined ? status?.flows[liveSlug] : undefined;
 
   return (
     <div className="connect4">
       <p className="psub">
         Pick your provider. Every broker's console exports a holdings file — drop it here and the
-        positions land in your portfolio. Zerodha can also connect live.
+        positions land in your portfolio. Brokers with a live API also connect directly.
       </p>
       <div className="brokergrid">
         {BROKERS.map((broker) => (
@@ -78,6 +103,9 @@ export default function PortfolioConnectV4({
             onClick={() => pick(broker)}
           >
             {broker.name}
+            {broker.live !== undefined && status?.providers[broker.live] === true && (
+              <span className="livedot" aria-label="live connect available" />
+            )}
           </button>
         ))}
       </div>
@@ -85,16 +113,35 @@ export default function PortfolioConnectV4({
         <div className="brokerpanel">
           <h3>{selected.name}</h3>
           <p className="psub">{selected.hint}</p>
-          {selected.live === 'kite' && (
+          {liveSlug !== undefined && liveFlow === 'redirect' && (
             <button
               type="button"
               className="authsubmit"
-              disabled={!kiteConfigured}
-              title={kiteConfigured ? undefined : 'Server has no Kite API keys configured'}
-              onClick={connectKite}
+              disabled={!liveConfigured}
+              title={liveConfigured ? undefined : `Server has no ${selected.name} API keys configured`}
+              onClick={() => void connectLive(liveSlug)}
             >
-              {kiteConfigured ? 'Connect live via Kite →' : 'Live connect unavailable — use CSV'}
+              {liveConfigured ? `Connect live via ${selected.name} →` : 'Live connect unavailable — use CSV'}
             </button>
+          )}
+          {liveSlug !== undefined && liveFlow === 'token' && (
+            <div className="tokenrow">
+              <input
+                type="password"
+                placeholder="Paste access token"
+                aria-label={`${selected.name} access token`}
+                value={pasteToken}
+                onChange={(event) => setPasteToken(event.target.value)}
+              />
+              <button
+                type="button"
+                className="authsubmit"
+                disabled={busy || pasteToken.trim() === ''}
+                onClick={() => void importToken(liveSlug)}
+              >
+                Import →
+              </button>
+            </div>
           )}
           <label className="filedrop">
             <input

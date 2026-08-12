@@ -21,7 +21,7 @@ import LogoV4 from './LogoV4';
 import PortfolioConnectV4 from './PortfolioConnectV4';
 import PortfolioManageV4 from './PortfolioManageV4';
 import { displaySector } from '../v3/directoryFilters';
-import { kiteImport } from './portfolioApi';
+import { providerImport } from './portfolioApi';
 import { formatMarketCap } from './directoryLiveCaps';
 import { useDirectoryLiveCaps } from './useDirectoryLiveCaps';
 import { useAuth } from '../lib/auth';
@@ -367,6 +367,19 @@ export function DirectoryV4({ onOpenDeepDive: _onOpenDeepDive }: { onOpenDeepDiv
   );
 }
 
+/* Which broker's OAuth redirect is this? Each broker decorates its
+   callback differently; ?broker= is our own marker where the redirect
+   URI allowed one. */
+function sniffBrokerCallback(params: URLSearchParams): string | null {
+  const marked = params.get('broker');
+  if (marked !== null && params.has('code')) return marked;
+  if (params.has('request_token')) return 'zerodha';
+  if (params.has('auth_code')) return 'fyers';
+  if (params.has('auth_token')) return 'angelone';
+  if (params.has('apisession') || params.has('API_Session')) return 'icicidirect';
+  return null;
+}
+
 /* ---------- SIGN-IN GATE (shared by Portfolio and Review) ---------- */
 
 /* Auth itself lives on the Account page -- gated sections show a quiet
@@ -411,25 +424,23 @@ export function PortfolioV4({
   const bump = () => setVersion((prev) => prev + 1);
   const [kiteNote, setKiteNote] = useState<string | null>(null);
 
-  // Kite Connect redirect lands back on the app with ?request_token=...
-  // -- exchange it once, then strip the param so a refresh can't replay.
+  // Broker OAuth redirects land back on the app with provider-specific
+  // params -- sniff which broker answered, post the params once, then
+  // strip them so a refresh can't replay the exchange.
   useEffect(() => {
     if (!token) return;
     const params = new URLSearchParams(window.location.search);
-    const requestToken = params.get('request_token');
-    if (requestToken === null) return;
-    params.delete('request_token');
-    params.delete('action');
-    params.delete('status');
-    const query = params.toString();
-    window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
-    setKiteNote('Importing your Zerodha holdings…');
-    kiteImport(token, requestToken)
+    const provider = sniffBrokerCallback(params);
+    if (provider === null) return;
+    const paramsObject = Object.fromEntries(params.entries());
+    window.history.replaceState(null, '', window.location.pathname);
+    setKiteNote(`Importing your ${provider} holdings…`);
+    providerImport(token, provider, paramsObject)
       .then((report) => {
-        setKiteNote(`Zerodha import: ${report.imported.length} holdings landed.`);
+        setKiteNote(`${provider} import: ${report.imported.length} holdings landed.`);
         bump();
       })
-      .catch((err: Error) => setKiteNote(`Zerodha import failed: ${err.message}`));
+      .catch((err: Error) => setKiteNote(`${provider} import failed: ${err.message}`));
   }, [token]);
 
   useEffect(() => {

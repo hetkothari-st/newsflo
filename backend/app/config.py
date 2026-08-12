@@ -166,11 +166,21 @@ class Settings(BaseSettings):
     def ingestion_enabled_source_set(self) -> set[str]:
         return {s.strip() for s in self.ingestion_enabled_sources.split(",") if s.strip()}
     brandfetch_client_id: str = os.environ.get("BRANDFETCH_CLIENT_ID", "")
-    # Zerodha Kite Connect developer app for live portfolio import. Empty
-    # disables the OAuth connect flow (the UI then offers CSV import only)
-    # -- same empty-means-off convention as brandfetch_client_id.
+    # Broker developer-app keys for live portfolio import (one pair per
+    # broker; every pair empty-means-off -- the UI then offers that
+    # broker's CSV import only). Dhan needs no keys (token-paste API).
     kite_api_key: str = os.environ.get("KITE_API_KEY", "")
     kite_api_secret: str = os.environ.get("KITE_API_SECRET", "")
+    upstox_api_key: str = os.environ.get("UPSTOX_API_KEY", "")
+    upstox_api_secret: str = os.environ.get("UPSTOX_API_SECRET", "")
+    fyers_app_id: str = os.environ.get("FYERS_APP_ID", "")
+    fyers_app_secret: str = os.environ.get("FYERS_APP_SECRET", "")
+    angelone_api_key: str = os.environ.get("ANGELONE_API_KEY", "")
+    breeze_api_key: str = os.environ.get("BREEZE_API_KEY", "")
+    breeze_api_secret: str = os.environ.get("BREEZE_API_SECRET", "")
+    # Where brokers bounce back after login -- must match the redirect
+    # URI registered on each broker's developer app.
+    connect_redirect_url: str = os.environ.get("CONNECT_REDIRECT_URL", "http://localhost:8400/")
     # Empty disables the live-price feature entirely (same convention as
     # brandfetch_client_id) -- local dev/CI never opens an outbound
     # WebSocket connection unless this is explicitly set.

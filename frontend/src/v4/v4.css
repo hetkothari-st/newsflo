@@ -1024,6 +1024,30 @@ body:has(.nf4.dark) { background: #2a2722; }
 }
 .nf4 .brokercell:hover { color: var(--ink); border-color: var(--ink); }
 .nf4 .brokercell.on { color: var(--ink); border-color: var(--ink); background: var(--hairline); }
+/* Live-connector marker: a small filled dot after the broker name --
+   data-ink green, the system's "this is live" color. */
+.nf4 .brokercell .livedot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--data-up);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.nf4 .tokenrow { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.nf4 .tokenrow input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--grotesque);
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--midstone);
+  padding: 6px 0;
+}
+.nf4 .tokenrow input:focus { outline: none; border-bottom-color: var(--ink); }
 .nf4 .brokerpanel { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px 16px; margin: 8px 0 12px; }
 .nf4 .brokerpanel h3 { font-family: var(--serif); font-size: 20px; margin: 0 0 4px; }
 .nf4 .filedrop { display: block; border: 1px dashed var(--midstone); border-radius: var(--radius); padding: 18px; text-align: center; cursor: pointer; margin-top: 12px; color: var(--ash); font-size: 13px; }

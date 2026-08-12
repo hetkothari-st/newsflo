@@ -135,13 +135,21 @@ def test_delete_holding_404s(db_session):
     app.dependency_overrides.clear()
 
 
-def test_connect_status_reports_unconfigured(db_session):
+def test_connect_status_reports_provider_map(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)
 
     body = client.get("/api/portfolio/connect/status").json()
 
-    assert body == {"kite_configured": False}
+    assert body["kite_configured"] is False  # back-compat key
+    # Key-gated providers all off without env keys; Dhan is token-paste
+    # (no app keys) and therefore always available.
+    assert body["providers"] == {
+        "zerodha": False, "upstox": False, "fyers": False,
+        "angelone": False, "icicidirect": False, "dhan": True,
+    }
+    assert body["flows"]["dhan"] == "token"
+    assert body["flows"]["zerodha"] == "redirect"
     app.dependency_overrides.clear()
 
 
@@ -172,11 +180,11 @@ def test_kite_import_exchanges_and_upserts(db_session, monkeypatch):
             return self._payload
 
     monkeypatch.setattr(
-        "app.routers.portfolio_connect.httpx.post",
+        "app.portfolio_connect.kite.httpx.post",
         lambda *a, **kw: _Resp({"data": {"access_token": "tok"}}),
     )
     monkeypatch.setattr(
-        "app.routers.portfolio_connect.httpx.get",
+        "app.portfolio_connect.kite.httpx.get",
         lambda *a, **kw: _Resp({"data": [
             {"tradingsymbol": "RELIANCE", "isin": "INE002A01018", "quantity": 3},
             {"tradingsymbol": "GHOST", "isin": "INE000Z00000", "quantity": 5},
