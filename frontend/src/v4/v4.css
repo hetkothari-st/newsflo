@@ -297,6 +297,30 @@ body:has(.nf4.dark) { background: #2a2722; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* MORE-expanded headline: clamp lifted in place; the card grows to fit
+   (reader asked for the full title -- honoring that beats the exact
+   snap height for this one card). */
+.nf4 .storycard h1.unclamped {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.nf4 .storycard:has(h1.unclamped) { height: auto; min-height: 0; }
+/* Subtle expander -- wire-meta styling, not a chrome button. */
+.nf4 .morebtn {
+  font-family: var(--grotesque);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ash);
+  background: none;
+  border: none;
+  padding: 0;
+  margin: -8px 0 12px;
+  cursor: pointer;
+}
+.nf4 .morebtn:hover, .nf4 .morebtn:focus-visible { color: var(--ink); }
 .nf4 .storycard .lgist {
   font-family: var(--serif);
   font-size: 20px;

@@ -18,6 +18,7 @@ import {
   type RippleLayer,
 } from '../v3/api';
 import { categoryArtUrl } from '../v3/categoryArt';
+import ExpandableTitle from './ExpandableTitle';
 import type { InfoV4Data } from './InfoV4';
 import LogoV4 from './LogoV4';
 import { useAuth } from '../lib/auth';
@@ -497,7 +498,7 @@ export default function FeedV4({
               <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
                 {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
               </div>
-              <h1>{alert.article.title}</h1>
+              <ExpandableTitle title={alert.article.title} />
               <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
               <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
             </div>

@@ -5,6 +5,7 @@
    intelligence pipeline: no analysis, no measurement, no LLM of any
    kind behind this view -- a plain DB read. */
 import { useEffect, useState } from 'react';
+import ExpandableTitle from './ExpandableTitle';
 import { categoryArtUrl } from '../v3/categoryArt';
 
 type PulseItem = {
@@ -114,7 +115,7 @@ export default function PulseLiveV4({
             style={{ textDecoration: 'none', color: 'inherit' }}
           >
             <div>
-              <h1>{item.title}</h1>
+              <ExpandableTitle title={item.title} />
               {item.published_at && (
                 <div className="ptime4">{IST_TIME.format(new Date(item.published_at))} IST</div>
               )}
