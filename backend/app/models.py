@@ -431,6 +431,12 @@ class AlertCompany(Base):
     # 5-way truth; `direction` above stays the market-facing legacy view
     # derived from it. NULL on pre-upgrade rows.
     economic_effect = Column(String, nullable=True)
+    # V4 strict publication gate (spec §5): the tier the gate authorized
+    # ("primary" | "secondary") and the terminal gate state. NULL on rows
+    # persisted with the flag off -- legacy rows have no gate semantics,
+    # and consumers must treat NULL as legacy, never as eligible.
+    display_tier = Column(String, nullable=True)
+    gate_state = Column(String, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
@@ -547,6 +553,33 @@ class CompanyNodeExposure(Base):
     verified_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     source_alert_id = Column(Integer, nullable=True)
 
+    company = relationship("Company")
+
+
+class CompanyDecisionRecord(Base):
+    """Durable audit record for every v3 company candidate that reached the
+    publication boundary (spec 2026-08-12 §35, INV-019/020). One row per
+    (alert, ticker) decision: why the candidate was accepted or rejected,
+    which gates it passed, what evidence class carried it. Written only in
+    strict mode -- the debugging backbone that lets postmortems answer
+    "why was this shown / hidden" without re-running paid analysis."""
+    __tablename__ = "company_decision_records"
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    ticker = Column(String, nullable=False)
+    final_state = Column(String, nullable=False)     # DISPLAY_ELIGIBLE | REJECT_*
+    display_tier = Column(String, nullable=False)    # primary | secondary | excluded
+    rejection_reason = Column(String, nullable=True)  # REJECT_* or NULL
+    gates_passed_json = Column(Text, nullable=True)   # JSON list of gate names
+    evidence_class = Column(String, nullable=True)
+    materiality_grade = Column(String, nullable=True)  # HIGH | MEDIUM | LOW | UNKNOWN
+    candidate_json = Column(Text, nullable=True)       # gate-input snapshot
+    analysis_version = Column(String, nullable=True)   # prompt/schema version pair
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    alert = relationship("Alert")
     company = relationship("Company")
 
 

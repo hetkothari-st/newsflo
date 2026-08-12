@@ -156,12 +156,11 @@ def _graph_company(**overrides):
 
 
 def _result_with(companies):
-    class _Result:
-        pass
-    result = _Result()
-    result.companies = companies
-    result.edges = []
-    return result
+    from app.analysis.impact_graph.schemas import ImpactGraphResult
+    return ImpactGraphResult(
+        category="commodity", event_type="crude_oil", facts="crude up 5%",
+        event_label="crude shock", companies=companies, edges=[],
+    )
 
 
 def test_strict_v3_entries_preserve_neutral_and_mixed(db_session, strict_mode):

@@ -526,6 +526,10 @@ class ImpactGraphResult(BaseModel):
     event_type: Optional[str] = None
     facts: str = ""
     event_label: str = ""
+    # Article-named entities carried through for the publication gate's
+    # ARTICLE_SUBJECT evidence classification (spec §9). Default empty so
+    # cached pre-upgrade results deserialize unchanged.
+    named_entities: list[str] = Field(default_factory=list)
     companies: list[GraphCompany] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     gaps: list[dict] = Field(default_factory=list)

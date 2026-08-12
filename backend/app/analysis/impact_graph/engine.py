@@ -862,6 +862,10 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
         )
     except StageRouterError as exc:
         logger.warning("impact-graph company verification unavailable, keeping recall set: %s", exc)
+        # The verifier never ran: record it so the publication gate can
+        # fail closed (REJECT_VALIDATOR_UNAVAILABLE) instead of treating
+        # "unverified because the validator was down" as ordinary output.
+        state.metrics["verification_unavailable"] = 1
         return
 
     accepted = {t for t in raw.get("accept", []) if t in state.companies}
@@ -1060,7 +1064,8 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
 
     return ImpactGraphResult(
         category=facts.category, event_type=facts.event_type, facts=facts.facts,
-        event_label=facts.event, companies=list(state.companies.values()),
+        event_label=facts.event, named_entities=list(facts.named_entities or []),
+        companies=list(state.companies.values()),
         edges=state.edges, gaps=state.gaps, ranking=ranking,
         analysis_provider=router.provider, analysis_quality=router.quality,
         metrics=dict(state.metrics),
@@ -1252,7 +1257,10 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         _skip("narrow_companies", "subject_fallback_persisted", count=len(state.companies))
 
     # Risk-based escalation (token-opt spec P18): independent verification
-    # when the result is large, high-impact, or shaky.
+    # when the result is large, high-impact, or shaky. Strict mode (spec
+    # §5, INV-005) never trusts the in-call self-check: verification is
+    # mandatory for every result, and its absence is recorded so the
+    # publication gate fails closed instead of silently displaying.
     companies = list(state.companies.values())
     risky = (
         len(companies) > 8
@@ -1260,6 +1268,8 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         or any(c.confidence < 0.6 for c in companies)
         or any(c.causal_distance >= 3 for c in companies)
     )
+    if settings.impact_engine_v4_strict:
+        risky = True
     if companies and risky and not budget.exceeded:
         for company in companies:
             company.verified = False

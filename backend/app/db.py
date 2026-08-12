@@ -151,6 +151,9 @@ _ADDED_COLUMNS = [
     ("llm_call_usage", "prompt_version", "VARCHAR"),
     ("llm_call_usage", "schema_version", "VARCHAR"),
     ("llm_call_usage", "estimated_cost_usd", "FLOAT"),
+    # -- V4 strict publication gate (2026-08-12) --
+    ("alert_companies", "display_tier", "VARCHAR"),
+    ("alert_companies", "gate_state", "VARCHAR"),
 ]
 
 

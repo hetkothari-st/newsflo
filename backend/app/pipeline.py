@@ -354,6 +354,9 @@ def _build_alert_company(
         mechanism=entry.get("mechanism"),
         channels_json=entry.get("channels_json"),
         economic_effect=entry.get("economic_effect"),
+        # V4 strict gate outcome -- None for legacy (ungated) entries.
+        display_tier=entry.get("display_tier"),
+        gate_state=entry.get("gate_state"),
     )
     return alert_company, result.score
 
@@ -542,6 +545,38 @@ def _persist_alert(
     )
     session.add(alert)
     session.flush()
+
+    # V4 strict publication gate (spec §5/§35): every gate-evaluated entry
+    # leaves a durable decision record -- accepted or not -- and excluded
+    # entries never become AlertCompany rows. Legacy entries (no gate
+    # fields) skip both branches untouched.
+    gated_entries = [e for e in entries if "gate_state" in e]
+    if gated_entries:
+        from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+        from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+        from app.models import CompanyDecisionRecord
+
+        for entry in gated_entries:
+            company_row = session.get(Company, entry["company_id"])
+            session.add(CompanyDecisionRecord(
+                alert_id=alert.id, company_id=entry["company_id"],
+                ticker=company_row.ticker if company_row else str(entry["company_id"]),
+                final_state=entry["gate_state"], display_tier=entry["display_tier"],
+                rejection_reason=entry.get("rejection_reason"),
+                gates_passed_json=json.dumps(entry.get("gates_passed") or []),
+                evidence_class=entry.get("evidence_class"),
+                materiality_grade=entry.get("materiality_grade"),
+                candidate_json=json.dumps({
+                    "economic_effect": entry.get("economic_effect"),
+                    "causal_distance": entry.get("causal_distance"),
+                    "materiality": entry.get("materiality"),
+                    "confidence_f": entry.get("confidence_f"),
+                    "mechanism": entry.get("mechanism"),
+                    "rationale": entry.get("rationale"),
+                }),
+                analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+            ))
+        entries = [e for e in entries if e.get("display_tier") != "excluded"]
 
     alert_companies = []
     kept_entries = []
@@ -750,11 +785,112 @@ def _v3_legacy_level(distance: int | None) -> str:
     return "indirect_l2"
 
 
+# Phrases that mark a rationale/mechanism as grounded in the observed
+# stock move rather than in economics (spec §10, INV-003): such a candidate
+# carries market-observation evidence, which can never authorize primary.
+_MARKET_OBSERVATION_PHRASES = (
+    "stock fell", "stock rose", "stock dropped", "stock declined",
+    "stock jumped", "stock surged", "shares fell", "shares rose",
+    "shares dropped", "shares declined", "shares jumped", "shares surged",
+)
+
+
+def _classify_evidence(session: Session, company, subject_tickers: set[str]) -> str:
+    """Deterministic evidence class for the publication gate (spec §9/§10).
+    Order matters: a price-movement argument taints the candidate before
+    any stronger class can rescue it -- the cure is a real economic
+    rationale, not a cache row."""
+    text = f"{company.rationale or ''} {company.mechanism or ''}".lower()
+    if any(phrase in text for phrase in _MARKET_OBSERVATION_PHRASES):
+        return "ARTICLE_MARKET_OBSERVATION"
+    row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
+    if row is not None:
+        from app.models import CompanyNodeExposure
+        cached = (
+            session.query(CompanyNodeExposure)
+            .filter_by(company_id=row.id, node_key=company.parent_id, exposure_exists=1)
+            .one_or_none()
+        )
+        if cached is not None and not (
+            row.business_desc_as_of is not None and cached.verified_at is not None
+            and str(row.business_desc_as_of) > str(cached.verified_at.date())
+        ):
+            return "VERIFIED_RELATIONSHIP"
+    if company.ticker in subject_tickers:
+        return "ARTICLE_SUBJECT"
+    return "MODEL_INFERENCE"
+
+
+def _roots_in_event(result, company) -> bool:
+    """Counterfactual proxy (spec §14): the candidate's causal chain must
+    trace back to this event's own graph. A parent that never appears as a
+    child of anything -- including the event -- is a dangling macro story."""
+    parent_of = {}
+    for edge in result.edges:
+        parent_of.setdefault((edge.child_type, edge.child_id),
+                             (edge.parent_type, edge.parent_id))
+    node = (company.parent_type, company.parent_id)
+    for _ in range(12):
+        if node[0] == "event":
+            return True
+        if node not in parent_of:
+            return False
+        node = parent_of[node]
+    return False
+
+
+def _gate_candidates(session: Session, result) -> dict[str, object]:
+    """Evaluate every graph company through the publication gate (strict
+    mode only). Returns ticker -> GateDecision."""
+    from app.analysis.impact_graph.engine import _subject_companies
+    from app.analysis.impact_graph.publication_gate import (
+        CandidateInput, evaluate_candidate,
+    )
+    from app.analysis.impact_graph.schemas import EventFacts
+
+    # Reuse the engine's deterministic subject resolver on the result's
+    # carried entity names -- same alias matcher, no LLM.
+    subject_facts = EventFacts(
+        event="", facts="", category=result.category,
+        event_type=result.event_type or "",
+        named_entities=list(result.named_entities or []),
+    )
+    subject_tickers = {row.ticker for row in _subject_companies(session, subject_facts)}
+    verification_available = result.analysis_quality != "budget_exhausted" and not (
+        result.metrics or {}).get("verification_unavailable")
+    decisions = {}
+    for company in result.companies:
+        row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
+        evidence_class = _classify_evidence(session, company, subject_tickers)
+        decisions[company.ticker] = (evidence_class, evaluate_candidate(CandidateInput(
+            ticker=company.ticker,
+            entity_resolved=row is not None,
+            mechanism=company.mechanism or "",
+            rationale=company.rationale or "",
+            economic_effect=company.economic_effect or "",
+            causal_distance=company.causal_distance,
+            materiality=company.materiality,
+            confidence=company.confidence,
+            independently_verified=bool(company.verified),
+            verification_available=bool(verification_available),
+            evidence_class=evidence_class,
+            positive_channels=list(company.positive_channels or []),
+            negative_channels=list(company.negative_channels or []),
+            net_direction=company.net_direction or "",
+            trigger_shock_present=_roots_in_event(result, company),
+        )))
+    return decisions
+
+
 def _v3_entries(session: Session, result) -> list[dict]:
     """ImpactGraphResult.companies -> the entry dicts _persist_alert
     consumes. Companies are already candidate-grounded, so resolution is a
     direct ticker lookup; a ticker that no longer resolves is skipped
-    (omit rather than mismatch)."""
+    (omit rather than mismatch). In strict mode every entry additionally
+    carries its publication-gate decision (spec §5)."""
+    gate_decisions = (
+        _gate_candidates(session, result) if settings.impact_engine_v4_strict else {}
+    )
     entries = []
     for company in result.companies:
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
@@ -805,6 +941,17 @@ def _v3_entries(session: Session, result) -> list[dict]:
             }) if (company.positive_channels or company.negative_channels
                    or company.net_direction) else None,
         })
+        gated = gate_decisions.get(company.ticker)
+        if gated is not None:
+            evidence_class, decision = gated
+            entries[-1].update({
+                "display_tier": decision.display_tier,
+                "gate_state": decision.final_state,
+                "gates_passed": decision.gates_passed,
+                "rejection_reason": decision.rejection_reason,
+                "materiality_grade": decision.materiality_grade,
+                "evidence_class": evidence_class,
+            })
     return entries
 
 
