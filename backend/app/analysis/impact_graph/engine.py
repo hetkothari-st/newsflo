@@ -805,6 +805,27 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         if held is None or company.impact_strength > held.impact_strength:
             state.companies[ticker] = company
 
+    # Deterministic subject fallback (2026-08-12): a single-stock story
+    # whose mapping call returned nothing must not ship an invisible
+    # zero-company alert -- the article NAMING the company is a fact, not a
+    # model opinion. The subject persists with modest scores; the
+    # measurement layer then overwrites direction with the REAL market
+    # move (its established job), so nothing here fabricates a call.
+    if not state.companies and subjects:
+        top_shock = next((e for e in state.edges if e.parent_id == EVENT_NODE_ID), None)
+        for subject in subjects[:3]:
+            state.companies[subject.ticker] = GraphCompany(
+                ticker=subject.ticker, name=subject.name,
+                direction=top_shock.direction if top_shock and top_shock.direction != "neutral" else "bearish",
+                impact_strength=0.4, confidence=0.6, materiality=0.45,
+                causal_distance=1, time_horizon="Short-Term",
+                parent_type="event", parent_id=EVENT_NODE_ID,
+                mechanism=(top_shock.mechanism if top_shock else facts.event)[:200],
+                rationale="Named subject of this article; direction reflects the measured market reaction.",
+                net_direction="uncertain", verified=False,
+            )
+        _skip("narrow_companies", "subject_fallback_persisted", count=len(state.companies))
+
     # Risk-based escalation (token-opt spec P18): independent verification
     # when the result is large, high-impact, or shaky.
     companies = list(state.companies.values())
