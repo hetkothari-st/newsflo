@@ -21,6 +21,7 @@ from app.market.alert_measurement import _intensity_for_company_move
 from app.market.breadth import compute_breadth_score
 from app.market.cap_tier import cap_tier_map
 from app.market.event_volatility import lookup_range, ranges_for_category
+from app.market.measure import classify_reaction
 from app.market.liquidity import compute_liquidity_tier
 from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
 from app.models import Alert, AlertRippleLayer, ImpactEdge, MarketMove
@@ -265,6 +266,14 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             "in_my_holdings": alert_company.company_id in held_company_ids,
             "why": alert_company.why,
             "logo_url": logo_url(company),
+            # Two separate truths per row (spec §37/§38): the fundamental
+            # analysis (economic_effect + gate tier) and the observed
+            # market reaction (dead-zone-classified). Additive fields --
+            # legacy consumers ignore them; NULL on pre-gate rows.
+            "economic_effect": alert_company.economic_effect,
+            "display_tier": alert_company.display_tier,
+            "reaction_direction": classify_reaction(
+                move.excess_move_pct if (not exposure_only and move is not None) else None),
         }
         if not exposure_only and move is not None and move.excess_move_pct is not None:
             row["excess_move_pct"] = move.excess_move_pct

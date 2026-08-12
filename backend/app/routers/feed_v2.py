@@ -95,6 +95,30 @@ def _serialize(
     }
 
 
+def _unavailable_measurement() -> dict:
+    """Measurement placeholder for a strict-mode alert whose price feed
+    failed (spec §49, INV-015): the fundamental analysis stays visible;
+    every market field is honestly null and the reaction object says
+    'unavailable' -- never fabricated, never hidden."""
+    return {
+        "excess_move_pct": None, "direction": None, "raw_move_pct": None,
+        "sector_move_pct": None, "volume_multiple": None,
+        "benchmark_ticker": None, "is_fallback_benchmark": False,
+        "peak_ticker": None, "peak_company_id": None, "peak_company_name": None,
+        "verdict": None, "intensity": None, "breadth_score": None,
+        "market_reaction": {"status": "unavailable", "direction": "unknown",
+                            "bar_complete": None},
+    }
+
+
+def _strict_displayable(alert: Alert) -> bool:
+    """Strict mode serves an unmeasured alert only when the publication
+    gate authorized at least one company for display."""
+    return settings.impact_engine_v4_strict and any(
+        ac.display_tier in ("primary", "secondary") for ac in alert.companies
+    )
+
+
 def _query_with_relations(db: Session):
     return db.query(Alert).options(
         selectinload(Alert.article),
@@ -160,6 +184,8 @@ def list_feed_v2_alerts(
         if not is_english_text(alert.article.title):
             continue
         measurement = compute_alert_measurement(db, alert)
+        if measurement is None and _strict_displayable(alert):
+            measurement = _unavailable_measurement()
         if measurement is not None:
             row = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
             row["peak_cap_tier"] = cap_tiers.get(measurement["peak_ticker"])
@@ -266,7 +292,10 @@ def get_feed_v2_alert(
 
     measurement = compute_alert_measurement(db, alert)
     if measurement is None:
-        raise HTTPException(status_code=404, detail="Alert has no measured companies")
+        if _strict_displayable(alert):
+            measurement = _unavailable_measurement()
+        else:
+            raise HTTPException(status_code=404, detail="Alert has no measured companies")
 
     held_company_ids = _held_company_ids(db, current_user)
     repeated_images = repeated_image_urls(

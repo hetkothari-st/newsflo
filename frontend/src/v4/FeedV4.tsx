@@ -82,7 +82,33 @@ function fmtPct(value: number): string {
 }
 
 function moveClass(value: number): string {
-  return value < 0 ? 'down' : 'up';
+  // 0.0 is flat, not up -- a zero excess move must never render as a
+  // green gain (one-source-of-truth spec §39).
+  return value < 0 ? 'down' : value > 0 ? 'up' : 'flat';
+}
+
+/* Reaction color from the server's dead-zone-classified direction when
+   present (strict engine), falling back to the raw sign. The server is
+   the single semantic source (spec §37). */
+function reactionClass(
+  reaction: { direction: string } | null | undefined,
+  excess: number | null,
+): string {
+  if (reaction) {
+    if (reaction.direction === 'positive') return 'up';
+    if (reaction.direction === 'negative') return 'down';
+    return 'flat';
+  }
+  return excess == null ? 'flat' : moveClass(excess);
+}
+
+/* Fundamental-impact glyph -- driven ONLY by economic_effect, never by
+   the price move (spec §38: Apollo is not a "winner" because its stock
+   is green). */
+function effectGlyph(effect: string): string {
+  if (effect === 'positive') return '▲';
+  if (effect === 'negative') return '▼';
+  return '◆';
 }
 
 function fmtISTTime(iso: string): string {
@@ -100,7 +126,7 @@ function MetaLine({ alert, onToggle }: { alert: FeedAlert; onToggle: () => void 
       <span>—</span>
       <span>{fmtISTTime(alert.created_at)} IST</span>
       <span>—</span>
-      <span>{alert.category.replace(/_/g, ' ')}</span>
+      <span>{alert.category_label ?? alert.category.replace(/_/g, ' ')}</span>
       {alert.in_my_holdings && (
         <>
           <span>—</span>
@@ -297,11 +323,26 @@ function RippleBand({
                 <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
                 <div className="cbody">
                   <div className="cmain">
+                    {row.economic_effect && (
+                      /* Fundamental impact -- separate truth from the
+                         price number to its right (spec §38/§65). */
+                      <span
+                        className={`fx4 ${row.economic_effect}`}
+                        title={`Fundamental impact: ${row.economic_effect}`}
+                      >
+                        {effectGlyph(row.economic_effect)}
+                      </span>
+                    )}
                     <span className="nm4">{row.name}</span>
                     {row.is_exposure_only || row.excess_move_pct == null ? (
                       <span className="mv4 mvx">exposure</span>
                     ) : (
-                      <span className={`mv4 ${moveClass(row.excess_move_pct)}`}>
+                      <span
+                        className={`mv4 ${reactionClass(
+                          row.reaction_direction ? { direction: row.reaction_direction } : null,
+                          row.excess_move_pct,
+                        )}`}
+                      >
                         {fmtPct(row.excess_move_pct)}
                       </span>
                     )}
@@ -495,9 +536,17 @@ export default function FeedV4({
             onTouchEnd={onCardTouchEnd(alert.id)}
           >
             <div>
-              <div className={`lmove ${moveClass(alert.excess_move_pct)}`}>
-                {alert.excess_move_pct < 0 ? '▼' : '▲'} {Math.abs(alert.excess_move_pct).toFixed(1)}%
-              </div>
+              {alert.excess_move_pct == null ? (
+                /* Strict engine (spec §49): fundamental analysis stays
+                   visible when the price feed failed -- honest dash,
+                   never a fabricated number. */
+                <div className="lmove flat">—</div>
+              ) : (
+                <div className={`lmove ${reactionClass(alert.market_reaction, alert.excess_move_pct)}`}>
+                  {alert.excess_move_pct < 0 ? '▼' : alert.excess_move_pct > 0 ? '▲' : ''}{' '}
+                  {Math.abs(alert.excess_move_pct).toFixed(1)}%
+                </div>
+              )}
               <ExpandableTitle title={alert.article.title} />
               <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
               <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />

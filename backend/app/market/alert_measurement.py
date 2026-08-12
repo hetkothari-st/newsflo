@@ -10,6 +10,7 @@ from app.companies.branding import logo_url
 from app.ist_time import day_utc_window, today_ist
 from app.market.breadth import compute_breadth_score
 from app.market.intensity import compute_intensity
+from app.market.measure import classify_reaction
 from app.market.sector_indices import NIFTY50_TICKER, is_fallback_benchmark
 from app.market.verdict import compute_verdict
 from app.models import Alert, Company, MarketMove
@@ -147,6 +148,13 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
         "verdict": verdict,
         "intensity": intensity,
         "breadth_score": breadth_score,
+        # Independent market-reaction object (spec §20/§22): classified
+        # through the dead zone, never a re-labeling of fundamentals.
+        "market_reaction": {
+            "status": "ok",
+            "direction": classify_reaction(peak.excess_move_pct),
+            "bar_complete": peak.bar_complete,
+        },
     }
 
 

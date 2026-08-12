@@ -140,7 +140,10 @@ function Card({
   const [imageStage, setImageStage] = useState<'story' | 'category' | 'none'>(
     alert.article.image_url !== null ? 'story' : 'category',
   );
-  const dir = moveDir(alert.excess_move_pct, alert.verdict);
+  // Strict-engine alerts can arrive with no measured move (spec §49);
+  // v3 renders them flat with a 0.0 display rather than crashing.
+  const excess = alert.excess_move_pct ?? 0;
+  const dir = moveDir(excess, alert.verdict);
   const imageSrc =
     imageStage === 'story'
       ? alert.article.image_url
@@ -164,7 +167,7 @@ function Card({
           <div className="ftop">
             <div>
               <div className={`move ${dir}`}>
-                {arrow(dir)} {Math.abs(alert.excess_move_pct).toFixed(1)}%
+                {arrow(dir)} {Math.abs(excess).toFixed(1)}%
               </div>
               <div className="xlabel">{t('v3.excessVsSector')}</div>
             </div>

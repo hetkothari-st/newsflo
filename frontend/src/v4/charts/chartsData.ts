@@ -58,7 +58,11 @@ export const CHART_ORDER: ChartMeta[] = [
 export function intensityBand(row: ChartRow): 'High' | 'Moderate' | 'Low' | null {
   const score = row.intensity?.score;
   if (score == null) return null;
-  return score >= 70 ? 'High' : score >= 40 ? 'Moderate' : 'Low';
+  // Same thresholds as the backend's canonical bands (config.py
+  // INTENSITY_BAND_HIGH=75 / _MODERATE=50) -- the chart legend previously
+  // re-invented them at 70/40, showing a different band vocabulary than
+  // the rest of the app for the same score.
+  return score >= 75 ? 'High' : score >= 50 ? 'Moderate' : 'Low';
 }
 
 /* Relationship -> level. DIRECT companies are level 1; every other

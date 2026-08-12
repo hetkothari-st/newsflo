@@ -42,8 +42,17 @@ export interface FeedAlert {
   summary_short: string | null;
   summary_long: string | null;
   article: FeedArticle;
-  excess_move_pct: number;
-  direction: Direction;
+  // null when the strict engine serves a fundamental-only alert whose
+  // price feed failed (spec §49) -- render an honest dash, never 0.
+  excess_move_pct: number | null;
+  direction: Direction | null;
+  // Independent market-reaction object (strict engine, spec §20/§22):
+  // dead-zone-classified direction, separate from fundamental impact.
+  market_reaction?: {
+    status: 'ok' | 'unavailable';
+    direction: 'positive' | 'negative' | 'flat' | 'unknown';
+    bar_complete: number | null;
+  } | null;
   raw_move_pct: number;
   sector_move_pct: number;
   volume_multiple: number | null;
@@ -85,6 +94,12 @@ export interface LayerRow {
   in_my_holdings: boolean;
   why: string | null;
   logo_url: string | null;
+  // Strict-engine dual truth per row (spec §37/§38): the gate-validated
+  // fundamental effect + tier, and the dead-zone-classified reaction.
+  // Absent/null on legacy rows.
+  economic_effect?: string | null;
+  display_tier?: 'primary' | 'secondary' | null;
+  reaction_direction?: 'positive' | 'negative' | 'flat' | 'unknown';
   // Subsystem D: empirical reaction range for this alert's news category.
   // Optional, mirroring how `fundamentals?:` above documents its
   // producers: app.market.ripple_layers rows emit it (null below sample

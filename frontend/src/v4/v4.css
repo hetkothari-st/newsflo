@@ -391,6 +391,13 @@ body:has(.nf4.dark) { background: #2a2722; }
 
 .nf4 .up { color: var(--data-up); }
 .nf4 .down { color: var(--data-down); }
+.nf4 .flat { color: var(--pebble); }
+/* Fundamental-impact glyph on company rows -- semantic color from
+   economic_effect, independent of the price number beside it. */
+.nf4 .crow .fx4 { font-size: 12px; margin-right: 6px; }
+.nf4 .crow .fx4.positive { color: var(--data-up); }
+.nf4 .crow .fx4.negative { color: var(--data-down); }
+.nf4 .crow .fx4.mixed, .nf4 .crow .fx4.uncertain, .nf4 .crow .fx4.neutral { color: var(--pebble); }
 /* ---------- THE RIPPLE (affected companies -- full-page takeover) ---------- */
 /* Mirrors the deployed card-flip: covers the whole viewport like turning
    the card over. Same paper theme and type as the rest of the app --
