@@ -57,6 +57,12 @@ class StageRouter:
         self.provider = "gemini" if (protected and self._gemini) else "groq"
         self.quality = "authoritative"
         self.stage_cache_hits = 0
+        # Spend-cap circuit breaker (2026-08-12): a monthly-cap 429 is
+        # terminal for the WHOLE run, not one stage -- once seen, every
+        # remaining call skips the Gemini rungs entirely instead of
+        # hammering a dead cap through the full ladder (measured: a capped
+        # broad article burned minutes of 4-rung retries across ~10 stages).
+        self.gemini_capped = False
 
     # -- public ----------------------------------------------------------
 
@@ -217,6 +223,10 @@ class StageRouter:
             return settings.gemini_summary_model, "low"
         return settings.gemini_reasoning_model, "high"
 
+    @staticmethod
+    def _is_spend_cap_error(exc: GeminiJSONError) -> bool:
+        return exc.status_code == 429 and "spending cap" in str(exc).lower()
+
     def _call_protected(self, stage, *, schema, static_prefix, dynamic_suffix,
                         compact_suffix, thinking, max_output_tokens,
                         context: dict | None = None) -> dict:
@@ -232,6 +242,10 @@ class StageRouter:
                          "medium", "degraded"))
 
         last_error: Exception | None = None
+        if self.gemini_capped:
+            attempts = []
+            last_error = GeminiJSONError("skipped: monthly spend cap already hit this run",
+                                         status_code=429)
         for attempt_model, suffix, level, degrade_to in attempts:
             try:
                 result = self._gemini.generate(
@@ -247,6 +261,11 @@ class StageRouter:
             except GeminiJSONError as exc:
                 last_error = exc
                 logger.warning("impact-graph %s failed on %s: %s", stage, attempt_model, exc)
+                if self._is_spend_cap_error(exc):
+                    self.gemini_capped = True
+                    logger.warning("impact-graph spend cap hit -- Gemini disabled for the "
+                                   "rest of article=%s", self.article_id)
+                    break
 
         # Last resort: Groq, loudly marked. Never merged silently.
         if self._groq is not None:
