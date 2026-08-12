@@ -1,7 +1,8 @@
-/* Holdings manager: ruled list with editable quantities, per-row
-   remove, and an add-by-ticker row. Backend upserts by (user, company),
-   so save is idempotent; onChanged tells PortfolioV4 to refresh the
-   news overlay after any mutation. */
+/* Holdings manager: ruled list with editable quantities and per-row
+   remove. Positions arrive via broker connect / file import (no manual
+   add -- user decision). Backend upserts by (user, company), so save is
+   idempotent; onChanged tells PortfolioV4 to refresh the news overlay
+   after any mutation. */
 import { useCallback, useEffect, useState } from 'react';
 import {
   deleteHolding,
@@ -22,8 +23,6 @@ export default function PortfolioManageV4({
 }) {
   const [rows, setRows] = useState<HoldingRow[] | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [newTicker, setNewTicker] = useState('');
-  const [newQty, setNewQty] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -59,25 +58,10 @@ export default function PortfolioManageV4({
     void act(() => saveHolding(token, row.ticker, quantity));
   };
 
-  const addRow = (event: React.FormEvent) => {
-    event.preventDefault();
-    const ticker = newTicker.trim().toUpperCase();
-    const quantity = Number(newQty);
-    if (!ticker || !Number.isFinite(quantity) || quantity <= 0) {
-      setError('Enter a ticker (e.g. RELIANCE.NS) and a positive quantity.');
-      return;
-    }
-    void act(async () => {
-      await saveHolding(token, ticker, quantity);
-      setNewTicker('');
-      setNewQty('');
-    });
-  };
-
   return (
     <div className="manage4">
       {rows !== null && rows.length === 0 && (
-        <p className="psub">Nothing held yet — add a position below or connect a broker.</p>
+        <p className="psub">Nothing held yet — connect a broker below to bring your positions in.</p>
       )}
       {(rows ?? []).map((row) => (
         <div className="mrow" key={row.ticker}>
@@ -104,26 +88,6 @@ export default function PortfolioManageV4({
           </button>
         </div>
       ))}
-      <form className="mrow madd" onSubmit={addRow}>
-        <input
-          type="text"
-          aria-label="New holding ticker"
-          placeholder="Ticker (RELIANCE.NS)"
-          value={newTicker}
-          onChange={(event) => setNewTicker(event.target.value)}
-        />
-        <input
-          type="number"
-          inputMode="decimal"
-          aria-label="New holding quantity"
-          placeholder="Qty"
-          value={newQty}
-          onChange={(event) => setNewQty(event.target.value)}
-        />
-        <button type="submit" className="authsubmit">
-          Add →
-        </button>
-      </form>
       {error !== null && <p className="autherr">{error}</p>}
     </div>
   );

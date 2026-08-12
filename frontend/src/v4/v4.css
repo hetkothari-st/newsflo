@@ -997,15 +997,6 @@ body:has(.nf4.dark) { background: #2a2722; }
 .nf4 .mrow input:focus { outline: none; border-bottom-color: var(--ink); }
 .nf4 .mdel { font-size: 13px; color: var(--ash); cursor: pointer; }
 .nf4 .mdel:hover { color: var(--data-down); }
-.nf4 .madd {
-  display: flex;
-  border-bottom: none;
-  margin-top: 10px;
-  gap: 10px;
-  align-items: center;
-}
-.nf4 .madd input[type="text"] { width: 200px; text-align: left; }
-
 /* ---------- BROKER CONNECT ---------- */
 .nf4 .connect4 { margin-top: 4px; }
 .nf4 .brokergrid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
