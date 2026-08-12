@@ -216,22 +216,20 @@ export default function ShellV4() {
               </button>
             ))}
           </nav>
-          <div className="topctl">
-            <button
-              className={`acctbtn ${view === 'account' ? 'on' : ''}`}
-              onClick={() => setView('account')}
-              aria-label="Account"
-              title={token ? (email ?? 'Account') : 'Sign in'}
-            >
-              <span className="acctdot" aria-hidden="true">
-                {token ? (email ?? '?').slice(0, 1).toUpperCase() : '○'}
-              </span>
-              {token ? (email?.split('@')[0] ?? 'Account') : 'Sign in'}
-            </button>
-            <button className="themebtn" onClick={toggleDark} aria-label="Toggle theme" title="Light / dark">
-              ◐
-            </button>
-          </div>
+          <button
+            className={`acctbtn ${view === 'account' ? 'on' : ''}`}
+            onClick={() => setView('account')}
+            aria-label="Account"
+            title={token ? (email ?? 'Account') : 'Sign in'}
+          >
+            <span className="acctdot" aria-hidden="true">
+              {token ? (email ?? '?').slice(0, 1).toUpperCase() : '○'}
+            </span>
+            {token ? (email?.split('@')[0] ?? 'Account') : 'Sign in'}
+          </button>
+          <button className="themebtn" onClick={toggleDark} aria-label="Toggle theme" title="Light / dark">
+            ◐
+          </button>
         </div>
         {view === 'feed' && feedDate !== null && (
           <div className="dateline">

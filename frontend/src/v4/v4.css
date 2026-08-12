@@ -73,18 +73,19 @@ body:has(.nf4.dark) { background: #2a2722; }
 }
 .nf4.dark .ddscrim { background: rgba(0, 0, 0, 0.6); }
 
-/* Right-side controls in the nav row: account chip + theme toggle. */
+/* Theme toggle stays pinned right; the account chip flows WITH the
+   centered nav items (never absolute -- an overlaid chip collided with
+   the wrapping nav links on narrow widths). */
 .nf4 .navrow { position: relative; }
-.nf4 .topctl {
+.nf4 .themebtn {
   position: absolute;
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  font-size: 16px;
+  color: var(--ink);
+  line-height: 1;
 }
-.nf4 .themebtn { font-size: 16px; color: var(--ink); line-height: 1; }
 .nf4 .acctbtn {
   display: inline-flex;
   align-items: center;
@@ -94,11 +95,12 @@ body:has(.nf4.dark) { background: #2a2722; }
   letter-spacing: -0.11px;
   text-transform: uppercase;
   color: var(--ash);
-  max-width: 140px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+  align-self: center;
 }
 .nf4 .acctbtn:hover, .nf4 .acctbtn.on { color: var(--ink); }
 .nf4 .acctdot {
