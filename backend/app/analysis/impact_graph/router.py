@@ -98,6 +98,7 @@ class StageRouter:
                         stage, self.article_id)
             self._record_cache_hit(stage, context)
             return cached
+        quality_before, provider_before = self.quality, self.provider
         if self.protected and self._gemini is not None:
             result = self._call_protected(
                 stage, schema=schema, static_prefix=static_prefix,
@@ -108,7 +109,15 @@ class StageRouter:
         else:
             result = self._call_groq(stage, schema=schema, static_prefix=static_prefix,
                                      dynamic_suffix=dynamic_suffix)
-        self._cache_put(fingerprint, stage, result)
+        # Cache-poisoning guard (2026-08-12): a result served by a LOWER
+        # ladder rung (degraded/fallback) is never cached -- a later retry
+        # with a healthy provider must re-earn the authoritative result,
+        # not replay the degraded one as if it were fine.
+        if self.quality == quality_before and self.provider == provider_before:
+            self._cache_put(fingerprint, stage, result)
+        else:
+            logger.info("impact-graph cache_put skipped stage=%s reason=served_by_lower_rung "
+                        "quality=%s article=%s", stage, self.quality, self.article_id)
         return result
 
     @staticmethod
