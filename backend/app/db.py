@@ -154,6 +154,7 @@ _ADDED_COLUMNS = [
     # -- V4 strict publication gate (2026-08-12) --
     ("alert_companies", "display_tier", "VARCHAR"),
     ("alert_companies", "gate_state", "VARCHAR"),
+    ("company_node_exposures", "provenance_type", "VARCHAR"),
 ]
 
 

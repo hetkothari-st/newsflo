@@ -51,7 +51,7 @@ def _tickers_from(kwargs) -> list[str]:
 FACTS = {
     "event": "Strait of Hormuz closes", "event_status": "confirmed",
     "facts": "Hormuz closed; a fifth of global crude transits it.",
-    "category": "oil_gas", "event_type": "geopolitical_conflict",
+    "category": "oil_gas", "event_type": "geopolitics",
 }
 
 

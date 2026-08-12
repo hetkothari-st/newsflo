@@ -540,7 +540,8 @@ def _register_company_entries(state: _GraphState, entries: list[dict], node: _No
             company = GraphCompany(
                 **{**{k: v for k, v in entry.items() if k in GraphCompany.model_fields},
                    "causal_distance": node.distance,
-                   "parent_type": node.node_type, "parent_id": node.node_id},
+                   "parent_type": node.node_type, "parent_id": node.node_id,
+                   "discovery_source": f"archetype:{mechanism_id}" if mechanism_id else ""},
             ).clamp()
         except ValidationError as exc:
             logger.warning("impact-graph company entry rejected by schema: %s", exc)
@@ -895,6 +896,7 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
 
 
 def _cached_positive_for(session, company: GraphCompany):
+    from app.analysis.impact_graph.exposure import exposure_row_is_fresh
     from app.models import Company as CompanyRow, CompanyNodeExposure
 
     if session is None:
@@ -902,11 +904,14 @@ def _cached_positive_for(session, company: GraphCompany):
     row = session.query(CompanyRow).filter_by(ticker=company.ticker).one_or_none()
     if row is None:
         return None
-    return (
+    cached = (
         session.query(CompanyNodeExposure)
         .filter_by(company_id=row.id, node_key=company.parent_id, exposure_exists=1)
         .one_or_none()
     )
+    if cached is not None and not exposure_row_is_fresh(cached, row):
+        return None
+    return cached
 
 
 def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bool,
@@ -930,6 +935,7 @@ def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bo
             strength=company.impact_strength if exposure_exists else None,
             mechanism=company.mechanism[:300] if exposure_exists else None,
             verified_at=utcnow(), source_alert_id=alert_id,
+            provenance_type="VERIFIED_RELATIONSHIP",
         ))
     else:
         existing.exposure_exists = 1 if exposure_exists else 0
@@ -937,6 +943,7 @@ def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bo
         existing.mechanism = company.mechanism[:300] if exposure_exists else existing.mechanism
         existing.verified_at = utcnow()
         existing.source_alert_id = alert_id
+        existing.provenance_type = "VERIFIED_RELATIONSHIP"
 
 
 def _verify_edges(router: StageRouter, facts: EventFacts, state: _GraphState) -> None:

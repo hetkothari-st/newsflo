@@ -440,7 +440,11 @@ EVENT_ARCHETYPES: dict[str, dict] = {
         "mechanisms": ["domestic_producer_protection", "downstream_input_cost_tariff"],
     },
     "GEOPOLITICAL_SUPPLY_DISRUPTION": {
-        "event_types": ["geopolitical_conflict"],
+        # NOTE: must match app.analysis.schemas.EVENT_TYPES exactly -- a
+        # stale token here silently kills the archetype (2026-08-12 fix:
+        # "geopolitical_conflict" was never a member, so Hormuz/Red-Sea
+        # events never matched the crude chain).
+        "event_types": ["geopolitics"],
         "keywords": ["strait", "hormuz", "red sea", "shipping route", "blockade", "supply disruption",
                      "attack", "conflict", "war"],
         "trigger": "supply_route_disruption",
@@ -637,6 +641,28 @@ ARCHETYPE_EXPOSURES: dict[str, dict[str, str]] = {
 }
 
 
+def ensure_exposure_seed(session: Session) -> int:
+    """Run seed_company_exposures once per registry version (2026-08-12
+    fix: the seeder existed but had NO production caller, so
+    company_exposures stayed empty and the archetype eligibility gate
+    silently no-oped on every event). Cheap no-op when rows for the
+    current KNOWLEDGE_REGISTRY_VERSION already exist; called from app
+    startup."""
+    from app.models import CompanyExposure
+
+    current_source = f"archetype:{KNOWLEDGE_REGISTRY_VERSION}"
+    already = (
+        session.query(CompanyExposure)
+        .filter(CompanyExposure.source == current_source)
+        .first()
+    )
+    if already is not None:
+        return 0
+    written = seed_company_exposures(session)
+    session.commit()
+    return written
+
+
 def seed_company_exposures(session: Session, per_archetype_limit: int = 300) -> int:
     """Materialize archetype-implied exposures into company_exposures
     (source='archetype:<version>'). Idempotent; keeps the HIGHEST level
@@ -739,13 +765,20 @@ def eligible_candidates(session: Session, mech: dict, mechanism_node_id: str,
     dimension = MECHANISM_DIMENSIONS.get(mech["mechanism_id"], "general")
     min_rank = _LEVEL_ORDER.get(mech.get("min_exposure", "MEDIUM"), 2)
     levels = exposure_levels_for(session, [c.id for c in pool])
+    # Same staleness rule as every other CompanyNodeExposure reader: a row
+    # verified before the company's metadata changed cannot justify
+    # candidacy (spec §8 freshness).
+    from app.analysis.impact_graph.exposure import exposure_row_is_fresh
+
+    pool_by_id = {c.id: c for c in pool}
     verified_ids = {
         row.company_id
         for row in session.query(CompanyNodeExposure)
         .filter(CompanyNodeExposure.node_key == mechanism_node_id,
                 CompanyNodeExposure.exposure_exists == 1,
-                CompanyNodeExposure.company_id.in_([c.id for c in pool]))
+                CompanyNodeExposure.company_id.in_(list(pool_by_id)))
         .all()
+        if exposure_row_is_fresh(row, pool_by_id[row.company_id])
     }
     eligible = []
     for company in pool:

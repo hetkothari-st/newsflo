@@ -312,6 +312,11 @@ class GraphCompany(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     verified: bool = False
+    # Where this candidate came from (spec §35 discovery_sources): "" for
+    # the dynamic mapping path, "archetype:<mechanism_id>" for the
+    # knowledge path, "subject_fallback" for the deterministic narrow
+    # fallback. Provenance for the publication gate's evidence classing.
+    discovery_source: str = ""
     # Net-effect reasoning (token-opt spec P12 -- a QUALITY requirement):
     # competing channels considered before the direction call. mixed /
     # uncertain are valid net outcomes; relative_beneficiary marks "better

@@ -64,6 +64,27 @@ _hub_task: asyncio.Task | None = None
 
 init_db()
 
+
+def _seed_exposure_registry() -> None:
+    """Materialize archetype-implied exposures once per knowledge-registry
+    version (2026-08-12 fix: seed_company_exposures had no production
+    caller, leaving company_exposures empty and the archetype eligibility
+    gate a silent no-op). Never blocks startup on failure."""
+    db = SessionLocal()
+    try:
+        from app.analysis.impact_graph.knowledge import ensure_exposure_seed
+        written = ensure_exposure_seed(db)
+        if written:
+            logging.getLogger(__name__).info(
+                "exposure registry seeded: %s company_exposures rows", written)
+    except Exception:
+        logging.getLogger(__name__).exception("exposure registry seed failed; continuing")
+    finally:
+        db.close()
+
+
+_seed_exposure_registry()
+
 if settings.enable_scheduler:
     start_scheduler()
 

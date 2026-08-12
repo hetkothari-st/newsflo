@@ -208,7 +208,7 @@ def test_triage_narrow_event_gets_small_graph_and_tight_budget(db_session, monke
 
 def test_triage_broad_event_keeps_full_budget(db_session):
     router = FakeRouter({
-        "extract_facts": FACTS,  # geopolitical_conflict -> broad
+        "extract_facts": FACTS,  # geopolitics -> broad
         "initial_shocks": {"shocks": [], "direct_nodes": []},
     })
     analyze_article_v3(router, "t", "c", session=db_session)
@@ -265,7 +265,7 @@ def test_narrow_single_call_escalates_risky_results_to_verification(db_session):
 
 def test_broad_events_never_use_single_call_mode(db_session):
     router = FakeRouter({
-        "extract_facts": FACTS,  # geopolitical_conflict -> broad tier
+        "extract_facts": FACTS,  # geopolitics -> broad tier
         "initial_shocks": {"shocks": [], "direct_nodes": []},
     })
     analyze_article_v3(router, "t", "c", session=db_session)

@@ -552,6 +552,11 @@ class CompanyNodeExposure(Base):
     mechanism = Column(Text, nullable=True)  # base-exposure mechanism, one line
     verified_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     source_alert_id = Column(Integer, nullable=True)
+    # How this relationship was established (spec 2026-08-12 §8). Rows
+    # written by the verifier carry VERIFIED_RELATIONSHIP; NULL on rows
+    # from before provenance shipped (treated as verified -- they only
+    # ever came from the verification path).
+    provenance_type = Column(String, nullable=True)
 
     company = relationship("Company")
 

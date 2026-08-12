@@ -805,19 +805,40 @@ def _classify_evidence(session: Session, company, subject_tickers: set[str]) -> 
         return "ARTICLE_MARKET_OBSERVATION"
     row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
     if row is not None:
-        from app.models import CompanyNodeExposure
+        from app.analysis.impact_graph.exposure import exposure_row_is_fresh
+        from app.models import CompanyNodeExposure, SupplyLink
+
         cached = (
             session.query(CompanyNodeExposure)
             .filter_by(company_id=row.id, node_key=company.parent_id, exposure_exists=1)
             .one_or_none()
         )
-        if cached is not None and not (
-            row.business_desc_as_of is not None and cached.verified_at is not None
-            and str(row.business_desc_as_of) > str(cached.verified_at.date())
-        ):
+        if cached is not None and exposure_row_is_fresh(cached, row):
             return "VERIFIED_RELATIONSHIP"
+        # SupplyLink corpus (verbatim-quote-gated, agency-sourced) as
+        # Tier-A relationship evidence for company-parent candidates
+        # (spec §9). Evidence classification ONLY: the graph proposed the
+        # candidate, the link never does -- the user-locked
+        # no-auto-attribution guarantee stays intact.
+        if company.parent_type == "company":
+            parent_row = session.query(Company).filter_by(ticker=company.parent_id).one_or_none()
+            if parent_row is not None:
+                linked = (
+                    session.query(SupplyLink)
+                    .filter(
+                        ((SupplyLink.company_id == parent_row.id)
+                         & (SupplyLink.counterparty_company_id == row.id))
+                        | ((SupplyLink.company_id == row.id)
+                           & (SupplyLink.counterparty_company_id == parent_row.id))
+                    )
+                    .first()
+                )
+                if linked is not None:
+                    return "VERIFIED_RELATIONSHIP"
     if company.ticker in subject_tickers:
         return "ARTICLE_SUBJECT"
+    if (getattr(company, "discovery_source", "") or "").startswith("archetype:"):
+        return "CURATED_ARCHETYPE"
     return "MODEL_INFERENCE"
 
 

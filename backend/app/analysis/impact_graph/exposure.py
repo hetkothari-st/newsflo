@@ -124,15 +124,28 @@ def sectors_for_node(node_id: str, label: str = "") -> list[str]:
     return sectors
 
 
+def exposure_row_is_fresh(row, company) -> bool:
+    """THE staleness rule for CompanyNodeExposure rows (spec §8 freshness):
+    a row verified before the company's own metadata changed is unusable.
+    Every reader must apply this -- one reader checking while three don't
+    was exactly the bug (2026-08-12)."""
+    meta_as_of = getattr(company, "business_desc_as_of", None)
+    if meta_as_of is None or row.verified_at is None:
+        return True
+    verified = row.verified_at.date() if hasattr(row.verified_at, "date") else row.verified_at
+    return meta_as_of <= verified
+
+
 def cached_exposed_companies(session: Session, node_key: str, limit: int = 15) -> list[Company]:
     """Companies with a VERIFIED positive exposure to this node key from any
     earlier event, regardless of sector -- the relationship cache used as a
     retrieval index, not just a dedup. Same tradeability rails as the
-    sector pools."""
+    sector pools. Stale rows (company metadata newer than verification)
+    are skipped."""
     from app.models import CompanyNodeExposure
 
     rows = (
-        session.query(Company)
+        session.query(Company, CompanyNodeExposure)
         .join(CompanyNodeExposure, CompanyNodeExposure.company_id == Company.id)
         .filter(CompanyNodeExposure.node_key == node_key,
                 CompanyNodeExposure.exposure_exists == 1)
@@ -140,7 +153,8 @@ def cached_exposed_companies(session: Session, node_key: str, limit: int = 15) -
         .filter(Company.market == "INDIA")
         .filter(Company.tradeability == "NORMAL")
         .order_by(CompanyNodeExposure.strength.desc().nullslast(), Company.ticker.asc())
-        .limit(limit)
+        .limit(limit * 2)
         .all()
     )
-    return rows
+    fresh = [company for company, row in rows if exposure_row_is_fresh(row, company)]
+    return fresh[:limit]

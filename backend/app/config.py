@@ -685,7 +685,7 @@ IMPACT_BROAD_EVENT_TYPES = frozenset(
         "IMPACT_BROAD_EVENT_TYPES",
         "repo_rate_change,inflation,macro_data,fiscal_policy,monsoon_weather,"
         "crude_oil,commodity_price,currency_move,global_rates,trade_policy,"
-        "geopolitical_conflict",
+        "geopolitics",
     ).split(",") if s.strip()
 )
 
