@@ -20,6 +20,13 @@ Usage:
     python benchmark_impact_graph.py --limit 5      # first 5 events
     python benchmark_impact_graph.py --old          # legacy cascade instead
     python benchmark_impact_graph.py --json out.json
+    python benchmark_impact_graph.py --strict       # V4 strict gate on
+    python benchmark_impact_graph.py --strict --baseline old.json
+                                                    # shadow diff vs a prior run
+
+Shadow workflow (spec §54): run once without --strict writing --json
+baseline.json, then run --strict --baseline baseline.json to see the
+per-event candidate/acceptance diff before flipping the flag anywhere.
 """
 import argparse
 import json
@@ -66,7 +73,7 @@ def run_v3(event, session):
     started = time.monotonic()
     result = analyze_article_v3(router, event["title"], event["body"], session=session)
     latency = time.monotonic() - started
-    return {
+    payload = {
         "companies": {c.ticker: c.direction for c in result.companies},
         "edges": [{"parent_id": e.parent_id, "child_id": e.child_id,
                    "distance": e.causal_distance} for e in result.edges],
@@ -74,6 +81,21 @@ def run_v3(event, session):
         "quality": result.analysis_quality, "provider": result.analysis_provider,
         "budget": router.budget.summary(), "latency_s": round(latency, 1),
     }
+    if settings.impact_engine_v4_strict:
+        # Publication-gate shadow columns (spec §54): what the strict
+        # boundary would actually display, with rejection reasons.
+        from app.pipeline import _gate_candidates
+        gate = _gate_candidates(session, result)
+        payload["gate"] = {
+            ticker: {"tier": decision.display_tier, "state": decision.final_state,
+                     "evidence": evidence_class}
+            for ticker, (evidence_class, decision) in gate.items()
+        }
+        payload["displayed"] = {
+            t: result_dir for t, result_dir in payload["companies"].items()
+            if gate.get(t) and gate[t][1].display_tier in ("primary", "secondary")
+        }
+    return payload
 
 
 def run_old(event, session):
@@ -97,7 +119,11 @@ def run_old(event, session):
 
 def score(event, run) -> dict:
     expected = {t: d for t, d in (event.get("expected_companies") or {}).items()}
-    got = run["companies"]
+    # Strict runs are scored on what the publication gate would DISPLAY --
+    # the product metric is displayed-company precision (spec §50), not
+    # internal recall-set precision. {} (everything rejected) is a real
+    # answer and scores accordingly.
+    got = run["displayed"] if "displayed" in run else run["companies"]
     overlap = set(expected) & set(got)
     precision = len(overlap) / len(got) if got else (1.0 if not expected else 0.0)
     recall = len(overlap) / len(expected) if expected else 1.0
@@ -124,7 +150,15 @@ def main() -> int:
     parser.add_argument("--ids", default=None, help="comma-separated event ids to run")
     parser.add_argument("--old", action="store_true", help="run the legacy cascade instead of v3")
     parser.add_argument("--json", default=None, help="write full results to this path")
+    parser.add_argument("--strict", action="store_true",
+                        help="enable IMPACT_ENGINE_V4_STRICT for this run (gate columns in output)")
+    parser.add_argument("--baseline", default=None,
+                        help="prior --json output to diff against (shadow comparison)")
     args = parser.parse_args()
+
+    if args.strict:
+        from app.config import settings as _settings
+        _settings.impact_engine_v4_strict = True
 
     events = json.loads((Path(__file__).parent / "benchmarks" / "impact_events.json").read_text())["events"]
     if args.ids:
@@ -162,6 +196,19 @@ def main() -> int:
               f"recall={avg('company_recall')} direction={avg('direction_accuracy')} "
               f"path_recall={avg('path_recall')} avg_latency={avg('latency_s')}s "
               f"avg_cost=${avg('cost')}")
+    if args.baseline:
+        baseline = {r["id"]: r for r in json.loads(Path(args.baseline).read_text())
+                    if "error" not in r}
+        print("\n== SHADOW DIFF vs", args.baseline, "==")
+        for r in scored:
+            base = baseline.get(r["id"])
+            if base is None:
+                continue
+            before = set((base.get("companies") or {}))
+            after = set(r.get("displayed") or r.get("companies") or {})
+            dropped, added = sorted(before - after), sorted(after - before)
+            if dropped or added:
+                print(f"   {r['id']}: -{dropped or '[]'} +{added or '[]'}")
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=2))
         print(f"written: {args.json}")
