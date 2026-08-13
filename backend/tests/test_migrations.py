@@ -23,6 +23,27 @@ def test_upgrade_head_is_idempotent(tmp_path):
     assert _run_alembic(url).returncode == 0
 
 
+def test_upgrade_head_creates_evidence_table(tmp_path):
+    """Corrective-v4 Task 5: the evidence_records table (0002) must exist
+    on a fresh DB after `alembic upgrade head`, not only via create_all."""
+    import sqlite3
+
+    db = tmp_path / "evidence.db"
+    url = f"sqlite:///{db}"
+    result = _run_alembic(url)
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        tables = {
+            row[0] for row in
+            conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+    assert "evidence_records" in tables
+
+
 def test_upgrade_on_legacy_created_db(tmp_path):
     """A DB created by the old create_all/_ADDED_COLUMNS path must accept
     `alembic stamp baseline` + upgrade without error."""

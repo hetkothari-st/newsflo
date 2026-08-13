@@ -140,7 +140,7 @@ def test_calibration_never_overwrites_magnitude(db_session):
 
 
 def test_gate_output_is_sole_persistence_authority(db_session, strict_mode, monkeypatch):
-    """A DISPLAY_ELIGIBLE/primary v3 entry persists even with a rock-bottom
+    """A DISPLAY_ELIGIBLE v3 entry persists even with a rock-bottom
     fundamental confidence_score -- CONFIDENCE_FLOOR must not be re-applied
     on top of a gate decision that already ruled the company in."""
     import app.pipeline as pipeline_module
@@ -158,7 +158,12 @@ def test_gate_output_is_sole_persistence_authority(db_session, strict_mode, monk
 
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
     assert len(rows) == 1
-    assert rows[0].display_tier == "primary"
+    # A bare CompanyNodeExposure row is a Tier-D prior (corrective-v4 Task
+    # 5), not primary-authorizing evidence -- secondary_deep_dive is the
+    # gate's honest tier here. The point of this test is that it persisted
+    # AT ALL (rows[0].confidence_score below) despite a zero score, not
+    # which tier it landed on.
+    assert rows[0].display_tier == "secondary_deep_dive"
     assert rows[0].gate_state == "DISPLAY_ELIGIBLE"
     # confidence_score is 0 -- well under CONFIDENCE_FLOOR -- and the row
     # still persisted: proof the gate, not the floor, decided this.

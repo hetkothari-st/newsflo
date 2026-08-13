@@ -591,6 +591,55 @@ class CompanyDecisionRecord(Base):
     company = relationship("Company")
 
 
+class EvidenceRecord(Base):
+    """Structured evidence backing one company's claim within one alert
+    (corrective-v4 Task 5, spec §18). Replaces the free-text `evidence_refs`
+    an LLM lists on its own claims: those strings are useful DISPLAY hints
+    but were never independently checked, so they can never be the thing
+    that raises a claim's evidence tier (app.pipeline._build_alert_company
+    only counts rulebook-MATCHED refs toward confidence at all -- see
+    app.analysis.impact_graph.evidence.classify_evidence for the producer).
+    A row here is either a real artifact (a SupplyLink's verbatim
+    rating-agency quote) or an explicit non-claim (the article itself
+    naming the company as its subject) -- never an invented citation
+    (INV-guarded by test_no_evidence_record_is_ever_fabricated).
+
+    `event_id` is the DB column name -- this row belongs to one alert's
+    (one event's) analysis of one company; the ORM attribute is `alert_id`
+    for consistency with every other model that references alerts.id.
+    """
+    __tablename__ = "evidence_records"
+    __table_args__ = (
+        Index("ix_evidence_alert_company", "event_id", "company_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    alert_id = Column("event_id", Integer, ForeignKey("alerts.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    mechanism_id = Column(String, nullable=True)
+    evidence_class = Column(String, nullable=False)
+    evidence_tier = Column(String, nullable=False)
+    source_type = Column(String, nullable=False)
+    source_name = Column(String, nullable=False)
+    source_url = Column(String, nullable=True)
+    source_date = Column(Date, nullable=True)
+    as_of_date = Column(Date, nullable=True)
+    quoted_text = Column(Text, nullable=True)
+    fact_text = Column(Text, nullable=False)
+    quality = Column(String, nullable=True)
+    reliability = Column(Float, nullable=True)
+    provenance_type = Column(String, nullable=True)
+    supports_claim = Column(Boolean, nullable=False, default=True)
+    supports_direction = Column(Boolean, nullable=True)
+    supports_materiality = Column(Boolean, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    review_after = Column(DateTime(timezone=True), nullable=True)
+
+    alert = relationship("Alert")
+    company = relationship("Company")
+
+
 class CalibrationSample(Base):
     __tablename__ = "calibration_samples"
     __table_args__ = (

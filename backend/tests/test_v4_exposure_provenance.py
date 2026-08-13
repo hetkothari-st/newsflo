@@ -91,7 +91,7 @@ def test_cached_exposed_companies_skips_stale_rows(db_session):
 
 
 def test_evidence_classification_skips_stale_rows(db_session, strict_mode):
-    from app.pipeline import _classify_evidence
+    from app.analysis.impact_graph.evidence import classify_evidence
     from app.analysis.impact_graph.schemas import GraphCompany
 
     stale = _company(db_session, ticker="STALE.NS", name="Stale Co",
@@ -105,7 +105,8 @@ def test_evidence_classification_skips_stale_rows(db_session, strict_mode):
         rationale="upstream producer", net_direction="bullish",
         economic_effect="positive", verified=True)
 
-    assert _classify_evidence(db_session, company, set()) == "MODEL_INFERENCE"
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+    assert (evidence_class, evidence_tier, payloads) == ("MODEL_INFERENCE", "E", [])
 
 
 # --- provenance on exposure writes ----------------------------------------
@@ -132,7 +133,7 @@ def test_exposure_cache_write_stamps_provenance(db_session):
 # --- archetype provenance reaches the gate --------------------------------
 
 def test_archetype_discovery_source_classifies_as_curated(db_session, strict_mode):
-    from app.pipeline import _classify_evidence
+    from app.analysis.impact_graph.evidence import classify_evidence
     from app.analysis.impact_graph.schemas import GraphCompany
 
     _company(db_session, ticker="MRF.NS", name="MRF", sector="auto")
@@ -145,7 +146,8 @@ def test_archetype_discovery_source_classifies_as_curated(db_session, strict_mod
         net_direction="bearish", economic_effect="negative", verified=True,
         discovery_source="archetype:tyre_input_cost")
 
-    assert _classify_evidence(db_session, company, set()) == "CURATED_ARCHETYPE"
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+    assert (evidence_class, evidence_tier, payloads) == ("CURATED_ARCHETYPE", "D", [])
 
 
 # --- exposure seed actually runs (bug: never called in production) --------
@@ -175,7 +177,7 @@ def test_supply_link_evidence_upgrades_company_parent_candidates(db_session, str
     SupplyLink between the two carries Tier-A relationship evidence
     (spec §9). Evidence only -- the graph proposed the candidate, the
     link never does (no-auto-attribution preserved)."""
-    from app.pipeline import _classify_evidence
+    from app.analysis.impact_graph.evidence import classify_evidence
     from app.analysis.impact_graph.schemas import GraphCompany
 
     parent = _company(db_session, ticker="MARUTI.NS", name="Maruti Suzuki", sector="auto")
@@ -197,4 +199,8 @@ def test_supply_link_evidence_upgrades_company_parent_candidates(db_session, str
         rationale="tier-1 supplier to the affected OEM",
         net_direction="bearish", economic_effect="negative", verified=True)
 
-    assert _classify_evidence(db_session, company, set()) == "VERIFIED_RELATIONSHIP"
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+    assert evidence_class == "VERIFIED_RELATIONSHIP"
+    assert evidence_tier == "C"
+    assert len(payloads) == 1
+    assert payloads[0]["source_url"] == "https://crisil.example/rationale"

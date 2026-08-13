@@ -334,7 +334,16 @@ def _build_alert_company(
 
     result = compute_confidence(
         claim_count=len(reasons),
-        evidence_ref_count=len(evidence_refs),
+        # Corrective-v4 Task 5: `evidence_refs` is the LLM's own free-text
+        # citation list, self-reported and never independently checked --
+        # it can never be the thing that RAISES a claim's confidence.
+        # `matched_rule_ids` is the subset that actually resolved against
+        # the rulebook (a real, deterministic check), so ONLY that count
+        # feeds the evidence-completeness component. A company that pads
+        # evidence_refs with invented ids scores identically to one that
+        # supplied none -- see tests/test_evidence_records.py::
+        # test_llm_evidence_refs_cannot_raise_confidence.
+        evidence_ref_count=len(matched_rule_ids),
         rule_matched=bool(matched_rule_ids),
         source_credibility=source_credibility(article.source),
         article_age_hours=article_age_hours,
@@ -588,12 +597,22 @@ def _persist_alert(
     # fields) skip both branches untouched.
     gated_entries = [e for e in entries if "gate_state" in e]
     if gated_entries:
+        from app.analysis.impact_graph.evidence import persist_evidence
         from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
         from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
         from app.models import CompanyDecisionRecord
 
         for entry in gated_entries:
             company_row = session.get(Company, entry["company_id"])
+            # Turn this candidate's EvidenceRecord payloads (Task 5) into
+            # real rows now that the Alert exists -- classify_evidence
+            # (called earlier, pre-flush) could only hand back plain
+            # dicts, never ids. Stored on the entry too so a kept entry's
+            # ids survive past this loop (candidate_json below is the
+            # decision record's copy).
+            evidence_ids = persist_evidence(
+                session, alert.id, entry["company_id"], entry.get("evidence_payloads") or [])
+            entry["evidence_ids"] = evidence_ids
             session.add(CompanyDecisionRecord(
                 alert_id=alert.id, company_id=entry["company_id"],
                 ticker=company_row.ticker if company_row else str(entry["company_id"]),
@@ -613,6 +632,7 @@ def _persist_alert(
                     # duplicate_company) -- no column of its own until the
                     # decision-record schema work, but never dropped.
                     "decision_notes": entry.get("decision_notes"),
+                    "evidence_ids": evidence_ids,
                 }),
                 analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
             ))
@@ -831,63 +851,6 @@ def _v3_legacy_level(distance: int | None) -> str:
     return "indirect_l2"
 
 
-# Phrases that mark a rationale/mechanism as grounded in the observed
-# stock move rather than in economics (spec §10, INV-003): such a candidate
-# carries market-observation evidence, which can never authorize primary.
-_MARKET_OBSERVATION_PHRASES = (
-    "stock fell", "stock rose", "stock dropped", "stock declined",
-    "stock jumped", "stock surged", "shares fell", "shares rose",
-    "shares dropped", "shares declined", "shares jumped", "shares surged",
-)
-
-
-def _classify_evidence(session: Session, company, subject_tickers: set[str]) -> str:
-    """Deterministic evidence class for the publication gate (spec §9/§10).
-    Order matters: a price-movement argument taints the candidate before
-    any stronger class can rescue it -- the cure is a real economic
-    rationale, not a cache row."""
-    text = f"{company.rationale or ''} {company.mechanism or ''}".lower()
-    if any(phrase in text for phrase in _MARKET_OBSERVATION_PHRASES):
-        return "ARTICLE_MARKET_OBSERVATION"
-    row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
-    if row is not None:
-        from app.analysis.impact_graph.exposure import exposure_row_is_fresh
-        from app.models import CompanyNodeExposure, SupplyLink
-
-        cached = (
-            session.query(CompanyNodeExposure)
-            .filter_by(company_id=row.id, node_key=company.parent_id, exposure_exists=1)
-            .one_or_none()
-        )
-        if cached is not None and exposure_row_is_fresh(cached, row):
-            return "VERIFIED_RELATIONSHIP"
-        # SupplyLink corpus (verbatim-quote-gated, agency-sourced) as
-        # Tier-A relationship evidence for company-parent candidates
-        # (spec §9). Evidence classification ONLY: the graph proposed the
-        # candidate, the link never does -- the user-locked
-        # no-auto-attribution guarantee stays intact.
-        if company.parent_type == "company":
-            parent_row = session.query(Company).filter_by(ticker=company.parent_id).one_or_none()
-            if parent_row is not None:
-                linked = (
-                    session.query(SupplyLink)
-                    .filter(
-                        ((SupplyLink.company_id == parent_row.id)
-                         & (SupplyLink.counterparty_company_id == row.id))
-                        | ((SupplyLink.company_id == row.id)
-                           & (SupplyLink.counterparty_company_id == parent_row.id))
-                    )
-                    .first()
-                )
-                if linked is not None:
-                    return "VERIFIED_RELATIONSHIP"
-    if company.ticker in subject_tickers:
-        return "ARTICLE_SUBJECT"
-    if (getattr(company, "discovery_source", "") or "").startswith("archetype:"):
-        return "CURATED_ARCHETYPE"
-    return "MODEL_INFERENCE"
-
-
 def _roots_in_event(result, company) -> bool:
     """Counterfactual proxy (spec §14): the candidate's causal chain must
     trace back to this event's own graph. A parent that never appears as a
@@ -928,17 +891,19 @@ def _company_profile_supports_mechanism(session: Session, row, company) -> bool:
     return exposure is not None and exposure_row_is_fresh(exposure, row)
 
 
-def _gate_candidates(session: Session, result) -> list[tuple[str, object]]:
+def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, object]]:
     """Evaluate every graph company through the publication gate (strict
-    mode only). Returns [(evidence_class, GateDecision)] positionally
-    aligned with `result.companies` -- a list, not a ticker-keyed dict, so
-    that two candidates resolving to ONE company both survive to
-    finalize_alert_decisions and the duplicate is decided there instead of
-    being silently swallowed by dict keying."""
+    mode only). Returns [(evidence_class, evidence_tier, evidence_payloads,
+    GateDecision)] positionally aligned with `result.companies` -- a list,
+    not a ticker-keyed dict, so that two candidates resolving to ONE
+    company both survive to finalize_alert_decisions and the duplicate is
+    decided there instead of being silently swallowed by dict keying.
+    `evidence_payloads` are EvidenceRecord payload dicts (Task 5) -- not
+    yet persisted, since no Alert id exists at this point; see
+    app.analysis.impact_graph.evidence.persist_evidence."""
     from app.analysis.impact_graph.engine import _subject_companies
-    from app.analysis.impact_graph.publication_gate import (
-        EVIDENCE_CLASS_TO_TIER, CandidateInput, GateContext, evaluate_candidate,
-    )
+    from app.analysis.impact_graph.evidence import classify_evidence
+    from app.analysis.impact_graph.publication_gate import CandidateInput, GateContext, evaluate_candidate
     from app.analysis.impact_graph.schemas import EventFacts
 
     # Reuse the engine's deterministic subject resolver on the result's
@@ -959,8 +924,9 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, object]]:
     decisions = []
     for company in result.companies:
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
-        evidence_class = _classify_evidence(session, company, subject_tickers)
-        decisions.append((evidence_class, evaluate_candidate(CandidateInput(
+        evidence_class, evidence_tier, evidence_payloads = classify_evidence(
+            session, company, subject_tickers)
+        decisions.append((evidence_class, evidence_tier, evidence_payloads, evaluate_candidate(CandidateInput(
             ticker=company.ticker,
             # Resolved-company identity: the dedup key finalize uses, so two
             # tickers naming one company collapse to one published row.
@@ -979,7 +945,7 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, object]]:
             independently_verified=bool(company.verified),
             verification_available=bool(verification_available),
             evidence_class=evidence_class,
-            evidence_tier=EVIDENCE_CLASS_TO_TIER.get(evidence_class, ""),
+            evidence_tier=evidence_tier,
             # Transitional: the semantic counterfactual verdict is wired from
             # the verifier in Task 9. Until then the structural proxy
             # (trigger_shock_present) is the only event-specificity evidence
@@ -1024,10 +990,11 @@ def _v3_entries(session: Session, result) -> list[dict]:
         from app.analysis.impact_graph.publication_gate import finalize_alert_decisions
 
         finalized = finalize_alert_decisions(
-            [decision for _, decision in gate_decisions])
+            [decision for _, _, _, decision in gate_decisions])
         gate_decisions = [
-            (evidence_class, decision)
-            for (evidence_class, _), decision in zip(gate_decisions, finalized)
+            (evidence_class, evidence_tier, evidence_payloads, decision)
+            for (evidence_class, evidence_tier, evidence_payloads, _), decision
+            in zip(gate_decisions, finalized)
         ]
     entries = []
     for company_index, company in enumerate(result.companies):
@@ -1087,7 +1054,7 @@ def _v3_entries(session: Session, result) -> list[dict]:
         # and each keeps its own decision (one of them REJECT_DUPLICATE).
         gated = gate_decisions[company_index] if gate_decisions else None
         if gated is not None:
-            evidence_class, decision = gated
+            evidence_class, evidence_tier, evidence_payloads, decision = gated
             entries[-1].update({
                 "display_tier": decision.display_tier,
                 "gate_state": decision.final_state,
@@ -1095,6 +1062,13 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 "rejection_reason": decision.rejection_reason,
                 "materiality_grade": decision.materiality_grade,
                 "evidence_class": evidence_class,
+                "evidence_tier": evidence_tier,
+                # Not-yet-persisted EvidenceRecord payload dicts (Task 5):
+                # no Alert id exists yet at this point in the pipeline.
+                # _persist_alert turns these into real rows via
+                # app.analysis.impact_graph.evidence.persist_evidence and
+                # sets "evidence_ids" (the resulting row ids) alongside.
+                "evidence_payloads": evidence_payloads,
                 "decision_notes": decision.notes,
             })
     return entries

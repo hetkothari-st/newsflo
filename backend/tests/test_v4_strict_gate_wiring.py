@@ -83,7 +83,9 @@ def test_strict_entries_carry_gate_decision(db_session, strict_mode):
     entries = _v3_entries(db_session, _result([_graph_company()]))
 
     assert len(entries) == 1
-    assert entries[0]["display_tier"] == "primary"
+    # A bare CompanyNodeExposure row is Tier-D evidence (MODEL_VERIFIED_PRIOR,
+    # corrective-v4 Task 5) -- eligible, but not primary-authorizing.
+    assert entries[0]["display_tier"] == "secondary_deep_dive"
     assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
 
 
@@ -208,19 +210,33 @@ def test_strict_price_movement_rationale_never_primary(db_session, strict_mode):
     assert entries[0]["display_tier"] != "primary"
 
 
-def test_strict_verified_relationship_upgrades_evidence(db_session, strict_mode):
-    """A fresh CompanyNodeExposure row is Tier-C evidence: d2 primary
-    becomes possible (spec §13)."""
-    row = _company_row(db_session)
-    db_session.add(CompanyNodeExposure(
-        company_id=row.id, node_key="crude_price", exposure_exists=1,
-        strength=0.8, mechanism="verified crude exposure", verified_at=utcnow()))
+def test_strict_supply_link_upgrades_evidence_to_primary(db_session, strict_mode):
+    """A SupplyLink-backed relationship is real Tier-C evidence (corrective-
+    v4 Task 5: a bare CompanyNodeExposure cache row no longer is -- see
+    test_strict_entries_carry_gate_decision): d2 primary becomes possible
+    (spec §13)."""
+    from datetime import date
+
+    from app.models import SupplyLink
+
+    parent = _company_row(db_session, ticker="MARUTI.NS", name="Maruti Suzuki", sector="auto")
+    supplier = _company_row(db_session, ticker="MOTHERSON.NS", name="Samvardhana Motherson",
+                            sector="auto_components")
+    db_session.add(SupplyLink(
+        company_id=parent.id, counterparty_company_id=supplier.id,
+        counterparty_name="Samvardhana Motherson", relation="SUPPLIER",
+        evidence="Samvardhana Motherson supplies wiring harnesses for our vehicle programmes",
+        source_url="https://crisil.example/rationale", source_agency="CRISIL",
+        as_of=date.today()))
     db_session.commit()
 
-    d2 = _graph_company(causal_distance=2, materiality=0.7)
-    edges = [_graph_edge(),
-             _graph_edge(parent_type="economic_node", parent_id="crude_price",
-                         child_type="sector", child_id="oil_gas", causal_distance=2)]
+    d2 = _graph_company(
+        ticker="MOTHERSON.NS", name="Samvardhana Motherson", causal_distance=2, materiality=0.7,
+        parent_type="company", parent_id="MARUTI.NS",
+        mechanism="volume cut at Maruti reduces component offtake",
+        rationale="tier-1 supplier to the affected OEM",
+    )
+    edges = [_graph_edge(child_type="company", child_id="MARUTI.NS")]
     entries = _v3_entries(db_session, _result([d2], edges=edges))
 
     assert entries[0]["evidence_class"] == "VERIFIED_RELATIONSHIP"
@@ -241,14 +257,36 @@ def test_strict_model_inference_d2_is_insufficient_evidence(db_session, strict_m
 
 def test_strict_primary_cap_demotes_overflow_to_deep_dive(db_session, strict_mode, monkeypatch):
     """finalize_alert_decisions runs at the alert boundary: the overflow is
-    demoted, never dropped (INV-015)."""
+    demoted, never dropped (INV-015). Needs genuinely primary-eligible
+    candidates (corrective-v4 Task 5: a bare CompanyNodeExposure row is only
+    Tier D, not primary-authorizing) -- SupplyLink-backed Tier-C evidence at
+    d2 gives both candidates a real shot at primary so the cap has something
+    to demote."""
+    from datetime import date
+
+    from app.models import SupplyLink
+
     monkeypatch.setattr(settings, "impact_max_primary_companies", 1)
+    parent = _company_row(db_session, ticker="PARENT.NS", name="Parent Co", sector="auto")
     for i in range(2):
-        _company_row(db_session, ticker=f"CO{i}.NS", name=f"Co{i}",
-                     verified_node="crude_price")
-    companies = [_graph_company(ticker="CO0.NS", name="Co0", materiality=0.9),
-                 _graph_company(ticker="CO1.NS", name="Co1", materiality=0.7)]
-    entries = _v3_entries(db_session, _result(companies))
+        supplier = _company_row(db_session, ticker=f"CO{i}.NS", name=f"Co{i}",
+                                sector="auto_components")
+        db_session.add(SupplyLink(
+            company_id=parent.id, counterparty_company_id=supplier.id,
+            counterparty_name=f"Co{i}", relation="SUPPLIER",
+            evidence=f"Co{i} supplies components used in Parent Co's vehicle programmes",
+            source_url=f"https://crisil.example/rationale-{i}", source_agency="CRISIL",
+            as_of=date.today()))
+    db_session.commit()
+
+    companies = [
+        _graph_company(ticker="CO0.NS", name="Co0", materiality=0.9, causal_distance=2,
+                       parent_type="company", parent_id="PARENT.NS"),
+        _graph_company(ticker="CO1.NS", name="Co1", materiality=0.7, causal_distance=2,
+                       parent_type="company", parent_id="PARENT.NS"),
+    ]
+    edges = [_graph_edge(child_type="company", child_id="PARENT.NS")]
+    entries = _v3_entries(db_session, _result(companies, edges=edges))
 
     tiers = {e["display_tier"] for e in entries}
     assert tiers == {"primary", "secondary_deep_dive"}
@@ -294,7 +332,10 @@ def test_strict_persist_skips_excluded_and_records_decisions(db_session, strict_
 
     from app.models import AlertCompany
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
-    assert [r.display_tier for r in rows] == ["primary"]
+    # Bare CompanyNodeExposure evidence is Tier D (corrective-v4 Task 5),
+    # not primary-authorizing -- secondary_deep_dive is the honest tier
+    # here. The point under test is exclusion + decision-record bookkeeping.
+    assert [r.display_tier for r in rows] == ["secondary_deep_dive"]
 
     records = db_session.query(CompanyDecisionRecord).filter_by(alert_id=alert.id).all()
     assert len(records) == 2
