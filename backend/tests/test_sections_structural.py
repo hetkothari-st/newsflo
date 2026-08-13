@@ -29,8 +29,12 @@ def legacy_mode(monkeypatch):
     monkeypatch.setattr(settings, "impact_engine_v4_strict", False)
 
 
+_alert_seq = [0]
+
+
 def _seed_alert(db):
-    article = Article(source="s", provider="finnhub", url=f"https://ex.com/{id(db)}-{Article.__name__}",
+    _alert_seq[0] += 1
+    article = Article(source="s", provider="finnhub", url=f"https://ex.com/{id(db)}-{_alert_seq[0]}",
                       title="crude spikes", content="c", status="ALERTED")
     db.add(article)
     db.commit()
@@ -46,6 +50,7 @@ _ticker_seq = [0]
 def _add_company(db, alert, ticker, name, sector, *, direction="bearish",
                  economic_effect="negative", display_tier="primary",
                  gate_state="DISPLAY_ELIGIBLE", causal_parent_id="crude_price",
+                 causal_parent_type="economic_node", parent_company_id=None,
                  materiality=0.7, excess=None, mechanism="crude-linked input costs"):
     _ticker_seq[0] += 1
     company = Company(name=name, ticker=ticker, sector=sector, index_tier="NIFTY50")
@@ -56,7 +61,8 @@ def _add_company(db, alert, ticker, name, sector, *, direction="bearish",
         magnitude_low=1.0, magnitude_high=3.0, rationale="thesis",
         basis="direct_mention", economic_effect=economic_effect,
         display_tier=display_tier, gate_state=gate_state,
-        causal_parent_type="economic_node", causal_parent_id=causal_parent_id,
+        causal_parent_type=causal_parent_type, causal_parent_id=causal_parent_id,
+        parent_company_id=parent_company_id,
         materiality=materiality, causal_distance=1, mechanism=mechanism,
     )
     db.add(ac)
@@ -172,6 +178,90 @@ def test_heterogeneous_section_has_no_single_company_note(db_session, strict_mod
     assert len(layers) == 1
     assert layers[0]["note"] is None
     assert {r["ticker"] for r in layers[0]["rows"]} == {"ONGC.NS", "OIL.NS"}
+
+
+def test_sector_parent_section_gets_sector_label(db_session, strict_mode):
+    """causal_parent_type == "sector" resolves through the legacy
+    _SECTOR_LABELS map, not the mechanism taxonomy (I5, review round 2)."""
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "RELIANCE.NS", "Reliance", "oil_gas",
+                 economic_effect="positive", causal_parent_type="sector",
+                 causal_parent_id="oil_gas", excess=1.0)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+
+    assert len(layers) == 1
+    assert "oil & gas" in layers[0]["title"]
+
+
+def test_company_parent_section_gets_linked_to_label(db_session, strict_mode):
+    """causal_parent_type == "company" resolves to "linked to <name>",
+    looking the parent company's name up among the alert's own rows -- no
+    extra DB query (I5, review round 2)."""
+    alert = _seed_alert(db_session)
+    parent, _ = _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                             economic_effect="positive", excess=1.0)
+    _add_company(db_session, alert, "OILFIELD.NS", "Oilfield Services", "oil_gas",
+                 economic_effect="positive", causal_parent_type="company",
+                 causal_parent_id=parent.ticker, parent_company_id=parent.id,
+                 excess=0.4)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+
+    linked = next(layer for layer in layers if "linked to ONGC" in layer["title"])
+    assert any(row["ticker"] == "OILFIELD.NS" for row in linked["rows"])
+
+
+def test_two_distinct_unknown_parents_merge_into_one_other_section(db_session, strict_mode):
+    """Two DIFFERENT unrecognized causal_parent_id values, same effect, both
+    fall back to OTHER_LABEL -- they must render as ONE merged section, not
+    two duplicate-titled ones (I5, review round 2)."""
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "AAA.NS", "AAA Co", "oil_gas",
+                 economic_effect="positive", causal_parent_id="weird_node_a",
+                 mechanism="mechanism a", excess=1.0)
+    _add_company(db_session, alert, "BBB.NS", "BBB Co", "oil_gas",
+                 economic_effect="positive", causal_parent_id="weird_node_b",
+                 mechanism="mechanism b", excess=0.9)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+
+    other_layers = [layer for layer in layers if OTHER_LABEL in layer["title"]]
+    assert len(other_layers) == 1
+    assert {r["ticker"] for r in other_layers[0]["rows"]} == {"AAA.NS", "BBB.NS"}
+    # Merged sections are necessarily heterogeneous (two distinct real
+    # mechanisms) -- no single-company note gets presented as if it
+    # applied to both.
+    assert other_layers[0]["note"] is None
+
+
+def test_note_pin_single_member_and_identical_multi_member(db_session, strict_mode):
+    """I6 (review round 2): a single-member section keeps its own mechanism
+    as the note; a multi-member section where every mechanism string is
+    IDENTICAL also keeps it -- only a heterogeneous section loses the
+    note (already covered by test_heterogeneous_section_has_no_single_
+    company_note above)."""
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "SOLO.NS", "Solo Co", "oil_gas",
+                 economic_effect="positive", causal_parent_id="crude_price",
+                 mechanism="Solo mechanism text.", excess=1.0)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+    assert len(layers) == 1
+    assert layers[0]["note"] == "Solo mechanism text."
+
+    twin_alert = _seed_alert(db_session)
+    _add_company(db_session, twin_alert, "TWIN1.NS", "Twin One", "oil_gas",
+                 economic_effect="positive", causal_parent_id="crude_price",
+                 mechanism="Shared mechanism text.", excess=1.0)
+    _add_company(db_session, twin_alert, "TWIN2.NS", "Twin Two", "oil_gas",
+                 economic_effect="positive", causal_parent_id="crude_price",
+                 mechanism="Shared mechanism text.", excess=0.5)
+
+    twin_layers = compute_ripple_layers(db_session, twin_alert, set())
+    assert len(twin_layers) == 1
+    assert twin_layers[0]["note"] == "Shared mechanism text."
+    assert {r["ticker"] for r in twin_layers[0]["rows"]} == {"TWIN1.NS", "TWIN2.NS"}
 
 
 def test_dedup_reuse_cannot_bypass_gate(db_session, monkeypatch):

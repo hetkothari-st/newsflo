@@ -123,6 +123,39 @@ NOTE_PRIMARY_CAP_OVERFLOW = "primary_cap_overflow"
 NOTE_DUPLICATE = "duplicate_company"
 
 
+def is_gated(alert_companies) -> bool:
+    """True when ANY row in `alert_companies` carries v4 gate output --
+    `gate_state` OR `display_tier` non-NULL (owner ruling, corrective-v4
+    Task 12 review round 2 / I1+I4: the owner's structural-unreachability
+    text is an OR of the two fields, not `gate_state` alone -- a row could
+    in principle carry one without the other, and either one present means
+    this alert went through gate-aware persistence).
+
+    Takes the AlertCompany rows directly (an iterable), not an Alert object
+    -- callers that already hold the exact list they care about (e.g.
+    refine_alert's `alert_companies` argument) pass it straight through
+    rather than relying on `alert.companies`' relationship state matching;
+    a caller working from the Alert itself passes `alert.companies`.
+
+    This is the SINGLE structural signal shared by every consumer that must
+    make the legacy (ungated) rendering/analysis path unreachable once an
+    alert is gated: `app.market.ripple_layers.compute_ripple_layers` (legacy
+    3-tier section generator) and `app.analysis.refinement.refine_alert`
+    (legacy why-text/section LLM calls). Deliberately reads only fields
+    already on the ORM objects -- no DB query, no `settings.
+    impact_engine_v4_strict` check: reachability is structural, not modal,
+    so a flag flip after gated rows were persisted can never resurrect the
+    legacy path for them. Lives here (not in app.market or app.analysis.
+    refinement) so both can import it without a cycle -- this module only
+    imports app.config at module scope, and neither of theirs imports it
+    back.
+    """
+    return any(
+        alert_company.gate_state is not None or alert_company.display_tier is not None
+        for alert_company in alert_companies
+    )
+
+
 # --- data ------------------------------------------------------------------
 
 @dataclass(frozen=True)

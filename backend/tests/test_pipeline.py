@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from sqlalchemy import event
 
@@ -974,6 +976,136 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     # V4/gate fields carried through the copy verbatim, not dropped.
     assert reused_indirect.display_tier == "primary"
     assert reused_indirect.gate_state == "DISPLAY_ELIGIBLE"
+
+
+def test_process_new_articles_reuse_copies_gate_audit_trail_honestly(db_session, monkeypatch):
+    """Corrective-v4 Task 12 review round 2 (I2+I3): a reused alert's gate
+    audit trail must be a COPY of the prior alert's real decision, not a
+    freshly-fabricated CompanyDecisionRecord invented from the copied
+    AlertCompany fields -- that would document a gate walk that never ran
+    against this alert. Also pins that analysis_quality/analysis_provider
+    carry through (transitively: a THIRD republish reuses off the SECOND
+    alert, so its own quality mark must be honest, not NULL)."""
+    from app.analysis.impact_graph.publication_gate import GateDecision
+    from app.config import settings
+    from app.models import CompanyDecisionRecord, EvidenceRecord
+
+    monkeypatch.setattr(settings, "impact_engine_v4_strict", True)
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    def fake_gate_candidates(session, result):
+        return [
+            ("ARTICLE_SUBJECT", "SUBJECT", [{
+                "source_type": "article", "source_name": "article",
+                "fact_text": "named subject of the article",
+                "evidence_class": "ARTICLE_COMPANY_MENTION", "evidence_tier": "SUBJECT",
+                "supports_claim": True,
+            }], GateDecision(
+                final_state="DISPLAY_ELIGIBLE", display_tier="primary",
+                gates_passed=["materiality", "evidence"], rejection_reason=None,
+                materiality_grade="HIGH", ticker=c.ticker, dedup_key=c.ticker,
+            ))
+            for c in result.companies
+        ]
+    monkeypatch.setattr(pipeline_module, "_gate_candidates", fake_gate_candidates)
+
+    fake_output = ImpactGraphResult(
+        category="oil_gas",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="bullish",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
+            reasons=["r1"],
+        )],
+    )
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda router, title, content, session=None, article_id=None: fake_output)
+    monkeypatch.setattr(pipeline_module, "get_or_fetch_financial_snapshot", lambda session, ticker: None)
+
+    first = Article(source="a", url="https://example.com/audit-first", title="Oil refining margins jump")
+    db_session.add(first)
+    db_session.commit()
+    assert process_new_articles(db_session, claude_client=object()) == 1
+    first_alert = first.alerts[0]
+    assert first_alert.analysis_quality == "authoritative"  # ImpactGraphResult default
+
+    original_decisions = (
+        db_session.query(CompanyDecisionRecord).filter_by(alert_id=first_alert.id)
+        .order_by(CompanyDecisionRecord.id).all()
+    )
+    original_evidence = (
+        db_session.query(EvidenceRecord).filter_by(alert_id=first_alert.id)
+        .order_by(EvidenceRecord.id).all()
+    )
+    assert len(original_decisions) == 1
+    assert len(original_evidence) == 1
+
+    # Second (republished) article -- same title, dedup-reuse path. No
+    # second LLM call, so the gate never actually ran against this alert;
+    # its audit trail must be a COPY, not a fresh synthesis.
+    second = Article(source="b", url="https://example.com/audit-second", title="Oil refining margins jump")
+    db_session.add(second)
+    db_session.commit()
+    monkeypatch.setattr(pipeline_module, "analyze_article_v3", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
+    assert process_new_articles(db_session, claude_client=object()) == 1
+    second_alert = second.alerts[0]
+
+    assert second_alert.analysis_quality == "authoritative"
+    assert second_alert.analysis_provider == first_alert.analysis_provider
+
+    copied_decisions = (
+        db_session.query(CompanyDecisionRecord).filter_by(alert_id=second_alert.id)
+        .order_by(CompanyDecisionRecord.id).all()
+    )
+    copied_evidence = (
+        db_session.query(EvidenceRecord).filter_by(alert_id=second_alert.id)
+        .order_by(EvidenceRecord.id).all()
+    )
+    assert len(copied_decisions) == 1
+    assert len(copied_evidence) == 1
+    # New rows (different ids), same content.
+    assert copied_evidence[0].id != original_evidence[0].id
+    assert copied_evidence[0].fact_text == original_evidence[0].fact_text
+    assert copied_evidence[0].evidence_class == original_evidence[0].evidence_class
+    assert copied_evidence[0].evidence_tier == original_evidence[0].evidence_tier
+
+    orig_d, copy_d = original_decisions[0], copied_decisions[0]
+    assert copy_d.id != orig_d.id
+    assert copy_d.alert_id != orig_d.alert_id
+    assert copy_d.final_state == orig_d.final_state
+    assert copy_d.display_tier == orig_d.display_tier
+    assert copy_d.rejection_reason == orig_d.rejection_reason
+    assert copy_d.gates_passed_json == orig_d.gates_passed_json
+    assert copy_d.evidence_class == orig_d.evidence_class
+    assert copy_d.materiality_grade == orig_d.materiality_grade
+    # analysis_version PRESERVED from the original gate run, not
+    # regenerated -- the record describes the gate contract that actually
+    # produced it.
+    assert copy_d.analysis_version == orig_d.analysis_version
+
+    # candidate_json's evidence_ids are REMAPPED to the copied evidence
+    # row, never left pointing at another alert's evidence.
+    orig_candidate = json.loads(orig_d.candidate_json)
+    copy_candidate = json.loads(copy_d.candidate_json)
+    assert orig_candidate["evidence_ids"] == [original_evidence[0].id]
+    assert copy_candidate["evidence_ids"] == [copied_evidence[0].id]
+    # Every other candidate_json field is unchanged content.
+    for key in ("economic_effect", "causal_distance", "materiality", "confidence_f", "mechanism", "rationale"):
+        assert copy_candidate[key] == orig_candidate[key]
+
+    # Chain: a THIRD republish reuses off the SECOND (reused) alert -- its
+    # own analysis_version/gate_state/analysis_quality must be complete
+    # enough to satisfy _dedup_reuse_policy_allows for the next hop too.
+    third = Article(source="c", url="https://example.com/audit-third", title="Oil refining margins jump")
+    db_session.add(third)
+    db_session.commit()
+    assert process_new_articles(db_session, claude_client=object()) == 1
+    third_alert = third.alerts[0]
+    third_decisions = db_session.query(CompanyDecisionRecord).filter_by(alert_id=third_alert.id).all()
+    assert len(third_decisions) == 1
+    assert third_decisions[0].analysis_version == orig_d.analysis_version
 
 
 def test_process_new_articles_cache_hit_skips_llm_call_and_throttle_sleep(db_session, monkeypatch):

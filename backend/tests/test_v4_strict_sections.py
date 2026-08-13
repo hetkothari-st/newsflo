@@ -152,10 +152,18 @@ def test_legacy_mode_with_no_gate_data_keeps_three_tier(db_session, legacy_mode)
     display_tier NULL): 3-tier path renders. Note this is now the ONLY
     "flag off" scenario that reaches the 3-tier path -- corrective-v4 Task
     12 made the legacy generator structurally unreachable whenever ANY
-    company carries a non-NULL gate_state, REGARDLESS of the flag (see
-    test_sections_structural.py::test_gated_alert_legacy_unreachable_even_flag_off
-    for that structural case, which this test used to conflate with "flag
-    off" alone -- gate fields existing was never actually exercised here)."""
+    company carries gate_state or display_tier, REGARDLESS of the flag
+    (see test_sections_structural.py::
+    test_gated_alert_legacy_unreachable_even_flag_off for that structural
+    case). This test's OLD fixture genuinely did seed gate fields (the
+    default gate_state="DISPLAY_ELIGIBLE"/display_tier="primary") and
+    correctly pinned the PRE-Task-12 behavior of that combination: flag off
+    was the sole authority, so the legacy layer rendered even with gate
+    data present. That was a real, exercised assertion, not a no-op --
+    the owner's Task 12 ruling deliberately INVERTED it (gate data now
+    always wins over the flag), so this fixture was updated to a genuinely
+    gate-less alert to keep testing what its name claims: "flag off"
+    alone, not "flag off despite gate data" (which now renders strict)."""
     alert = _seed_alert(db_session)
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
                  display_tier=None, gate_state=None,
@@ -234,11 +242,20 @@ def test_legacy_refine_still_calls_whys_and_layers(db_session, monkeypatch, lega
 
 def test_refine_alert_rerun_does_not_duplicate_layers_and_timeline(db_session, monkeypatch):
     """refine_alert appended AlertRippleLayer/TimelineEffect rows with no
-    delete-before-insert -- a re-run duplicated every section (INV-009)."""
+    delete-before-insert -- a re-run duplicated every section (INV-009).
+    Needs a LEGACY (gate_state/display_tier NULL) alert_company: since
+    corrective-v4 Task 12 (review round 2 / I4) made refine_alert's
+    generate_ripple_layers call structurally unreachable for a gated
+    alert (is_gated), this file's `_add_company` default (gate_state=
+    "DISPLAY_ELIGIBLE") would otherwise skip the AlertRippleLayer branch
+    entirely and this test would never exercise the dedup fix it's named
+    for. TimelineEffect's delete-before-insert stays unconditional either
+    way; this fixture choice is only about reaching the layers branch too."""
     from app.analysis import refinement
 
     alert = _seed_alert(db_session)
     company, ac = _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                               display_tier=None, gate_state=None,
                                excess=1.0)
     article = db_session.query(Article).get(alert.article_id)
     move = db_session.query(MarketMove).filter_by(alert_id=alert.id).one()

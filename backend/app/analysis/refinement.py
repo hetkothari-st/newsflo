@@ -15,6 +15,7 @@ import time
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
+from app.analysis.impact_graph.publication_gate import is_gated
 from app.companies.matching.normalize import normalize_name
 from app.config import settings
 from app.models import AlertRippleLayer, Company, CompanyAlias, TimelineEffect
@@ -781,19 +782,22 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
         if summary.get("is_unconfirmed") is not None:
             alert.is_unconfirmed = 1 if summary["is_unconfirmed"] else 0
 
-    # V4 strict closed-world explanations (spec §32, INV-014): the
-    # per-company "why" IS the gate-validated mechanism -- already
-    # company-specific, one line, and derived from evidence. The legacy
-    # impact_whys call (which handed the model the measured direction and
-    # asked it to invent a story for it) is exactly the market-move
-    # rationalization the spec forbids, so it never runs in strict mode.
-    # The mechanism has already passed the closed-world evidence gate
-    # upstream, so the only thing that can still block it here is the
-    # compliance regex (a % or price-target phrase); _sanitize_mechanism
-    # salvages the rest of an otherwise-valid mechanism rather than
-    # discarding a genuine, specific explanation over one flagged clause.
-    strict_gated = settings.impact_engine_v4_strict and any(
-        ac.display_tier for ac in alert_companies)
+    # V4 structural closed-world explanations (spec §32, INV-014; owner
+    # ruling, corrective-v4 Task 12 review round 2 / I4): the per-company
+    # "why" IS the gate-validated mechanism -- already company-specific,
+    # one line, and derived from evidence. The legacy impact_whys call
+    # (which handed the model the measured direction and asked it to
+    # invent a story for it) is exactly the market-move rationalization
+    # the spec forbids, so a GATED alert never pays for it -- structurally,
+    # like ripple_layers' section generator (see is_gated's docstring):
+    # this no longer reads settings.impact_engine_v4_strict at all, so a
+    # gated alert gets why=mechanism even with the flag off. The mechanism
+    # has already passed the closed-world evidence gate upstream, so the
+    # only thing that can still block it here is the compliance regex (a %
+    # or price-target phrase); _sanitize_mechanism salvages the rest of an
+    # otherwise-valid mechanism rather than discarding a genuine, specific
+    # explanation over one flagged clause.
+    strict_gated = is_gated(alert_companies)
     if strict_gated:
         for ac in alert_companies:
             if ac.display_tier in ("primary", "secondary_deep_dive", "secondary") and ac.mechanism:

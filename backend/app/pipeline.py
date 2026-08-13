@@ -653,11 +653,75 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
     return fixed
 
 
+def _copy_gate_audit_trail(session: Session, prior_alert_id: int, new_alert_id: int) -> None:
+    """Copy a reused alert's gate audit trail onto the new alert (corrective-
+    v4 Task 12, review round 2 / I2+I3): the publication gate ran exactly
+    ONCE, against the prior article -- synthesizing a fresh
+    CompanyDecisionRecord from the copied AlertCompany fields (the
+    gated_entries branch below, built for a REAL gate run) would invent an
+    audit trail for a gate walk that never happened against this alert.
+    Instead, copy the prior alert's decision records (analysis_version
+    PRESERVED as originally written -- it describes the gate contract that
+    actually produced the decision, not "now") and the EvidenceRecord rows
+    they cite, as new rows under `new_alert_id`. Evidence is copied first so
+    each decision record's `candidate_json.evidence_ids` can be remapped to
+    the new rows' ids rather than pointing at another alert's evidence."""
+    from app.models import CompanyDecisionRecord, EvidenceRecord
+
+    prior_evidence = (
+        session.query(EvidenceRecord).filter_by(alert_id=prior_alert_id).order_by(EvidenceRecord.id).all()
+    )
+    evidence_id_map: dict[int, int] = {}
+    for record in prior_evidence:
+        copy = EvidenceRecord(
+            alert_id=new_alert_id, company_id=record.company_id,
+            mechanism_id=record.mechanism_id, evidence_class=record.evidence_class,
+            evidence_tier=record.evidence_tier, source_type=record.source_type,
+            source_name=record.source_name, source_url=record.source_url,
+            source_date=record.source_date, as_of_date=record.as_of_date,
+            quoted_text=record.quoted_text, fact_text=record.fact_text,
+            quality=record.quality, reliability=record.reliability,
+            provenance_type=record.provenance_type, supports_claim=record.supports_claim,
+            supports_direction=record.supports_direction,
+            supports_materiality=record.supports_materiality,
+            verified_at=record.verified_at, review_after=record.review_after,
+        )
+        session.add(copy)
+        session.flush()
+        evidence_id_map[record.id] = copy.id
+
+    prior_decisions = (
+        session.query(CompanyDecisionRecord).filter_by(alert_id=prior_alert_id)
+        .order_by(CompanyDecisionRecord.id).all()
+    )
+    for record in prior_decisions:
+        candidate = json.loads(record.candidate_json) if record.candidate_json else {}
+        old_evidence_ids = candidate.get("evidence_ids") or []
+        # Every id here came from persist_evidence against this same
+        # prior_alert_id, so it is always in evidence_id_map -- the
+        # .get(eid, eid) fallback is defensive only, never dropping a
+        # reference outright if that invariant is ever violated.
+        candidate["evidence_ids"] = [evidence_id_map.get(eid, eid) for eid in old_evidence_ids]
+        session.add(CompanyDecisionRecord(
+            alert_id=new_alert_id, company_id=record.company_id, ticker=record.ticker,
+            final_state=record.final_state, display_tier=record.display_tier,
+            rejection_reason=record.rejection_reason,
+            gates_passed_json=record.gates_passed_json,
+            evidence_class=record.evidence_class,
+            materiality_grade=record.materiality_grade,
+            candidate_json=json.dumps(candidate),
+            # PRESERVED, not regenerated (see docstring): this row
+            # describes the gate run that actually produced it.
+            analysis_version=record.analysis_version,
+        ))
+    session.flush()
+
+
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
     analysis_provider: str | None = None, analysis_quality: str | None = None,
-    event_cause: str | None = None,
+    event_cause: str | None = None, reused_from_alert_id: int | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -665,6 +729,14 @@ def _persist_alert(
     computed fresh here (not copied from a reused analysis) so a reused
     alert reflects the current calibration state exactly like a brand new
     analysis would.
+
+    `reused_from_alert_id`: set ONLY by the dedup-reuse call site (corrective-
+    v4 Task 12) to the prior alert's id -- an explicit flag, not inferred
+    from entry dict shape. When set, the gate audit trail (CompanyDecision
+    Record + EvidenceRecord rows) is COPIED from that prior alert via
+    _copy_gate_audit_trail instead of being synthesized fresh from `entries`
+    (see that function's docstring for why: the gate walk ran once, not
+    twice).
     """
     # The tool schema constrains `category` to CATEGORIES, but that's a
     # request-time hint, not a guarantee -- defend against a provider that
@@ -690,52 +762,63 @@ def _persist_alert(
     session.add(alert)
     session.flush()
 
-    # V4 strict publication gate (spec §5/§35): every gate-evaluated entry
-    # leaves a durable decision record -- accepted or not -- and excluded
-    # entries never become AlertCompany rows. Legacy entries (no gate
-    # fields) skip both branches untouched.
-    gated_entries = [e for e in entries if "gate_state" in e]
-    if gated_entries:
-        from app.analysis.impact_graph.evidence import persist_evidence
-        from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
-        from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
-        from app.models import CompanyDecisionRecord
+    if reused_from_alert_id is not None:
+        # Dedup-reuse (Task 12 review round 2): copy the REAL prior gate
+        # run's audit trail instead of synthesizing a fresh one below --
+        # reused entries already carry gate_state/display_tier etc. for
+        # _build_alert_company further down, but must never fabricate a
+        # new CompanyDecisionRecord for a gate walk that didn't happen
+        # against this alert. `entries` needs no excluded-tier filtering
+        # here: the prior alert's AlertCompany rows (the source of these
+        # entries) already exclude "excluded" tier by construction.
+        _copy_gate_audit_trail(session, reused_from_alert_id, alert.id)
+    else:
+        # V4 strict publication gate (spec §5/§35): every gate-evaluated
+        # entry leaves a durable decision record -- accepted or not -- and
+        # excluded entries never become AlertCompany rows. Legacy entries
+        # (no gate fields) skip both branches untouched.
+        gated_entries = [e for e in entries if "gate_state" in e]
+        if gated_entries:
+            from app.analysis.impact_graph.evidence import persist_evidence
+            from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+            from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+            from app.models import CompanyDecisionRecord
 
-        for entry in gated_entries:
-            company_row = session.get(Company, entry["company_id"])
-            # Turn this candidate's EvidenceRecord payloads (Task 5) into
-            # real rows now that the Alert exists -- classify_evidence
-            # (called earlier, pre-flush) could only hand back plain
-            # dicts, never ids. Stored on the entry too so a kept entry's
-            # ids survive past this loop (candidate_json below is the
-            # decision record's copy).
-            evidence_ids = persist_evidence(
-                session, alert.id, entry["company_id"], entry.get("evidence_payloads") or [])
-            entry["evidence_ids"] = evidence_ids
-            session.add(CompanyDecisionRecord(
-                alert_id=alert.id, company_id=entry["company_id"],
-                ticker=company_row.ticker if company_row else str(entry["company_id"]),
-                final_state=entry["gate_state"], display_tier=entry["display_tier"],
-                rejection_reason=entry.get("rejection_reason"),
-                gates_passed_json=json.dumps(entry.get("gates_passed") or []),
-                evidence_class=entry.get("evidence_class"),
-                materiality_grade=entry.get("materiality_grade"),
-                candidate_json=json.dumps({
-                    "economic_effect": _persist_effect(entry.get("economic_effect")),
-                    "causal_distance": entry.get("causal_distance"),
-                    "materiality": entry.get("materiality"),
-                    "confidence_f": entry.get("confidence_f"),
-                    "mechanism": entry.get("mechanism"),
-                    "rationale": entry.get("rationale"),
-                    # Alert-level finalization note (primary_cap_overflow,
-                    # duplicate_company) -- no column of its own until the
-                    # decision-record schema work, but never dropped.
-                    "decision_notes": entry.get("decision_notes"),
-                    "evidence_ids": evidence_ids,
-                }),
-                analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
-            ))
-        entries = [e for e in entries if e.get("display_tier") != "excluded"]
+            for entry in gated_entries:
+                company_row = session.get(Company, entry["company_id"])
+                # Turn this candidate's EvidenceRecord payloads (Task 5) into
+                # real rows now that the Alert exists -- classify_evidence
+                # (called earlier, pre-flush) could only hand back plain
+                # dicts, never ids. Stored on the entry too so a kept entry's
+                # ids survive past this loop (candidate_json below is the
+                # decision record's copy).
+                evidence_ids = persist_evidence(
+                    session, alert.id, entry["company_id"], entry.get("evidence_payloads") or [])
+                entry["evidence_ids"] = evidence_ids
+                session.add(CompanyDecisionRecord(
+                    alert_id=alert.id, company_id=entry["company_id"],
+                    ticker=company_row.ticker if company_row else str(entry["company_id"]),
+                    final_state=entry["gate_state"], display_tier=entry["display_tier"],
+                    rejection_reason=entry.get("rejection_reason"),
+                    gates_passed_json=json.dumps(entry.get("gates_passed") or []),
+                    evidence_class=entry.get("evidence_class"),
+                    materiality_grade=entry.get("materiality_grade"),
+                    candidate_json=json.dumps({
+                        "economic_effect": _persist_effect(entry.get("economic_effect")),
+                        "causal_distance": entry.get("causal_distance"),
+                        "materiality": entry.get("materiality"),
+                        "confidence_f": entry.get("confidence_f"),
+                        "mechanism": entry.get("mechanism"),
+                        "rationale": entry.get("rationale"),
+                        # Alert-level finalization note (primary_cap_overflow,
+                        # duplicate_company) -- no column of its own until the
+                        # decision-record schema work, but never dropped.
+                        "decision_notes": entry.get("decision_notes"),
+                        "evidence_ids": evidence_ids,
+                    }),
+                    analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+                ))
+            entries = [e for e in entries if e.get("display_tier") != "excluded"]
 
     alert_companies = []
     kept_entries = []
@@ -1420,11 +1503,20 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             # fresh _extract_facts call would have produced -- and without
             # them this alert's refinement would silently fall back to
             # re-reading the raw article, the very cost this removes.
+            # analysis_provider/analysis_quality also carry over (I3c,
+            # review round 2): reuse is transitive -- a THIRD republish of
+            # the same story reuses off THIS alert next, so its own
+            # provenance/quality marks must be honest, not silently NULL'd
+            # out, or _dedup_reuse_policy_allows' analysis_quality ==
+            # "authoritative" check would wrongly refuse the next reuse.
             _persist_alert(
                 session, article, reusable_alert.category, entries,
                 event_type=reusable_alert.event_type, client=claude_client,
                 facts=reusable_alert.facts,
                 event_cause=reusable_alert.event_cause,
+                analysis_provider=reusable_alert.analysis_provider,
+                analysis_quality=reusable_alert.analysis_quality,
+                reused_from_alert_id=reusable_alert.id,
             )
             alerts_created += 1
             continue

@@ -13,6 +13,7 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.analysis.impact_graph.publication_gate import is_gated
 from app.companies.branding import logo_url
 from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
@@ -63,20 +64,29 @@ _SECTOR_LABELS = {
 # always sets that node id to normalize_node_id(mechanism_id), so every key
 # below is normalize_node_id() applied to a MECHANISMS id in
 # app.analysis.impact_graph.knowledge (test_all_42_mechanisms_have_labels
-# pins full coverage). The first eight entries predate the 42-mechanism
-# registry -- top-level trigger-variable node ids observed on production
-# rows, not mechanism ids themselves -- and stay for backward compatibility.
+# pins full coverage). The first entries predate the 42-mechanism registry
+# -- top-level trigger-variable node ids observed on production rows, not
+# mechanism ids themselves -- and stay for backward compatibility (M3,
+# review round 2: the provably-unreachable "repo_rate" entry among them was
+# deleted -- see the inline comment at its old position below).
 # Unknown parent ids (a novel/LLM-authored node, or a dynamic-discovery
 # node with no archetype mechanism behind it) get OTHER_LABEL: raw LLM/
 # engine node ids must never reach the UI verbatim (INV: controlled
-# taxonomy only).
+# taxonomy only). This dict backs ONLY the default (non-sector, non-company)
+# causal_parent_type branch of _strict_sections' _label_for -- "sector" and
+# "company" parents resolve through _SECTOR_LABELS and a "linked to <name>"
+# rule instead (I5, review round 2).
 _TAXONOMY_LABELS = {
     "crude_price": "crude-linked",
     "tyre_input_cost": "tyre input costs",
     "aviation_fuel_cost": "aviation fuel costs",
     "paint_input_cost": "paint input costs",
     "refining_margin": "refining & marketing",
-    "repo_rate": "rate-sensitive",
+    # "repo_rate" deleted (M3, review round 2): normalize_node_id() rewrites
+    # every reachable canonical form of this trigger to "interest_rate_up"
+    # (see normalize.py's repo_rate phrase-merge rule), so the bare string
+    # "repo_rate" can never actually be produced as a causal_parent_id --
+    # provably dead.
     "inr_depreciation": "currency-exposed",
     "road_freight_fuel_cost": "freight fuel costs",
     # -- crude oil family --
@@ -87,13 +97,13 @@ _TAXONOMY_LABELS = {
     "cement_energy_freight": "cement energy & freight costs",
     "auto_fuel_demand": "auto fuel-cost demand drag",
     "two_wheeler_fuel_demand": "two-wheeler fuel-cost demand drag",
-    "ev_relative_advantage": "ev relative advantage",
+    "ev_relative_advantage": "EV relative advantage",
     "vehicle_financier_stress": "vehicle-financier asset stress",
     "crude_inflation_pressure": "crude-led inflation pressure",
     "oil_import_bill_currency": "oil import bill & currency",
     # -- rates family --
     "bank_nim_repricing": "bank margin repricing",
-    "nbfc_financing_cost": "nbfc funding costs",
+    "nbfc_financing_cost": "NBFC funding costs",
     "housing_demand_rate": "housing demand & rates",
     "durable_financing_demand": "durables financing demand",
     "auto_financing_demand": "auto financing demand",
@@ -103,14 +113,14 @@ _TAXONOMY_LABELS = {
     "discretionary_demand_squeeze": "discretionary demand squeeze",
     "rate_expectation_shift": "rate expectation shift",
     # -- currency family --
-    "it_export_realization": "it export realization",
+    "it_export_realization": "IT export realization",
     "pharma_export_realization": "pharma export realization",
     "textile_export_competitiveness": "textile export competitiveness",
     "import_cost_inflation": "import cost inflation",
     "electronic_import_cost": "electronics import costs",
     # -- government spending family --
     "cement_demand_infra": "cement demand from infrastructure",
-    "epc_order_book": "epc order books",
+    "epc_order_book": "EPC order books",
     "steel_demand_infra": "steel demand from infrastructure",
     "capital_good_order": "capital goods orders",
     "infra_logistics_volume": "infrastructure logistics volume",
@@ -122,7 +132,7 @@ _TAXONOMY_LABELS = {
     "defense_procurement_sentiment": "defense procurement sentiment",
     # -- monsoon/rural family --
     "rural_income_agri": "rural agri income",
-    "rural_fmcg_demand": "rural fmcg demand",
+    "rural_fmcg_demand": "rural FMCG demand",
     "rural_two_wheeler_demand": "rural two-wheeler demand",
     "agrochemical_volume": "agrochemical volume",
 }
@@ -174,34 +184,70 @@ def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
         alert_company, row = pair
         return (-(alert_company.materiality or 0.0), row["ticker"])
 
-    sections: dict[tuple[str, str], list] = {}
+    # Company-parent label resolution (I5, review round 2): engine.py sets
+    # causal_parent_id to the PARENT's ticker when causal_parent_type ==
+    # "company" (GraphCompany.parent_id), and that parent is frequently
+    # itself another company IN this same alert (e.g. a distance-2 "linked
+    # to the direct company" row) -- so its display name is usually
+    # resolvable from the alert's own companies, no extra DB query needed.
+    name_by_company_id = {ac.company_id: ac.company.name for ac in alert.companies}
+
+    def _label_for(alert_company) -> str:
+        parent_type = alert_company.causal_parent_type
+        parent_id = alert_company.causal_parent_id or "event"
+        if parent_type == "sector":
+            return _SECTOR_LABELS.get(parent_id, OTHER_LABEL)
+        if parent_type == "company":
+            parent_name = name_by_company_id.get(alert_company.parent_company_id)
+            return f"linked to {parent_name or parent_id}"
+        return _TAXONOMY_LABELS.get(parent_id, OTHER_LABEL)
+
+    # Pass 1: group by (effect, EXACT parent) -- same grain as before, now
+    # keyed on parent_type too so a "company" ticker string can never
+    # collide with a "sector"/economic-node id that happens to share text.
+    sections: dict[tuple[str, str, str], list] = {}
     secondary: list = []
     for alert_company, row in gated:
         if alert_company.display_tier in DEEP_DIVE_TIERS:
             secondary.append((alert_company, row))
         else:
-            key = (_effect(alert_company), alert_company.causal_parent_id or "event")
+            key = (
+                _effect(alert_company),
+                alert_company.causal_parent_type or "",
+                alert_company.causal_parent_id or "event",
+            )
             sections.setdefault(key, []).append((alert_company, row))
+
+    # Pass 2: merge sections whose resolved (effect, label) collide (I5) --
+    # two DIFFERENT unknown/novel parents both falling back to OTHER_LABEL
+    # (the common case) must render as ONE section, not duplicate-titled
+    # ones. A "sector"/"company" collision with a taxonomy label is
+    # possible too (rare) and gets the same treatment: union the rows,
+    # order by materiality.
+    merged: dict[tuple[str, str], list] = {}
+    for (effect, _parent_type, _parent_id), members in sections.items():
+        label = _label_for(members[0][0])
+        merged.setdefault((effect, label), []).extend(members)
 
     layers = []
     ordered = sorted(
-        sections.items(),
+        merged.items(),
         key=lambda kv: -max((ac.materiality or 0.0) for ac, _ in kv[1]),
     )
-    for (effect, parent_id), members in ordered:
+    for (effect, label), members in ordered:
         members = sorted(members, key=_row_sort_key)
-        label = _TAXONOMY_LABELS.get(parent_id, OTHER_LABEL)
         # The "why this layer" note is only honest when every member
-        # actually shares it: members already share causal_parent_id (the
-        # grouping key above), so the remaining check is the mechanism
-        # string itself -- a heterogeneous section (same taxonomy parent,
-        # different specific mechanisms) gets no single-company note
+        # actually shares it (I6: a single member, or several members with
+        # an IDENTICAL mechanism string, keep it as the note) -- computed
+        # on the FINAL, post-merge member list, so a merged section (two
+        # distinct unknown parents, necessarily different mechanisms) gets
+        # no single-company note, same as any other heterogeneous section
         # (corrective-v4 Task 12).
         mechanisms = {alert_company.mechanism for alert_company, _ in members}
         note = members[0][0].mechanism if len(mechanisms) == 1 else None
         layers.append({
             "title": f"{_EFFECT_PREFIX.get(effect, 'Mixed')} — {label}",
-            "relationship": f"MECH:{parent_id}",
+            "relationship": f"MECH:{label}",
             "icon": _EFFECT_ICON.get(effect, "side"),
             "note": note,
             "rows": [row for _, row in members],
@@ -368,18 +414,20 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             impact_level=alert_company.impact_level,
         ))
 
-    # V4 structural gate (owner-locked invariant, corrective-v4 Task 12):
-    # ANY AlertCompany.gate_state != NULL makes the legacy 3-tier generator
-    # STRUCTURALLY unreachable for this alert -- not merely "we prefer not
-    # to call it". This deliberately does NOT read
-    # settings.impact_engine_v4_strict: the flag controls whether NEW
-    # alerts get gated at analysis time, but once gate_state is persisted
-    # on a row, flipping the flag back off must never resurrect the legacy
+    # V4 structural gate (owner-locked invariant, corrective-v4 Task 12,
+    # review round 2 / I1): ANY AlertCompany.gate_state OR display_tier !=
+    # NULL makes the legacy 3-tier generator STRUCTURALLY unreachable for
+    # this alert -- not merely "we prefer not to call it" (see
+    # app.analysis.impact_graph.publication_gate.is_gated's docstring for
+    # why it's an OR, not gate_state alone). This deliberately does NOT
+    # read settings.impact_engine_v4_strict: the flag controls whether NEW
+    # alerts get gated at analysis time, but once gate data is persisted on
+    # a row, flipping the flag back off must never resurrect the legacy
     # renderer for it. _strict_sections returning None (no company cleared
     # DISPLAYABLE_TIERS) still returns [] here, never a fall-through.
-    # The 3-tier path below runs ONLY when every gate_state is NULL, and
-    # stays byte-identical for those alerts (existing tests pin it).
-    if any(alert_company.gate_state is not None for alert_company in alert.companies):
+    # The 3-tier path below runs ONLY when the alert is not gated at all,
+    # and stays byte-identical for those alerts (existing tests pin it).
+    if is_gated(alert.companies):
         return _strict_sections(alert, rows_flat) or []
 
     def _sorted(rows: list[dict]) -> list[dict]:
