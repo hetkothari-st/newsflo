@@ -24,7 +24,7 @@ import { displaySector } from '../v3/directoryFilters';
 import { providerImport } from './portfolioApi';
 import { formatMarketCap } from './directoryLiveCaps';
 import { useDirectoryLiveCaps } from './useDirectoryLiveCaps';
-import { useAuth } from '../lib/auth';
+import { isAuthError, useAuth } from '../lib/auth';
 
 function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
@@ -41,7 +41,7 @@ const TAB_LABELS: Record<DiscoveryTab, string> = {
 };
 
 export function DiscoverV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string, alertId?: number) => void }) {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [tab, setTab] = useState<DiscoveryTab>('materiality');
   const [entries, setEntries] = useState<DiscoveryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +55,9 @@ export function DiscoverV4({ onOpenDeepDive }: { onOpenDeepDive: (ticker: string
         if (!cancelled) setEntries(result);
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+        if (cancelled) return;
+        if (isAuthError(err.message)) logout();
+        else setError(err.message);
       });
     return () => {
       cancelled = true;
@@ -415,7 +417,7 @@ export function PortfolioV4({
   onOpenDeepDive: (ticker: string, alertId?: number) => void;
   onSignIn: () => void;
 }) {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [overlay, setOverlay] = useState<Awaited<ReturnType<typeof getPortfolioOverlay>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bumped on any holdings mutation (manual edit, CSV/Kite import) --
@@ -451,7 +453,11 @@ export function PortfolioV4({
         if (!cancelled) setOverlay(result);
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+        if (cancelled) return;
+        // Stale session: sign out so the SignInGate renders, instead of
+        // showing the raw API error under a still-signed-in chip.
+        if (isAuthError(err.message)) logout();
+        else setError(err.message);
       });
     return () => {
       cancelled = true;
@@ -542,7 +548,7 @@ const OUTCOME_LABELS: Record<CarReviewRow['outcome_label'], string> = {
 };
 
 export function ReviewV4({ onSignIn }: { onSignIn: () => void }) {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [rows, setRows] = useState<CarReviewRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -567,7 +573,9 @@ export function ReviewV4({ onSignIn }: { onSignIn: () => void }) {
         if (!cancelled) setRows(result);
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+        if (cancelled) return;
+        if (isAuthError(err.message)) logout();
+        else setError(err.message);
       });
     return () => {
       cancelled = true;

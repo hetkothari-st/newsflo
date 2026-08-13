@@ -73,3 +73,11 @@ export function useAuth(): AuthContextValue {
   }
   return ctx;
 }
+
+/* A 401 from an authed endpoint means the stored token is stale (24h
+   expiry server-side) -- the session is over, not the feature broken.
+   Callers should logout() on this instead of rendering the raw API
+   error next to a still-signed-in account chip. */
+export function isAuthError(message: string): boolean {
+  return /invalid or expired token|not authenticated/i.test(message);
+}
