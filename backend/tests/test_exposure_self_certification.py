@@ -12,7 +12,7 @@ regardless of cache history; a cached row is a PRIOR (candidacy + prompt
 hint only), never itself evidence, unless it carries real independent
 provenance (SUPPLY_LINK/MANUAL/CURATED); and a prior expires (review_after)
 so acceptance cannot compound indefinitely."""
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 
@@ -176,6 +176,157 @@ def test_legacy_null_provenance_is_not_permanently_authoritative(db_session, str
     assert evidence_tier == "D"
     assert payloads == []
     assert evidence_class != "VERIFIED_RELATIONSHIP"
+
+
+# --- the provenanced-row Tier-C escape itself (review finding) -----------
+# The tests above pin that MODEL_VERIFIED / NULL provenance can NEVER reach
+# Tier C. These pin the one branch that CAN: a CompanyNodeExposure row
+# whose provenance_type names an independently-sourced relationship
+# (SUPPLY_LINK/MANUAL/CURATED) -- evidence.py:124-137. Every existing
+# Tier-C test in this codebase exercises the separate SupplyLink-TABLE
+# branch (a JOIN against app.models.SupplyLink); none of them touch this
+# CompanyNodeExposure-column branch at all.
+
+def test_provenanced_exposure_row_yields_real_tier_c_payload(db_session, strict_mode):
+    """A fresh SUPPLY_LINK-provenanced CompanyNodeExposure row (in review_
+    after, not yet expired) is the ONE thing that can carry a company-node
+    exposure to Tier C. The payload must cite the row's own fields
+    verbatim -- nothing fabricated (INV: no invented citation, same
+    discipline as SupplyLink evidence)."""
+    from app.analysis.impact_graph.evidence import classify_evidence
+
+    row = _company(db_session)
+    cached = CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="CRISIL rating rationale: upstream crude realization",
+        provenance_type="SUPPLY_LINK",
+        source_url="https://crisil.example/ongc-rationale",
+        source_date=date(2026, 6, 1),
+        verified_at=utcnow(), review_after=utcnow() + timedelta(days=90))
+    db_session.add(cached)
+    db_session.commit()
+
+    company = _graph_company()
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+
+    assert evidence_class == "VERIFIED_RELATIONSHIP"
+    assert evidence_tier == "C"
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["source_url"] == cached.source_url
+    assert payload["source_date"] == cached.source_date
+    assert payload["fact_text"] == cached.mechanism
+    assert payload["source_name"] == "SUPPLY_LINK"
+    assert payload["supports_claim"] is True
+
+
+def test_stale_provenanced_row_does_not_yield_tier_c(db_session, strict_mode):
+    """The SAME provenanced row, but past its own review_after: staleness
+    (spec §8, unified via exposure_row_is_fresh) gates entry into the
+    whole exposure branch, provenanced or not -- a stale row is not usable
+    evidence at all, so classify_evidence falls through exactly as if
+    there were no row (it does NOT downgrade to the MODEL_VERIFIED_PRIOR/D
+    label, which would misrepresent an expired independently-sourced row
+    as the model's own weaker prior)."""
+    from app.analysis.impact_graph.evidence import classify_evidence
+    from app.analysis.impact_graph.exposure import exposure_row_is_fresh
+
+    row = _company(db_session)
+    cached = CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="CRISIL rating rationale: upstream crude realization",
+        provenance_type="SUPPLY_LINK",
+        source_url="https://crisil.example/ongc-rationale",
+        source_date=date(2026, 6, 1),
+        verified_at=utcnow() - timedelta(days=100),
+        review_after=utcnow() - timedelta(days=1))
+    db_session.add(cached)
+    db_session.commit()
+
+    assert exposure_row_is_fresh(cached, row) is False
+
+    company = _graph_company()
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+
+    assert evidence_class != "VERIFIED_RELATIONSHIP"
+    assert evidence_tier != "C"
+    assert evidence_class != "MODEL_VERIFIED_PRIOR"  # falls through, not downgraded
+    assert payloads == []
+
+
+@pytest.mark.parametrize("provenance_type", ["MANUAL", "CURATED"])
+def test_other_provenanced_types_also_yield_tier_c(db_session, strict_mode, provenance_type):
+    """The escape is not SUPPLY_LINK-specific -- any independently-sourced
+    provenance value (MANUAL, CURATED) earns the same Tier C."""
+    from app.analysis.impact_graph.evidence import classify_evidence
+
+    row = _company(db_session)
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="analyst-confirmed exposure",
+        provenance_type=provenance_type, source_url="https://example.com/source",
+        source_date=date(2026, 6, 1), verified_at=utcnow(),
+        review_after=utcnow() + timedelta(days=90)))
+    db_session.commit()
+
+    company = _graph_company()
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+
+    assert evidence_class == "VERIFIED_RELATIONSHIP"
+    assert evidence_tier == "C"
+    assert payloads[0]["source_name"] == provenance_type
+
+
+def test_provenanced_exposure_row_reaches_gate_as_primary_at_d2(db_session, strict_mode):
+    """End-to-end: the escape must not just classify as Tier C in
+    isolation -- it must actually reach the publication gate and unlock
+    primary at causal distance 2 (RELATIONSHIP_TIERS + HIGH materiality,
+    publication_gate._primary_authorized), the same authority a SupplyLink-
+    table row has. This is the CompanyNodeExposure-column escape, not the
+    separate SupplyLink-table join classify_evidence also supports."""
+    from app.analysis.impact_graph.schemas import GraphEdge, ImpactGraphResult
+    from app.pipeline import _v3_entries
+
+    parent = _company(db_session, ticker="PARENT.NS", name="Parent Co", sector="auto")
+    supplier = _company(db_session, ticker="SUPPLIER.NS", name="Supplier Co",
+                        sector="auto_components")
+    # node_key = the parent ticker: the same row both (a) satisfies
+    # BUSINESS_MODEL_VALID for the supplier candidate (exposure_row_is_fresh
+    # via app.pipeline._company_profile_supports_mechanism) and (b) is what
+    # classify_evidence reads back as Tier C evidence -- one real row, two
+    # honest readers.
+    db_session.add(CompanyNodeExposure(
+        company_id=supplier.id, node_key="PARENT.NS", exposure_exists=1,
+        strength=0.8, mechanism="rating-agency confirmed tier-1 supplier exposure",
+        provenance_type="SUPPLY_LINK", source_url="https://crisil.example/rationale",
+        source_date=date(2026, 6, 1), verified_at=utcnow(),
+        review_after=utcnow() + timedelta(days=90)))
+    db_session.commit()
+
+    d2 = _graph_company(
+        ticker="SUPPLIER.NS", name="Supplier Co", causal_distance=2, materiality=0.8,
+        parent_type="company", parent_id="PARENT.NS",
+        mechanism="volume cut at Parent reduces component offtake",
+        rationale="tier-1 supplier to the affected OEM",
+    )
+    edges = [GraphEdge(
+        parent_type="event", parent_id="demand_shock", child_type="company",
+        child_id="PARENT.NS", direction="bearish", economic_effect="negative",
+        mechanism="demand shock hits Parent's volumes", causal_distance=1,
+        impact_strength=0.8, confidence=0.9, materiality=0.7,
+        time_horizon="Short-Term",
+    )]
+    result = ImpactGraphResult(
+        category="auto", event_type="demand_shock", facts="parent demand shock",
+        event_label="parent demand shock", named_entities=[],
+        companies=[d2], edges=edges, gaps=[], ranking=[],
+        analysis_provider="gemini", analysis_quality="authoritative", metrics={},
+    )
+    entries = _v3_entries(db_session, result)
+
+    assert entries[0]["evidence_class"] == "VERIFIED_RELATIONSHIP"
+    assert entries[0]["display_tier"] == "primary"
+    assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
 
 
 # --- prompt annotation must not overclaim -----------------------------
