@@ -1,0 +1,143 @@
+{
+  "id": "ev_substitution",
+  "article": {
+    "title": "Cabinet clears a demand incentive of Rs 10,000 per kWh for electric two-wheelers, caps it at 15% of ex-factory price",
+    "text": "The Cabinet approved a two-year demand incentive of ten thousand rupees per kilowatt hour for electric two-wheelers, capped at fifteen per cent of the ex-factory price and restricted to models meeting a fifty per cent domestic value addition threshold. The scheme replaces a lapsed programme under which the effective subsidy had fallen to about half this level. Ola Electric and TVS Motor Company both sell qualifying models today. Bajaj Auto, whose volumes are overwhelmingly internal combustion and whose electric portfolio is one model, is affected in the opposite direction only to the extent that the incentive shifts share within the commuter segment. The size of that shift is not estimated anywhere in the notification.",
+    "note": "Substitution stories invite an 'ICE loser' claim that is a relative, unquantified statement. Relative disadvantage without a magnitude is uncertain -- displayable as a deep dive, never as a lead."
+  },
+  "universe": [
+    {
+      "ticker": "OLAELEC.NS",
+      "name": "Ola Electric Mobility",
+      "sector": "auto",
+      "sub_sector": "electric_two_wheelers",
+      "index_tier": "NIFTY500",
+      "market_cap": 380000000000.0,
+      "business_desc": "Electric two-wheeler manufacturer selling scooters built on an in-house platform with domestic cell assembly."
+    },
+    {
+      "ticker": "TVSMOTOR.NS",
+      "name": "TVS Motor Company",
+      "sector": "auto",
+      "sub_sector": "two_wheelers",
+      "index_tier": "NIFTY100",
+      "market_cap": 1200000000000.0,
+      "business_desc": "Two-wheeler manufacturer with a scooter and motorcycle range alongside a growing qualifying electric scooter portfolio."
+    },
+    {
+      "ticker": "BAJAJ-AUTO.NS",
+      "name": "Bajaj Auto",
+      "sector": "auto",
+      "sub_sector": "two_wheelers",
+      "index_tier": "NIFTY50",
+      "market_cap": 2600000000000.0,
+      "business_desc": "Two-wheeler and three-wheeler manufacturer with a predominantly internal-combustion commuter portfolio and a single electric scooter model."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Cabinet approves a Rs 10,000 per kWh demand incentive for electric two-wheelers",
+      "event_status": "confirmed",
+      "facts": "The Cabinet approved a two-year demand incentive of ten thousand rupees per kilowatt hour for electric two-wheelers, capped at fifteen per cent of ex-factory price and requiring fifty per cent domestic value addition. It replaces a lapsed programme whose effective subsidy had fallen to about half this level. Ola Electric and TVS Motor sell qualifying models. The notification does not estimate any share shift within the commuter segment.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Two-year incentive of Rs 10,000 per kWh for electric two-wheelers, capped at fifteen per cent of ex-factory price."},
+        {"fact_id": "F2", "text": "Requires fifty per cent domestic value addition; replaces a lapsed programme at about half the effective level."},
+        {"fact_id": "F3", "text": "No estimate of any share shift within the commuter segment is given in the notification."}
+      ],
+      "quantities": ["ten thousand rupees per kilowatt hour", "fifteen per cent", "fifty per cent"],
+      "named_entities": ["Ola Electric Mobility", "TVS Motor Company", "Bajaj Auto"],
+      "category": "auto",
+      "event_type": "government_policy",
+      "event_cause": "policy_decision"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "ev_relative_advantage",
+          "label": "EV relative advantage",
+          "direction": "neutral",
+          "mechanism": "A demand incentive lowers the effective retail price of qualifying electric models against unchanged internal-combustion prices, improving the relative total cost of ownership without changing anyone's absolute cost base",
+          "confidence": 0.88,
+          "materiality": 0.75,
+          "impact_strength": 0.72,
+          "time_horizon": "Medium-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "OLAELEC.NS",
+          "name": "Ola Electric Mobility",
+          "parent_id": "ev_relative_advantage",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.75,
+          "confidence": 0.85,
+          "materiality": 0.78,
+          "time_horizon": "Medium-Term",
+          "mechanism": "The entire portfolio qualifies and the incentive roughly doubles the effective per-vehicle subsidy against the lapsed scheme, cutting the on-road price of a pure-play maker's only product line",
+          "rationale": "Pure-play electric two-wheeler maker whose full range meets the value-addition threshold",
+          "positive_channels": ["effective retail price reduction on qualifying models"]
+        },
+        {
+          "ticker": "TVSMOTOR.NS",
+          "name": "TVS Motor Company",
+          "parent_id": "ev_relative_advantage",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.55,
+          "confidence": 0.8,
+          "materiality": 0.66,
+          "time_horizon": "Medium-Term",
+          "mechanism": "The qualifying electric scooter range gets the same effective price cut while the internal-combustion range is unaffected, so the incentive lands on the growing part of the mix",
+          "rationale": "Sells qualifying models today alongside an unaffected combustion range",
+          "positive_channels": ["effective retail price reduction on the qualifying range"]
+        },
+        {
+          "ticker": "BAJAJ-AUTO.NS",
+          "name": "Bajaj Auto",
+          "parent_id": "ev_relative_advantage",
+          "direction": "neutral",
+          "net_direction": "uncertain",
+          "economic_effect": "uncertain",
+          "impact_strength": 0.45,
+          "confidence": 0.65,
+          "materiality": 0.55,
+          "time_horizon": "Medium-Term",
+          "mechanism": "A relative price shift toward qualifying electric models could move share within the commuter segment, but the notification estimates no shift and the combustion portfolio's own economics are unchanged",
+          "rationale": "Relative disadvantage of unstated magnitude with no change to its own cost or price",
+          "relative_beneficiary": false,
+          "negative_channels": ["possible commuter-segment share shift"],
+          "offsetting_channels": ["no change to the combustion portfolio's own cost or pricing"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["OLAELEC.NS", "TVSMOTOR.NS", "BAJAJ-AUTO.NS"],
+      "reject": [],
+      "counterfactual": {
+        "OLAELEC.NS": "SUPPORTED",
+        "TVSMOTOR.NS": "SUPPORTED",
+        "BAJAJ-AUTO.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "OLAELEC.NS": "positive",
+      "TVSMOTOR.NS": "positive"
+    },
+    "allow_secondary": ["BAJAJ-AUTO.NS"],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "positive", "label_contains": "ev relative advantage"}
+    ],
+    "expected_causal_distance": {"OLAELEC.NS": 1, "TVSMOTOR.NS": 1},
+    "expect_abstention": false,
+    "rationale": "The two makers whose products actually qualify get a measurable price cut -- primary. The combustion incumbent's exposure is a RELATIVE claim of unstated size: uncertain is the honest verdict, and an uncertain verdict can inform a deep dive but must never lead the feed (INV-012). Publishing it as a confident negative would be inventing a magnitude the notification does not contain."
+  }
+}

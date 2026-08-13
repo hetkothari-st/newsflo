@@ -1,0 +1,101 @@
+{
+  "id": "consumer_ripple_verifier_outage",
+  "article": {
+    "title": "Rural wage growth turns positive in real terms for the first time in seven quarters",
+    "text": "Real rural wage growth turned positive for the first time in seven quarters according to the latest labour bureau series, with agricultural wages rising ahead of rural consumer price inflation in eleven of the sixteen major states. Staples makers have been calling for a rural volume recovery for four consecutive quarters without it arriving, and channel checks this month showed a mid single digit pickup in wholesale offtake in the northern and central belts. Hindustan Unilever and Dabur India both derive a substantially larger share of revenue from rural India than the listed staples average. Neither company has revised guidance, and the pickup remains one month of channel data.",
+    "note": "Verifier-outage fixture: the analysis itself is fine, the independent check never ran. Fail closed -- an unverified claim is not a quiet claim, it is no claim."
+  },
+  "universe": [
+    {
+      "ticker": "HINDUNILVR.NS",
+      "name": "Hindustan Unilever",
+      "sector": "fmcg",
+      "sub_sector": "home_personal_care",
+      "index_tier": "NIFTY50",
+      "market_cap": 5800000000000.0,
+      "business_desc": "India's largest fast-moving consumer goods company across home care, beauty and foods, with roughly a third of revenue from rural markets."
+    },
+    {
+      "ticker": "DABUR.NS",
+      "name": "Dabur India",
+      "sector": "fmcg",
+      "sub_sector": "ayurvedic_foods",
+      "index_tier": "NIFTY100",
+      "market_cap": 950000000000.0,
+      "business_desc": "Ayurvedic healthcare and foods company with an above-average rural revenue share and a wide village-level distribution footprint."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Real rural wage growth turns positive after seven quarters",
+      "event_status": "confirmed",
+      "facts": "Real rural wage growth turned positive for the first time in seven quarters, with agricultural wages rising ahead of rural CPI in eleven of sixteen major states. Channel checks showed a mid single digit pickup in wholesale offtake in the northern and central belts. No staples maker has revised guidance and the pickup is one month of channel data.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Real rural wage growth positive for the first time in seven quarters."},
+        {"fact_id": "F2", "text": "Agricultural wages ahead of rural CPI in eleven of sixteen major states."},
+        {"fact_id": "F3", "text": "Mid single digit pickup in wholesale offtake in northern and central belts; no guidance revision."}
+      ],
+      "quantities": ["seven quarters", "eleven of the sixteen major states"],
+      "named_entities": ["Hindustan Unilever", "Dabur India"],
+      "category": "fmcg",
+      "event_type": "macro_data",
+      "event_cause": "demand_shift"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "rural_fmcg_demand",
+          "label": "Rural FMCG demand",
+          "direction": "bullish",
+          "mechanism": "Positive real rural wage growth lifts discretionary headroom in the village basket, which reaches staples volumes before it reaches any other consumption category",
+          "confidence": 0.78,
+          "materiality": 0.65,
+          "impact_strength": 0.6,
+          "time_horizon": "Medium-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@rural_fmcg_demand": {
+      "companies": [
+        {
+          "ticker": "HINDUNILVR.NS",
+          "name": "Hindustan Unilever",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.6,
+          "confidence": 0.8,
+          "materiality": 0.68,
+          "time_horizon": "Medium-Term",
+          "mechanism": "About a third of revenue comes from rural markets, so a real wage recovery feeds volume growth in the mass home-care and foods portfolio before pricing does",
+          "rationale": "Highest absolute rural revenue base among listed staples makers",
+          "positive_channels": ["rural volume recovery"]
+        },
+        {
+          "ticker": "DABUR.NS",
+          "name": "Dabur India",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.62,
+          "confidence": 0.78,
+          "materiality": 0.7,
+          "time_horizon": "Medium-Term",
+          "mechanism": "An above-average rural revenue share and village-level distribution mean the wage recovery converts into offtake faster than for urban-skewed peers",
+          "rationale": "Rural revenue share materially above the listed staples average",
+          "positive_channels": ["rural volume recovery"]
+        }
+      ]
+    },
+    "verify_companies": {"__raise__": "verifier stage unavailable (simulated router outage)"}
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": [],
+    "expected_rejected": ["HINDUNILVR.NS", "DABUR.NS"],
+    "expected_sections": [],
+    "expect_abstention": true,
+    "rationale": "ABSTENTION FIXTURE, and the most dangerous shape in the system: the analysis is good, the companies are right, and the independent verifier never ran. The gate must fail CLOSED (REJECT_VALIDATOR_UNAVAILABLE) rather than treat 'unverified because the checker was down' as ordinary output. This is the fail-open regression that INV-005/016 exist to prevent."
+  }
+}

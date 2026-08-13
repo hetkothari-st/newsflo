@@ -1,0 +1,125 @@
+{
+  "id": "cement_energy_freight",
+  "article": {
+    "title": "Pet coke lands 14% dearer as cement makers head into the pre-monsoon season",
+    "text": "Imported pet coke landed costs are running about fourteen per cent above the previous quarter's average, and diesel-linked road freight, which carries roughly a third of Indian cement volumes on the outbound leg, has risen with the institutional fuel revision. Power and fuel together with freight are close to half of the delivered cost of a bag of cement, and the industry enters the pre-monsoon quarter with realisations already soft in the eastern and central markets. UltraTech Cement, which has the widest grinding footprint and the most captive power, and Ambuja Cements, which relies more on purchased power in its eastern clusters, face the same input move with different absorption capacity. Dalmia Bharat did not comment.",
+    "note": "Two subjects with genuinely different absorption capacity: the correct output is two primary rows with the same direction but different materiality, plus a silent peer that is not published."
+  },
+  "universe": [
+    {
+      "ticker": "ULTRACEMCO.NS",
+      "name": "UltraTech Cement",
+      "sector": "infra",
+      "sub_sector": "cement",
+      "index_tier": "NIFTY50",
+      "market_cap": 3100000000000.0,
+      "business_desc": "India's largest cement manufacturer with the widest grinding and blending footprint and substantial captive power capacity."
+    },
+    {
+      "ticker": "AMBUJACEM.NS",
+      "name": "Ambuja Cements",
+      "sector": "infra",
+      "sub_sector": "cement",
+      "index_tier": "NIFTY100",
+      "market_cap": 1400000000000.0,
+      "business_desc": "Cement manufacturer with eastern and northern clusters relying more heavily on purchased grid power and imported pet coke."
+    },
+    {
+      "ticker": "DALBHARAT.NS",
+      "name": "Dalmia Bharat",
+      "sector": "infra",
+      "sub_sector": "cement",
+      "index_tier": "NIFTY500",
+      "market_cap": 340000000000.0,
+      "business_desc": "Cement manufacturer concentrated in the eastern and southern markets with a growing blended-cement mix."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Pet coke landed cost up 14% and diesel freight rises ahead of the pre-monsoon cement season",
+      "event_status": "confirmed",
+      "facts": "Imported pet coke landed costs are about fourteen per cent above the previous quarter's average and diesel-linked road freight has risen with the institutional fuel revision. Roughly a third of Indian cement volumes move by road on the outbound leg. Power, fuel and freight are close to half the delivered cost of a bag of cement, and realisations are already soft in the eastern and central markets.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Imported pet coke landed cost about fourteen per cent above the previous quarter's average."},
+        {"fact_id": "F2", "text": "Diesel-linked road freight has risen; about a third of cement volumes move by road outbound."},
+        {"fact_id": "F3", "text": "Power, fuel and freight are close to half the delivered cost of a bag of cement."},
+        {"fact_id": "F4", "text": "Realisations are already soft in the eastern and central markets."}
+      ],
+      "quantities": ["fourteen per cent", "a third", "half"],
+      "named_entities": ["UltraTech Cement", "Ambuja Cements", "Dalmia Bharat"],
+      "category": "infra",
+      "event_type": "commodity_price",
+      "event_cause": "input_cost_change"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "cement_energy_freight",
+          "label": "Cement energy and freight cost",
+          "direction": "bearish",
+          "mechanism": "Pet coke and diesel-linked outbound freight together approach half the delivered cost of cement, so a simultaneous rise in both compresses EBITDA per tonne while realisations are soft",
+          "confidence": 0.9,
+          "materiality": 0.8,
+          "impact_strength": 0.78,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@cement_energy_freight": {
+      "companies": [
+        {
+          "ticker": "AMBUJACEM.NS",
+          "name": "Ambuja Cements",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.72,
+          "confidence": 0.85,
+          "materiality": 0.76,
+          "time_horizon": "Short-Term",
+          "mechanism": "Eastern and northern clusters lean on purchased grid power and imported pet coke, so a fourteen per cent landed-cost rise passes almost undiluted into cost per tonne",
+          "rationale": "Higher purchased-power and imported pet coke share than the market leader",
+          "negative_channels": ["pet coke landed cost", "diesel-linked outbound freight"]
+        },
+        {
+          "ticker": "ULTRACEMCO.NS",
+          "name": "UltraTech Cement",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.85,
+          "materiality": 0.66,
+          "time_horizon": "Short-Term",
+          "mechanism": "Captive power and the widest blending footprint dilute the pet coke step-up per tonne, but diesel-linked outbound freight still lifts delivered cost across the network",
+          "rationale": "Largest producer with captive power partially insulating the energy line",
+          "negative_channels": ["pet coke landed cost", "diesel-linked outbound freight"],
+          "offsetting_channels": ["captive power reduces purchased energy exposure"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["AMBUJACEM.NS", "ULTRACEMCO.NS"],
+      "reject": [],
+      "counterfactual": {
+        "AMBUJACEM.NS": "SUPPORTED",
+        "ULTRACEMCO.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "AMBUJACEM.NS": "negative",
+      "ULTRACEMCO.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": ["DALBHARAT.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "cement energy"}
+    ],
+    "expected_causal_distance": {"AMBUJACEM.NS": 1, "ULTRACEMCO.NS": 1},
+    "expect_abstention": false,
+    "rationale": "Both named producers are subjects at distance 1 with a cost-share mechanism specific to their own energy mix. The third producer is named only as declining to comment and is never proposed by the mapping stage at all -- correct behaviour is that it simply does not appear, not that it is inferred in by sector membership."
+  }
+}

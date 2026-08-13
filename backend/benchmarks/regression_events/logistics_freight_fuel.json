@@ -1,0 +1,141 @@
+{
+  "id": "logistics_freight_fuel",
+  "article": {
+    "title": "Bulk diesel prices raised 9%, hitting fleet operators outside the retail freeze",
+    "text": "Oil marketing companies raised bulk diesel prices by nine per cent for institutional buyers, a category that covers fleet operators, railways and large industrial users and that sits entirely outside the retail price freeze at the pump. Diesel is the dominant variable cost in road freight and contract rates in the surface express business are typically renegotiated quarterly, so an increase of this size sits with the operator for at least one full cycle before it reaches the customer. Container Corporation of India, whose first-mile and last-mile road legs use bulk diesel, and Blue Dart Express, which runs an owned surface and air fleet, are both directly exposed. The Blue Dart counter tanked on the news.",
+    "note": "Uses the Indian-vernacular paraphrase 'the counter tanked' -- the Task-20 bypass. A rationale echoing it must be classified as market observation just like 'shares fell 3%'."
+  },
+  "universe": [
+    {
+      "ticker": "CONCOR.NS",
+      "name": "Container Corporation of India",
+      "sector": "railways_transport",
+      "sub_sector": "logistics",
+      "index_tier": "NIFTY100",
+      "market_cap": 480000000000.0,
+      "business_desc": "Rail-led multimodal container logistics operator whose first-mile and last-mile road legs consume bulk diesel."
+    },
+    {
+      "ticker": "BLUEDART.NS",
+      "name": "Blue Dart Express",
+      "sector": "railways_transport",
+      "sub_sector": "logistics",
+      "index_tier": "NIFTY500",
+      "market_cap": 160000000000.0,
+      "business_desc": "Express logistics operator running an owned surface fleet and dedicated freighter aircraft across India."
+    },
+    {
+      "ticker": "VRLLOG.NS",
+      "name": "VRL Logistics",
+      "sector": "railways_transport",
+      "sub_sector": "logistics",
+      "index_tier": "OTHER",
+      "market_cap": 45000000000.0,
+      "business_desc": "Less-than-truckload surface transport operator running a large owned fleet on bulk diesel across a hub-and-spoke network."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Bulk diesel prices raised 9% for institutional buyers",
+      "event_status": "confirmed",
+      "facts": "Oil marketing companies raised bulk diesel prices by nine per cent for institutional buyers including fleet operators, railways and large industrial users. Bulk diesel sits outside the retail pump price freeze. Diesel is the dominant variable cost in road freight and surface express contract rates are renegotiated quarterly, so the increase sits with the operator for at least one cycle.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Bulk diesel prices raised nine per cent for institutional buyers."},
+        {"fact_id": "F2", "text": "Bulk diesel is outside the retail pump-price freeze."},
+        {"fact_id": "F3", "text": "Surface express contract rates reprice quarterly, so pass-through lags at least one cycle."}
+      ],
+      "quantities": ["nine per cent"],
+      "named_entities": ["Container Corporation of India", "Blue Dart Express", "VRL Logistics"],
+      "category": "railways_transport",
+      "event_type": "pricing_action",
+      "event_cause": "input_cost_change"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "road_freight_fuel_cost",
+          "label": "Road freight fuel cost",
+          "direction": "bearish",
+          "mechanism": "Bulk diesel is the dominant variable cost of road freight and quarterly contract repricing means an institutional price rise is absorbed by the operator for a full cycle",
+          "confidence": 0.9,
+          "materiality": 0.78,
+          "impact_strength": 0.75,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "VRLLOG.NS",
+          "name": "VRL Logistics",
+          "parent_id": "road_freight_fuel_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.75,
+          "confidence": 0.86,
+          "materiality": 0.78,
+          "time_horizon": "Short-Term",
+          "mechanism": "An owned less-than-truckload fleet buys bulk diesel directly, so a nine per cent institutional increase lands on the largest single variable cost line with contract rates fixed for the cycle",
+          "rationale": "Owned-fleet surface operator buying institutional diesel with quarterly customer contracts",
+          "negative_channels": ["bulk diesel cost inflation ahead of contract repricing"]
+        },
+        {
+          "ticker": "CONCOR.NS",
+          "name": "Container Corporation of India",
+          "parent_id": "road_freight_fuel_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.5,
+          "confidence": 0.78,
+          "materiality": 0.62,
+          "time_horizon": "Short-Term",
+          "mechanism": "Only the first-mile and last-mile road legs consume bulk diesel while the rail haul is priced separately, so the cost increase reaches a minority of the cost stack",
+          "rationale": "Rail-led multimodal operator with limited road exposure per container moved",
+          "negative_channels": ["road leg diesel cost"]
+        },
+        {
+          "ticker": "BLUEDART.NS",
+          "name": "Blue Dart Express",
+          "parent_id": "road_freight_fuel_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.72,
+          "materiality": 0.65,
+          "time_horizon": "Short-Term",
+          "mechanism": "The counter tanked as soon as the bulk diesel notification circulated, which marks the market's read on the express operator's exposure",
+          "rationale": "The Blue Dart counter tanked on the news of the bulk diesel increase",
+          "negative_channels": ["negative market reaction"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["VRLLOG.NS", "CONCOR.NS", "BLUEDART.NS"],
+      "reject": [],
+      "counterfactual": {
+        "VRLLOG.NS": "SUPPORTED",
+        "CONCOR.NS": "SUPPORTED",
+        "BLUEDART.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "VRLLOG.NS": "negative",
+      "CONCOR.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": ["BLUEDART.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "freight fuel costs"}
+    ],
+    "expected_evidence_tier": {"BLUEDART.NS": "MARKET_OBS"},
+    "expect_abstention": false,
+    "rationale": "Blue Dart is genuinely the most fuel-exposed name in the story, and the system must still refuse to publish it: the ONLY reasoning offered is the observed price move, phrased in market vernacular rather than textbook English. Being right by accident is not evidence (INV-003), and the vernacular paraphrase must not be a bypass."
+  }
+}

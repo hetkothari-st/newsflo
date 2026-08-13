@@ -1,0 +1,146 @@
+{
+  "id": "omc_marketing_margin",
+  "article": {
+    "title": "Centre asks state oil marketers to hold pump prices through the festive quarter",
+    "text": "The petroleum ministry has informally asked the three state-owned oil marketing companies to keep petrol and diesel pump prices unchanged through the festive quarter, officials familiar with the matter said. Bharat Petroleum Corporation, Hindustan Petroleum Corporation and Indian Oil Corporation have not revised retail rates since March even as the Indian crude basket has averaged eight dollars a barrel higher over the same period. Marketing margins on diesel have turned negative on a per-litre basis, and analysts expect the three refiners to absorb the gap rather than pass it on. The ministry has made no commitment on a compensating subsidy. Shares of Indian Oil Corporation fell 3% in Wednesday's session, while the broader energy index closed flat. A senior official said the informal freeze would be reviewed after the quarter ends.",
+    "note": "Deliberately carries a contaminating 'shares fell 3%' sentence: the market-observation trap this corpus exists to catch."
+  },
+  "universe": [
+    {
+      "ticker": "BPCL.NS",
+      "name": "Bharat Petroleum Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "oil_marketing",
+      "index_tier": "NIFTY50",
+      "market_cap": 1400000000000.0,
+      "business_desc": "State-owned oil marketing company refining crude and selling petrol, diesel and LPG through a national retail network."
+    },
+    {
+      "ticker": "HINDPETRO.NS",
+      "name": "Hindustan Petroleum Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "oil_marketing",
+      "index_tier": "NIFTY100",
+      "market_cap": 900000000000.0,
+      "business_desc": "State-owned refiner and fuel retailer with a large marketing footprint and limited upstream production."
+    },
+    {
+      "ticker": "IOC.NS",
+      "name": "Indian Oil Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "oil_marketing",
+      "index_tier": "NIFTY50",
+      "market_cap": 1900000000000.0,
+      "business_desc": "India's largest oil marketing company, refining and retailing transport fuels nationwide."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Government asks state oil marketers to freeze retail fuel prices",
+      "event_status": "confirmed",
+      "facts": "The petroleum ministry has informally asked BPCL, HPCL and IOC to hold petrol and diesel pump prices through the festive quarter. Retail rates have not moved since March while the Indian crude basket averaged eight dollars a barrel higher. Diesel marketing margins are negative per litre and no compensating subsidy has been committed.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Ministry asked BPCL, HPCL and IOC to hold pump prices through the festive quarter."},
+        {"fact_id": "F2", "text": "Retail rates unchanged since March; Indian crude basket averaged eight dollars a barrel higher."},
+        {"fact_id": "F3", "text": "Diesel marketing margins are negative per litre; no compensating subsidy committed."}
+      ],
+      "quantities": ["eight dollars a barrel"],
+      "named_entities": ["Bharat Petroleum Corporation", "Hindustan Petroleum Corporation", "Indian Oil Corporation"],
+      "category": "oil_gas",
+      "event_type": "regulation",
+      "event_cause": "policy_decision"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "retail_fuel_price_freeze",
+          "label": "Retail fuel price freeze",
+          "direction": "bearish",
+          "mechanism": "Pump prices held flat while crude cost rises compresses the per-litre marketing margin earned on every litre sold",
+          "confidence": 0.9,
+          "materiality": 0.8,
+          "impact_strength": 0.8,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "BPCL.NS",
+          "name": "Bharat Petroleum Corporation",
+          "parent_id": "retail_fuel_price_freeze",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.7,
+          "confidence": 0.85,
+          "materiality": 0.75,
+          "time_horizon": "Short-Term",
+          "mechanism": "Frozen pump prices against a higher crude acquisition cost turn the diesel marketing margin negative across BPCL's retail volumes",
+          "rationale": "Marketing is the dominant earnings driver and the company cannot reprice at the pump",
+          "negative_channels": ["marketing margin compression on transport fuels"]
+        },
+        {
+          "ticker": "HINDPETRO.NS",
+          "name": "Hindustan Petroleum Corporation",
+          "parent_id": "retail_fuel_price_freeze",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.72,
+          "confidence": 0.85,
+          "materiality": 0.78,
+          "time_horizon": "Short-Term",
+          "mechanism": "HPCL has the thinnest refining cover of the three marketers, so a frozen retail price feeds almost fully into marketing margin",
+          "rationale": "Marketing-heavy mix with little upstream or petrochemical offset",
+          "negative_channels": ["marketing margin compression on transport fuels"]
+        },
+        {
+          "ticker": "IOC.NS",
+          "name": "Indian Oil Corporation",
+          "parent_id": "retail_fuel_price_freeze",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.7,
+          "materiality": 0.7,
+          "time_horizon": "Short-Term",
+          "mechanism": "The stock fell 3% on the session as traders read the informal freeze as a subsidy burden",
+          "rationale": "Shares fell 3% after the ministry's instruction became public",
+          "negative_channels": ["negative price reaction"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["BPCL.NS", "HINDPETRO.NS", "IOC.NS"],
+      "reject": [],
+      "counterfactual": {
+        "BPCL.NS": "SUPPORTED",
+        "HINDPETRO.NS": "SUPPORTED",
+        "IOC.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "BPCL.NS": "negative",
+      "HINDPETRO.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": ["IOC.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "negative"}
+    ],
+    "expected_evidence_tier": {
+      "BPCL.NS": "SUBJECT",
+      "IOC.NS": "MARKET_OBS"
+    },
+    "expected_causal_distance": {"BPCL.NS": 1, "HINDPETRO.NS": 1},
+    "expected_materiality_grade": {"BPCL.NS": "HIGH", "HINDPETRO.NS": "HIGH"},
+    "expect_abstention": false,
+    "rationale": "BPCL and HPCL are article subjects at distance 1 with an articulated marketing-margin mechanism -- primary. IOC's only stated reasoning is the observed 3% share move, which is a market fact and not fundamental evidence (INV-003): it must never be published as a fundamental impact, however plausible its economics."
+  }
+}

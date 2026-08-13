@@ -1,0 +1,149 @@
+{
+  "id": "crude_demand_shock",
+  "article": {
+    "title": "Brent slumps to a nineteen-month low as Chinese refinery runs fall for a fifth month",
+    "text": "Brent crude fell below sixty-eight dollars a barrel, a nineteen-month low, after Chinese refinery throughput declined for a fifth consecutive month and the International Energy Agency cut its demand growth forecast by four hundred thousand barrels a day. The move is a demand-side decline rather than a supply glut, and the Indian crude basket has eased by eleven dollars from its recent peak. Oil and Natural Gas Corporation realises the basket price directly on its nominated production, while fuel-consuming industries see their largest variable cost fall. Trading desks cautioned that a demand-driven crude decline usually accompanies weaker global industrial activity, which is not uniformly good news for exporters.",
+    "note": "The inverted twin of crude_supply_shock. The SAME curated mechanisms must flip sign, and the article's own subject must flip from beneficiary to loser."
+  },
+  "universe": [
+    {
+      "ticker": "ONGC.NS",
+      "name": "Oil and Natural Gas Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "upstream_exploration",
+      "index_tier": "NIFTY50",
+      "market_cap": 3200000000000.0,
+      "business_desc": "India's largest crude oil and natural gas exploration and production company, with unhedged upstream realisations linked to the international crude benchmark.",
+      "exposures": [{"dimension": "commodity_revenue", "level": "HIGH"}]
+    },
+    {
+      "ticker": "INDIGO.NS",
+      "name": "InterGlobe Aviation",
+      "sector": "railways_transport",
+      "sub_sector": "airlines",
+      "index_tier": "NIFTY50",
+      "market_cap": 1600000000000.0,
+      "business_desc": "India's largest airline by market share, operating a single-fleet low-cost air transport network where aviation turbine fuel is the dominant operating cost.",
+      "exposures": [{"dimension": "fuel_cost", "level": "VERY_HIGH"}]
+    },
+    {
+      "ticker": "MRF.NS",
+      "name": "MRF",
+      "sector": "auto",
+      "sub_sector": "tyres",
+      "index_tier": "NIFTY100",
+      "market_cap": 550000000000.0,
+      "business_desc": "India's largest tyre manufacturer, consuming crude-derived synthetic rubber and carbon black as primary raw materials.",
+      "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Brent crude falls to a nineteen-month low as Chinese demand declines",
+      "event_status": "confirmed",
+      "facts": "Brent fell below sixty-eight dollars a barrel, a nineteen-month low, after Chinese refinery throughput declined for a fifth consecutive month and the IEA cut its demand growth forecast by four hundred thousand barrels a day. The decline is demand-driven rather than a supply glut. The Indian crude basket has eased eleven dollars from its recent peak.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent fell below sixty-eight dollars a barrel, a nineteen-month low."},
+        {"fact_id": "F2", "text": "Chinese refinery throughput declined for a fifth consecutive month; IEA cut demand growth by 400kbd."},
+        {"fact_id": "F3", "text": "The decline is demand-driven; the Indian crude basket has eased eleven dollars from its peak."}
+      ],
+      "quantities": ["sixty-eight dollars a barrel", "four hundred thousand barrels a day", "eleven dollars"],
+      "named_entities": ["Oil and Natural Gas Corporation"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "demand_shift"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price",
+          "label": "Crude price",
+          "direction": "bearish",
+          "mechanism": "A demand-driven decline in global crude consumption lowers the benchmark price India both imports against and realises on domestic production",
+          "confidence": 0.9,
+          "materiality": 0.82,
+          "impact_strength": 0.8,
+          "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@upstream_realization": {"companies": []},
+    "map_companies@crude_price": {
+      "companies": [
+        {
+          "ticker": "ONGC.NS",
+          "name": "Oil and Natural Gas Corporation",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.78,
+          "confidence": 0.88,
+          "materiality": 0.8,
+          "time_horizon": "Immediate",
+          "mechanism": "Unhedged upstream realisation per barrel falls one for one with the benchmark, so an eleven dollar decline reduces revenue on unchanged production volumes",
+          "rationale": "Domestic upstream producer selling at import parity with no marketing arm to capture the offsetting gain",
+          "negative_channels": ["lower crude realisation per barrel"]
+        }
+      ]
+    },
+    "map_companies@aviation_fuel_cost": {
+      "companies": [
+        {
+          "ticker": "INDIGO.NS",
+          "name": "InterGlobe Aviation",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.7,
+          "confidence": 0.85,
+          "materiality": 0.72,
+          "time_horizon": "Immediate",
+          "mechanism": "Aviation turbine fuel tracks the crude basket with a short lag and is the largest operating cost line, so an eleven dollar decline widens spread per available seat kilometre before fares reset",
+          "rationale": "Fuel-heavy cost structure with fares set by a competitive market rather than by cost",
+          "positive_channels": ["ATF cost relief"]
+        }
+      ]
+    },
+    "map_companies@tyre_input_cost": {
+      "companies": [
+        {
+          "ticker": "MRF.NS",
+          "name": "MRF",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.55,
+          "confidence": 0.78,
+          "materiality": 0.64,
+          "time_horizon": "Short-Term",
+          "mechanism": "Synthetic rubber and carbon black quotations follow crude down with a one-quarter lag, easing the raw-material basket while replacement prices stay where the last hike left them",
+          "rationale": "Crude-derived input basket repricing lower against sticky replacement-market prices",
+          "positive_channels": ["raw-material cost relief with sticky output prices"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ONGC.NS", "INDIGO.NS", "MRF.NS"],
+      "reject": [],
+      "counterfactual": {
+        "ONGC.NS": "SUPPORTED",
+        "INDIGO.NS": "SUPPORTED",
+        "MRF.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"ONGC.NS": "negative"},
+    "allow_secondary": ["INDIGO.NS", "MRF.NS"],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "crude-linked"}
+    ],
+    "expected_evidence_tier": {"ONGC.NS": "SUBJECT", "INDIGO.NS": "D", "MRF.NS": "D"},
+    "expected_causal_distance": {"ONGC.NS": 1, "INDIGO.NS": 2, "MRF.NS": 2},
+    "expected_mechanism": {"INDIGO.NS": "aviation_fuel_cost", "MRF.NS": "tyre_input_cost"},
+    "expect_abstention": false,
+    "rationale": "Paired with crude_supply_shock to catch sign-copying: identical companies, identical mechanism nodes, opposite direction. A system that had memorised 'crude story -> ONGC bullish, airlines bearish' scores zero here while looking perfect on its twin. The archetype-sourced second-order names stay tier D and therefore deep dive in both directions."
+  }
+}

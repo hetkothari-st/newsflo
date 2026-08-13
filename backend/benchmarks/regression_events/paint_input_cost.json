@@ -1,0 +1,143 @@
+{
+  "id": "paint_input_cost",
+  "article": {
+    "title": "Asian Paints flags a 180 bps gross margin hit as monomer and TiO2 costs reset higher",
+    "text": "Asian Paints told analysts that its gross margin for the quarter would land roughly a hundred and eighty basis points below the preceding three months, attributing the move to a step-up in crude-derived monomer prices and a fresh contract reset on titanium dioxide. Raw materials are close to sixty per cent of the decorative paint cost structure and the company said it had not taken a list-price increase since the festive season, preferring to protect volume growth in the tier-three markets it has been gaining share in. Berger Paints, whose raw-material basket is nearly identical, said it faced the same inflation but had already taken a two per cent increase in the premium emulsion range. The paint index has rallied twelve per cent this quarter.",
+    "note": "The article's own 'rallied twelve per cent' line is an index observation. It must not become the evidence for any company claim."
+  },
+  "universe": [
+    {
+      "ticker": "ASIANPAINT.NS",
+      "name": "Asian Paints",
+      "sector": "chemicals",
+      "sub_sector": "paints",
+      "index_tier": "NIFTY50",
+      "market_cap": 2700000000000.0,
+      "business_desc": "India's largest decorative paints manufacturer, whose raw-material basket is dominated by crude-derived monomers, solvents and titanium dioxide."
+    },
+    {
+      "ticker": "BERGEPAINT.NS",
+      "name": "Berger Paints India",
+      "sector": "chemicals",
+      "sub_sector": "paints",
+      "index_tier": "NIFTY500",
+      "market_cap": 620000000000.0,
+      "business_desc": "Decorative and industrial coatings manufacturer with a raw-material basket closely mirroring the sector leader's."
+    },
+    {
+      "ticker": "PIDILITIND.NS",
+      "name": "Pidilite Industries",
+      "sector": "chemicals",
+      "sub_sector": "adhesives",
+      "index_tier": "NIFTY100",
+      "market_cap": 1500000000000.0,
+      "business_desc": "Adhesives and construction chemicals manufacturer using vinyl acetate monomer as its principal input."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Asian Paints guides to a 180 bps gross margin decline on monomer and TiO2 inflation",
+      "event_status": "confirmed",
+      "facts": "Asian Paints guided its quarterly gross margin about one hundred and eighty basis points below the preceding quarter on higher crude-derived monomer prices and a titanium dioxide contract reset. Raw materials are close to sixty per cent of the decorative paint cost structure and the company has not raised list prices since the festive season. Berger Paints reported the same input inflation and has already taken a two per cent increase in premium emulsions.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Asian Paints guided gross margin about 180 bps below the preceding quarter."},
+        {"fact_id": "F2", "text": "Cause: crude-derived monomer price step-up and a titanium dioxide contract reset."},
+        {"fact_id": "F3", "text": "Raw materials are about sixty per cent of decorative paint cost; no list-price increase since the festive season."},
+        {"fact_id": "F4", "text": "Berger Paints faces the same inflation but has taken a two per cent premium-emulsion increase."}
+      ],
+      "quantities": ["one hundred and eighty basis points", "sixty per cent", "two per cent"],
+      "named_entities": ["Asian Paints", "Berger Paints India", "Pidilite Industries"],
+      "category": "other",
+      "event_type": "earnings",
+      "event_cause": "input_cost_change"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "paint_input_cost",
+          "label": "Paint input costs",
+          "direction": "bearish",
+          "mechanism": "Crude-derived monomers, solvents and titanium dioxide carriers dominate the paint cost structure, so a contract reset compresses gross margin until list prices catch up",
+          "confidence": 0.9,
+          "materiality": 0.8,
+          "impact_strength": 0.75,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "ASIANPAINT.NS",
+          "name": "Asian Paints",
+          "parent_id": "paint_input_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.7,
+          "confidence": 0.9,
+          "materiality": 0.8,
+          "time_horizon": "Short-Term",
+          "mechanism": "Raw materials are about sixty per cent of decorative cost and the company has deliberately not repriced, so the full one hundred and eighty basis point reset lands in gross margin",
+          "rationale": "Company-guided margin impact with an explicit decision not to pass the cost on",
+          "negative_channels": ["monomer and titanium dioxide input inflation", "deliberate absence of price pass-through"]
+        },
+        {
+          "ticker": "BERGEPAINT.NS",
+          "name": "Berger Paints India",
+          "parent_id": "paint_input_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.55,
+          "confidence": 0.82,
+          "materiality": 0.68,
+          "time_horizon": "Short-Term",
+          "mechanism": "The same monomer and titanium dioxide inflation applies to a near-identical basket, partly recovered by the two per cent premium emulsion increase already taken",
+          "rationale": "Confirmed the same input inflation and has repriced only part of the range",
+          "negative_channels": ["monomer and titanium dioxide input inflation"],
+          "positive_channels": ["partial premium-range price recovery"]
+        },
+        {
+          "ticker": "PIDILITIND.NS",
+          "name": "Pidilite Industries",
+          "parent_id": "paint_input_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.45,
+          "confidence": 0.65,
+          "materiality": 0.55,
+          "time_horizon": "Short-Term",
+          "mechanism": "Chemical input inflation across the coatings and adhesives complex lifts the cost of the vinyl acetate monomer basket as well",
+          "rationale": "Adhesives maker exposed to its own monomer basket rather than to the paint inputs this reset covers",
+          "negative_channels": ["chemical input inflation"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ASIANPAINT.NS", "BERGEPAINT.NS", "PIDILITIND.NS"],
+      "reject": [],
+      "counterfactual": {
+        "ASIANPAINT.NS": "SUPPORTED",
+        "BERGEPAINT.NS": "SUPPORTED",
+        "PIDILITIND.NS": "NOT_SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "ASIANPAINT.NS": "negative",
+      "BERGEPAINT.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": ["PIDILITIND.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "paint input costs"}
+    ],
+    "expected_causal_distance": {"ASIANPAINT.NS": 1, "BERGEPAINT.NS": 1},
+    "expect_abstention": false,
+    "rationale": "The two paint makers each stated their own exposure to this exact input basket -- primary. The adhesives maker is a real company with real chemical-input exposure, and it is also named by the article, so its evidence tier is strong enough to carry a claim -- which is exactly why the SEMANTIC counterfactual has to do the work here: its vinyl-acetate basket is a different input from the monomer/TiO2 reset this event is about, so the claim survives the event's removal and is NOT_SUPPORTED. Tier strength must never be able to substitute for event-specificity."
+  }
+}

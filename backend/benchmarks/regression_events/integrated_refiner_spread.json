@@ -1,0 +1,120 @@
+{
+  "id": "integrated_refiner_spread",
+  "article": {
+    "title": "Singapore gross refining margin slips to $6.4 while crude runs up: what it means for Indian refiners",
+    "text": "The benchmark Singapore complex gross refining margin eased to six dollars forty a barrel last week from nine dollars a month ago, even as the crude India buys climbed by seven dollars. For a purely integrated refiner the two moves fight each other: cheaper products against a dearer feedstock compresses the distillation spread, while the inventory held at the older, lower cost is revalued upward and the petrochemical stream that runs on the same barrel sees its own naphtha cost rise. Reliance Industries, which runs the country's largest single-site complex alongside a fully integrated petrochemical chain, is exposed on both sides of the barrel at once. Analysts were split on the net direction, with two houses cutting estimates and two raising them in the same week.",
+    "note": "The genuinely two-sided case. A confident directional call here is WRONG even if it later proves lucky -- 'mixed' is the correct answer and mixed_accuracy has no auto-pass."
+  },
+  "universe": [
+    {
+      "ticker": "RELIANCE.NS",
+      "name": "Reliance Industries",
+      "sector": "oil_gas",
+      "sub_sector": "refining_marketing",
+      "index_tier": "NIFTY50",
+      "market_cap": 18000000000000.0,
+      "business_desc": "Integrated energy group operating India's largest refining complex together with a fully integrated petrochemical chain, retail and telecom businesses."
+    },
+    {
+      "ticker": "CHENNPETRO.NS",
+      "name": "Chennai Petroleum Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "refining_marketing",
+      "index_tier": "NIFTY500",
+      "market_cap": 120000000000.0,
+      "business_desc": "Standalone refiner processing imported crude into transport fuels for a single parent marketer, with no petrochemical or retail integration."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Singapore refining margin falls to $6.4 a barrel while crude cost rises",
+      "event_status": "confirmed",
+      "facts": "The Singapore complex gross refining margin eased to six dollars forty a barrel from nine dollars a month earlier while the Indian crude basket rose seven dollars. Integrated refiners face a compressed distillation spread, an upward inventory revaluation and a higher naphtha cost in their petrochemical stream at the same time. Analyst estimate revisions were split in both directions.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Singapore complex GRM eased to $6.4/bbl from $9/bbl a month earlier."},
+        {"fact_id": "F2", "text": "The Indian crude basket rose seven dollars a barrel over the same period."},
+        {"fact_id": "F3", "text": "Integrated refiners see spread compression, inventory revaluation and higher petrochemical feedstock cost simultaneously."}
+      ],
+      "quantities": ["six dollars forty a barrel", "seven dollars"],
+      "named_entities": ["Reliance Industries", "Chennai Petroleum Corporation"],
+      "category": "oil_gas",
+      "event_type": "earnings",
+      "event_cause": "market_repricing"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "refiner_marketing_margin",
+          "label": "Refining and marketing spread",
+          "direction": "neutral",
+          "mechanism": "Crude is simultaneously the feedstock cost and the realisation driver for a refiner, so a falling product crack against a rising barrel moves the two halves of the spread in opposite directions",
+          "confidence": 0.85,
+          "materiality": 0.8,
+          "impact_strength": 0.7,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "RELIANCE.NS",
+          "name": "Reliance Industries",
+          "parent_id": "refiner_marketing_margin",
+          "direction": "neutral",
+          "net_direction": "mixed",
+          "economic_effect": "mixed",
+          "impact_strength": 0.6,
+          "confidence": 0.75,
+          "materiality": 0.7,
+          "time_horizon": "Short-Term",
+          "mechanism": "A narrower product crack compresses the distillation spread while the same barrel delivers an inventory revaluation gain and a costlier naphtha stream into the integrated petrochemical chain",
+          "rationale": "Integrated across refining, petrochemicals and marketing, so both halves of the barrel move at once",
+          "positive_channels": ["inventory revaluation on cheaper held crude"],
+          "negative_channels": ["distillation spread compression", "naphtha feedstock cost in petrochemicals"],
+          "offsetting_channels": ["inventory gain offsets part of the spread compression within the quarter"]
+        },
+        {
+          "ticker": "CHENNPETRO.NS",
+          "name": "Chennai Petroleum Corporation",
+          "parent_id": "refiner_marketing_margin",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.65,
+          "confidence": 0.8,
+          "materiality": 0.72,
+          "time_horizon": "Short-Term",
+          "mechanism": "A standalone refiner with no petrochemical or marketing stream takes the full crack compression with nothing on the other side of the barrel to offset it",
+          "rationale": "Pure distillation economics with no integration to absorb the spread move",
+          "negative_channels": ["distillation spread compression"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["RELIANCE.NS", "CHENNPETRO.NS"],
+      "reject": [],
+      "counterfactual": {
+        "RELIANCE.NS": "SUPPORTED",
+        "CHENNPETRO.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "RELIANCE.NS": "mixed",
+      "CHENNPETRO.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "mixed", "label_contains": "refining"},
+      {"effect": "negative", "label_contains": "refining"}
+    ],
+    "expected_causal_distance": {"RELIANCE.NS": 1, "CHENNPETRO.NS": 1},
+    "expected_evidence_tier": {"RELIANCE.NS": "SUBJECT", "CHENNPETRO.NS": "SUBJECT"},
+    "expect_abstention": false,
+    "rationale": "The integrated refiner is genuinely two-sided and must survive to the feed AS mixed -- collapsing it to bullish or bearish is a wrong published claim, not a rounding. The standalone refiner in the same story is unambiguously negative, which proves the mixed verdict is a judgement about THIS business model rather than a hedge applied to the whole sector."
+  }
+}

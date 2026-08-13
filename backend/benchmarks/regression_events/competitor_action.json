@@ -1,0 +1,145 @@
+{
+  "id": "competitor_action",
+  "article": {
+    "title": "Jio cuts entry-level unlimited plan pricing 18%, first tariff reduction in six years",
+    "text": "Reliance Jio reduced the price of its entry-level unlimited plan by eighteen per cent and extended the validity of two mid-tier packs, the first downward tariff move by any Indian operator in six years. The cut applies only to the entry tier, which carries the lowest average revenue per user in the industry and the highest churn. Bharti Airtel, whose subscriber mix skews to the higher-paying post-paid and mid-tier prepaid bands, said it had no plan to match. Vodafone Idea, whose base is concentrated in exactly the tier being repriced and whose balance sheet leaves no room to defend share on price, is the most directly exposed. Industry ARPU had risen for eleven consecutive quarters before this.",
+    "note": "The competitor-action shape: the actor, the insulated rival and the exposed rival all belong in the same story with three different verdicts."
+  },
+  "universe": [
+    {
+      "ticker": "RELIANCE.NS",
+      "name": "Reliance Industries",
+      "sector": "oil_gas",
+      "sub_sector": "diversified",
+      "index_tier": "NIFTY50",
+      "market_cap": 18000000000000.0,
+      "business_desc": "Diversified group whose consolidated results include the Jio digital services business alongside energy, petrochemicals and retail."
+    },
+    {
+      "ticker": "BHARTIARTL.NS",
+      "name": "Bharti Airtel",
+      "sector": "telecom",
+      "sub_sector": "wireless",
+      "index_tier": "NIFTY50",
+      "market_cap": 9000000000000.0,
+      "business_desc": "Integrated telecom operator with a subscriber mix skewed to post-paid and higher-paying prepaid bands across India and Africa."
+    },
+    {
+      "ticker": "IDEA.NS",
+      "name": "Vodafone Idea",
+      "sector": "telecom",
+      "sub_sector": "wireless",
+      "index_tier": "NIFTY500",
+      "market_cap": 90000000000.0,
+      "business_desc": "Mobile network operator whose subscriber base is concentrated in the entry-level prepaid tier, carrying a heavily leveraged balance sheet."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Reliance Jio cuts entry-level unlimited tariff by 18%",
+      "event_status": "confirmed",
+      "facts": "Reliance Jio reduced its entry-level unlimited plan price by eighteen per cent and extended validity on two mid-tier packs, the first downward tariff move by an Indian operator in six years. The cut applies only to the entry tier, which has the lowest ARPU and highest churn. Bharti Airtel said it had no plan to match. Vodafone Idea's base is concentrated in the repriced tier. Industry ARPU had risen for eleven consecutive quarters.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Jio cut its entry-level unlimited plan price eighteen per cent, the first tariff reduction in six years."},
+        {"fact_id": "F2", "text": "The cut applies only to the entry tier: lowest ARPU, highest churn."},
+        {"fact_id": "F3", "text": "Bharti Airtel said it has no plan to match; Vodafone Idea's base is concentrated in that tier."}
+      ],
+      "quantities": ["eighteen per cent", "eleven consecutive quarters"],
+      "named_entities": ["Reliance Industries", "Bharti Airtel", "Vodafone Idea"],
+      "category": "telecom",
+      "event_type": "pricing_action",
+      "event_cause": "competitive_action"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "entry_tier_tariff_reset",
+          "label": "Entry-tier tariff cut",
+          "direction": "neutral",
+          "mechanism": "A price cut confined to the lowest-ARPU tier trades realisation per subscriber for share of the most churn-prone base, and reaches rivals only in proportion to how much of their own base sits in that tier",
+          "confidence": 0.9,
+          "materiality": 0.75,
+          "impact_strength": 0.72,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "IDEA.NS",
+          "name": "Vodafone Idea",
+          "parent_id": "entry_tier_tariff_reset",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.72,
+          "confidence": 0.85,
+          "materiality": 0.76,
+          "time_horizon": "Short-Term",
+          "mechanism": "The repriced tier is where this operator's base is concentrated, and a leveraged balance sheet cannot fund a matching cut, so the choice is between losing share and losing realisation",
+          "rationale": "Base concentrated in exactly the tier being repriced with no capacity to defend on price",
+          "negative_channels": ["entry-tier share loss", "realisation pressure if it matches"]
+        },
+        {
+          "ticker": "RELIANCE.NS",
+          "name": "Reliance Industries",
+          "parent_id": "entry_tier_tariff_reset",
+          "direction": "neutral",
+          "net_direction": "mixed",
+          "economic_effect": "mixed",
+          "impact_strength": 0.5,
+          "confidence": 0.78,
+          "materiality": 0.62,
+          "time_horizon": "Short-Term",
+          "mechanism": "The digital services business gives up eighteen per cent of realisation on its lowest-ARPU cohort in exchange for share of the most churn-prone segment, and the effect on consolidated group earnings depends on which of the two dominates",
+          "rationale": "Initiator of the cut, taking realisation loss for share gain within a diversified consolidated group",
+          "positive_channels": ["entry-tier subscriber share gain"],
+          "negative_channels": ["realisation loss on the repriced cohort"],
+          "offsetting_channels": ["share gain and realisation loss work against each other within the same tier"]
+        },
+        {
+          "ticker": "BHARTIARTL.NS",
+          "name": "Bharti Airtel",
+          "parent_id": "entry_tier_tariff_reset",
+          "direction": "neutral",
+          "net_direction": "uncertain",
+          "economic_effect": "uncertain",
+          "impact_strength": 0.4,
+          "confidence": 0.7,
+          "materiality": 0.55,
+          "time_horizon": "Short-Term",
+          "mechanism": "The mix skews away from the repriced tier and the company has said it will not match, so the exposure is limited to whatever second-order pressure a sustained entry-tier gap eventually puts on the mid-tier bands",
+          "rationale": "Stated it will not match, with limited base in the affected tier",
+          "negative_channels": ["possible eventual mid-tier spillover"],
+          "offsetting_channels": ["no realisation given up in the near term"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["IDEA.NS", "RELIANCE.NS", "BHARTIARTL.NS"],
+      "reject": [],
+      "counterfactual": {
+        "IDEA.NS": "SUPPORTED",
+        "RELIANCE.NS": "SUPPORTED",
+        "BHARTIARTL.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "IDEA.NS": "negative",
+      "RELIANCE.NS": "mixed"
+    },
+    "allow_secondary": ["BHARTIARTL.NS"],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "other verified mechanisms"},
+      {"effect": "mixed", "label_contains": "other verified mechanisms"}
+    ],
+    "expected_causal_distance": {"IDEA.NS": 1, "RELIANCE.NS": 1},
+    "expect_abstention": false,
+    "rationale": "Three companies, one action, three different verdicts. The exposed rival is clearly negative; the ACTOR is mixed, because initiating a price cut is a trade, not a win; and the insulated rival is genuinely uncertain -- it has said it will not match, so anything beyond that is speculation about a second-order spillover, which belongs in a deep dive rather than at the top of a feed."
+  }
+}

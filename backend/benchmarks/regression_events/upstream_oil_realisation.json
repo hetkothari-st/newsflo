@@ -1,0 +1,145 @@
+{
+  "id": "upstream_oil_realisation",
+  "article": {
+    "title": "Cabinet lifts the ceiling price on administered gas by 18%, frees new wells entirely",
+    "text": "The Cabinet Committee on Economic Affairs has approved a revision to the administered price mechanism that raises the ceiling on legacy gas fields by eighteen per cent and removes the ceiling altogether for gas produced from new wells drilled after April. Oil and Natural Gas Corporation and Oil India, which together account for the bulk of nominated-block output, will realise the higher price on volumes already flowing, with no corresponding increase in operating cost. The petroleum ministry said the revision restores the link between domestic realisation and the imported landed cost that the previous formula had capped for three consecutive review cycles. City gas distributors, which buy the same molecules, will see their input cost rise.",
+    "note": "Clean administered-price event: the two nominated-block producers are the article's own subjects, the gain is arithmetic on flowing volumes, and the offsetting party (a CGD buyer) is a distinct, opposite claim."
+  },
+  "universe": [
+    {
+      "ticker": "ONGC.NS",
+      "name": "Oil and Natural Gas Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "upstream_exploration",
+      "index_tier": "NIFTY50",
+      "market_cap": 3200000000000.0,
+      "business_desc": "India's largest crude oil and natural gas exploration and production company, selling nominated-block gas at the administered ceiling price."
+    },
+    {
+      "ticker": "OIL.NS",
+      "name": "Oil India",
+      "sector": "oil_gas",
+      "sub_sector": "upstream_exploration",
+      "index_tier": "NIFTY500",
+      "market_cap": 700000000000.0,
+      "business_desc": "State-owned upstream explorer producing crude and natural gas from nominated blocks in the north-east and Rajasthan."
+    },
+    {
+      "ticker": "IGL.NS",
+      "name": "Indraprastha Gas",
+      "sector": "oil_gas",
+      "sub_sector": "city_gas_distribution",
+      "index_tier": "NIFTY500",
+      "market_cap": 300000000000.0,
+      "business_desc": "City gas distributor supplying CNG and piped natural gas in the national capital region, sourcing administered-price domestic gas."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Cabinet raises the administered gas ceiling price by 18% and frees new-well gas",
+      "event_status": "confirmed",
+      "facts": "The CCEA raised the administered price ceiling on legacy gas fields by eighteen per cent and removed the ceiling for gas from new wells drilled after April. ONGC and Oil India produce the bulk of nominated-block output and will realise the higher price on flowing volumes with no offsetting cost increase. City gas distributors buying the same gas face a higher input cost.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "CCEA raised the administered gas ceiling on legacy fields by eighteen per cent."},
+        {"fact_id": "F2", "text": "The ceiling is removed entirely for gas from new wells drilled after April."},
+        {"fact_id": "F3", "text": "ONGC and Oil India produce the bulk of nominated-block output; city gas distributors buy the same gas."}
+      ],
+      "quantities": ["eighteen per cent"],
+      "named_entities": ["Oil and Natural Gas Corporation", "Oil India", "Indraprastha Gas"],
+      "category": "oil_gas",
+      "event_type": "government_policy",
+      "event_cause": "policy_decision"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "upstream_realization",
+          "label": "Upstream gas realisation",
+          "direction": "bullish",
+          "mechanism": "A higher administered ceiling raises the price received on gas volumes already being produced, with no matching change in lifting cost",
+          "confidence": 0.92,
+          "materiality": 0.85,
+          "impact_strength": 0.85,
+          "time_horizon": "Immediate"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "ONGC.NS",
+          "name": "Oil and Natural Gas Corporation",
+          "parent_id": "upstream_realization",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.8,
+          "confidence": 0.9,
+          "materiality": 0.82,
+          "time_horizon": "Immediate",
+          "mechanism": "Every nominated-block gas molecule already flowing now realises an eighteen per cent higher administered price against an unchanged lifting cost",
+          "rationale": "Largest nominated-block gas producer with the revision applying to existing volumes",
+          "positive_channels": ["higher administered gas realisation"]
+        },
+        {
+          "ticker": "OIL.NS",
+          "name": "Oil India",
+          "parent_id": "upstream_realization",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.75,
+          "confidence": 0.88,
+          "materiality": 0.76,
+          "time_horizon": "Immediate",
+          "mechanism": "Nominated-block gas is a material share of Oil India's revenue mix and reprices immediately at the new ceiling",
+          "rationale": "Second nominated-block producer named by the notification itself",
+          "positive_channels": ["higher administered gas realisation"]
+        },
+        {
+          "ticker": "IGL.NS",
+          "name": "Indraprastha Gas",
+          "parent_id": "upstream_realization",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.8,
+          "materiality": 0.7,
+          "time_horizon": "Short-Term",
+          "mechanism": "Domestic administered gas is the dominant input for CNG, so an eighteen per cent ceiling rise lifts cost of goods before any retail price revision",
+          "rationale": "City gas distributor buying the same administered gas as an input",
+          "negative_channels": ["administered gas input cost"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ONGC.NS", "OIL.NS", "IGL.NS"],
+      "reject": [],
+      "counterfactual": {
+        "ONGC.NS": "SUPPORTED",
+        "OIL.NS": "SUPPORTED",
+        "IGL.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "ONGC.NS": "positive",
+      "OIL.NS": "positive",
+      "IGL.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "positive", "label_contains": "upstream oil producers"},
+      {"effect": "negative", "label_contains": "upstream oil producers"}
+    ],
+    "expected_evidence_tier": {"ONGC.NS": "SUBJECT", "OIL.NS": "SUBJECT", "IGL.NS": "SUBJECT"},
+    "expected_causal_distance": {"ONGC.NS": 1, "OIL.NS": 1, "IGL.NS": 1},
+    "expected_materiality_grade": {"ONGC.NS": "HIGH", "OIL.NS": "HIGH", "IGL.NS": "HIGH"},
+    "expect_abstention": false,
+    "rationale": "One shock, two directions. The producers gain and the distributor that buys the same molecule loses -- both are article subjects at distance 1 with arithmetic mechanisms, so both are primary, and the sections must split by effect rather than collapsing into one 'oil & gas' bucket."
+  }
+}

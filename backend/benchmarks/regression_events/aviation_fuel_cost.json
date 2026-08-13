@@ -1,0 +1,142 @@
+{
+  "id": "aviation_fuel_cost",
+  "article": {
+    "title": "Oil marketers notify a 6.5% ATF price increase from the first of the month",
+    "text": "State oil marketing companies notified a six and a half per cent increase in aviation turbine fuel prices with effect from the first of the month, the third consecutive monthly rise and the steepest since the winter schedule began. ATF is roughly two-fifths of an Indian carrier's operating cost and is bought at the notified price with no hedging permitted on the domestic leg. InterGlobe Aviation and SpiceJet both fly predominantly domestic networks where the fare environment is set by a competitor with excess capacity, so pass-through into fares typically lags the notification by a full quarter. SpiceJet shares slid on the notification while InterGlobe closed higher.",
+    "note": "Contains a 'shares slid' contaminant in the article body; the correct system behaviour is to reason from fuel-cost economics, not from that sentence."
+  },
+  "universe": [
+    {
+      "ticker": "INDIGO.NS",
+      "name": "InterGlobe Aviation",
+      "sector": "railways_transport",
+      "sub_sector": "airlines",
+      "index_tier": "NIFTY50",
+      "market_cap": 1600000000000.0,
+      "business_desc": "India's largest airline by domestic market share, running a single-fleet low-cost air transport network where aviation turbine fuel is the dominant operating cost."
+    },
+    {
+      "ticker": "SPICEJET.NS",
+      "name": "SpiceJet",
+      "sector": "railways_transport",
+      "sub_sector": "airlines",
+      "index_tier": "OTHER",
+      "market_cap": 35000000000.0,
+      "business_desc": "Low-cost Indian airline operating a domestic-heavy network with a stretched balance sheet and limited ability to absorb input-cost shocks."
+    },
+    {
+      "ticker": "IOC.NS",
+      "name": "Indian Oil Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "oil_marketing",
+      "index_tier": "NIFTY50",
+      "market_cap": 1900000000000.0,
+      "business_desc": "India's largest oil marketing company, refining and retailing transport fuels including aviation turbine fuel."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Oil marketers raise aviation turbine fuel prices by 6.5%",
+      "event_status": "confirmed",
+      "facts": "State oil marketing companies notified a six and a half per cent increase in aviation turbine fuel prices from the first of the month, the third consecutive monthly rise. ATF is about two-fifths of an Indian carrier's operating cost and cannot be hedged on the domestic leg. Fare pass-through typically lags the notification by a quarter.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "ATF prices raised six and a half per cent from the first of the month."},
+        {"fact_id": "F2", "text": "Third consecutive monthly increase."},
+        {"fact_id": "F3", "text": "ATF is roughly two-fifths of an Indian carrier's operating cost; fare pass-through lags a quarter."}
+      ],
+      "quantities": ["six and a half per cent", "two-fifths"],
+      "named_entities": ["InterGlobe Aviation", "SpiceJet", "Indian Oil Corporation"],
+      "category": "railways_transport",
+      "event_type": "pricing_action",
+      "event_cause": "input_cost_change"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "aviation_fuel_cost",
+          "label": "Aviation fuel cost",
+          "direction": "bearish",
+          "mechanism": "A notified ATF price increase raises the single largest line in an airline's cost per available seat kilometre before any fare revision can recover it",
+          "confidence": 0.92,
+          "materiality": 0.85,
+          "impact_strength": 0.8,
+          "time_horizon": "Immediate"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "INDIGO.NS",
+          "name": "InterGlobe Aviation",
+          "parent_id": "aviation_fuel_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.7,
+          "confidence": 0.88,
+          "materiality": 0.78,
+          "time_horizon": "Immediate",
+          "mechanism": "ATF is about forty per cent of cost per available seat kilometre and cannot be hedged domestically, so a six and a half per cent notification lands in the current quarter's spread",
+          "rationale": "Largest domestic network with the highest absolute fuel bill in the industry",
+          "negative_channels": ["ATF cost inflation ahead of fare pass-through"]
+        },
+        {
+          "ticker": "SPICEJET.NS",
+          "name": "SpiceJet",
+          "parent_id": "aviation_fuel_cost",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.75,
+          "confidence": 0.82,
+          "materiality": 0.76,
+          "time_horizon": "Immediate",
+          "mechanism": "The same unhedged ATF increase hits a carrier with thinner liquidity, so the cost shock converts directly into cash burn rather than being absorbed by the balance sheet",
+          "rationale": "Domestic-heavy network with no financial cushion for an input-cost step-up",
+          "negative_channels": ["ATF cost inflation", "cash burn on a stretched balance sheet"]
+        },
+        {
+          "ticker": "IOC.NS",
+          "name": "Indian Oil Corporation",
+          "parent_id": "aviation_fuel_cost",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.4,
+          "confidence": 0.6,
+          "materiality": 0.5,
+          "time_horizon": "Short-Term",
+          "mechanism": "Sells more dearly",
+          "rationale": "Sells the fuel whose price just went up",
+          "positive_channels": ["ATF realisation"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["INDIGO.NS", "SPICEJET.NS", "IOC.NS"],
+      "reject": [],
+      "counterfactual": {
+        "INDIGO.NS": "SUPPORTED",
+        "SPICEJET.NS": "SUPPORTED",
+        "IOC.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "INDIGO.NS": "negative",
+      "SPICEJET.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": ["IOC.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "aviation fuel costs"}
+    ],
+    "expected_evidence_tier": {"INDIGO.NS": "SUBJECT", "SPICEJET.NS": "SUBJECT"},
+    "expected_causal_distance": {"INDIGO.NS": 1, "SPICEJET.NS": 1},
+    "expect_abstention": false,
+    "rationale": "Both carriers are subjects at distance 1 with a quantified cost-share mechanism -- primary. The marketer's entry states no causal channel at all ('Sells more dearly' is a slogan, not an analysis): MECHANISM_VALID rejects it. The claim might even be directionally right; an unargued claim is still not publishable."
+  }
+}

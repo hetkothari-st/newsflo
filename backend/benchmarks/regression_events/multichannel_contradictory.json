@@ -1,0 +1,180 @@
+{
+  "id": "multichannel_contradictory",
+  "article": {
+    "title": "Government doubles the import duty on refined edible oil while cutting it on crude palm",
+    "text": "The government raised the basic customs duty on refined palm, soyabean and sunflower oil from twelve and a half to twenty-five per cent while simultaneously reducing the levy on crude palm oil by five percentage points, widening the refining differential to its largest in four years. Domestic refiners that crush and refine imported crude oil gain protection on their finished output and a cheaper feedstock at the same time. The same companies also sell branded packaged edible oil, where the retail price is now set against a costlier competing import and volume is highly price elastic in the mass segment. Adani Wilmar operates on both sides of that trade at once.",
+    "note": "One company reached by TWO opposite mechanisms in the same graph. The merge must not silently pick a winner: the surviving record has to say mixed and keep both channels."
+  },
+  "universe": [
+    {
+      "ticker": "AWL.NS",
+      "name": "Adani Wilmar",
+      "sector": "fmcg",
+      "sub_sector": "edible_oils",
+      "index_tier": "NIFTY500",
+      "market_cap": 420000000000.0,
+      "business_desc": "Edible oil and packaged foods company that imports and refines crude vegetable oil and sells branded packaged oil under the Fortune brand."
+    },
+    {
+      "ticker": "MARICO.NS",
+      "name": "Marico",
+      "sector": "fmcg",
+      "sub_sector": "packaged_foods",
+      "index_tier": "NIFTY100",
+      "market_cap": 800000000000.0,
+      "business_desc": "Packaged consumer goods company whose edible oil portfolio is a branded refined product bought from third-party refiners rather than refined in house."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Import duty on refined edible oil doubled to 25% while crude palm oil duty is cut",
+      "event_status": "confirmed",
+      "facts": "The basic customs duty on refined palm, soyabean and sunflower oil was raised from twelve and a half to twenty-five per cent while the levy on crude palm oil was cut by five percentage points, widening the refining differential to a four-year high. Domestic refiners of imported crude oil gain output protection and cheaper feedstock. The same companies sell branded packaged oil at retail prices set against a costlier competing import, in a price-elastic mass segment.",
+      "fact_items": [
+        {
+          "fact_id": "F1",
+          "text": "Refined edible oil import duty raised from twelve and a half to twenty-five per cent."
+        },
+        {
+          "fact_id": "F2",
+          "text": "Crude palm oil duty cut by five percentage points; refining differential at a four-year high."
+        },
+        {
+          "fact_id": "F3",
+          "text": "Integrated refiners gain output protection and cheaper feedstock simultaneously."
+        },
+        {
+          "fact_id": "F4",
+          "text": "Branded packaged oil retail volume is highly price elastic in the mass segment."
+        }
+      ],
+      "quantities": [
+        "twelve and a half to twenty-five per cent",
+        "five percentage points"
+      ],
+      "named_entities": [
+        "Adani Wilmar",
+        "Marico"
+      ],
+      "category": "fmcg",
+      "event_type": "government_policy",
+      "event_cause": "policy_decision"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "refining_differential_widening",
+          "label": "Refining differential widening",
+          "direction": "bullish",
+          "mechanism": "A higher duty on refined oil against a lower duty on crude oil widens the protected margin available to anyone who crushes and refines domestically",
+          "confidence": 0.9,
+          "materiality": 0.78,
+          "impact_strength": 0.75,
+          "time_horizon": "Short-Term"
+        },
+        {
+          "shock_id": "packaged_oil_retail_price",
+          "label": "Packaged oil retail price",
+          "direction": "bearish",
+          "mechanism": "A doubled duty on the competing refined import raises the shelf price of packaged edible oil in a segment where mass-market volume is highly price elastic",
+          "confidence": 0.85,
+          "materiality": 0.7,
+          "impact_strength": 0.68,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "AWL.NS",
+          "name": "Adani Wilmar",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.7,
+          "confidence": 0.84,
+          "materiality": 0.74,
+          "time_horizon": "Short-Term",
+          "mechanism": "Domestic crushing and refining capacity captures the widened differential directly, with a cheaper crude palm feedstock and a protected refined output price on the same tonne",
+          "rationale": "Owns the refining step the differential protects",
+          "positive_channels": [
+            "protected refining differential",
+            "cheaper crude palm feedstock"
+          ],
+          "parent_id": "refining_differential_widening"
+        },
+        {
+          "ticker": "AWL.NS",
+          "name": "Adani Wilmar",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.8,
+          "materiality": 0.7,
+          "time_horizon": "Short-Term",
+          "mechanism": "The branded packaged portfolio has to shelf at a higher price against the dearer competing import, and mass-segment volume responds sharply to a shelf price step-up",
+          "rationale": "Large branded packaged edible oil business in the price-elastic mass segment",
+          "negative_channels": [
+            "mass-segment volume elasticity at a higher shelf price"
+          ],
+          "parent_id": "packaged_oil_retail_price"
+        },
+        {
+          "ticker": "MARICO.NS",
+          "name": "Marico",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.45,
+          "confidence": 0.68,
+          "materiality": 0.55,
+          "time_horizon": "Short-Term",
+          "mechanism": "Refined oil is bought from third-party refiners, so the higher duty passes into the purchase price of the branded portfolio without any refining margin to offset it",
+          "rationale": "Buys refined oil rather than refining it, so only the cost side of the trade applies",
+          "negative_channels": [
+            "third-party refined oil purchase cost"
+          ],
+          "parent_id": "packaged_oil_retail_price"
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": [
+        "AWL.NS",
+        "MARICO.NS"
+      ],
+      "reject": [],
+      "counterfactual": {
+        "AWL.NS": "SUPPORTED",
+        "MARICO.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "AWL.NS": "mixed",
+      "MARICO.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": [],
+    "expected_sections": [
+      {
+        "effect": "mixed",
+        "label_contains": "other verified mechanisms"
+      },
+      {
+        "effect": "negative",
+        "label_contains": "other verified mechanisms"
+      }
+    ],
+    "expected_causal_distance": {
+      "AWL.NS": 1,
+      "MARICO.NS": 1
+    },
+    "expect_abstention": false,
+    "rationale": "The integrated player is proposed TWICE in the same mapping result, once per mechanism, with OPPOSITE signs. The merge must resolve to mixed and union both channel lists -- a best-wins merge would publish whichever proposal happened to carry the higher impact score and silently delete the other half of the story. The non-integrated buyer alongside it is reached by only one leg of the same policy and is correctly a single-signed negative: the mixed verdict has to be a judgement about the BUSINESS MODEL, not a hedge applied to everyone in the story."
+  }
+}

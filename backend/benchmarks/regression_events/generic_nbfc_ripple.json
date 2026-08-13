@@ -1,0 +1,156 @@
+{
+  "id": "generic_nbfc_ripple",
+  "article": {
+    "title": "System liquidity swings into deficit as advance tax outflows drain the banking system",
+    "text": "Banking system liquidity slipped into a deficit of about one lakh crore rupees this week as advance tax payments and goods and services tax outflows coincided with a heavy government bond auction calendar. The weighted average call rate has drifted above the repo rate for four consecutive sessions and three-month commercial paper is quoting fifteen basis points wider than a month ago. Treasury desks expect the central bank to conduct variable rate repo operations rather than announce any structural measure. Analysts noted that tighter system liquidity is generally read as unhelpful for wholesale-funded lenders, though none of the large non-bank lenders has reported a change in its own borrowing cost.",
+    "note": "The classic ripple trap: a real macro event, a plausible transmission story, and NOT ONE company-specific piece of evidence anywhere. The correct output is an empty primary feed."
+  },
+  "universe": [
+    {
+      "ticker": "BAJFINANCE.NS",
+      "name": "Bajaj Finance",
+      "sector": "banking",
+      "sub_sector": "nbfc",
+      "index_tier": "NIFTY50",
+      "market_cap": 4500000000000.0,
+      "market_cap_note": "largest NBFC by market cap so it heads the candidate pool",
+      "business_desc": "Diversified non-banking financial company lending across consumer durables, two-wheeler, SME and mortgage segments, funded by a mix of bank lines, deposits and market borrowings."
+    },
+    {
+      "ticker": "CHOLAFIN.NS",
+      "name": "Cholamandalam Investment and Finance",
+      "sector": "banking",
+      "sub_sector": "nbfc",
+      "index_tier": "NIFTY100",
+      "market_cap": 1000000000000.0,
+      "business_desc": "Vehicle-finance led non-banking financial company with a growing loan-against-property and SME book."
+    },
+    {
+      "ticker": "LICHSGFIN.NS",
+      "name": "LIC Housing Finance",
+      "sector": "banking",
+      "sub_sector": "housing_finance",
+      "index_tier": "NIFTY500",
+      "market_cap": 350000000000.0,
+      "business_desc": "Housing finance company lending predominantly against salaried-borrower home loans, funded largely through non-convertible debentures."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Banking system liquidity swings into deficit on tax outflows",
+      "event_status": "confirmed",
+      "facts": "Banking system liquidity moved to a deficit of about one lakh crore rupees as advance tax and GST outflows coincided with a heavy bond auction calendar. The weighted average call rate has stayed above the repo rate for four sessions and three-month commercial paper is quoting fifteen basis points wider than a month ago. No large non-bank lender has reported a change in its own borrowing cost.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "System liquidity in deficit of about one lakh crore rupees."},
+        {"fact_id": "F2", "text": "Weighted average call rate above the repo rate for four sessions; three-month CP fifteen basis points wider."},
+        {"fact_id": "F3", "text": "No large non-bank lender has reported a change in its own borrowing cost."}
+      ],
+      "quantities": ["one lakh crore rupees", "fifteen basis points"],
+      "named_entities": [],
+      "category": "banking",
+      "event_type": "banking_metrics",
+      "event_cause": "liquidity_change"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "nbfc_financing_cost",
+          "label": "NBFC funding cost",
+          "direction": "bearish",
+          "mechanism": "A system liquidity deficit widens short-tenor market spreads, raising the marginal cost of wholesale borrowing for lenders that fund themselves in that market",
+          "confidence": 0.8,
+          "materiality": 0.6,
+          "impact_strength": 0.55,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": [
+        {
+          "parent_type": "economic_node",
+          "parent_id": "nbfc_financing_cost",
+          "child_type": "sector",
+          "child_id": "banking",
+          "child_sector": "banking",
+          "direction": "bearish",
+          "mechanism": "Wholesale-funded lenders reprice their marginal borrowing at the wider commercial paper spread",
+          "impact_strength": 0.5,
+          "confidence": 0.72,
+          "materiality": 0.55,
+          "time_horizon": "Short-Term"
+        }
+      ]
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "BAJFINANCE.NS",
+          "name": "Bajaj Finance",
+          "parent_id": "banking",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.5,
+          "confidence": 0.7,
+          "materiality": 0.55,
+          "time_horizon": "Short-Term",
+          "mechanism": "A wider commercial paper spread raises the marginal cost of the market-borrowing share of the funding mix and compresses net interest margin over the repricing cycle",
+          "rationale": "Wholesale-funded lender with a material market-borrowing share",
+          "negative_channels": ["marginal funding cost"]
+        },
+        {
+          "ticker": "CHOLAFIN.NS",
+          "name": "Cholamandalam Investment and Finance",
+          "parent_id": "banking",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.45,
+          "confidence": 0.68,
+          "materiality": 0.5,
+          "time_horizon": "Short-Term",
+          "mechanism": "Tighter system liquidity is unhelpful for every lender in the sector as a whole and pressures the funding line",
+          "rationale": "Large company in the same sector as the affected lenders",
+          "negative_channels": ["funding cost"]
+        },
+        {
+          "ticker": "LICHSGFIN.NS",
+          "name": "LIC Housing Finance",
+          "parent_id": "banking",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.42,
+          "confidence": 0.66,
+          "materiality": 0.48,
+          "time_horizon": "Short-Term",
+          "mechanism": "Debenture-funded housing lenders face a higher marginal issuance cost when short-tenor spreads widen across the curve",
+          "rationale": "Funds itself mainly through non-convertible debentures priced off the same curve",
+          "negative_channels": ["marginal issuance cost"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["BAJFINANCE.NS", "CHOLAFIN.NS", "LICHSGFIN.NS"],
+      "reject": [],
+      "counterfactual": {
+        "BAJFINANCE.NS": "UNCERTAIN",
+        "CHOLAFIN.NS": "UNCERTAIN",
+        "LICHSGFIN.NS": "UNCERTAIN"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": [],
+    "expected_rejected": ["BAJFINANCE.NS", "CHOLAFIN.NS", "LICHSGFIN.NS"],
+    "expected_sections": [],
+    "expected_evidence_tier": {
+      "BAJFINANCE.NS": "E",
+      "CHOLAFIN.NS": "E",
+      "LICHSGFIN.NS": "E"
+    },
+    "expected_materiality_grade": {"BAJFINANCE.NS": "LOW"},
+    "expect_abstention": true,
+    "rationale": "ABSTENTION FIXTURE. Every candidate here is reached by sector membership alone -- the article names no company, no company has a verified exposure to this node, and no relationship record exists. Model inference is the whole of the evidence, and model inference authorises nothing (tier E caps materiality at LOW). An empty primary feed is the CORRECT answer: two of these lenders probably are affected, and the system has no basis to say which."
+  }
+}

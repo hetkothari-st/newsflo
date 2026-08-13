@@ -1,0 +1,115 @@
+{
+  "id": "fertilizer_feedstock",
+  "article": {
+    "title": "Nutrient-based subsidy rates cut 22% for phosphorus as global rock phosphate eases",
+    "text": "The Cabinet approved nutrient-based subsidy rates for the coming season that cut the per-kilogram rate on phosphorus by twenty-two per cent and on potash by nine per cent, citing a decline in international rock phosphate and muriate of potash contract prices. Maximum retail prices for complex fertilisers remain under informal control, so a subsidy cut that runs ahead of the imported raw-material decline compresses the manufacturer's realised margin per bag rather than the farmer's cost. Coromandel International, which manufactures complex phosphatic fertilisers, and Chambal Fertilisers, whose portfolio is predominantly urea and therefore outside the nutrient-based regime, face very different exposure to the same notification. Urea remains on the separate fixed-price subsidy mechanism.",
+    "note": "Two companies, one notification, and only one of them is actually inside the regime being changed. Sector membership is not exposure."
+  },
+  "universe": [
+    {
+      "ticker": "COROMANDEL.NS",
+      "name": "Coromandel International",
+      "sector": "chemicals",
+      "sub_sector": "fertilizers",
+      "index_tier": "NIFTY500",
+      "market_cap": 520000000000.0,
+      "business_desc": "Manufacturer of complex phosphatic fertilisers and crop protection chemicals, operating entirely within the nutrient-based subsidy regime."
+    },
+    {
+      "ticker": "CHAMBLFERT.NS",
+      "name": "Chambal Fertilisers and Chemicals",
+      "sector": "chemicals",
+      "sub_sector": "fertilizers",
+      "index_tier": "NIFTY500",
+      "market_cap": 200000000000.0,
+      "business_desc": "Fertiliser manufacturer whose output is predominantly urea, produced under the separate fixed-price subsidy mechanism rather than the nutrient-based regime."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Cabinet cuts nutrient-based subsidy rates 22% on phosphorus and 9% on potash",
+      "event_status": "confirmed",
+      "facts": "The Cabinet approved nutrient-based subsidy rates cutting the per-kilogram phosphorus rate twenty-two per cent and potash nine per cent, citing lower international rock phosphate and muriate of potash contract prices. Maximum retail prices for complex fertilisers remain under informal control, so a subsidy cut ahead of the raw-material decline compresses manufacturer margin per bag. Urea remains on the separate fixed-price subsidy mechanism.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Nutrient-based subsidy cut twenty-two per cent on phosphorus and nine per cent on potash."},
+        {"fact_id": "F2", "text": "Complex fertiliser MRPs stay under informal control, so the cut compresses manufacturer margin per bag."},
+        {"fact_id": "F3", "text": "Urea remains on the separate fixed-price subsidy mechanism, outside this regime."}
+      ],
+      "quantities": ["twenty-two per cent", "nine per cent"],
+      "named_entities": ["Coromandel International", "Chambal Fertilisers and Chemicals"],
+      "category": "other",
+      "event_type": "government_policy",
+      "event_cause": "policy_decision"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "nutrient_subsidy_rate_reset",
+          "label": "Nutrient-based subsidy rate cut",
+          "direction": "bearish",
+          "mechanism": "A subsidy rate cut that runs ahead of the imported feedstock decline, against informally controlled retail prices, lands on the manufacturer's realised margin per bag",
+          "confidence": 0.88,
+          "materiality": 0.75,
+          "impact_strength": 0.72,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "COROMANDEL.NS",
+          "name": "Coromandel International",
+          "parent_id": "nutrient_subsidy_rate_reset",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.68,
+          "confidence": 0.85,
+          "materiality": 0.74,
+          "time_horizon": "Short-Term",
+          "mechanism": "The complex phosphatic portfolio sits entirely inside the regime being cut, so a twenty-two per cent phosphorus rate reduction against controlled retail prices compresses realised margin per bag immediately",
+          "rationale": "Complex phosphatic manufacturer wholly inside the nutrient-based subsidy regime",
+          "negative_channels": ["subsidy realisation per bag ahead of feedstock relief"],
+          "positive_channels": ["lower imported rock phosphate cost with a lag"]
+        },
+        {
+          "ticker": "CHAMBLFERT.NS",
+          "name": "Chambal Fertilisers and Chemicals",
+          "parent_id": "nutrient_subsidy_rate_reset",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.4,
+          "confidence": 0.62,
+          "materiality": 0.5,
+          "time_horizon": "Short-Term",
+          "mechanism": "A predominantly urea portfolio is reimbursed under the separate fixed-price mechanism, so this notification touches only the small non-urea tail of the volume mix",
+          "rationale": "Mostly outside the regime this notification changes",
+          "negative_channels": ["small non-urea share of volumes"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["COROMANDEL.NS"],
+      "reject": [
+        {"ticker": "CHAMBLFERT.NS", "reason": "no real exposure to this shock: the urea portfolio is reimbursed under a different mechanism that this notification does not change"}
+      ],
+      "counterfactual": {
+        "COROMANDEL.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"COROMANDEL.NS": "negative"},
+    "allow_secondary": [],
+    "expected_rejected": ["CHAMBLFERT.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "other verified mechanisms"}
+    ],
+    "expected_causal_distance": {"COROMANDEL.NS": 1},
+    "expect_abstention": false,
+    "rationale": "Both companies are fertiliser makers named by the same article; only one is inside the regime being changed. The verifier's explicit structural rejection removes the other before the gate ever sees it, and the rejection reason is recorded so a postmortem can tell 'the verifier said no' apart from 'the gate excluded it'."
+  }
+}

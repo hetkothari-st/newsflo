@@ -1,0 +1,126 @@
+{
+  "id": "telecom_weak_exposure",
+  "article": {
+    "title": "TRAI floats a consultation paper on satellite spectrum pricing methodology",
+    "text": "The Telecom Regulatory Authority of India released a consultation paper seeking views on the pricing methodology for satellite communication spectrum, covering whether administrative assignment should carry a percentage-of-revenue levy and how any such levy should interact with the existing licence fee framework. Responses are due in eight weeks and the authority will hold an open house before framing recommendations, which the department of telecommunications is not bound to accept. No band, quantum, reserve price or timeline is proposed in the paper. Terrestrial mobile operators hold no satellite spectrum today and the incumbent satellite licensees are unlisted or foreign-owned subsidiaries.",
+    "note": "A consultation paper is not a policy. Every quantity that would make a company claim measurable is explicitly absent -- the correct answer is that nothing is material enough to publish."
+  },
+  "universe": [
+    {
+      "ticker": "BHARTIARTL.NS",
+      "name": "Bharti Airtel",
+      "sector": "telecom",
+      "sub_sector": "wireless",
+      "index_tier": "NIFTY50",
+      "market_cap": 9000000000000.0,
+      "business_desc": "Integrated telecom operator running mobile, broadband and enterprise networks in India and Africa."
+    },
+    {
+      "ticker": "IDEA.NS",
+      "name": "Vodafone Idea",
+      "sector": "telecom",
+      "sub_sector": "wireless",
+      "index_tier": "NIFTY500",
+      "market_cap": 90000000000.0,
+      "business_desc": "Mobile network operator with a heavily leveraged balance sheet and no satellite spectrum holdings."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "TRAI issues a consultation paper on satellite spectrum pricing methodology",
+      "event_status": "confirmed",
+      "facts": "TRAI released a consultation paper on the pricing methodology for satellite communication spectrum, seeking views on whether administrative assignment should carry a percentage-of-revenue levy. Responses are due in eight weeks and an open house will follow; the department of telecommunications is not bound to accept the recommendations. No band, quantum, reserve price or timeline is proposed. Terrestrial mobile operators hold no satellite spectrum today.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "TRAI consultation paper on satellite spectrum pricing methodology; responses due in eight weeks."},
+        {"fact_id": "F2", "text": "No band, quantum, reserve price or timeline is proposed."},
+        {"fact_id": "F3", "text": "DoT is not bound to accept the eventual recommendations; terrestrial operators hold no satellite spectrum today."}
+      ],
+      "quantities": ["eight weeks"],
+      "named_entities": [],
+      "category": "telecom",
+      "event_type": "regulation",
+      "event_cause": "policy_decision"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "satellite_spectrum_pricing",
+          "label": "Satellite spectrum pricing consultation",
+          "direction": "neutral",
+          "mechanism": "A consultation on assignment methodology may eventually change the cost basis of satellite spectrum, but no band, quantum or reserve price has been proposed",
+          "confidence": 0.6,
+          "materiality": 0.3,
+          "impact_strength": 0.3,
+          "time_horizon": "Long-Term"
+        }
+      ],
+      "edges": [
+        {
+          "parent_type": "economic_node",
+          "parent_id": "satellite_spectrum_pricing",
+          "child_type": "sector",
+          "child_id": "telecom",
+          "child_sector": "telecom",
+          "direction": "neutral",
+          "mechanism": "Any eventual levy framework would apply to licensees holding satellite spectrum",
+          "impact_strength": 0.3,
+          "confidence": 0.62,
+          "materiality": 0.4,
+          "time_horizon": "Long-Term"
+        }
+      ]
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "BHARTIARTL.NS",
+          "name": "Bharti Airtel",
+          "parent_id": "telecom",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.35,
+          "confidence": 0.65,
+          "materiality": 0.42,
+          "time_horizon": "Long-Term",
+          "mechanism": "A future revenue-share levy on satellite spectrum would raise the cost basis of any satellite broadband venture the operator eventually pursues through an affiliate",
+          "rationale": "Has publicly stated an intention to pursue satellite broadband at some future date",
+          "negative_channels": ["prospective satellite spectrum levy"]
+        },
+        {
+          "ticker": "IDEA.NS",
+          "name": "Vodafone Idea",
+          "parent_id": "telecom",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.3,
+          "confidence": 0.62,
+          "materiality": 0.4,
+          "time_horizon": "Long-Term",
+          "mechanism": "Any additional spectrum-linked levy framework adds to the regulatory cost stack a leveraged operator must eventually fund",
+          "rationale": "Balance sheet leaves no headroom for incremental regulatory cost of any kind",
+          "negative_channels": ["regulatory cost stack"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["BHARTIARTL.NS", "IDEA.NS"],
+      "reject": [],
+      "counterfactual": {
+        "BHARTIARTL.NS": "UNCERTAIN",
+        "IDEA.NS": "UNCERTAIN"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": [],
+    "expected_rejected": ["BHARTIARTL.NS", "IDEA.NS"],
+    "expected_sections": [],
+    "expected_materiality_grade": {"BHARTIARTL.NS": "LOW", "IDEA.NS": "LOW"},
+    "expected_evidence_tier": {"BHARTIARTL.NS": "E", "IDEA.NS": "E"},
+    "expect_abstention": true,
+    "rationale": "ABSTENTION FIXTURE. Weak exposure to a real regulatory process is still weak exposure: neither operator holds the spectrum being priced, the paper proposes no quantum, and the evidence is pure model inference. A LOW composite materiality grade must exclude rather than earn a quiet deep-dive slot."
+  }
+}

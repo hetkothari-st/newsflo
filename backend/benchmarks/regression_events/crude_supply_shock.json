@@ -1,0 +1,176 @@
+{
+  "id": "crude_supply_shock",
+  "article": {
+    "title": "OPEC+ deepens output cut; Brent jumps to a fourteen-month high",
+    "text": "OPEC and its allies agreed on Sunday to extend and deepen production cuts by a further 1.1 million barrels a day through the first half of next year, tightening a market that was already drawing down inventories. Brent crude settled at a fourteen-month high, and the Indian crude basket rose to eighty-nine dollars a barrel. India imports more than eighty per cent of the crude it consumes, so a sustained rise in the basket lifts realisations for domestic producers such as Oil and Natural Gas Corporation while raising the input bill for every fuel-consuming industry. Refiners face a two-sided move, with feedstock costs and product cracks both repricing. Traders said the cut had been partly anticipated and that positioning was already long ahead of the meeting."
+  },
+  "universe": [
+    {
+      "ticker": "ONGC.NS",
+      "name": "Oil and Natural Gas Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "upstream_exploration",
+      "index_tier": "NIFTY50",
+      "market_cap": 3200000000000.0,
+      "business_desc": "India's largest crude oil and natural gas exploration and production company, with unhedged upstream realisations linked to the international crude benchmark.",
+      "exposures": [{"dimension": "commodity_revenue", "level": "HIGH"}]
+    },
+    {
+      "ticker": "INDIGO.NS",
+      "name": "InterGlobe Aviation",
+      "sector": "railways_transport",
+      "sub_sector": "airlines",
+      "index_tier": "NIFTY50",
+      "market_cap": 1600000000000.0,
+      "business_desc": "India's largest airline by market share, operating a single-fleet low-cost air transport network where aviation turbine fuel is the dominant operating cost.",
+      "exposures": [{"dimension": "fuel_cost", "level": "VERY_HIGH"}]
+    },
+    {
+      "ticker": "MRF.NS",
+      "name": "MRF",
+      "sector": "auto",
+      "sub_sector": "tyres",
+      "index_tier": "NIFTY100",
+      "market_cap": 550000000000.0,
+      "business_desc": "India's largest tyre manufacturer, consuming crude-derived synthetic rubber and carbon black as primary raw materials.",
+      "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]
+    },
+    {
+      "ticker": "GAIL.NS",
+      "name": "GAIL India",
+      "sector": "oil_gas",
+      "sub_sector": "gas_transmission",
+      "index_tier": "NIFTY100",
+      "market_cap": 1100000000000.0,
+      "business_desc": "Natural gas transmission and marketing utility earning regulated tariffs on pipeline throughput."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "OPEC+ deepens output cuts and crude prices rise to a fourteen-month high",
+      "event_status": "confirmed",
+      "facts": "OPEC+ agreed to extend and deepen production cuts by 1.1 million barrels a day through the first half of next year. Brent settled at a fourteen-month high and the Indian crude basket rose to eighty-nine dollars a barrel. India imports over eighty per cent of the crude it consumes.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "OPEC+ deepened output cuts by 1.1 million barrels a day through H1 next year."},
+        {"fact_id": "F2", "text": "Brent settled at a fourteen-month high; the Indian crude basket rose to eighty-nine dollars a barrel."},
+        {"fact_id": "F3", "text": "India imports more than eighty per cent of the crude it consumes."}
+      ],
+      "quantities": ["1.1 million barrels a day", "eighty-nine dollars a barrel"],
+      "named_entities": ["Oil and Natural Gas Corporation"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price",
+          "label": "Crude price",
+          "direction": "bullish",
+          "mechanism": "A deeper OPEC+ output cut tightens physical supply and lifts the benchmark crude price India imports against",
+          "confidence": 0.92,
+          "materiality": 0.85,
+          "impact_strength": 0.85,
+          "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@upstream_realization": {"companies": []},
+    "map_companies@crude_price": {
+      "companies": [
+        {
+          "ticker": "ONGC.NS",
+          "name": "Oil and Natural Gas Corporation",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.8,
+          "confidence": 0.88,
+          "materiality": 0.82,
+          "time_horizon": "Immediate",
+          "mechanism": "Unhedged upstream realisation per barrel rises directly with the benchmark crude price, lifting revenue on flat production volumes",
+          "rationale": "Domestic upstream producer selling crude at import parity with no marketing arm to absorb the gain",
+          "positive_channels": ["higher crude realisation per barrel"]
+        },
+        {
+          "ticker": "GAIL.NS",
+          "name": "GAIL India",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.5,
+          "confidence": 0.65,
+          "materiality": 0.55,
+          "time_horizon": "Short-Term",
+          "mechanism": "Energy complex repricing generally lifts sentiment and realisations across the hydrocarbon value chain",
+          "rationale": "Large company in the same sector as the affected producers, so sector exposure applies here too",
+          "positive_channels": ["energy complex repricing"]
+        }
+      ]
+    },
+    "map_companies@aviation_fuel_cost": {
+      "companies": [
+        {
+          "ticker": "INDIGO.NS",
+          "name": "InterGlobe Aviation",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.72,
+          "confidence": 0.86,
+          "materiality": 0.75,
+          "time_horizon": "Immediate",
+          "mechanism": "Aviation turbine fuel is priced off crude and is roughly forty per cent of the airline's operating cost, so a sustained basket rise compresses spread per available seat kilometre",
+          "rationale": "Single-fleet low-cost carrier with fuel as its dominant unhedged operating input",
+          "negative_channels": ["ATF cost inflation"]
+        }
+      ]
+    },
+    "map_companies@tyre_input_cost": {
+      "companies": [
+        {
+          "ticker": "MRF.NS",
+          "name": "MRF",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.8,
+          "materiality": 0.68,
+          "time_horizon": "Short-Term",
+          "mechanism": "Synthetic rubber and carbon black are crude derivatives and together form the largest share of tyre raw-material cost, with replacement-market price hikes lagging by a quarter",
+          "rationale": "Tyre maker with crude-derived inputs and limited immediate pricing power",
+          "negative_channels": ["synthetic rubber and carbon black cost inflation"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ONGC.NS", "INDIGO.NS", "MRF.NS", "GAIL.NS"],
+      "reject": [],
+      "counterfactual": {
+        "ONGC.NS": "SUPPORTED",
+        "INDIGO.NS": "SUPPORTED",
+        "MRF.NS": "SUPPORTED",
+        "GAIL.NS": "UNCERTAIN"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"ONGC.NS": "positive"},
+    "allow_secondary": ["INDIGO.NS", "MRF.NS"],
+    "expected_rejected": ["GAIL.NS"],
+    "expected_sections": [
+      {"effect": "positive", "label_contains": "crude-linked"}
+    ],
+    "expected_evidence_tier": {
+      "ONGC.NS": "SUBJECT",
+      "INDIGO.NS": "D",
+      "MRF.NS": "D"
+    },
+    "expected_causal_distance": {"ONGC.NS": 1, "INDIGO.NS": 2, "MRF.NS": 2},
+    "expected_mechanism": {"INDIGO.NS": "aviation_fuel_cost", "MRF.NS": "tyre_input_cost"},
+    "expect_abstention": false,
+    "rationale": "ONGC is the article's own named subject at distance 1 with an unhedged-realisation mechanism -- primary. The airline and tyre second-order effects come from the curated archetype registry, which is a maintainer-reviewed template rather than a sourced artifact: tier D, so they may inform a deep dive and must never lead the feed. GAIL's rationale is interchangeable with a sector statement ('large company in the same sector ... sector exposure'), which at tier D/E cannot carry a company-specific claim."
+  }
+}

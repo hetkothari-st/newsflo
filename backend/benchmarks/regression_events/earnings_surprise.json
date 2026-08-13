@@ -1,0 +1,116 @@
+{
+  "id": "earnings_surprise",
+  "article": {
+    "title": "Titan posts 24% jewellery revenue growth and raises its store addition target",
+    "text": "Titan Company reported twenty-four per cent year-on-year growth in its jewellery division against consensus of about fifteen, with studded share improving one hundred and ten basis points and same-store growth in the high teens across all four zones. Management raised the full-year store addition target from ninety to one hundred and thirty and said the studded mix improvement was structural rather than a festive artefact. The company also said gold customs duty changes had not disturbed its exchange programme economics. Kalyan Jewellers reports next week; brokerages were split on whether Titan's studded gain came at an organised-competitor's expense or from the unorganised trade.",
+    "note": "The read-across trap: a strong print from one listed jeweller is not evidence about the next one, and the article itself says the analysts cannot tell where the share came from."
+  },
+  "universe": [
+    {
+      "ticker": "TITAN.NS",
+      "name": "Titan Company",
+      "sector": "consumer_durables",
+      "sub_sector": "jewellery_watches",
+      "index_tier": "NIFTY50",
+      "market_cap": 3300000000000.0,
+      "business_desc": "Branded jewellery, watches and eyewear retailer operating the Tanishq, Mia and CaratLane jewellery formats through a national store network."
+    },
+    {
+      "ticker": "KALYANKJIL.NS",
+      "name": "Kalyan Jewellers India",
+      "sector": "consumer_durables",
+      "sub_sector": "jewellery_watches",
+      "index_tier": "NIFTY500",
+      "market_cap": 550000000000.0,
+      "business_desc": "Branded jewellery retailer expanding through a franchise-led store network across south and north India."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Titan reports 24% jewellery revenue growth and raises its store addition target",
+      "event_status": "confirmed",
+      "facts": "Titan Company reported twenty-four per cent year-on-year jewellery division growth against consensus of about fifteen, with studded share up one hundred and ten basis points and high-teens same-store growth across all four zones. Management raised the full-year store addition target from ninety to one hundred and thirty and called the studded mix improvement structural. Brokerages were split on whether the studded gain came from an organised competitor or the unorganised trade.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Jewellery division revenue up twenty-four per cent year on year against consensus of about fifteen."},
+        {"fact_id": "F2", "text": "Studded share up one hundred and ten basis points; high-teens same-store growth in all four zones."},
+        {"fact_id": "F3", "text": "Full-year store addition target raised from ninety to one hundred and thirty."},
+        {"fact_id": "F4", "text": "Brokerages split on whether the studded share gain came from an organised competitor or the unorganised trade."}
+      ],
+      "quantities": ["twenty-four per cent", "one hundred and ten basis points", "ninety to one hundred and thirty"],
+      "named_entities": ["Titan Company", "Kalyan Jewellers India"],
+      "category": "corporate_event",
+      "event_type": "earnings",
+      "event_cause": "company_performance"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "jewellery_demand_beat",
+          "label": "Jewellery demand beat",
+          "direction": "bullish",
+          "mechanism": "A reported revenue beat with an improving studded mix raises the realised gross margin per transaction and validates a faster store rollout against the same fixed cost base",
+          "confidence": 0.9,
+          "materiality": 0.75,
+          "impact_strength": 0.72,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "TITAN.NS",
+          "name": "Titan Company",
+          "parent_id": "jewellery_demand_beat",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.7,
+          "confidence": 0.9,
+          "materiality": 0.76,
+          "time_horizon": "Short-Term",
+          "mechanism": "Reported growth nine points ahead of consensus with a one hundred and ten basis point studded mix gain lifts both revenue and realised margin, and the raised store target extends it into the following year",
+          "rationale": "The company's own reported numbers and its own raised guidance",
+          "positive_channels": ["revenue beat", "studded mix margin gain", "accelerated store rollout"]
+        },
+        {
+          "ticker": "KALYANKJIL.NS",
+          "name": "Kalyan Jewellers India",
+          "parent_id": "jewellery_demand_beat",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.5,
+          "confidence": 0.7,
+          "materiality": 0.6,
+          "time_horizon": "Short-Term",
+          "mechanism": "Industry-wide organised jewellery demand implied by the leader's print should translate into a comparable same-store trend at the next reporting franchise-led retailer",
+          "rationale": "Read-across from the sector leader's reported quarter ahead of its own results",
+          "positive_channels": ["implied industry demand"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["TITAN.NS"],
+      "reject": [
+        {"ticker": "KALYANKJIL.NS", "reason": "no real exposure to this shock: the article states the source of the share gain is unknown, so the leader's print is not evidence about this company's own quarter"}
+      ],
+      "counterfactual": {
+        "TITAN.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"TITAN.NS": "positive"},
+    "allow_secondary": [],
+    "expected_rejected": ["KALYANKJIL.NS"],
+    "expected_sections": [
+      {"effect": "positive", "label_contains": "other verified mechanisms"}
+    ],
+    "expected_evidence_tier": {"TITAN.NS": "SUBJECT"},
+    "expected_causal_distance": {"TITAN.NS": 1},
+    "expect_abstention": false,
+    "rationale": "A company's own reported numbers are the strongest evidence the system ever sees -- primary without qualification. The peer read-across is exactly the claim the article itself says cannot be made: if the share came from the organised competitor, the read-across has the SIGN BACKWARDS. Rejecting it is not conservatism, it is refusing to guess a direction."
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "id": "regulation_usfda_alert",
+  "article": {
+    "title": "USFDA places Sun Pharma's Halol unit under import alert, exempts 14 products",
+    "text": "The United States Food and Drug Administration placed Sun Pharmaceutical Industries' Halol facility under an import alert following an inspection that cited data integrity observations in the sterile block, while exempting fourteen products from the alert on medical necessity grounds. Halol supplies a mid single digit share of the company's United States revenue, and the exempted list covers the two largest contributors. Cipla, which operates its own Goa and Indore facilities inspected in a separate cycle, is not named in the action. Divi's Laboratories supplies active ingredients into several US-bound programmes but none from the affected site.",
+    "note": "Regulatory actions are the most over-generalised events in Indian pharma: one plant, one company, and the whole sector gets marked down. Only the named plant's owner has evidence."
+  },
+  "universe": [
+    {
+      "ticker": "SUNPHARMA.NS",
+      "name": "Sun Pharmaceutical Industries",
+      "sector": "pharma",
+      "sub_sector": "generics_formulations",
+      "index_tier": "NIFTY50",
+      "market_cap": 4200000000000.0,
+      "business_desc": "India's largest pharmaceutical company, manufacturing generic and specialty formulations for the United States and domestic markets across multiple sites including Halol."
+    },
+    {
+      "ticker": "CIPLA.NS",
+      "name": "Cipla",
+      "sector": "pharma",
+      "sub_sector": "generics_formulations",
+      "index_tier": "NIFTY50",
+      "market_cap": 1300000000000.0,
+      "business_desc": "Pharmaceutical manufacturer with respiratory and generic formulation franchises supplied from its own Goa and Indore facilities."
+    },
+    {
+      "ticker": "DIVISLAB.NS",
+      "name": "Divi's Laboratories",
+      "sector": "pharma",
+      "sub_sector": "api_cdmo",
+      "index_tier": "NIFTY50",
+      "market_cap": 1500000000000.0,
+      "business_desc": "Active pharmaceutical ingredient and custom synthesis manufacturer supplying innovator and generic programmes from its own Telangana and Andhra Pradesh sites."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "USFDA places Sun Pharma's Halol facility under import alert with 14 product exemptions",
+      "event_status": "confirmed",
+      "facts": "The USFDA placed Sun Pharmaceutical Industries' Halol facility under an import alert after citing data integrity observations in the sterile block, exempting fourteen products on medical necessity grounds. Halol supplies a mid single digit share of the company's United States revenue and the exempted list covers the two largest contributors. No other company is named in the action.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "USFDA import alert on Sun Pharma's Halol facility over data integrity observations in the sterile block."},
+        {"fact_id": "F2", "text": "Fourteen products exempted on medical necessity grounds, covering the two largest contributors."},
+        {"fact_id": "F3", "text": "Halol supplies a mid single digit share of the company's US revenue; no other company is named."}
+      ],
+      "quantities": ["fourteen products", "mid single digit share"],
+      "named_entities": ["Sun Pharmaceutical Industries", "Cipla", "Divi's Laboratories"],
+      "category": "pharma",
+      "event_type": "regulation",
+      "event_cause": "regulatory_action"
+    },
+    "narrow_graph": {
+      "shocks": [
+        {
+          "shock_id": "site_import_alert",
+          "label": "Facility import alert",
+          "direction": "bearish",
+          "mechanism": "An import alert blocks commercial shipment of non-exempt products from the named site into the United States until the observations are resolved and the site is re-inspected",
+          "confidence": 0.92,
+          "materiality": 0.7,
+          "impact_strength": 0.68,
+          "time_horizon": "Medium-Term"
+        }
+      ],
+      "edges": []
+    },
+    "narrow_companies": {
+      "companies": [
+        {
+          "ticker": "SUNPHARMA.NS",
+          "name": "Sun Pharmaceutical Industries",
+          "parent_id": "site_import_alert",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.88,
+          "materiality": 0.68,
+          "time_horizon": "Medium-Term",
+          "mechanism": "Non-exempt Halol products cannot ship into the United States until re-inspection, removing part of a mid single digit US revenue share and deferring pending approvals filed from the site",
+          "rationale": "Owner of the named facility, with the alert's scope stated in the action itself",
+          "negative_channels": ["blocked non-exempt US shipments", "approval deferral on site-linked filings"],
+          "offsetting_channels": ["the fourteen exempted products cover the two largest contributors"]
+        },
+        {
+          "ticker": "CIPLA.NS",
+          "name": "Cipla",
+          "parent_id": "site_import_alert",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.3,
+          "confidence": 0.6,
+          "materiality": 0.32,
+          "time_horizon": "Medium-Term",
+          "mechanism": "Heightened regulatory scrutiny of Indian sterile manufacturing raises the perceived probability of an adverse observation at any peer's own facilities in future cycles",
+          "rationale": "Operates its own sterile capacity in a separate inspection cycle",
+          "negative_channels": ["general regulatory scrutiny"]
+        },
+        {
+          "ticker": "DIVISLAB.NS",
+          "name": "Divi's Laboratories",
+          "parent_id": "site_import_alert",
+          "direction": "bullish",
+          "net_direction": "bearish",
+          "economic_effect": "positive",
+          "impact_strength": 0.35,
+          "confidence": 0.62,
+          "materiality": 0.5,
+          "time_horizon": "Medium-Term",
+          "mechanism": "A competitor site losing US shipment capability could redirect ingredient and contract manufacturing demand toward unaffected suppliers over the medium term",
+          "rationale": "Unaffected supplier that could pick up displaced programmes",
+          "positive_channels": ["displaced programme redirection"],
+          "negative_channels": ["sector-wide regulatory sentiment"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["SUNPHARMA.NS", "CIPLA.NS", "DIVISLAB.NS"],
+      "reject": [],
+      "counterfactual": {
+        "SUNPHARMA.NS": "SUPPORTED",
+        "CIPLA.NS": "SUPPORTED",
+        "DIVISLAB.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"SUNPHARMA.NS": "negative"},
+    "allow_secondary": [],
+    "expected_rejected": ["CIPLA.NS", "DIVISLAB.NS"],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "other verified mechanisms"}
+    ],
+    "expected_causal_distance": {"SUNPHARMA.NS": 1},
+    "expected_materiality_grade": {"CIPLA.NS": "LOW"},
+    "expect_abstention": false,
+    "rationale": "Only the plant's owner has evidence. The peer's 'heightened scrutiny' claim grades LOW on materiality and must be excluded rather than parked in a deep dive. The API supplier is rejected for a different reason entirely: its economic_effect says positive while its net_direction says bearish -- the record contradicts itself, and a contradictory record is not a hedged one, it is a broken one."
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "id": "interest_rate_hike",
+  "article": {
+    "title": "RBI raises the repo rate 25 basis points and shifts the stance to withdrawal of accommodation",
+    "text": "The Monetary Policy Committee voted four to two to raise the repo rate by twenty-five basis points to six and a half per cent and changed the stance to withdrawal of accommodation, citing a broadening of core inflation and a still-negative output gap in services. The governor said the transmission of the previous cycle was incomplete on the deposit side. Banks reprice external-benchmark-linked loans within one quarter while term deposits reprice over three to four, so the near-term margin effect depends on each lender's floating-rate share. HDFC Bank has the highest external-benchmark-linked share among large private lenders. Non-bank lenders that fund themselves in the market see their marginal borrowing cost rise with no matching asset reset.",
+    "note": "A rate hike is genuinely mixed for a bank -- assets reprice faster than liabilities and then the order reverses. A confident bullish or bearish bank call here is a wrong published claim."
+  },
+  "universe": [
+    {
+      "ticker": "HDFCBANK.NS",
+      "name": "HDFC Bank",
+      "sector": "banking",
+      "sub_sector": "private_bank",
+      "index_tier": "NIFTY50",
+      "market_cap": 12000000000000.0,
+      "business_desc": "India's largest private sector bank, with a high share of external-benchmark-linked floating-rate loans and a large retail deposit franchise.",
+      "exposures": [{"dimension": "financing", "level": "HIGH"}]
+    },
+    {
+      "ticker": "BAJFINANCE.NS",
+      "name": "Bajaj Finance",
+      "sector": "banking",
+      "sub_sector": "nbfc",
+      "index_tier": "NIFTY50",
+      "market_cap": 4500000000000.0,
+      "business_desc": "Diversified non-banking financial company funded through bank lines, deposits and market borrowings, lending largely at fixed rates.",
+      "exposures": [{"dimension": "financing", "level": "HIGH"}]
+    },
+    {
+      "ticker": "DLF.NS",
+      "name": "DLF",
+      "sector": "construction_realestate",
+      "sub_sector": "residential_developer",
+      "index_tier": "NIFTY100",
+      "market_cap": 2000000000000.0,
+      "business_desc": "Residential and commercial real estate developer whose end customers finance purchases predominantly through floating-rate home loans.",
+      "exposures": [{"dimension": "housing_demand", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "RBI raises the repo rate by 25 basis points to 6.5% and shifts stance to withdrawal of accommodation",
+      "event_status": "confirmed",
+      "facts": "The Monetary Policy Committee voted four to two to raise the repo rate twenty-five basis points to six and a half per cent and changed the stance to withdrawal of accommodation. External-benchmark-linked loans reprice within a quarter while term deposits reprice over three to four quarters. Market-funded non-bank lenders see marginal borrowing cost rise with no matching asset reset.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Repo rate raised twenty-five basis points to six and a half per cent on a four-two vote."},
+        {"fact_id": "F2", "text": "Stance changed to withdrawal of accommodation; core inflation broadening."},
+        {"fact_id": "F3", "text": "EBLR loans reprice within a quarter; term deposits reprice over three to four quarters."}
+      ],
+      "quantities": ["twenty-five basis points", "six and a half per cent"],
+      "named_entities": ["HDFC Bank"],
+      "category": "macro_policy",
+      "event_type": "repo_rate_change",
+      "event_cause": "policy_decision"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "repo_rate_up",
+          "label": "Policy rate increase",
+          "direction": "neutral",
+          "mechanism": "A higher policy rate reprices external-benchmark-linked assets within a quarter and term liabilities over three to four, so the sign of the margin effect changes with the horizon and with each lender's mix",
+          "confidence": 0.92,
+          "materiality": 0.8,
+          "impact_strength": 0.78,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@bank_nim_repricing": {"companies": []},
+    "map_companies@interest_rate_up": {
+      "companies": [
+        {
+          "ticker": "HDFCBANK.NS",
+          "name": "HDFC Bank",
+          "direction": "neutral",
+          "net_direction": "mixed",
+          "economic_effect": "mixed",
+          "impact_strength": 0.6,
+          "confidence": 0.82,
+          "materiality": 0.7,
+          "time_horizon": "Short-Term",
+          "mechanism": "The highest external-benchmark-linked loan share reprices assets within one quarter, lifting margin first, while term deposits reprice over the following three quarters and take it back",
+          "rationale": "Asset-sensitive in the near term and liability-sensitive across the full cycle",
+          "positive_channels": ["immediate EBLR asset repricing"],
+          "negative_channels": ["term deposit cost reset over the following quarters"],
+          "offsetting_channels": ["the asset gain and the deposit cost land in different quarters of the same cycle"]
+        }
+      ]
+    },
+    "map_companies@nbfc_financing_cost": {
+      "companies": [
+        {
+          "ticker": "BAJFINANCE.NS",
+          "name": "Bajaj Finance",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.8,
+          "materiality": 0.68,
+          "time_horizon": "Short-Term",
+          "mechanism": "Market borrowings reprice at the higher policy-linked curve while a largely fixed-rate loan book cannot reset, compressing spread until new originations catch up",
+          "rationale": "Market-funded lender with a fixed-rate asset book",
+          "negative_channels": ["marginal funding cost with no asset reset"]
+        }
+      ]
+    },
+    "map_companies@housing_demand_rate": {
+      "companies": [
+        {
+          "ticker": "DLF.NS",
+          "name": "DLF",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.5,
+          "confidence": 0.72,
+          "materiality": 0.6,
+          "time_horizon": "Medium-Term",
+          "mechanism": "Home loan equated instalments rise with the external benchmark, reducing affordability at the margin for the salaried buyer who finances the purchase",
+          "rationale": "End demand financed predominantly through floating-rate home loans",
+          "negative_channels": ["buyer affordability at higher EMIs"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["HDFCBANK.NS", "BAJFINANCE.NS", "DLF.NS"],
+      "reject": [],
+      "counterfactual": {
+        "HDFCBANK.NS": "SUPPORTED",
+        "BAJFINANCE.NS": "SUPPORTED",
+        "DLF.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"HDFCBANK.NS": "mixed"},
+    "allow_secondary": ["BAJFINANCE.NS", "DLF.NS"],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "mixed", "label_contains": "other verified mechanisms"}
+    ],
+    "expected_evidence_tier": {"HDFCBANK.NS": "SUBJECT", "BAJFINANCE.NS": "D"},
+    "expected_causal_distance": {"HDFCBANK.NS": 1, "BAJFINANCE.NS": 2},
+    "expected_mechanism": {"BAJFINANCE.NS": "nbfc_financing_cost"},
+    "expect_abstention": false,
+    "rationale": "The bank must survive to the feed as MIXED: asset repricing and deposit repricing land in different quarters of the same cycle, and collapsing that into one direction is the exact fake-precision this engine exists to stop. The non-bank lender and the developer come through the curated registry at tier D and stay deep dives."
+  }
+}

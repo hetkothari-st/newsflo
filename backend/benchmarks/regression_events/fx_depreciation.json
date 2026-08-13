@@ -1,0 +1,120 @@
+{
+  "id": "fx_depreciation",
+  "article": {
+    "title": "Rupee slides to a record low of 88.4 as the dollar index firms and portfolio outflows continue",
+    "text": "The rupee closed at a record low of eighty-eight point four to the dollar, down two and a half per cent in the quarter, as the dollar index firmed and foreign portfolio investors pulled money out of Indian equities for a seventh straight week. The central bank was seen selling dollars through state-owned banks but did not defend any particular level. A weaker rupee raises the realised rupee value of dollar-denominated services and product exports, and simultaneously raises the landed cost of every imported input, most visibly the crude India buys. Infosys books the large majority of its revenue in dollars and euros against a predominantly rupee cost base.",
+    "note": "Two-sided macro event where the export beneficiary is the article's subject and the import-cost loser reaches the graph through the curated registry."
+  },
+  "universe": [
+    {
+      "ticker": "INFY.NS",
+      "name": "Infosys",
+      "sector": "it",
+      "sub_sector": "it_services",
+      "index_tier": "NIFTY50",
+      "market_cap": 6400000000000.0,
+      "business_desc": "Global IT services and consulting company billing predominantly in dollars and euros against a largely rupee-denominated delivery cost base.",
+      "exposures": [{"dimension": "fx", "level": "HIGH"}]
+    },
+    {
+      "ticker": "BPCL.NS",
+      "name": "Bharat Petroleum Corporation",
+      "sector": "oil_gas",
+      "sub_sector": "refining_marketing",
+      "index_tier": "NIFTY50",
+      "market_cap": 1400000000000.0,
+      "business_desc": "State-owned refiner and oil marketing company importing dollar-denominated crude and selling petroleum product at administered rupee retail prices.",
+      "exposures": [{"dimension": "fx", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Rupee depreciates to a record low of 88.4 to the dollar",
+      "event_status": "confirmed",
+      "facts": "The rupee closed at a record low of eighty-eight point four to the dollar, down two and a half per cent in the quarter, as the dollar index firmed and foreign portfolio investors sold Indian equities for a seventh straight week. The central bank sold dollars without defending a level. A weaker rupee raises realised rupee revenue on dollar exports and raises the landed cost of imported inputs including crude.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Rupee closed at a record low of 88.4 to the dollar, down two and a half per cent in the quarter."},
+        {"fact_id": "F2", "text": "Dollar index firmed; FPIs sold Indian equities for a seventh straight week."},
+        {"fact_id": "F3", "text": "Weaker rupee lifts rupee realisation on dollar exports and raises landed cost of imported inputs."}
+      ],
+      "quantities": ["eighty-eight point four", "two and a half per cent"],
+      "named_entities": ["Infosys"],
+      "category": "macro_policy",
+      "event_type": "currency_move",
+      "event_cause": "capital_flow"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "inr_depreciation",
+          "label": "Rupee depreciation",
+          "direction": "neutral",
+          "mechanism": "A weaker rupee raises the rupee value of dollar revenue for exporters and the rupee cost of dollar-denominated imports at the same time, so the sign depends entirely on which side of the trade a company sits",
+          "confidence": 0.9,
+          "materiality": 0.78,
+          "impact_strength": 0.75,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@it_export_realization": {"companies": []},
+    "map_companies@inr_depreciation": {
+      "companies": [
+        {
+          "ticker": "INFY.NS",
+          "name": "Infosys",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.6,
+          "confidence": 0.85,
+          "materiality": 0.68,
+          "time_horizon": "Short-Term",
+          "mechanism": "Revenue is billed in dollars and euros while the delivery cost base is largely rupee, so a two and a half per cent depreciation drops almost entirely into reported operating margin",
+          "rationale": "Dollar-billed revenue against a rupee cost base, hedged only partially and on a rolling basis",
+          "positive_channels": ["export realisation translation gain"]
+        }
+      ]
+    },
+    "map_companies@import_cost_inflation": {
+      "companies": [
+        {
+          "ticker": "BPCL.NS",
+          "name": "Bharat Petroleum Corporation",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.62,
+          "confidence": 0.8,
+          "materiality": 0.7,
+          "time_horizon": "Short-Term",
+          "mechanism": "Crude is bought in dollars and product is sold at administered rupee retail prices, so depreciation lifts the landed feedstock cost with no matching revenue translation",
+          "rationale": "Dollar-denominated import bill against rupee-denominated administered realisations",
+          "negative_channels": ["landed crude cost in rupee terms"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["INFY.NS", "BPCL.NS"],
+      "reject": [],
+      "counterfactual": {
+        "INFY.NS": "SUPPORTED",
+        "BPCL.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"INFY.NS": "positive"},
+    "allow_secondary": ["BPCL.NS"],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "positive", "label_contains": "currency-exposed"}
+    ],
+    "expected_evidence_tier": {"INFY.NS": "SUBJECT", "BPCL.NS": "D"},
+    "expected_causal_distance": {"INFY.NS": 1, "BPCL.NS": 2},
+    "expected_mechanism": {"BPCL.NS": "import_cost_inflation"},
+    "expect_abstention": false,
+    "rationale": "One macro shock, two opposite signs, and the tier difference decides how loudly each speaks: the exporter is the article's own subject at distance 1 and leads the feed; the importer is reached through the curated registry, which is a template rather than a sourced artifact, so it informs a deep dive. The section split must follow the fundamental effect, never the shared macro cause."
+  }
+}

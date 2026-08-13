@@ -1,0 +1,141 @@
+{
+  "id": "tariff_safeguard_duty",
+  "article": {
+    "title": "Government notifies a 12% safeguard duty on flat steel imports for 200 days",
+    "text": "The finance ministry notified a twelve per cent provisional safeguard duty on imports of hot-rolled and cold-rolled flat steel products for two hundred days, acting on the directorate general of trade remedies' preliminary finding of serious injury from a surge in low-priced shipments. Landed import parity for flat products rises immediately by roughly the duty, which restores pricing headroom for domestic mills that had been discounting to hold share. Tata Steel and JSW Steel together account for the majority of domestic flat-product capacity. Downstream converters that buy hot-rolled coil, including auto component makers and pipe manufacturers, face a higher input cost with contracts that reprice only at quarter end.",
+    "note": "Protection is a transfer, not a creation: the mill's gain is the converter's cost. The converter side is real but reaches the graph with nothing company-specific behind it."
+  },
+  "universe": [
+    {
+      "ticker": "TATASTEEL.NS",
+      "name": "Tata Steel",
+      "sector": "metals",
+      "sub_sector": "steel",
+      "index_tier": "NIFTY50",
+      "market_cap": 2000000000000.0,
+      "business_desc": "Integrated steel producer with large Indian flat-product capacity selling into the domestic automotive and construction markets.",
+      "exposures": [{"dimension": "trade_policy", "level": "HIGH"}]
+    },
+    {
+      "ticker": "JSWSTEEL.NS",
+      "name": "JSW Steel",
+      "sector": "metals",
+      "sub_sector": "steel",
+      "index_tier": "NIFTY50",
+      "market_cap": 2300000000000.0,
+      "business_desc": "India's largest flat-product steel producer by capacity, competing directly against imported hot-rolled and cold-rolled coil.",
+      "exposures": [{"dimension": "trade_policy", "level": "HIGH"}]
+    },
+    {
+      "ticker": "BHARATFORG.NS",
+      "name": "Bharat Forge",
+      "sector": "auto",
+      "sub_sector": "auto_components",
+      "index_tier": "NIFTY100",
+      "market_cap": 600000000000.0,
+      "business_desc": "Forging and auto-component manufacturer converting steel into crankshafts and chassis components for global commercial vehicle programmes."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "India notifies a 12% provisional safeguard duty on flat steel imports for 200 days",
+      "event_status": "confirmed",
+      "facts": "The finance ministry notified a twelve per cent provisional safeguard duty on hot-rolled and cold-rolled flat steel imports for two hundred days following a preliminary finding of serious injury from low-priced shipments. Landed import parity rises by roughly the duty, restoring pricing headroom for domestic mills. Downstream converters buying hot-rolled coil face a higher input cost with contracts repricing only at quarter end.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Twelve per cent provisional safeguard duty notified on flat steel imports for two hundred days."},
+        {"fact_id": "F2", "text": "Landed import parity rises by roughly the duty, restoring domestic mill pricing headroom."},
+        {"fact_id": "F3", "text": "Downstream converters face higher input cost with quarter-end contract repricing."}
+      ],
+      "quantities": ["twelve per cent", "two hundred days"],
+      "named_entities": ["Tata Steel", "JSW Steel"],
+      "category": "metals",
+      "event_type": "trade_policy",
+      "event_cause": "policy_decision"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "import_tariff_up",
+          "label": "Import tariff increase",
+          "direction": "neutral",
+          "mechanism": "A safeguard duty lifts landed import parity, transferring pricing power from importers and downstream converters to domestic producers of the protected product",
+          "confidence": 0.92,
+          "materiality": 0.8,
+          "impact_strength": 0.78,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@import_tariff_up": {
+      "companies": [
+        {
+          "ticker": "TATASTEEL.NS",
+          "name": "Tata Steel",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.65,
+          "confidence": 0.85,
+          "materiality": 0.72,
+          "time_horizon": "Short-Term",
+          "mechanism": "Domestic flat-product realisation is set at import parity, so a twelve per cent duty restores the discount the mill had been giving up to hold share against low-priced imports",
+          "rationale": "Large Indian flat-product capacity priced directly against the imports now dutiable",
+          "positive_channels": ["import parity pricing headroom"]
+        },
+        {
+          "ticker": "BHARATFORG.NS",
+          "name": "Bharat Forge",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.45,
+          "confidence": 0.68,
+          "materiality": 0.5,
+          "time_horizon": "Short-Term",
+          "mechanism": "Steel is the principal raw material for forged components and a higher domestic price raises input cost until quarter-end contract repricing catches up",
+          "rationale": "Downstream converter of the protected product",
+          "negative_channels": ["steel input cost"]
+        }
+      ]
+    },
+    "map_companies@domestic_producer_protection": {
+      "companies": [
+        {
+          "ticker": "JSWSTEEL.NS",
+          "name": "JSW Steel",
+          "direction": "bullish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.7,
+          "confidence": 0.86,
+          "materiality": 0.74,
+          "time_horizon": "Short-Term",
+          "mechanism": "The largest domestic flat-product capacity competes head-on with the dutiable import stream, so the duty converts directly into realisation per tonne on unchanged volumes",
+          "rationale": "Largest exposure to the exact product category the duty covers",
+          "positive_channels": ["import parity pricing headroom"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["TATASTEEL.NS", "JSWSTEEL.NS", "BHARATFORG.NS"],
+      "reject": [],
+      "counterfactual": {
+        "TATASTEEL.NS": "SUPPORTED",
+        "JSWSTEEL.NS": "SUPPORTED",
+        "BHARATFORG.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"TATASTEEL.NS": "positive"},
+    "allow_secondary": ["JSWSTEEL.NS"],
+    "expected_rejected": ["BHARATFORG.NS"],
+    "expected_sections": [
+      {"effect": "positive", "label_contains": "other verified mechanisms"}
+    ],
+    "expected_evidence_tier": {"TATASTEEL.NS": "SUBJECT", "BHARATFORG.NS": "E"},
+    "expect_abstention": false,
+    "rationale": "The mill named by the article publishes at distance 1. The converter's loss is economically real and the system still must not publish it: nothing company-specific supports it -- no exposure record, no relationship artifact, not even a mention -- so it is model inference, which caps materiality at LOW and authorises nothing. Precision-first means eating a true negative rather than guessing a true positive."
+  }
+}

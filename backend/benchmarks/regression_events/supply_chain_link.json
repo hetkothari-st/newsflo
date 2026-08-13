@@ -1,0 +1,167 @@
+{
+  "id": "supply_chain_link",
+  "article": {
+    "title": "Red Sea rerouting strands wiring-harness containers; Maruti halts two Manesar lines",
+    "text": "Maruti Suzuki India suspended production on two of its Manesar assembly lines after wiring-harness containers routed around the Cape of Good Hope arrived eighteen days late, exhausting the buffer stock the company had built through December. The plant runs on a two-day inventory model for harnesses, which are model-specific and cannot be substituted between platforms. The company said it expects to recover the lost volume within the quarter through additional Saturday shifts. Component suppliers on the affected programmes will see the same volume gap in their own dispatch schedules before the recovery shifts begin.",
+    "note": "The only fixture where a distance-2 company earns a primary slot -- and it earns it on an independently sourced relationship artifact, not on the model's say-so about who supplies whom."
+  },
+  "universe": [
+    {
+      "ticker": "MARUTI.NS",
+      "name": "Maruti Suzuki India",
+      "sector": "auto",
+      "sub_sector": "passenger_vehicles",
+      "index_tier": "NIFTY50",
+      "market_cap": 3800000000000.0,
+      "business_desc": "India's largest passenger vehicle manufacturer, assembling at Gurugram, Manesar and Gujarat on a low-inventory just-in-time model."
+    },
+    {
+      "ticker": "MOTHERSON.NS",
+      "name": "Samvardhana Motherson International",
+      "sector": "auto",
+      "sub_sector": "auto_components",
+      "index_tier": "NIFTY100",
+      "market_cap": 900000000000.0,
+      "business_desc": "Auto-component manufacturer supplying wiring harnesses, mirrors and polymer modules to Indian and global vehicle programmes.",
+      "node_exposures": [
+        {
+          "node_key": "MARUTI.NS",
+          "exposure_exists": 1,
+          "strength": 0.75,
+          "mechanism": "Wiring-harness supply into Maruti vehicle programmes"
+        }
+      ],
+      "supply_links": [
+        {
+          "counterparty_ticker": "MARUTI.NS",
+          "relation": "CUSTOMER",
+          "evidence": "Samvardhana Motherson supplies wiring harnesses for Maruti Suzuki's Manesar vehicle programmes; the customer accounts for a material share of the India wiring-harness division's revenue.",
+          "source_url": "https://ratings.example/motherson-rationale",
+          "source_agency": "CRISIL"
+        }
+      ]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Maruti halts two Manesar lines after Red Sea rerouting delays wiring-harness containers",
+      "event_status": "confirmed",
+      "facts": "Maruti Suzuki India suspended production on two Manesar assembly lines after wiring-harness containers rerouted around the Cape of Good Hope arrived eighteen days late, exhausting buffer stock. The plant runs a two-day harness inventory and harnesses are model-specific. The company expects to recover lost volume within the quarter through additional Saturday shifts.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Two Manesar assembly lines suspended after wiring-harness containers arrived eighteen days late."},
+        {"fact_id": "F2", "text": "Plant runs a two-day harness inventory; harnesses are model-specific and non-substitutable."},
+        {"fact_id": "F3", "text": "Company expects to recover the lost volume within the quarter via Saturday shifts."}
+      ],
+      "quantities": ["eighteen days", "two-day inventory"],
+      "named_entities": ["Maruti Suzuki India"],
+      "category": "auto",
+      "event_type": "geopolitics",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "shipping_route_disruption",
+          "label": "Shipping route disruption",
+          "direction": "bearish",
+          "mechanism": "Rerouting around the Cape adds roughly a fortnight of transit, which breaks just-in-time inventory models that hold days rather than weeks of cover",
+          "confidence": 0.9,
+          "materiality": 0.78,
+          "impact_strength": 0.75,
+          "time_horizon": "Immediate"
+        },
+        {
+          "shock_id": "component_supply_gap",
+          "label": "Component supply gap",
+          "direction": "bearish",
+          "mechanism": "A stopped assembly programme removes the offtake its component suppliers were scheduled to dispatch against, propagating the volume gap one link down the chain",
+          "confidence": 0.85,
+          "materiality": 0.7,
+          "impact_strength": 0.7,
+          "time_horizon": "Short-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@component_supply_gap": {"companies": []},
+    "map_companies@shipping_route_disruption": {
+      "companies": [
+        {
+          "ticker": "MARUTI.NS",
+          "name": "Maruti Suzuki India",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.65,
+          "confidence": 0.88,
+          "materiality": 0.7,
+          "time_horizon": "Immediate",
+          "mechanism": "Two assembly lines are stopped for want of a model-specific harness with only two days of cover, so the volume gap is booked before the recovery shifts can begin",
+          "rationale": "Company-confirmed line stoppage caused directly by the rerouting delay",
+          "negative_channels": ["assembly line stoppage and lost volume"]
+        }
+      ]
+    },
+    "ripple_discovery": [
+      {
+        "children": [
+          {
+            "parent_type": "economic_node",
+            "parent_id": "component_supply_gap",
+            "child_type": "company",
+            "child_id": "MARUTI.NS",
+            "child_label": "Maruti assembly programme",
+            "direction": "bearish",
+            "mechanism": "The halted Manesar programmes are themselves the transmission point into the component supply chain that feeds them",
+            "impact_strength": 0.6,
+            "confidence": 0.82,
+            "materiality": 0.68,
+            "time_horizon": "Short-Term"
+          }
+        ]
+      }
+    ],
+    "map_companies@MARUTI.NS": {
+      "companies": [
+        {
+          "ticker": "MOTHERSON.NS",
+          "name": "Samvardhana Motherson International",
+          "direction": "bearish",
+          "net_direction": "bearish",
+          "economic_effect": "negative",
+          "impact_strength": 0.6,
+          "confidence": 0.82,
+          "materiality": 0.68,
+          "time_horizon": "Short-Term",
+          "mechanism": "Dispatch schedules into the halted Manesar programmes stop with the lines, so the India wiring-harness division books the same volume gap one link down the chain",
+          "rationale": "Documented harness supplier to the exact vehicle programmes that stopped",
+          "negative_channels": ["dispatch volume gap on the halted programmes"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["MARUTI.NS", "MOTHERSON.NS"],
+      "reject": [],
+      "counterfactual": {
+        "MARUTI.NS": "SUPPORTED",
+        "MOTHERSON.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {
+      "MARUTI.NS": "negative",
+      "MOTHERSON.NS": "negative"
+    },
+    "allow_secondary": [],
+    "expected_rejected": [],
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "other verified mechanisms"},
+      {"effect": "negative", "label_contains": "linked to"}
+    ],
+    "expected_evidence_tier": {"MARUTI.NS": "SUBJECT", "MOTHERSON.NS": "C"},
+    "expected_causal_distance": {"MARUTI.NS": 1, "MOTHERSON.NS": 2},
+    "expect_abstention": false,
+    "rationale": "Distance 2 is normally a deep dive at best. It earns primary here because the supplier relationship is backed by an independently sourced, verbatim-quoted rating rationale -- tier C evidence about the transmission chain itself, not a model assertion that A supplies B. Remove the SupplyLink row and the correct answer changes; that is the whole point of the tier."
+  }
+}
