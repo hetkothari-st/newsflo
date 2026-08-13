@@ -87,19 +87,25 @@ function moveClass(value: number): string {
   return value < 0 ? 'down' : value > 0 ? 'up' : 'flat';
 }
 
-/* Reaction color from the server's dead-zone-classified direction when
-   present (strict engine), falling back to the raw sign. The server is
-   the single semantic source (spec §37). */
-function reactionClass(
-  reaction: { direction: string } | null | undefined,
-  excess: number | null,
-): string {
-  if (reaction) {
-    if (reaction.direction === 'positive') return 'up';
-    if (reaction.direction === 'negative') return 'down';
-    return 'flat';
-  }
-  return excess == null ? 'flat' : moveClass(excess);
+/* Reaction color from the server's dead-zone-classified direction --
+   the ONLY semantic source (spec §37). A missing reaction_direction
+   renders neutral/flat; it is never re-derived from the raw excess
+   sign (that fallback used to make a +0.02% noise move flash green). */
+export function reactionClass(reaction: { direction: string } | null | undefined): string {
+  if (!reaction) return 'flat';
+  if (reaction.direction === 'positive') return 'up';
+  if (reaction.direction === 'negative') return 'down';
+  return 'flat';
+}
+
+/* Arrow glyph from the SAME source as the color -- never a separate
+   sign check on the raw number (spec §37/§39: color and arrow must
+   never disagree). */
+export function reactionArrow(reaction: { direction: string } | null | undefined): string {
+  if (!reaction) return '';
+  if (reaction.direction === 'positive') return '▲';
+  if (reaction.direction === 'negative') return '▼';
+  return '';
 }
 
 /* Fundamental-impact glyph -- driven ONLY by economic_effect, never by
@@ -340,13 +346,22 @@ function RippleBand({
                       <span
                         className={`mv4 ${reactionClass(
                           row.reaction_direction ? { direction: row.reaction_direction } : null,
-                          row.excess_move_pct,
                         )}`}
                       >
                         {fmtPct(row.excess_move_pct)}
                       </span>
                     )}
                   </div>
+                  {row.economic_effect && row.materiality_grade && (
+                    /* Authoritative fundamental verdict + gate confidence
+                       -- text label, not just the glyph, so the reader
+                       gets the tier without opening the deep dive. */
+                    <div className={`fxl4 ${row.economic_effect}`}>
+                      {row.economic_effect.toUpperCase()} · {row.materiality_grade}
+                    </div>
+                  )}
+                  {row.mechanism && <div className="mch4">{row.mechanism}</div>}
+                  {row.divergence && <p className="dvg4">{row.divergence}</p>}
                   <div className="cmeta">
                     <span>{row.ticker}</span>
                     {row.cap_tier !== null && <span>{row.cap_tier} cap</span>}
@@ -542,8 +557,8 @@ export default function FeedV4({
                    never a fabricated number. */
                 <div className="lmove flat">—</div>
               ) : (
-                <div className={`lmove ${reactionClass(alert.market_reaction, alert.excess_move_pct)}`}>
-                  {alert.excess_move_pct < 0 ? '▼' : alert.excess_move_pct > 0 ? '▲' : ''}{' '}
+                <div className={`lmove ${reactionClass(alert.market_reaction)}`}>
+                  {reactionArrow(alert.market_reaction)}{' '}
                   {Math.abs(alert.excess_move_pct).toFixed(1)}%
                 </div>
               )}

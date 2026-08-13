@@ -19,6 +19,42 @@ function moveClass(value: number | null | undefined): string {
   return value < 0 ? 'down' : 'up';
 }
 
+/* Winners/losers/neutral split keyed on the row's gate-authoritative
+   economic_effect when present (spec §38: a stock trading green on news
+   that hurts its actual business is not a "winner") -- falls back to the
+   legacy AlertCompany.direction ONLY for rows with no economic_effect at
+   all (pre-gate alerts). A row with no measured move always lands in
+   neutral regardless of effect -- nothing to chart as a winner/loser;
+   mixed/uncertain/no_material_impact effects land in neutral too, never
+   dropped from the chart. */
+function bucketByEffect(rows: ChartRow[]): {
+  winners: ChartRow[];
+  losers: ChartRow[];
+  neutral: ChartRow[];
+} {
+  const winners: ChartRow[] = [];
+  const losers: ChartRow[] = [];
+  const neutral: ChartRow[] = [];
+  for (const row of rows) {
+    if (row.excess_move_pct == null) {
+      neutral.push(row);
+      continue;
+    }
+    if (row.economic_effect) {
+      if (row.economic_effect === 'positive') winners.push(row);
+      else if (row.economic_effect === 'negative') losers.push(row);
+      else neutral.push(row);
+    } else if (row.direction === 'bullish') {
+      winners.push(row);
+    } else if (row.direction === 'bearish') {
+      losers.push(row);
+    } else {
+      neutral.push(row);
+    }
+  }
+  return { winners, losers, neutral };
+}
+
 /* ---------- shared SVG pieces ---------- */
 
 const NODE_W = 126;
@@ -479,9 +515,7 @@ export function CIntensity({ detail }: { detail: AlertDetail }) {
 /* 5 -- Winners / losers split (reference chart 6). */
 export function CSplit({ detail }: { detail: AlertDetail }) {
   const rows = flattenRows(detail);
-  const winners = rows.filter((row) => row.direction === 'bullish' && row.excess_move_pct != null);
-  const losers = rows.filter((row) => row.direction === 'bearish' && row.excess_move_pct != null);
-  const neutral = rows.filter((row) => row.excess_move_pct == null);
+  const { winners, losers, neutral } = bucketByEffect(rows);
   const col = (list: ChartRow[]) =>
     list.map((row) => (
       <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker} data-ticker={row.ticker}>
@@ -507,7 +541,11 @@ export function CSplit({ detail }: { detail: AlertDetail }) {
       </div>
       {neutral.length > 0 && (
         <div className="csplit-neutral">
-          <div className="csplit-collabel">Exposure only — no measured move · {neutral.length}</div>
+          {/* Exposure-only rows (no measured move) AND rows whose gate
+              effect is mixed/uncertain/no_material_impact -- either way,
+              not a clean winner or loser, but never dropped from the
+              chart (spec §38). */}
+          <div className="csplit-collabel">No net effect / exposure only · {neutral.length}</div>
           {col(neutral)}
         </div>
       )}
@@ -719,9 +757,7 @@ function KnowMemberNode({ m, x, y }: { m: KnowMember; x: number; y: number }) {
 export function CKnowledge({ detail }: { detail: AlertDetail }) {
   const [selected, setSelected] = useState<string | null>(null);
   const rows = flattenRows(detail);
-  const winners = rows.filter((r) => r.direction === 'bullish' && r.excess_move_pct != null);
-  const losers = rows.filter((r) => r.direction === 'bearish' && r.excess_move_pct != null);
-  const exposure = rows.filter((r) => r.excess_move_pct == null);
+  const { winners, losers, neutral: exposure } = bucketByEffect(rows);
   const sectors = [...new Set(rows.map((r) => r.sector))];
   const member = (row: ChartRow): KnowMember => ({
     label: row.ticker.split('.')[0].slice(0, 7),

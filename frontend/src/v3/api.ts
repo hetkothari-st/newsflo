@@ -7,7 +7,42 @@ import type { VolatilityRangeData } from '../components/VolatilityRange';
 export type CapTier = 'LARGE' | 'MID' | 'SMALL' | 'MICRO';
 export type LiquidityTier = 'LOW' | 'MODERATE' | 'HIGH';
 export type Verdict = 'COMPANY_SPECIFIC' | 'SECTOR_WIDE' | 'UNCONFIRMED';
+// Legacy per-row label (AlertCompany.direction) -- still served on
+// LayerRow for pre-gate alerts; NOT the dead-zone-classified reaction
+// (that is ReactionDirection below, spec §22/§37).
 export type Direction = 'bullish' | 'bearish';
+// The one sanctioned excess->direction mapping (app.market.measure.
+// classify_reaction): dead-zone-aware, used for FeedAlert.direction,
+// market_reaction.direction and LayerRow.reaction_direction alike.
+export type ReactionDirection = 'positive' | 'negative' | 'flat' | 'unknown';
+// Gate-authoritative fundamental verdict (app.analysis.impact_graph.
+// publication_gate.ECONOMIC_EFFECTS) -- separate truth from the price
+// reaction above (spec §37/§38).
+export type EconomicEffect = 'positive' | 'negative' | 'mixed' | 'uncertain' | 'no_material_impact';
+export type MaterialityGrade = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+export type ConfidenceBand = 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH';
+export type ImpactType = 'direct' | 'indirect';
+export type MarketSensitivity = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+export type ReactionSignificance = 'significant' | 'normal' | 'noise' | 'unknown';
+export type DataQuality = 'ok' | 'partial_bar' | 'stale' | 'invalid';
+
+// Independent market-reaction object (strict engine, spec §20/§22):
+// dead-zone-classified direction, separate from fundamental impact.
+// Always present on a strict-mode alert -- "unavailable" status with
+// direction "unknown" when the price feed failed (spec §49), never
+// omitted.
+export interface MarketReaction {
+  status: 'ok' | 'unavailable';
+  direction: ReactionDirection;
+  bar_complete: number | null;
+  raw_move_pct: number | null;
+  excess_move_pct: number | null;
+  benchmark_ticker: string | null;
+  benchmark_is_fallback: boolean;
+  data_quality: DataQuality | null;
+  session_state: string | null;
+  reaction_significance: ReactionSignificance;
+}
 
 export interface IntensityComponent {
   label: string;
@@ -45,14 +80,11 @@ export interface FeedAlert {
   // null when the strict engine serves a fundamental-only alert whose
   // price feed failed (spec §49) -- render an honest dash, never 0.
   excess_move_pct: number | null;
-  direction: Direction | null;
-  // Independent market-reaction object (strict engine, spec §20/§22):
-  // dead-zone-classified direction, separate from fundamental impact.
-  market_reaction?: {
-    status: 'ok' | 'unavailable';
-    direction: 'positive' | 'negative' | 'flat' | 'unknown';
-    bar_complete: number | null;
-  } | null;
+  // BREAKING vocab change (Task 14): this used to be a raw sign(excess)
+  // -> bullish/bearish label with no dead zone. classify_reaction is the
+  // one sanctioned mapping now -- same vocab as market_reaction.direction.
+  direction: ReactionDirection | null;
+  market_reaction?: MarketReaction | null;
   raw_move_pct: number;
   sector_move_pct: number;
   volume_multiple: number | null;
@@ -97,11 +129,23 @@ export interface LayerRow {
   // Strict-engine dual truth per row (spec §37/§38): the gate-validated
   // fundamental effect + tier, and the dead-zone-classified reaction.
   // Absent/null on legacy rows.
-  economic_effect?: string | null;
+  economic_effect?: EconomicEffect | null;
   // 'secondary' is the legacy spelling of 'secondary_deep_dive' on rows
   // persisted before the executable gate; still served, never written anew.
   display_tier?: 'primary' | 'secondary_deep_dive' | 'secondary' | null;
-  reaction_direction?: 'positive' | 'negative' | 'flat' | 'unknown';
+  reaction_direction?: ReactionDirection;
+  // Gated rows only (Task 16/17) -- present only when alert_is_gated, so
+  // a legacy (ungated) row simply omits these keys rather than nulling
+  // them (app.market.ripple_layers row dict, corrective-v4 Task 16/17).
+  mechanism?: string | null;
+  materiality_grade?: MaterialityGrade | null;
+  confidence_band?: ConfidenceBand | null;
+  impact_type?: ImpactType | null;
+  expected_market_sensitivity?: MarketSensitivity | null;
+  // Deterministic template (app.analysis.refinement.divergence_line):
+  // non-null ONLY when economic_effect and reaction_direction point
+  // opposite ways; never a prediction, only a stated fact.
+  divergence?: string | null;
   // Subsystem D: empirical reaction range for this alert's news category.
   // Optional, mirroring how `fundamentals?:` above documents its
   // producers: app.market.ripple_layers rows emit it (null below sample
@@ -131,6 +175,23 @@ export interface AlertDetail extends FeedAlert {
   // Cascade derivation edges (v4 ripple network chart): who each company
   // was derived from; source null = hangs off the news event directly.
   edges?: Array<{ source: string | null; target: string; relation: string }>;
+}
+
+// GET /api/feed-v2/{id}/deep-dive (corrective-v4 Task 16, spec §52):
+// gated-analysis-only surface, PRIMARY + SECONDARY_DEEP_DIVE + the
+// machine-readable rejection audit trail. 404s for an ungated (legacy)
+// alert -- the normal feed-v2 detail route stays the place that one is
+// served from.
+export interface RejectedCompany {
+  ticker: string;
+  rejection_reason: string | null;
+  materiality_grade: string | null;
+}
+
+export interface DeepDiveResponse {
+  primary: RippleLayer[];
+  secondary: RippleLayer[];
+  rejected_summary: RejectedCompany[];
 }
 
 export interface StockDeepDive {
@@ -278,6 +339,10 @@ export function getAlertDetail(
 ): Promise<AlertDetail> {
   const query = lang && lang !== 'en' ? `?lang=${lang}` : '';
   return getJson<AlertDetail>(`/api/feed-v2/${id}${query}`, token);
+}
+
+export function getAlertDeepDive(id: number, token: string | null = null): Promise<DeepDiveResponse> {
+  return getJson<DeepDiveResponse>(`/api/feed-v2/${id}/deep-dive`, token);
 }
 
 export type CalendarCounts = Record<string, number>;

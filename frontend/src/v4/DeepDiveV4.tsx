@@ -16,6 +16,25 @@ function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 }
 
+// Frontend mirror of app.market.measure.MARKET_REACTION_DEAD_ZONE_PCT --
+// only used as a fallback for rows that carry no server-classified
+// reaction_direction (StockDeepDive's own excess number today has none).
+// Keeps a near-zero/0.0 excess from ever rendering green off a bare sign
+// check (spec §39).
+const REACTION_DEAD_ZONE_PCT = 0.25;
+
+/* Dead-zone-aware reaction class: the server's reaction_direction is the
+   single semantic source when present (spec §37); only when it is absent
+   does this fall back to the same dead zone classify_reaction applies --
+   never a bare `< 0` sign check. */
+function reactionCls(excess: number, direction?: string | null): string {
+  if (direction === 'positive') return 'up';
+  if (direction === 'negative') return 'down';
+  if (direction === 'flat' || direction === 'unknown') return 'flat';
+  if (Math.abs(excess) < REACTION_DEAD_ZONE_PCT) return 'flat';
+  return excess < 0 ? 'down' : 'up';
+}
+
 /* First two sentences of the sourced description -- the deep dive wants
    a compact "who is this" line, not the full sourced paragraph (that
    stays in the (i) glance). Attribution link still travels with it. */
@@ -112,7 +131,7 @@ export default function DeepDiveV4({
                 {data.excess_move_pct !== null && (
                   <span>
                     Excess
-                    <b className={data.excess_move_pct < 0 ? 'down' : 'up'}>
+                    <b className={reactionCls(data.excess_move_pct)}>
                       {fmtPct(data.excess_move_pct)}
                     </b>
                   </span>
@@ -205,7 +224,7 @@ export default function DeepDiveV4({
                           {peer.is_exposure_only || peer.excess_move_pct == null ? (
                             <span className="mv4 mvx">exposure</span>
                           ) : (
-                            <span className={`mv4 ${peer.excess_move_pct < 0 ? 'down' : 'up'}`}>
+                            <span className={`mv4 ${reactionCls(peer.excess_move_pct, peer.reaction_direction)}`}>
                               {fmtPct(peer.excess_move_pct)}
                             </span>
                           )}

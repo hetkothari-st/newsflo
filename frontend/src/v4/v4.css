@@ -610,6 +610,20 @@ body:has(.nf4.dark) { background: #2a2722; }
 }
 .nf4 .crow .mv4 { font-family: var(--serif); font-size: 20px; white-space: nowrap; }
 .nf4 .crow .mv4.mvx { font-style: italic; font-size: 16px; color: var(--ash); }
+/* Fundamental verdict label (economic_effect + materiality_grade),
+   mechanism, and divergence lines -- text companions to the fx4 glyph
+   above, spec §38/§65/Task 13. */
+.nf4 .crow .fxl4 {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pebble);
+  margin-top: 2px;
+}
+.nf4 .crow .fxl4.positive { color: var(--data-up); }
+.nf4 .crow .fxl4.negative { color: var(--data-down); }
+.nf4 .crow .mch4 { font-size: 12px; color: var(--sepia); margin-top: 2px; }
+.nf4 .crow .dvg4 { font-size: 12px; font-style: italic; color: var(--sepia); margin-top: 2px; }
 .nf4 .crow .cmeta {
   display: flex;
   gap: 12px;
