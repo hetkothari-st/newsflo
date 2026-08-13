@@ -601,9 +601,20 @@ def _merge_company(held: GraphCompany | None, newcomer: GraphCompany) -> GraphCo
     merged.positive_channels = _union_preserve_order(primary.positive_channels, secondary.positive_channels)
     merged.negative_channels = _union_preserve_order(primary.negative_channels, secondary.negative_channels)
     merged.offsetting_channels = _union_preserve_order(primary.offsetting_channels, secondary.offsetting_channels)
-    if secondary.mechanism and secondary.mechanism != primary.mechanism:
-        merged.secondary_mechanisms = _union_preserve_order(
-            primary.secondary_mechanisms, [secondary.mechanism])
+    # Fold BOTH records' secondary_mechanisms plus the losing record's own
+    # primary mechanism into one list -- a CHAINED merge (e.g. A,B merged,
+    # then that result merged with C) must not drop B just because it was
+    # already demoted to secondary once before C arrived. Order-preserving
+    # dedup; the winner's own primary mechanism string is excluded here
+    # since it already IS `merged.mechanism`, never duplicated into the
+    # secondary list.
+    incoming_secondary = list(secondary.secondary_mechanisms)
+    if secondary.mechanism and secondary.mechanism not in incoming_secondary:
+        incoming_secondary = [secondary.mechanism] + incoming_secondary
+    merged.secondary_mechanisms = [
+        m for m in _union_preserve_order(primary.secondary_mechanisms, incoming_secondary)
+        if m != primary.mechanism
+    ]
 
     effects = {held.economic_effect, newcomer.economic_effect}
     if effects == {"positive", "negative"}:

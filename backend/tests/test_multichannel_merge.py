@@ -112,6 +112,48 @@ def test_uncertain_incumbent_absorbing_directional_newcomer_becomes_mixed():
     assert merged.net_direction == "mixed"
 
 
+def test_chained_three_way_merge_preserves_all_mechanisms():
+    """Review finding: a 3-way collision (three proposals for the SAME
+    ticker, e.g. three entries in one batched narrow-path call) must not
+    lose the FIRST loser's mechanism when a THIRD proposal later wins
+    overall. merge(A,B) demotes B to secondary; merge(that, C) with C
+    winning must fold BOTH the running secondary_mechanisms list AND the
+    displaced primary's own mechanism -- not just C's immediate opponent's
+    bare mechanism string, or B silently vanishes on the second merge."""
+    a = _co(mechanism="mech_A", impact_strength=0.5, economic_effect="positive")
+    b = _co(mechanism="mech_B", impact_strength=0.3, economic_effect="positive")
+    c = _co(mechanism="mech_C", impact_strength=0.9, economic_effect="positive")
+
+    ab = _merge_company(None, a)
+    ab = _merge_company(ab, b)
+    assert ab.mechanism == "mech_A"
+    assert ab.secondary_mechanisms == ["mech_B"]
+
+    abc = _merge_company(ab, c)
+    assert abc.mechanism == "mech_C"  # highest overall impact wins
+    # Neither earlier loser is dropped by the second merge.
+    assert set(abc.secondary_mechanisms) == {"mech_A", "mech_B"}
+    assert len(abc.secondary_mechanisms) == 2  # no duplicates either
+
+
+def test_chained_three_way_merge_through_conflicting_effects():
+    """The same fold-through must hold when the chain crosses a
+    conflicting (mixed) merge partway through."""
+    a = _co(mechanism="mech_A", impact_strength=0.4, economic_effect="positive")
+    b = _co(mechanism="mech_B", impact_strength=0.6, economic_effect="negative")
+    c = _co(mechanism="mech_C", impact_strength=0.5, economic_effect="positive")
+
+    ab = _merge_company(None, a)
+    ab = _merge_company(ab, b)  # conflicting -> mixed, b wins as primary (0.6 > 0.4)
+    assert ab.economic_effect == "mixed"
+    assert ab.mechanism == "mech_B"
+    assert ab.secondary_mechanisms == ["mech_A"]
+
+    abc = _merge_company(ab, c)  # b (0.6) still beats c (0.5)
+    assert abc.mechanism == "mech_B"
+    assert set(abc.secondary_mechanisms) == {"mech_A", "mech_C"}
+
+
 # --- end-to-end: same ticker proposed under two nodes (narrow path) -------
 
 def test_narrow_path_conflicting_mechanisms_merge_end_to_end(db_session):
@@ -161,6 +203,11 @@ def test_narrow_path_conflicting_mechanisms_merge_end_to_end(db_session):
 
 
 def test_narrow_path_same_direction_mechanisms_merge_end_to_end(db_session):
+    """Three entries for the same ticker (DUAL.NS) in one batched response
+    -- a real 3-way collision, not just two. All three mechanisms must
+    survive: the highest-impact one as primary, the other two folded into
+    secondary_mechanisms (review finding: a naive chained merge drops the
+    FIRST loser once a third, higher-impact proposal arrives)."""
     _company(db_session, "DUAL.NS", "Dual Co", "fmcg")
     _company(db_session, "OTHER.NS", "Other Co", "auto")
     router = FakeRouter({
@@ -182,6 +229,9 @@ def test_narrow_path_same_direction_mechanisms_merge_end_to_end(db_session):
             dict(_company_entry("DUAL.NS", "Dual Co", direction="bearish", impact=0.6, conf=0.8, mat=0.5),
                  parent_id="auto", net_direction="bearish", economic_effect="negative",
                  mechanism="second segment demand hit", negative_channels=["segment demand"]),
+            dict(_company_entry("DUAL.NS", "Dual Co", direction="bearish", impact=0.55, conf=0.7, mat=0.4),
+                 parent_id="auto", net_direction="bearish", economic_effect="negative",
+                 mechanism="third channel pressure", negative_channels=["channel cost"]),
         ]},
     })
     result = analyze_article_v3(router, "t", "c", session=db_session)
@@ -191,7 +241,10 @@ def test_narrow_path_same_direction_mechanisms_merge_end_to_end(db_session):
 
     dual = next(c for c in result.companies if c.ticker == "DUAL.NS")
     assert dual.economic_effect == "negative"  # same-direction, never flips to mixed
-    assert dual.impact_strength == 0.6  # higher-impact record wins as base
+    assert dual.impact_strength == 0.6  # highest-impact record wins as base
     assert dual.mechanism == "second segment demand hit"
-    assert "input cost pressure" in dual.secondary_mechanisms
-    assert set(dual.negative_channels) == {"raw material cost", "segment demand"}
+    # All three mechanisms survive: one primary + two secondary -- neither
+    # earlier-displaced mechanism is silently dropped by the third merge.
+    assert set(dual.secondary_mechanisms) == {"input cost pressure", "third channel pressure"}
+    assert len(dual.secondary_mechanisms) == 2
+    assert set(dual.negative_channels) == {"raw material cost", "segment demand", "channel cost"}

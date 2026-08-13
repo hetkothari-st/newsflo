@@ -44,6 +44,31 @@ def test_event_cause_out_of_enum_normalizes_to_unknown():
     assert facts.event_cause == "unknown"
 
 
+# --- EventFacts.magnitude / magnitude_units --------------------------------
+
+def test_magnitude_and_units_preserved_verbatim():
+    """The article's own stated figure survives exactly as written --
+    never reformatted, never re-derived."""
+    facts = EventFacts(**dict(FACTS, magnitude="5%", magnitude_units="percent"))
+    assert facts.magnitude == "5%"
+    assert facts.magnitude_units == "percent"
+
+
+def test_magnitude_defaults_to_none_when_absent():
+    facts = EventFacts(**FACTS)  # FACTS carries no magnitude/magnitude_units keys
+    assert facts.magnitude is None
+    assert facts.magnitude_units is None
+
+
+def test_magnitude_not_synthesized_from_other_facts_fields():
+    """A magnitude figure elsewhere in `quantities` must NOT get pulled
+    into `magnitude` -- only an explicit magnitude value counts; the
+    absence of one stays None, never backfilled from a nearby field."""
+    facts = EventFacts(**dict(FACTS, quantities=["a fifth of global crude", "5%"]))
+    assert facts.magnitude is None
+    assert facts.magnitude_units is None
+
+
 # --- GraphCompany.expected_market_sensitivity ------------------------------
 
 def test_sensitivity_parsed_when_valid():
