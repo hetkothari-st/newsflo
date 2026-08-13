@@ -22,11 +22,22 @@ engine = get_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
-# (table, column, SQL type) for every column added to a model after the dev
-# DB file first existed. create_all only creates missing TABLES, never
-# missing columns on one that's already there -- there's no Alembic in this
-# project -- so each new column must be registered here or it raises "no
-# such column" the moment it's queried against an older DB file.
+# Schema evolution is now owned by Alembic (backend/alembic/) -- see
+# alembic/versions/0001_baseline.py, generated 2026-08-13 from the model
+# metadata as it stood that day. Every schema change from this point forward
+# is an Alembic revision, not a new _ADDED_COLUMNS entry.
+#
+# _ADDED_COLUMNS below is FROZEN as of 2026-08-13 -- do not extend it. It is
+# kept only so `init_db()` (used throughout the test suite and by any
+# deployment older than the Alembic baseline) keeps producing a schema
+# identical to what it always has: create_all() builds new tables in full
+# already (models already declare every column below), so this list only
+# ever mattered for patching an EXISTING DB file created before a given
+# column existed on its model. New columns belong in an Alembic migration,
+# generated with `alembic revision --autogenerate`, and a DB that predates
+# Alembic adopts it via `alembic stamp 0001` (see tests/test_migrations.py).
+SCHEMA_MANAGED_BY = "alembic"
+
 _ADDED_COLUMNS = [
     ("articles", "image_url", "VARCHAR"),
     ("alert_companies", "key_points_json", "TEXT"),
@@ -171,13 +182,13 @@ def _existing_columns(conn, table: str) -> set[str]:
 
 
 def _add_missing_columns() -> None:
-    """Guarded ALTER TABLE for each entry in ``_ADDED_COLUMNS``. Runs against
-    SQLite (local dev) and PostgreSQL (production) -- create_all only creates
-    missing TABLES, never missing columns on one that's already there, and
-    there's no Alembic in this project, so each new column must be registered
-    here or it raises "no such column"/"column does not exist" the moment a
-    query touches it against a database whose companies table predates that
-    column.
+    """LEGACY BOOTSTRAP ONLY -- frozen 2026-08-13, do not extend. Guarded
+    ALTER TABLE for each entry in the frozen ``_ADDED_COLUMNS`` list, so that
+    a DB file created before Alembic existed (or via bare ``init_db()`` in
+    tests) still ends up with every column the current models declare.
+    create_all() alone only creates missing TABLES, never missing columns on
+    one that already exists. Schema changes from 2026-08-13 onward are
+    Alembic revisions (backend/alembic/versions/), not new entries here.
     """
     with engine.connect() as conn:
         for table, column, sql_type in _ADDED_COLUMNS:

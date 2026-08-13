@@ -1,0 +1,41 @@
+import subprocess, sys, tempfile, os
+from pathlib import Path
+
+BACKEND = Path(__file__).resolve().parents[1]
+
+
+def _run_alembic(db_url):
+    env = dict(os.environ, DATABASE_URL=db_url)
+    return subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+
+
+def test_upgrade_head_on_empty_sqlite(tmp_path):
+    url = f"sqlite:///{tmp_path/'fresh.db'}"
+    result = _run_alembic(url)
+    assert result.returncode == 0, result.stderr
+
+
+def test_upgrade_head_is_idempotent(tmp_path):
+    url = f"sqlite:///{tmp_path/'twice.db'}"
+    assert _run_alembic(url).returncode == 0
+    assert _run_alembic(url).returncode == 0
+
+
+def test_upgrade_on_legacy_created_db(tmp_path):
+    """A DB created by the old create_all/_ADDED_COLUMNS path must accept
+    `alembic stamp baseline` + upgrade without error."""
+    db = tmp_path / "legacy.db"
+    url = f"sqlite:///{db}"
+    env = dict(os.environ, DATABASE_URL=url)
+    boot = subprocess.run(
+        [sys.executable, "-c",
+         "from app.db import init_db; init_db()"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert boot.returncode == 0, boot.stderr
+    stamp = subprocess.run(
+        [sys.executable, "-m", "alembic", "stamp", "0001"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert stamp.returncode == 0, stamp.stderr
+    assert _run_alembic(url).returncode == 0
