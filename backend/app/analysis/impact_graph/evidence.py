@@ -20,10 +20,33 @@ from sqlalchemy.orm import Session
 # carries market-observation evidence, which can never authorize primary.
 # Owned here (not app.pipeline) now that evidence classification has its
 # own module; app.pipeline no longer defines its own copy.
+#
+# Matching is lowercase SUBSTRING matching over "<rationale> <mechanism>",
+# so an entry also catches its compound forms ("rallied" covers "has
+# rallied hard"). The second block (corrective-v4 Task 20) closes the
+# paraphrase bypass the audit found: the original list matched only the
+# textbook English phrasings, so the identical argument written in Indian
+# market vernacular -- "the scrip slid 3%", "the counter tanked" -- read as
+# ordinary fundamental evidence and could authorize a primary claim.
+#
+# DELIBERATELY OVER-INCLUSIVE (precision-first): a few of these verbs
+# ("rallied", "surged", "plunged") could in principle appear inside a
+# genuine mechanism sentence about a COMMODITY rather than the stock. That
+# error costs a demotion to deep dive; the error this list exists to
+# prevent -- a price move published as a fundamental finding -- costs the
+# product's credibility. The cheap direction wins. Pinned phrase by phrase
+# in tests/test_audit_bypasses.py::test_bypass_market_observation_paraphrase,
+# alongside a companion test that genuine cost/margin/demand language is
+# NOT swallowed.
 _MARKET_OBSERVATION_PHRASES = (
     "stock fell", "stock rose", "stock dropped", "stock declined",
     "stock jumped", "stock surged", "shares fell", "shares rose",
     "shares dropped", "shares declined", "shares jumped", "shares surged",
+    # Paraphrases (Task 20).
+    "scrip fell", "scrip rose", "scrip slid",
+    "price fell", "price rose", "sold off",
+    "stock slid", "shares slid", "stock is down", "stock is up",
+    "tanked", "plunged", "rallied", "surged", "cracked", "tumbled",
 )
 
 # Provenance values that name an independently-sourced relationship, never

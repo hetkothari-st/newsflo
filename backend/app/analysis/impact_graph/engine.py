@@ -25,7 +25,7 @@ from app.analysis.impact_graph.router import StageRouter, StageRouterError
 from app.analysis.impact_graph.schemas import (
     CHILD_TYPES, COUNTERFACTUAL_VERDICTS, PARENT_TYPES, SCHEMA_EDGE_VERDICTS, SCHEMA_FACTS,
     SCHEMA_RIPPLE, SCHEMA_SHOCKS, EventFacts, GraphCompany, GraphEdge, ImpactGraphResult,
-    direction_to_effect, effect_to_direction,
+    direction_to_effect, effect_to_direction, normalize_effect,
     schema_companies, schema_company_verdicts, schema_ranking,
 )
 from app.analysis.schemas import CATEGORIES, SECTORS
@@ -1473,23 +1473,36 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
     # Deterministic subject fallback (2026-08-12): a single-stock story
     # whose mapping call returned nothing must not ship an invisible
     # zero-company alert -- the article NAMING the company is a fact, not a
-    # model opinion. The subject persists with modest scores; the
-    # measurement layer then overwrites direction with the REAL market
-    # move (its established job), so nothing here fabricates a call.
+    # model opinion.
+    #
+    # What it may claim is exactly that fact and nothing more (corrective-v4
+    # Task 20). It used to hardcode direction "bearish" when the shock was
+    # neutral, and its rationale said the direction "reflects the measured
+    # market reaction" -- a fabricated directional call presented as
+    # measurement, produced by a stage that measured nothing and verified
+    # nothing (INV-001: measurement is a SEPARATE truth that never fills in
+    # for analysis). Now: net_direction "uncertain", economic_effect derived
+    # by the schema's own normalization (never a literal direction),
+    # verified=False, and a rationale that states only what is known. clamp()
+    # runs like every other construction path, so the scores face the same
+    # normalization and reconcile_effect() sets the legacy market-facing
+    # `direction` from the honest effect. The gate then treats it as what it
+    # is: unverified, uncertain, never primary.
     if not state.companies and subjects:
         top_shock = next((e for e in state.edges if e.parent_id == EVENT_NODE_ID), None)
         for subject in subjects[:3]:
             state.companies[subject.ticker] = GraphCompany(
                 ticker=subject.ticker, name=subject.name,
-                direction=top_shock.direction if top_shock and top_shock.direction != "neutral" else "bearish",
                 impact_strength=0.4, confidence=0.6, materiality=0.45,
                 causal_distance=1, time_horizon="Short-Term",
                 parent_type="event", parent_id=EVENT_NODE_ID,
                 mechanism=(top_shock.mechanism if top_shock else facts.event)[:200],
-                rationale="Named subject of this article; direction reflects the measured market reaction.",
-                net_direction="uncertain", verified=False,
+                rationale="Named subject of this article; no verified causal mechanism established.",
+                net_direction="uncertain",
+                economic_effect=normalize_effect("uncertain"),
+                verified=False,
                 discovery_source="subject_fallback",
-            )
+            ).clamp()
         _skip("narrow_companies", "subject_fallback_persisted", count=len(state.companies))
 
     # Risk-based escalation (token-opt spec P18): independent verification
