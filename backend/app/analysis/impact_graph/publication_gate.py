@@ -143,6 +143,13 @@ class CandidateInput:
     company_key: str = ""
     # Derived from evidence_class when the caller has no classifier yet.
     evidence_tier: str = ""
+    # Composite grade (Task 8, app.analysis.impact_graph.materiality): the
+    # caller-computed grade that already applied the exposure/evidence
+    # caps. Empty string (the default) means the caller never computed one
+    # -- every gate check falls back to `materiality_grade(materiality)`,
+    # the naked-float grade, so old callers (benchmark harness, tests
+    # written before Task 8) keep working unmodified.
+    materiality_grade: str = ""
     net_direction: str = ""
     positive_channels: list = field(default_factory=list)
     negative_channels: list = field(default_factory=list)
@@ -206,6 +213,13 @@ class GateDecision:
 # --- helpers ---------------------------------------------------------------
 
 def materiality_grade(value: float | None) -> str:
+    """The naked-float grade -- HIGH/MEDIUM/LOW/UNKNOWN from
+    `materiality` alone, no exposure or evidence caps applied. Kept for
+    backward compat (callers that pre-date Task 8, and as the fallback
+    `_effective_grade` uses when a candidate carries no composite grade);
+    the gate itself no longer calls this directly -- see `_effective_grade`
+    and `app.analysis.impact_graph.materiality.materiality_grade` for the
+    real composite."""
     if value is None:
         return "UNKNOWN"
     if value >= _MATERIALITY_HIGH:
@@ -213,6 +227,16 @@ def materiality_grade(value: float | None) -> str:
     if value >= _MATERIALITY_MEDIUM:
         return "MEDIUM"
     return "LOW"
+
+
+def _effective_grade(candidate: CandidateInput) -> str:
+    """The grade every gate check actually evaluates (Task 8): the
+    caller-computed composite when supplied, falling back to the naked
+    float for a candidate that never computed one. This is the ONE place
+    that fallback lives, so no check can silently diverge from another on
+    which grade it's looking at."""
+    grade = (candidate.materiality_grade or "").strip().upper()
+    return grade if grade else materiality_grade(candidate.materiality)
 
 
 def evidence_tier_of(candidate: CandidateInput) -> str:
@@ -312,7 +336,7 @@ def _check_causal_path_valid(c: CandidateInput, ctx: GateContext) -> str | None:
         return "REJECT_TOO_DISTANT"
     if c.causal_distance == 3 and not (
             evidence_tier_of(c) in RELATIONSHIP_TIERS
-            and materiality_grade(c.materiality) == "HIGH"):
+            and _effective_grade(c) == "HIGH"):
         return "REJECT_LOW_PRIORITY"
     return None
 
@@ -323,7 +347,7 @@ def _check_materiality_valid(c: CandidateInput, ctx: GateContext) -> str | None:
     displays only as a deep dive and only under explicit owner policy."""
     if c.economic_effect == "no_material_impact":
         return "REJECT_NO_MATERIAL_IMPACT"
-    grade = materiality_grade(c.materiality)
+    grade = _effective_grade(c)
     if grade == "UNKNOWN":
         return "REJECT_LOW_MATERIALITY"
     if grade == "LOW" and not ctx.low_materiality_deep_dive_allowed:
@@ -343,7 +367,7 @@ def _check_evidence_valid(c: CandidateInput, ctx: GateContext) -> str | None:
         return "REJECT_INSUFFICIENT_EVIDENCE"
     if c.economic_effect == "uncertain" and not (
             tier in STRONG_TIERS
-            and materiality_grade(c.materiality) in ("HIGH", "MEDIUM")):
+            and _effective_grade(c) in ("HIGH", "MEDIUM")):
         return "REJECT_INSUFFICIENT_EVIDENCE"
     return None
 
@@ -426,7 +450,7 @@ def evaluate_candidate(candidate: CandidateInput,
     """Walk GATE_SEQUENCE in order; the first check that returns a state
     terminates the walk. Nothing outside the sequence can reject."""
     ctx = context if context is not None else GateContext()
-    grade = materiality_grade(candidate.materiality)
+    grade = _effective_grade(candidate)
     passed: list = []
 
     for name, check in GATE_SEQUENCE:
@@ -452,7 +476,7 @@ def evaluate_candidate(candidate: CandidateInput,
 def _primary_authorized(candidate: CandidateInput, ctx: GateContext) -> bool:
     """Primary is the strongest claim the product makes; every doubt
     downgrades it (spec §13/§15/§19/§26)."""
-    grade = materiality_grade(candidate.materiality)
+    grade = _effective_grade(candidate)
     tier = evidence_tier_of(candidate)
     quality = (candidate.analysis_quality or "").strip().lower()
 

@@ -903,6 +903,7 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
     app.analysis.impact_graph.evidence.persist_evidence."""
     from app.analysis.impact_graph.engine import _subject_companies_ex
     from app.analysis.impact_graph.evidence import classify_evidence
+    from app.analysis.impact_graph.materiality import materiality_grade as composite_materiality_grade
     from app.analysis.impact_graph.publication_gate import CandidateInput, GateContext, evaluate_candidate
     from app.analysis.impact_graph.schemas import EventFacts
 
@@ -946,6 +947,20 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             else "resolved" if row is not None
             else "unresolved"
         )
+        # Materiality composite (Task 8): the gate must never see the naked
+        # LLM float. exposure_level is the company's own CompanyExposure
+        # ordinal for the mechanism's dimension when one exists; None (no
+        # prior on file) applies no cap, per materiality_grade()'s contract.
+        grade = composite_materiality_grade(
+            company.materiality,
+            _exposure_level_for_candidate(session, row, company),
+            evidence_tier,
+            # Reserved for Task 10 (event magnitude extraction) -- no
+            # producer of a real shock-magnitude verdict exists yet, and
+            # inventing one here would be the same sin materiality.py exists
+            # to prevent.
+            False,
+        )
         decisions.append((evidence_class, evidence_tier, evidence_payloads, evaluate_candidate(CandidateInput(
             ticker=company.ticker,
             # Resolved-company identity: the dedup key finalize uses, so two
@@ -959,6 +974,7 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             economic_effect=_persist_effect(company.economic_effect) or "",
             causal_distance=company.causal_distance,
             materiality=company.materiality,
+            materiality_grade=grade,
             confidence=company.confidence,
             independently_verified=bool(company.verified),
             verification_available=bool(verification_available),
@@ -977,6 +993,35 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             trigger_shock_present=_roots_in_event(result, company),
         ), context)))
     return decisions
+
+
+def _exposure_level_for_candidate(session: Session, row, company) -> str | None:
+    """CompanyExposure ordinal for the mechanism's own dimension (Task 8's
+    materiality composite input). The mechanism_id rides on
+    `discovery_source` ("archetype:<mechanism_id>") -- the only place a
+    candidate carries it today; the dynamic mapping path and the
+    subject-fallback path carry no mechanism_id at all. Either "no
+    mechanism_id" or "no exposure row at that dimension" honestly means "no
+    prior on file" -- None, which materiality_grade() treats as no cap
+    rather than inventing a NONE-exposure claim nobody made."""
+    if row is None:
+        return None
+    source = company.discovery_source or ""
+    if not source.startswith("archetype:"):
+        return None
+    from app.analysis.impact_graph.knowledge import MECHANISM_DIMENSIONS
+    from app.models import CompanyExposure
+
+    mechanism_id = source[len("archetype:"):]
+    dimension = MECHANISM_DIMENSIONS.get(mechanism_id)
+    if dimension is None:
+        return None
+    exposure = (
+        session.query(CompanyExposure)
+        .filter_by(company_id=row.id, dimension=dimension)
+        .one_or_none()
+    )
+    return exposure.level if exposure is not None else None
 
 
 def _gate_quality(analysis_quality: str | None) -> str:

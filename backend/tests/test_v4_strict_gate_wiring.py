@@ -245,14 +245,22 @@ def test_strict_supply_link_upgrades_evidence_to_primary(db_session, strict_mode
 
 def test_strict_model_inference_d2_is_insufficient_evidence(db_session, strict_mode):
     """Policy change (corrective-v4 Task 4): tier E used to buy a quiet
-    secondary slot. Model inference alone now authorizes nothing at all."""
+    secondary slot. Model inference alone now authorizes nothing at all.
+
+    Task 8 note: the composite materiality grade
+    (app.analysis.impact_graph.materiality) caps tier E to LOW *before* the
+    gate walk even starts, and MATERIALITY_VALID runs before EVIDENCE_VALID
+    in GATE_SEQUENCE -- so this candidate now rejects one gate earlier, on
+    REJECT_LOW_MATERIALITY rather than REJECT_INSUFFICIENT_EVIDENCE. Same
+    root cause (tier E can never authorize display), same excluded outcome;
+    only the specific machine-readable reason moved upstream."""
     d2 = _graph_company(causal_distance=2, materiality=0.7)
     _company_row(db_session)
     entries = _v3_entries(db_session, _result([d2]))
 
     assert entries[0]["evidence_class"] == "MODEL_INFERENCE"
     assert entries[0]["display_tier"] == "excluded"
-    assert entries[0]["gate_state"] == "REJECT_INSUFFICIENT_EVIDENCE"
+    assert entries[0]["gate_state"] == "REJECT_LOW_MATERIALITY"
 
 
 def test_strict_primary_cap_demotes_overflow_to_deep_dive(db_session, strict_mode, monkeypatch):
