@@ -155,14 +155,41 @@ def test_persist_alert_stores_facts_for_the_refinement_layer(db_session):
 def test_reused_alert_carries_its_facts_to_the_new_alert(db_session, monkeypatch):
     """The dedup-reuse path skips analyze_article entirely, so the only
     facts available are the reused alert's -- without carrying them over,
-    every republished story would silently refine off the raw article."""
+    every republished story would silently refine off the raw article.
+
+    Corrective-v4 Task 12: reuse now requires the prior alert to be fully
+    gate-authoritative (see app.pipeline._dedup_reuse_policy_allows), so
+    this seeds a gated AlertCompany plus a matching CompanyDecisionRecord
+    audit row -- a bare gate-less alert (this test's old fixture) no
+    longer qualifies for the reuse shortcut at all."""
+    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+    from app.models import CompanyDecisionRecord
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(company)
+    db_session.commit()
+
     first = Article(
         source="test", url="https://example.com/1", title="Oil jumps on outage",
         content=BODY, status="ANALYZED", fetched_at=utcnow(),
     )
     db_session.add(first)
     db_session.commit()
-    db_session.add(Alert(article_id=first.id, category="oil_gas", event_type="crude_oil", facts=FACTS))
+    first_alert = Alert(article_id=first.id, category="oil_gas", event_type="crude_oil",
+                        facts=FACTS, analysis_quality="authoritative")
+    db_session.add(first_alert)
+    db_session.commit()
+    db_session.add(AlertCompany(
+        alert_id=first_alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=3.0, rationale="refiner", basis="direct_mention",
+        display_tier="primary", gate_state="DISPLAY_ELIGIBLE",
+    ))
+    db_session.add(CompanyDecisionRecord(
+        alert_id=first_alert.id, company_id=company.id, ticker=company.ticker,
+        final_state="DISPLAY_ELIGIBLE", display_tier="primary",
+        analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+    ))
     db_session.commit()
 
     duplicate = Article(

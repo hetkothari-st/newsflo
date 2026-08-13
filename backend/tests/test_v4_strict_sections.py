@@ -147,10 +147,18 @@ def test_strict_legacy_alert_falls_back_to_three_tier(db_session, strict_mode):
     assert layers[0]["title"] == "Winners — upstream"  # tier-1 LLM layer used
 
 
-def test_legacy_mode_ignores_gate_fields_entirely(db_session, legacy_mode):
-    """Flag off: 3-tier path untouched even when gate fields exist."""
+def test_legacy_mode_with_no_gate_data_keeps_three_tier(db_session, legacy_mode):
+    """Flag off AND no gate data on this alert's companies (gate_state/
+    display_tier NULL): 3-tier path renders. Note this is now the ONLY
+    "flag off" scenario that reaches the 3-tier path -- corrective-v4 Task
+    12 made the legacy generator structurally unreachable whenever ANY
+    company carries a non-NULL gate_state, REGARDLESS of the flag (see
+    test_sections_structural.py::test_gated_alert_legacy_unreachable_even_flag_off
+    for that structural case, which this test used to conflate with "flag
+    off" alone -- gate fields existing was never actually exercised here)."""
     alert = _seed_alert(db_session)
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier=None, gate_state=None,
                  economic_effect="positive", excess=1.0)
     db_session.add(AlertRippleLayer(
         alert_id=alert.id, position=0, title="Winners — upstream",

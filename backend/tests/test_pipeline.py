@@ -357,6 +357,29 @@ def test_process_new_articles_reuses_analysis_for_republished_article(db_session
     # exactly how a republish looks) must reuse the first's analysis
     # instead of spending a second LLM call, and must produce the SAME
     # AlertCompany data a second real call would have.
+    #
+    # Corrective-v4 Task 12: reuse now requires the prior alert to be fully
+    # gate-authoritative (see app.pipeline._dedup_reuse_policy_allows), so
+    # this runs under strict mode with a mocked publication gate that
+    # accepts the candidate -- a purely-legacy (ungated) prior alert no
+    # longer qualifies for the reuse shortcut at all (see
+    # test_sections_structural.py::test_dedup_reuse_cannot_bypass_gate).
+    from app.analysis.impact_graph.publication_gate import GateDecision
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "impact_engine_v4_strict", True)
+
+    def fake_gate_candidates(session, result):
+        return [
+            ("ARTICLE_SUBJECT", "TIER1", [], GateDecision(
+                final_state="DISPLAY_ELIGIBLE", display_tier="primary",
+                gates_passed=["materiality"], rejection_reason=None,
+                materiality_grade="HIGH", ticker=company.ticker, dedup_key=company.ticker,
+            ))
+            for company in result.companies
+        ]
+    monkeypatch.setattr(pipeline_module, "_gate_candidates", fake_gate_candidates)
+
     company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
     db_session.add(company)
     db_session.commit()
@@ -871,6 +894,31 @@ def test_process_new_articles_persists_indirect_impact_chain_with_decayed_confid
 
 
 def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_session, monkeypatch):
+    """Corrective-v4 Task 12: the dedup-reuse shortcut now only fires for a
+    prior alert whose companies are ALL gate-authoritative (see
+    app.pipeline._dedup_reuse_policy_allows), so this exercises the reuse
+    path with strict mode on and a mocked publication gate that accepts
+    both candidates -- a purely-legacy (ungated) prior alert no longer
+    qualifies for reuse at all (see test_sections_structural.py::
+    test_dedup_reuse_cannot_bypass_gate for that case). Also asserts the
+    v4/gate fields (display_tier, gate_state) survive the copy, not just
+    impact_level/parent_company_id."""
+    from app.analysis.impact_graph.publication_gate import GateDecision
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "impact_engine_v4_strict", True)
+
+    def fake_gate_candidates(session, result):
+        return [
+            ("ARTICLE_SUBJECT", "TIER1", [], GateDecision(
+                final_state="DISPLAY_ELIGIBLE", display_tier="primary",
+                gates_passed=["materiality"], rejection_reason=None,
+                materiality_grade="HIGH", ticker=company.ticker, dedup_key=company.ticker,
+            ))
+            for company in result.companies
+        ]
+    monkeypatch.setattr(pipeline_module, "_gate_candidates", fake_gate_candidates)
+
     direct = Company(ticker="NVDA.NS", name="Nvidia", sector="it", index_tier="NIFTY50", market_cap=1.0)
     supplier = Company(ticker="TSM.NS", name="TSMC", sector="it", index_tier="NIFTY50", market_cap=1.0)
     db_session.add_all([direct, supplier])
@@ -882,6 +930,8 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
 
     fake_output = ImpactGraphResult(
         category="it",
+        # analysis_quality defaults to "authoritative" -- required by the
+        # reuse policy alongside the gate_state/analysis_version checks.
         companies=[
             # Matched rule + fully-cited claim on both, same reasoning as
             # test_process_new_articles_persists_indirect_impact_chain_with_decayed_confidence
@@ -921,6 +971,9 @@ def test_process_new_articles_reuse_path_carries_impact_level_and_parent(db_sess
     )
     assert reused_indirect.impact_level == "indirect_l1"
     assert reused_indirect.parent_company_id == direct.id
+    # V4/gate fields carried through the copy verbatim, not dropped.
+    assert reused_indirect.display_tier == "primary"
+    assert reused_indirect.gate_state == "DISPLAY_ELIGIBLE"
 
 
 def test_process_new_articles_cache_hit_skips_llm_call_and_throttle_sleep(db_session, monkeypatch):

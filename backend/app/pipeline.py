@@ -253,6 +253,40 @@ def _normalize_title(title: str) -> str:
     return " ".join(title.strip().lower().split())
 
 
+def _dedup_reuse_policy_allows(session: Session, alert: Alert) -> bool:
+    """Dedup-reuse gate (corrective-v4 Task 12): the title-dedup shortcut
+    must never resurrect an alert whose companies never passed the
+    publication gate, nor one persisted under a stale gate contract --
+    copying a legacy (pre-gate) alert's field-less rows onto a new alert
+    would silently reintroduce exactly the gate bypass this closes.
+    Reuse is allowed ONLY when:
+      1. every one of the prior alert's AlertCompany rows has a non-NULL
+         gate_state (an alert with no companies at all also fails: there is
+         nothing gate-authoritative to reuse);
+      2. the prior alert has a durable CompanyDecisionRecord audit trail
+         (written only in strict mode) whose analysis_version matches the
+         CURRENT prompt/schema version -- a version mismatch means the gate
+         contract has since changed and the old decision can't be trusted;
+      3. the prior alert's own analysis_quality is "authoritative" (a
+         degraded/fallback/budget_exhausted analysis is never reused).
+    Any failure falls through to a fresh analysis, never a partial copy.
+    """
+    companies = alert.companies
+    if not companies or any(ac.gate_state is None for ac in companies):
+        return False
+    if alert.analysis_quality != "authoritative":
+        return False
+    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+    from app.models import CompanyDecisionRecord
+
+    current_version = f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}"
+    records = session.query(CompanyDecisionRecord).filter_by(alert_id=alert.id).all()
+    if not records:
+        return False
+    return all(record.analysis_version == current_version for record in records)
+
+
 def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
     """Find an already-analyzed article with the EXACT same normalized
     title, fetched recently -- RSS sources frequently republish the
@@ -262,7 +296,10 @@ def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
     is the same story), while skipping the call entirely.
 
     Exact-match only, no fuzzy similarity -- this must never risk merging
-    two genuinely different stories into one analysis.
+    two genuinely different stories into one analysis. A title match whose
+    alert fails _dedup_reuse_policy_allows is treated as no match at all --
+    the caller falls through to a fresh analysis, never a stale/partial
+    copy (corrective-v4 Task 12).
     """
     normalized = _normalize_title(article.title)
     cutoff = utcnow() - timedelta(hours=DEDUP_LOOKBACK_HOURS)
@@ -275,7 +312,10 @@ def _find_reusable_alert(session: Session, article: Article) -> Alert | None:
     )
     for candidate in candidates:
         if _normalize_title(candidate.title) == normalized:
-            return session.query(Alert).filter_by(article_id=candidate.id).first()
+            matched = session.query(Alert).filter_by(article_id=candidate.id).first()
+            if matched is not None and _dedup_reuse_policy_allows(session, matched):
+                return matched
+            return None
     return None
 
 
@@ -1311,6 +1351,19 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "impact_level": ac.impact_level,
                 "parent_company_id": ac.parent_company_id,
                 "expected_market_sensitivity": ac.expected_market_sensitivity,
+                # V4/gate fields (corrective-v4 Task 12): _find_reusable_alert
+                # only hands back an alert whose companies are ALL
+                # gate-authoritative (see _dedup_reuse_policy_allows), so
+                # copy that decision verbatim -- letting a reused row
+                # silently regress to "ungated" (gate_state/display_tier
+                # NULL) would make it structurally indistinguishable from a
+                # legacy alert and re-open the gate bypass this closes.
+                "display_tier": ac.display_tier, "gate_state": ac.gate_state,
+                "economic_effect": ac.economic_effect,
+                "causal_distance": ac.causal_distance, "impact_strength": ac.impact_strength,
+                "confidence_f": ac.confidence_f, "materiality": ac.materiality,
+                "causal_parent_type": ac.causal_parent_type, "causal_parent_id": ac.causal_parent_id,
+                "mechanism": ac.mechanism, "channels_json": ac.channels_json,
             } for ac in reusable_alert.companies]
             # The reused alert's own distilled facts carry over too: this
             # is the SAME underlying story, so its facts are exactly what a

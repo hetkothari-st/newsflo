@@ -14,7 +14,6 @@ import json
 from sqlalchemy.orm import Session
 
 from app.companies.branding import logo_url
-from app.config import settings
 from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
 from app.market.alert_measurement import _intensity_for_company_move
@@ -58,9 +57,19 @@ _SECTOR_LABELS = {
 }
 
 
-# Controlled taxonomy labels for strict-mode sections (spec §23): keyed by
-# the causal parent node the gate validated. Fallback prettifies the node
-# id -- deterministic either way, never LLM-authored.
+# Controlled taxonomy labels for strict-mode sections (spec §23, corrective-
+# v4 Task 12): keyed by the causal parent node the gate validated -- the
+# archetype-mapping path (app.analysis.impact_graph.engine._archetype_mapping)
+# always sets that node id to normalize_node_id(mechanism_id), so every key
+# below is normalize_node_id() applied to a MECHANISMS id in
+# app.analysis.impact_graph.knowledge (test_all_42_mechanisms_have_labels
+# pins full coverage). The first eight entries predate the 42-mechanism
+# registry -- top-level trigger-variable node ids observed on production
+# rows, not mechanism ids themselves -- and stay for backward compatibility.
+# Unknown parent ids (a novel/LLM-authored node, or a dynamic-discovery
+# node with no archetype mechanism behind it) get OTHER_LABEL: raw LLM/
+# engine node ids must never reach the UI verbatim (INV: controlled
+# taxonomy only).
 _TAXONOMY_LABELS = {
     "crude_price": "crude-linked",
     "tyre_input_cost": "tyre input costs",
@@ -70,7 +79,58 @@ _TAXONOMY_LABELS = {
     "repo_rate": "rate-sensitive",
     "inr_depreciation": "currency-exposed",
     "road_freight_fuel_cost": "freight fuel costs",
+    # -- crude oil family --
+    "upstream_realization": "upstream oil producers",
+    "refiner_marketing_margin": "refining & marketing",
+    "lubricant_base_oil_cost": "lubricant input costs",
+    "petrochemical_feedstock": "petrochemical feedstock costs",
+    "cement_energy_freight": "cement energy & freight costs",
+    "auto_fuel_demand": "auto fuel-cost demand drag",
+    "two_wheeler_fuel_demand": "two-wheeler fuel-cost demand drag",
+    "ev_relative_advantage": "ev relative advantage",
+    "vehicle_financier_stress": "vehicle-financier asset stress",
+    "crude_inflation_pressure": "crude-led inflation pressure",
+    "oil_import_bill_currency": "oil import bill & currency",
+    # -- rates family --
+    "bank_nim_repricing": "bank margin repricing",
+    "nbfc_financing_cost": "nbfc funding costs",
+    "housing_demand_rate": "housing demand & rates",
+    "durable_financing_demand": "durables financing demand",
+    "auto_financing_demand": "auto financing demand",
+    "corporate_capex_rate": "corporate capex & rates",
+    # -- inflation family --
+    "staple_volume_pressure": "staples volume pressure",
+    "discretionary_demand_squeeze": "discretionary demand squeeze",
+    "rate_expectation_shift": "rate expectation shift",
+    # -- currency family --
+    "it_export_realization": "it export realization",
+    "pharma_export_realization": "pharma export realization",
+    "textile_export_competitiveness": "textile export competitiveness",
+    "import_cost_inflation": "import cost inflation",
+    "electronic_import_cost": "electronics import costs",
+    # -- government spending family --
+    "cement_demand_infra": "cement demand from infrastructure",
+    "epc_order_book": "epc order books",
+    "steel_demand_infra": "steel demand from infrastructure",
+    "capital_good_order": "capital goods orders",
+    "infra_logistics_volume": "infrastructure logistics volume",
+    # -- trade/tariff family --
+    "domestic_producer_protection": "domestic producer protection",
+    "downstream_input_cost_tariff": "downstream input costs (tariff)",
+    # -- geopolitical supply disruption --
+    "freight_rate_up": "freight rate spikes",
+    "defense_procurement_sentiment": "defense procurement sentiment",
+    # -- monsoon/rural family --
+    "rural_income_agri": "rural agri income",
+    "rural_fmcg_demand": "rural fmcg demand",
+    "rural_two_wheeler_demand": "rural two-wheeler demand",
+    "agrochemical_volume": "agrochemical volume",
 }
+
+# Controlled fallback for a causal_parent_id with no taxonomy entry (a novel
+# node an LLM named, or a dynamic-discovery node with no archetype
+# mechanism behind it) -- never the raw node id itself.
+OTHER_LABEL = "other verified mechanisms"
 
 _EFFECT_PREFIX = {
     "positive": "Positive", "negative": "Negative",
@@ -90,11 +150,17 @@ def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
     """Deterministic section assembly for gate-validated alerts (spec
     §23-§26): direction comes from economic_effect, membership from the
     publication gate's tier, labels from the controlled taxonomy. Returns
-    None for legacy alerts (no gate output) so the 3-tier path renders
-    them unchanged -- and the 3-tier code itself is never touched."""
+    None when no company clears DISPLAYABLE_TIERS (compute_ripple_layers'
+    structural gate turns that into [], never a fall-through to the 3-tier
+    path -- see corrective-v4 Task 12: gate_state != NULL makes the legacy
+    generator structurally unreachable, not merely undesired)."""
+    # Keyed on alert_company_id, not position: rows_flat and alert.companies
+    # happen to share an order today, but a positional pairing is a latent
+    # bug waiting for either list to be re-sorted or filtered independently.
+    rows_by_alert_company_id = {row["alert_company_id"]: row for row in rows_flat}
     gated = [
-        (alert_company, rows_flat[i])
-        for i, alert_company in enumerate(alert.companies)
+        (alert_company, rows_by_alert_company_id[alert_company.id])
+        for alert_company in alert.companies
         if alert_company.display_tier in DISPLAYABLE_TIERS
     ]
     if not gated:
@@ -124,13 +190,20 @@ def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
     )
     for (effect, parent_id), members in ordered:
         members = sorted(members, key=_row_sort_key)
-        label = _TAXONOMY_LABELS.get(parent_id, parent_id.replace("_", " "))
-        top_mechanism = members[0][0].mechanism
+        label = _TAXONOMY_LABELS.get(parent_id, OTHER_LABEL)
+        # The "why this layer" note is only honest when every member
+        # actually shares it: members already share causal_parent_id (the
+        # grouping key above), so the remaining check is the mechanism
+        # string itself -- a heterogeneous section (same taxonomy parent,
+        # different specific mechanisms) gets no single-company note
+        # (corrective-v4 Task 12).
+        mechanisms = {alert_company.mechanism for alert_company, _ in members}
+        note = members[0][0].mechanism if len(mechanisms) == 1 else None
         layers.append({
             "title": f"{_EFFECT_PREFIX.get(effect, 'Mixed')} — {label}",
             "relationship": f"MECH:{parent_id}",
             "icon": _EFFECT_ICON.get(effect, "side"),
-            "note": top_mechanism,
+            "note": note,
             "rows": [row for _, row in members],
         })
     if secondary:
@@ -295,13 +368,19 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
             impact_level=alert_company.impact_level,
         ))
 
-    # V4 strict (spec §23): gate-validated alerts render deterministic
-    # taxonomy sections; legacy alerts (None) fall through to the 3-tier
-    # path below, which stays byte-identical for flag-off rendering.
-    if settings.impact_engine_v4_strict:
-        strict_layers = _strict_sections(alert, rows_flat)
-        if strict_layers is not None:
-            return strict_layers
+    # V4 structural gate (owner-locked invariant, corrective-v4 Task 12):
+    # ANY AlertCompany.gate_state != NULL makes the legacy 3-tier generator
+    # STRUCTURALLY unreachable for this alert -- not merely "we prefer not
+    # to call it". This deliberately does NOT read
+    # settings.impact_engine_v4_strict: the flag controls whether NEW
+    # alerts get gated at analysis time, but once gate_state is persisted
+    # on a row, flipping the flag back off must never resurrect the legacy
+    # renderer for it. _strict_sections returning None (no company cleared
+    # DISPLAYABLE_TIERS) still returns [] here, never a fall-through.
+    # The 3-tier path below runs ONLY when every gate_state is NULL, and
+    # stays byte-identical for those alerts (existing tests pin it).
+    if any(alert_company.gate_state is not None for alert_company in alert.companies):
+        return _strict_sections(alert, rows_flat) or []
 
     def _sorted(rows: list[dict]) -> list[dict]:
         return sorted(rows, key=lambda r: r["intensity"]["score"] if r["intensity"] else -1, reverse=True)
