@@ -12,7 +12,7 @@ Scores are floats in [0,1]; code clamps rather than trusting the model
 """
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.analysis.schemas import CATEGORIES, EVENT_TYPES
 
@@ -48,6 +48,22 @@ _ECONOMIC_EFFECT_INPUT_ENUM = ECONOMIC_EFFECTS + ["neutral"]
 # vocabulary distinguishes "not applicable" from "plausible but uncertain"
 # -- uncertain is NOT a discard.
 CHANNEL_VERDICTS = ["material", "potential", "not_applicable", "uncertain"]
+# Structured event-causation vocabulary (corrective plan 2026-08-13 task 10):
+# the article's own ROOT CAUSE for the event, orthogonal to `category`
+# (topical bucket) and `event_type` (article-classification tag). "unknown"
+# is the honest default -- never invented, see EventFacts._normalize_cause.
+EVENT_CAUSES = [
+    "supply_shock", "demand_shock", "policy_action", "regulatory_change",
+    "geopolitical_event", "company_action", "macro_data_surprise",
+    "market_structure_event", "other", "unknown",
+]
+# Expected market SENSITIVITY (task 10): how likely THIS event is to cause
+# meaningful repricing for a given company -- a distinct concept from
+# economic_effect (the direction/size of the fundamental impact),
+# materiality (worth showing at all) and the market layer's OWN measured
+# price move. A model that has no basis to judge sensitivity omits the
+# field and gets the honest "UNKNOWN", never a guess.
+MARKET_SENSITIVITY_LEVELS = ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 
 _EFFECT_TO_DIRECTION = {
     "positive": "bullish", "negative": "bearish",
@@ -106,6 +122,27 @@ class EventFacts(BaseModel):
     article_evidence: list[str] = Field(default_factory=list)  # "article: ..." snippets
     category: str
     event_type: str
+    # Structured event causation (task 10): the canonical ROOT CAUSE, kept
+    # DISTINCT from category/event_type (topical classification) and from
+    # any company's economic_effect (a downstream consequence, not a
+    # cause). Never invented -- an omitted or out-of-enum value normalizes
+    # to "unknown" via the validator below, the same discipline
+    # normalize_effect() applies to economic_effect.
+    event_cause: str = "unknown"
+    # Magnitude exactly AS STATED by the article -- free text on purpose
+    # (a percentage, a currency figure, a unit count, whatever the article
+    # actually says), never a code-estimated number. None means the
+    # article gave no magnitude at all.
+    magnitude: str | None = None
+    magnitude_units: str | None = None
+
+    @field_validator("event_cause", mode="before")
+    @classmethod
+    def _normalize_cause(cls, value):
+        """Missing/omitted or any value outside the enum honestly becomes
+        "unknown" -- this stage must never invent a cause the article does
+        not support."""
+        return value if value in EVENT_CAUSES else "unknown"
 
     def compact_lines(self, limit: int = 14) -> str:
         """The downstream-call fact block: numbered canonical facts, or a
@@ -136,6 +173,11 @@ SCHEMA_FACTS = {
         "article_evidence": {"type": "array", "items": {"type": "string"}},
         "category": {"type": "string", "enum": CATEGORIES},
         "event_type": {"type": "string", "enum": EVENT_TYPES},
+        # Task 10: optional -- an omission is a legitimate "unknown", never
+        # required from the model.
+        "event_cause": {"type": "string", "enum": EVENT_CAUSES},
+        "magnitude": {"type": "string"},
+        "magnitude_units": {"type": "string"},
     },
     "required": ["event", "event_status", "facts", "fact_items", "category", "event_type"],
 }
@@ -395,6 +437,20 @@ class GraphCompany(BaseModel):
     # UNCERTAIN fallback when the verifier ran but omitted this ticker); a
     # company the verifier never reached at all keeps "".
     counterfactual: str = ""
+    # Expected market sensitivity (task 10): HIGH/MEDIUM/LOW/UNKNOWN --
+    # how likely THIS event is to cause meaningful repricing sensitivity
+    # for this company. Explicitly NOT the economic effect, NOT
+    # materiality, and NOT the measured price move (app.market.measure
+    # owns that; this field is set ONLY from the model's own judgment at
+    # mapping time and must never be back-derived from a later price
+    # observation). Optional in every company schema -- an omission is the
+    # honest "UNKNOWN", never a guess.
+    expected_market_sensitivity: str = "UNKNOWN"
+
+    @field_validator("expected_market_sensitivity", mode="before")
+    @classmethod
+    def _normalize_sensitivity(cls, value):
+        return value if value in MARKET_SENSITIVITY_LEVELS else "UNKNOWN"
 
     def clamp(self) -> "GraphCompany":
         self.impact_strength = _clamp(self.impact_strength)
@@ -458,6 +514,9 @@ def schema_companies(valid_tickers: list[str]) -> dict:
                         "offsetting_channels": {"type": "array", "items": {"type": "string"}},
                         "net_direction": {"type": "string", "enum": NET_DIRECTIONS},
                         "economic_effect": {"type": "string", "enum": _ECONOMIC_EFFECT_INPUT_ENUM},
+                        # Task 10: OPTIONAL -- omission defaults to UNKNOWN
+                        # via GraphCompany's own validator, never required.
+                        "expected_market_sensitivity": {"type": "string", "enum": MARKET_SENSITIVITY_LEVELS},
                         "relative_beneficiary": {"type": "boolean"},
                         "key_points": {"type": "array", "items": {"type": "string"}},
                         "reasons": {"type": "array", "items": {"type": "string"}},
@@ -609,6 +668,10 @@ class ImpactGraphResult(BaseModel):
     event_type, gaps, facts) so persistence adapts, not rewrites."""
     category: str
     event_type: Optional[str] = None
+    # Task 10: mirrors event_type's carry-through -- set from
+    # facts.event_cause, "unknown" for cached pre-upgrade results
+    # deserializing without it.
+    event_cause: str = "unknown"
     facts: str = ""
     event_label: str = ""
     # Article-named entities carried through for the publication gate's

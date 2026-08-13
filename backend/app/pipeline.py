@@ -395,6 +395,11 @@ def _build_alert_company(
         # V4 strict gate outcome -- None for legacy (ungated) entries.
         display_tier=entry.get("display_tier"),
         gate_state=entry.get("gate_state"),
+        # Expected market sensitivity (corrective-v4 task 10): set ONLY from
+        # entry["expected_market_sensitivity"], which _v3_entries populates
+        # from GraphCompany.expected_market_sensitivity directly -- never
+        # from price_at_analysis/return_1m/return_3m above.
+        expected_market_sensitivity=entry.get("expected_market_sensitivity"),
     )
     return alert_company, result.score
 
@@ -560,6 +565,7 @@ def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
     analysis_provider: str | None = None, analysis_quality: str | None = None,
+    event_cause: str | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -578,6 +584,7 @@ def _persist_alert(
         category = "other"
     alert = Alert(
         article_id=article.id, category=category, event_type=event_type,
+        event_cause=event_cause,
         prompt_version=PROMPT_VERSION, knowledge_version=KNOWLEDGE_VERSION,
         # Stored BEFORE refine_alert runs below -- that is the evidence base
         # it reasons from (see app.analysis.refinement.refine_alert). None
@@ -1119,6 +1126,12 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 "relative_beneficiary": company.relative_beneficiary,
             }) if (company.positive_channels or company.negative_channels
                    or company.net_direction) else None,
+            # Expected market sensitivity (task 10): straight from
+            # GraphCompany.expected_market_sensitivity -- set by the
+            # mapping-stage model's own judgment, never derived from any
+            # measured price move (app.market.measure runs later and
+            # separately).
+            "expected_market_sensitivity": company.expected_market_sensitivity,
         })
         # Positional, not ticker-keyed: two candidates can name one company
         # and each keeps its own decision (one of them REJECT_DUPLICATE).
@@ -1280,6 +1293,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "alternative_hypothesis": ac.alternative_hypothesis,
                 "impact_level": ac.impact_level,
                 "parent_company_id": ac.parent_company_id,
+                "expected_market_sensitivity": ac.expected_market_sensitivity,
             } for ac in reusable_alert.companies]
             # The reused alert's own distilled facts carry over too: this
             # is the SAME underlying story, so its facts are exactly what a
@@ -1290,6 +1304,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 session, article, reusable_alert.category, entries,
                 event_type=reusable_alert.event_type, client=claude_client,
                 facts=reusable_alert.facts,
+                event_cause=reusable_alert.event_cause,
             )
             alerts_created += 1
             continue
@@ -1340,6 +1355,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 event_type=result.event_type, gaps=result.gaps, edges=_v3_edges(result),
                 client=claude_client, facts=result.facts,
                 analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
+                event_cause=result.event_cause,
             )
         except Exception:
             logger.exception("persist failed for article_id=%s; marked for retry", article.id)

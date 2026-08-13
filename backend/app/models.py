@@ -341,6 +341,12 @@ class Alert(Base):
     # | budget_exhausted. NULL on pre-v3 alerts.
     analysis_provider = Column(String, nullable=True)
     analysis_quality = Column(String, nullable=True)
+    # Structured event causation (corrective-v4 task 10): the article's own
+    # ROOT CAUSE classification (see app.analysis.impact_graph.schemas.
+    # EVENT_CAUSES), distinct from `category`/`event_type` above and from
+    # any company's economic_effect. NULL on pre-task-10 rows; "unknown" on
+    # rows persisted after this shipped where the model could not classify.
+    event_cause = Column(String, nullable=True)
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -439,6 +445,12 @@ class AlertCompany(Base):
     # and consumers must treat NULL as legacy, never as eligible.
     display_tier = Column(String, nullable=True)
     gate_state = Column(String, nullable=True)
+    # Expected market sensitivity (corrective-v4 task 10): HIGH/MEDIUM/LOW/
+    # UNKNOWN, set ONLY from GraphCompany.expected_market_sensitivity (the
+    # model's own judgment at mapping time) -- never derived from
+    # price_at_analysis/return_1m/return_3m above, which belong to the
+    # separately-measured market-reaction layer. NULL on pre-task-10 rows.
+    expected_market_sensitivity = Column(String, nullable=True)
 
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])

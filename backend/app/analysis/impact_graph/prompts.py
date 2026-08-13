@@ -13,7 +13,7 @@ from app.analysis.schemas import SECTOR_DEFINITIONS
 # 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
 # fingerprint, so a prompt change is an explicit, visible cache
 # invalidation instead of a silent one. Bump on ANY prompt-text change.
-IMPACT_PROMPT_VERSION = "kg-4"
+IMPACT_PROMPT_VERSION = "kg-5"
 
 # Business-model validation (final spec §9/§13): shared by every company
 # stage. Sector labels, names and tickers are candidacy, never proof.
@@ -221,6 +221,8 @@ If the article contains a quantitative or company-specific fact that could affec
 
 Also classify category and event_type using the provided enums.
 
+Also classify event_cause using the provided enum and preserve stated magnitude + units exactly as written; never estimate a magnitude the article does not state.
+
 Additionally emit fact_items: the canonical numbered fact store (F1, F2, ...).
 Each fact_item is ONE self-contained factual sentence carrying its concrete
 specifics (numbers, names, dates). Downstream reasoning stages read ONLY
@@ -319,6 +321,8 @@ For each candidate, determine:
 7. time_horizon.
 
 Rank companies by expected impact_strength, with confidence and materiality used as separate fields.
+
+Also emit expected_market_sensitivity (HIGH/MEDIUM/LOW/UNKNOWN): how likely this event is to cause meaningful repricing sensitivity for this company. This is NOT the economic effect, NOT materiality, NOT the current price move.
 
 Do not rank a company highly merely because it is large or famous.
 
@@ -641,6 +645,8 @@ NARROW_COMPANIES_PROMPT = """For EVERY sector node listed, evaluate EVERY candid
 
 For each company: exact mechanism through its parent node, competing channels (positive_channels / negative_channels), NET direction (mixed and uncertain are valid; a relative beneficiary is not an absolute winner), impact_strength, confidence, materiality, time_horizon. Judge diversified companies at the relevant segment.
 
+Also emit expected_market_sensitivity (HIGH/MEDIUM/LOW/UNKNOWN): how likely this event is to cause meaningful repricing sensitivity for this company. This is NOT the economic effect, NOT materiality, NOT the current price move.
+
 Set parent_id to the company's sector node id. A company sits AT its parent node's causal distance.
 
 SELF-CHECK before answering: for each company -- concrete causal link? direction logically correct? actually exposed? material enough? If any answer is no, leave it out; do not include companies to look thorough. Returning few or zero companies is a correct answer.
@@ -660,6 +666,8 @@ The mechanism prior comes from a verified registry. Your task is EVENT-SPECIFIC 
 3. Weigh competing channels (positive_channels / negative_channels) and report the NET direction -- mixed and uncertain are valid.
 4. Override the prior freely when the event's facts differ from the typical case (price controls, subsidies, inventory positions, pass-through changes, company disclosures in the facts).
 5. Score impact_strength, confidence, materiality for THIS event, not for the mechanism in general.
+
+Also emit expected_market_sensitivity (HIGH/MEDIUM/LOW/UNKNOWN): how likely this event is to cause meaningful repricing sensitivity for this company. This is NOT the economic effect, NOT materiality, NOT the current price move.
 
 Choose ONLY from the candidate list. Selecting none is a correct answer when the mechanism does not genuinely apply.
 

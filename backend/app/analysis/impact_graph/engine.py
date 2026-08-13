@@ -1122,7 +1122,8 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
                 budget.summary(), state.metrics)
 
     return ImpactGraphResult(
-        category=facts.category, event_type=facts.event_type, facts=facts.facts,
+        category=facts.category, event_type=facts.event_type,
+        event_cause=facts.event_cause, facts=facts.facts,
         event_label=facts.event, named_entities=list(facts.named_entities or []),
         companies=list(state.companies.values()),
         edges=state.edges, gaps=state.gaps, ranking=ranking,
