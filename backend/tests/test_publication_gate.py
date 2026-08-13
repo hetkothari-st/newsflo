@@ -51,11 +51,11 @@ def _ctx(**overrides):
     return GateContext(**overrides)
 
 
-def _ok_decision(ticker, mat=0.7, conf=0.8, tier="primary"):
+def _ok_decision(ticker, mat=0.7, conf=0.8, tier="primary", dedup_key=""):
     return GateDecision(
         final_state="DISPLAY_ELIGIBLE", display_tier=tier, gates_passed=list(),
         rejection_reason=None, materiality_grade=materiality_grade(mat),
-        ticker=ticker, materiality=mat, confidence=conf,
+        ticker=ticker, dedup_key=dedup_key, materiality=mat, confidence=conf,
     )
 
 
@@ -206,9 +206,15 @@ def test_counterfactual_not_supported_rejects():
     assert decision.display_tier == "excluded"
 
 
-def test_counterfactual_unknown_verdict_fails_closed():
+def test_counterfactual_unknown_verdict_is_validator_unavailable():
+    """An unrecognized verdict is not a finding about the candidate -- it
+    means the check produced no answer. Fail closed, but under the state
+    that says "the validator did not run", not "the claim is generic"."""
     decision = evaluate_candidate(_candidate(counterfactual=""), _ctx())
-    assert decision.final_state == "REJECT_NOT_EVENT_SPECIFIC"
+    assert decision.final_state == "REJECT_VALIDATOR_UNAVAILABLE"
+
+    garbage = evaluate_candidate(_candidate(counterfactual="probably?"), _ctx())
+    assert garbage.final_state == "REJECT_VALIDATOR_UNAVAILABLE"
 
 
 def test_counterfactual_uncertain_blocks_primary():
@@ -347,6 +353,24 @@ def test_article_subject_with_direct_facts_is_primary_capable():
     assert decision.display_tier == "primary"
 
 
+def test_article_subject_is_d1_evidence_only_at_d2(monkeypatch):
+    """Owner ruling (Task 4 review): two hops out, "the article was about
+    them" says nothing about the transmission chain -- d2 primary needs a
+    relationship record (tier A/B/C), not SUBJECT."""
+    decision = evaluate_candidate(_candidate(
+        causal_distance=2, materiality=0.9,
+        evidence_class="ARTICLE_SUBJECT", evidence_tier="SUBJECT"), _ctx())
+    assert decision.final_state == "DISPLAY_ELIGIBLE"
+    assert decision.display_tier == "secondary_deep_dive"
+
+
+def test_article_subject_is_d1_evidence_only_at_d3():
+    decision = evaluate_candidate(_candidate(
+        causal_distance=3, materiality=0.9,
+        evidence_class="ARTICLE_SUBJECT", evidence_tier="SUBJECT"), _ctx())
+    assert decision.final_state == "REJECT_LOW_PRIORITY"
+
+
 def test_evidence_tier_derived_from_class_when_not_supplied():
     decision = evaluate_candidate(_candidate(
         evidence_class="MODEL_INFERENCE", evidence_tier=""), _ctx())
@@ -437,6 +461,27 @@ def test_validator_unavailable_fails_closed():
     assert decision.final_state == "REJECT_VALIDATOR_UNAVAILABLE"
 
 
+def test_verified_flag_cannot_outrank_an_absent_verifier():
+    """The fail-open bug this gate exists to prevent: when the verifier
+    never ran, `independently_verified=True` is an upstream DEFAULT (the
+    narrow path's in-call self-check, a budget overrun that skipped
+    verification), not a verdict. Availability is checked first,
+    unconditionally (INV-005/016)."""
+    decision = evaluate_candidate(_candidate(
+        independently_verified=True, verification_available=False), _ctx())
+    assert decision.final_state == "REJECT_VALIDATOR_UNAVAILABLE"
+    assert decision.display_tier == "excluded"
+
+
+def test_missing_trigger_shock_is_the_fail_closed_default():
+    """A caller that never computed the structural counterfactual has not
+    shown the claim roots in this event."""
+    from dataclasses import fields
+
+    default = {f.name: f.default for f in fields(CandidateInput)}
+    assert default["trigger_shock_present"] is False
+
+
 # --- alert-level finalization ---------------------------------------------
 
 def test_duplicate_second_occurrence_rejected():
@@ -450,6 +495,14 @@ def test_duplicate_keeps_higher_materiality_regardless_of_order():
     decisions = finalize_alert_decisions([
         _ok_decision("X.NS", mat=0.4), _ok_decision("X.NS", mat=0.9)])
     assert [d.final_state for d in decisions] == ["REJECT_DUPLICATE", "DISPLAY_ELIGIBLE"]
+
+
+def test_duplicate_identity_is_the_resolved_company_not_the_ticker():
+    """Two tickers naming one company are one row to the reader."""
+    decisions = finalize_alert_decisions([
+        _ok_decision("ONGC.NS", mat=0.7, dedup_key="41"),
+        _ok_decision("ONGC.BO", mat=0.5, dedup_key="41")])
+    assert [d.final_state for d in decisions] == ["DISPLAY_ELIGIBLE", "REJECT_DUPLICATE"]
 
 
 def test_duplicate_dedup_leaves_distinct_companies_alone():

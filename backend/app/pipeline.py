@@ -906,9 +906,35 @@ def _roots_in_event(result, company) -> bool:
     return False
 
 
-def _gate_candidates(session: Session, result) -> dict[str, object]:
+def _company_profile_supports_mechanism(session: Session, row, company) -> bool:
+    """BUSINESS_MODEL_VALID's input (canonical policy table): can the system
+    say anything grounded about this company's business at the mechanism's
+    own dimension? A plain-language business description qualifies, and so
+    does a FRESH verified exposure row for the parent node -- an exposure
+    record IS a statement about the business at exactly this dimension, and
+    a company can easily have one without ever getting a description."""
+    if row is None:
+        return False
+    if (row.business_desc or "").strip():
+        return True
+    from app.analysis.impact_graph.exposure import exposure_row_is_fresh
+    from app.models import CompanyNodeExposure
+
+    exposure = (
+        session.query(CompanyNodeExposure)
+        .filter_by(company_id=row.id, node_key=company.parent_id, exposure_exists=1)
+        .one_or_none()
+    )
+    return exposure is not None and exposure_row_is_fresh(exposure, row)
+
+
+def _gate_candidates(session: Session, result) -> list[tuple[str, object]]:
     """Evaluate every graph company through the publication gate (strict
-    mode only). Returns ticker -> GateDecision."""
+    mode only). Returns [(evidence_class, GateDecision)] positionally
+    aligned with `result.companies` -- a list, not a ticker-keyed dict, so
+    that two candidates resolving to ONE company both survive to
+    finalize_alert_decisions and the duplicate is decided there instead of
+    being silently swallowed by dict keying."""
     from app.analysis.impact_graph.engine import _subject_companies
     from app.analysis.impact_graph.publication_gate import (
         EVIDENCE_CLASS_TO_TIER, CandidateInput, GateContext, evaluate_candidate,
@@ -930,16 +956,20 @@ def _gate_candidates(session: Session, result) -> dict[str, object]:
         result.metrics or {}).get("verification_unavailable")
     analysis_quality = _gate_quality(result.analysis_quality)
     context = GateContext()
-    decisions = {}
+    decisions = []
     for company in result.companies:
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
         evidence_class = _classify_evidence(session, company, subject_tickers)
-        decisions[company.ticker] = (evidence_class, evaluate_candidate(CandidateInput(
+        decisions.append((evidence_class, evaluate_candidate(CandidateInput(
             ticker=company.ticker,
+            # Resolved-company identity: the dedup key finalize uses, so two
+            # tickers naming one company collapse to one published row.
+            company_key=str(row.id) if row is not None else "",
             # Tri-state entity resolution lands in Task 7; the pipeline can
             # only tell resolved from unresolved today, and says exactly that.
             entity_status="resolved" if row is not None else "unresolved",
-            company_profile_present=bool(row is not None and (row.business_desc or "")),
+            company_profile_present=_company_profile_supports_mechanism(
+                session, row, company),
             mechanism=company.mechanism or "",
             rationale=company.rationale or "",
             economic_effect=_persist_effect(company.economic_effect) or "",
@@ -961,7 +991,7 @@ def _gate_candidates(session: Session, result) -> dict[str, object]:
             negative_channels=list(company.negative_channels or []),
             net_direction=company.net_direction or "",
             trigger_shock_present=_roots_in_event(result, company),
-        ), context))
+        ), context)))
     return decisions
 
 
@@ -985,7 +1015,7 @@ def _v3_entries(session: Session, result) -> list[dict]:
     (omit rather than mismatch). In strict mode every entry additionally
     carries its publication-gate decision (spec §5)."""
     gate_decisions = (
-        _gate_candidates(session, result) if settings.impact_engine_v4_strict else {}
+        _gate_candidates(session, result) if settings.impact_engine_v4_strict else []
     )
     if gate_decisions:
         # Alert-level policy the per-candidate walk cannot decide alone:
@@ -994,13 +1024,13 @@ def _v3_entries(session: Session, result) -> list[dict]:
         from app.analysis.impact_graph.publication_gate import finalize_alert_decisions
 
         finalized = finalize_alert_decisions(
-            [decision for _, decision in gate_decisions.values()])
-        gate_decisions = {
-            decision.ticker: (gate_decisions[decision.ticker][0], decision)
-            for decision in finalized
-        }
+            [decision for _, decision in gate_decisions])
+        gate_decisions = [
+            (evidence_class, decision)
+            for (evidence_class, _), decision in zip(gate_decisions, finalized)
+        ]
     entries = []
-    for company in result.companies:
+    for company_index, company in enumerate(result.companies):
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
         if row is None:
             logger.warning("v3 company %s did not resolve to a Company row; skipped", company.ticker)
@@ -1053,7 +1083,9 @@ def _v3_entries(session: Session, result) -> list[dict]:
             }) if (company.positive_channels or company.negative_channels
                    or company.net_direction) else None,
         })
-        gated = gate_decisions.get(company.ticker)
+        # Positional, not ticker-keyed: two candidates can name one company
+        # and each keeps its own decision (one of them REJECT_DUPLICATE).
+        gated = gate_decisions[company_index] if gate_decisions else None
         if gated is not None:
             evidence_class, decision = gated
             entries[-1].update({

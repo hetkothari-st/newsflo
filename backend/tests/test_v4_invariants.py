@@ -85,7 +85,7 @@ def test_scenario_omc_negative_and_airline_negative_pass_gate():
             confidence=0.8, independently_verified=True,
             verification_available=True, evidence_class="VERIFIED_RELATIONSHIP",
             evidence_tier="C", counterfactual="SUPPORTED",
-            analysis_quality="authoritative",
+            analysis_quality="authoritative", trigger_shock_present=True,
             negative_channels=["fuel cost"], net_direction="bearish"))
         assert decision.final_state == "DISPLAY_ELIGIBLE"
         assert decision.display_tier == "primary"
@@ -129,6 +129,7 @@ def test_scenario_generic_nbfc_macro_ripple_rejected():
         confidence=0.5, independently_verified=True, verification_available=True,
         evidence_class="MODEL_INFERENCE", evidence_tier="E",
         counterfactual="SUPPORTED", analysis_quality="authoritative",
+        trigger_shock_present=True,
         negative_channels=["demand"], net_direction="bearish"))
 
     assert decision.final_state == "REJECT_GENERIC_EXPOSURE"

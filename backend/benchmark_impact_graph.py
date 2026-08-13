@@ -91,17 +91,26 @@ def run_v3(event, session):
     if settings.impact_engine_v4_strict:
         # Publication-gate shadow columns (spec §54): what the strict
         # boundary would actually display, with rejection reasons.
+        from app.analysis.impact_graph.publication_gate import finalize_alert_decisions
         from app.pipeline import _gate_candidates
+        # Aligned with result.companies; finalize applies the alert-level
+        # dedup + primary cap, exactly as the persistence boundary does.
         gate = _gate_candidates(session, result)
+        finalized = finalize_alert_decisions([decision for _, decision in gate])
+        by_ticker = {
+            company.ticker: (evidence_class, decision)
+            for company, (evidence_class, _), decision
+            in zip(result.companies, gate, finalized)
+        }
         payload["gate"] = {
             ticker: {"tier": decision.display_tier, "state": decision.final_state,
                      "evidence": evidence_class}
-            for ticker, (evidence_class, decision) in gate.items()
+            for ticker, (evidence_class, decision) in by_ticker.items()
         }
         payload["displayed"] = {
             t: result_dir for t, result_dir in payload["companies"].items()
-            if gate.get(t)
-            and gate[t][1].display_tier in ("primary", "secondary_deep_dive", "secondary")
+            if by_ticker.get(t)
+            and by_ticker[t][1].display_tier in ("primary", "secondary_deep_dive", "secondary")
         }
     return payload
 

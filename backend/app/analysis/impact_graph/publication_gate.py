@@ -65,7 +65,15 @@ TIER_EXCLUDED = "excluded"
 #              fact, not fundamental evidence (INV-003)
 KNOWN_EVIDENCE_TIERS = frozenset({"A", "B", "C", "D", "E", "SUBJECT", "MARKET_OBS"})
 STRUCTURED_TIERS = frozenset({"A", "B"})
-STRONG_TIERS = frozenset({"A", "B", "C", "SUBJECT"})       # tier >= C
+# "Tier >= C": what may carry a company-specific claim at all. ARTICLE_SUBJECT
+# belongs here -- being the article's own subject IS company-specific evidence.
+STRONG_TIERS = frozenset({"A", "B", "C", "SUBJECT"})
+# Owner ruling (Task 4 review, I1): ARTICLE_SUBJECT is strong evidence about
+# the company AT DISTANCE 1 ONLY. Two hops out, "the article was about them"
+# says nothing about the transmission chain, so d2-primary and d3-deep-dive
+# require a structured relationship record (A/B) or a verified relationship
+# (C). SUBJECT at d2/d3 behaves like tier D.
+RELATIONSHIP_TIERS = frozenset({"A", "B", "C"})
 NON_AUTHORIZING_TIERS = frozenset({"E", "MARKET_OBS"})
 
 # Transitional bridge from the legacy evidence-class vocabulary (Task 5
@@ -129,12 +137,19 @@ class CandidateInput:
     evidence_class: str
     counterfactual: str           # SUPPORTED | NOT_SUPPORTED | UNCERTAIN
     analysis_quality: str         # authoritative | fallback | degraded | failed
+    # Resolved-company identity for dedup: two tickers can name one company,
+    # and the company is what the user sees twice. Empty falls back to the
+    # ticker.
+    company_key: str = ""
     # Derived from evidence_class when the caller has no classifier yet.
     evidence_tier: str = ""
     net_direction: str = ""
     positive_channels: list = field(default_factory=list)
     negative_channels: list = field(default_factory=list)
-    trigger_shock_present: bool = True
+    # Fail-closed default: a caller that never computed the structural
+    # counterfactual has not shown the claim roots in this event, and
+    # "not computed" must never read as "rooted".
+    trigger_shock_present: bool = False
 
 
 @dataclass(frozen=True)
@@ -168,12 +183,21 @@ class GateContext:
 
 @dataclass(frozen=True)
 class GateDecision:
+    """The gate's verdict. Consumers MUST key on `final_state` (and
+    `display_tier`), never on the length or membership of `gates_passed`:
+    that list is an audit trail of how far the walk got, and adding a gate
+    to GATE_SEQUENCE changes its length for every decision. `notes` carries
+    alert-level finalization detail (primary_cap_overflow, duplicate)."""
     final_state: str              # DISPLAY_ELIGIBLE or a REJECT_* state
     display_tier: str             # primary | secondary_deep_dive | excluded
     gates_passed: list
     rejection_reason: str | None
     materiality_grade: str        # HIGH | MEDIUM | LOW | UNKNOWN
     ticker: str = ""
+    # Identity for alert-level dedup: the RESOLVED company (two tickers can
+    # name one company). Falls back to the ticker when the caller has no
+    # resolved id.
+    dedup_key: str = ""
     materiality: float | None = None
     confidence: float | None = None
     notes: str | None = None
@@ -230,11 +254,17 @@ def _check_entity_valid(c: CandidateInput, ctx: GateContext) -> str | None:
     return None
 
 
+def candidate_identity(candidate: CandidateInput) -> str:
+    """What "the same company twice" means: the resolved company when the
+    caller knows it, the ticker otherwise."""
+    return candidate.company_key or candidate.ticker
+
+
 def _check_duplicate_free(c: CandidateInput, ctx: GateContext) -> str | None:
     """The same company may appear once per alert. Batch-level dedup (which
     of two occurrences wins) lives in finalize_alert_decisions; this catches
-    a caller that already accepted the ticker for this alert."""
-    if c.ticker in ctx.seen_tickers:
+    a caller that already accepted this company for this alert."""
+    if candidate_identity(c) in ctx.seen_tickers or c.ticker in ctx.seen_tickers:
         return "REJECT_DUPLICATE"
     return None
 
@@ -281,7 +311,7 @@ def _check_causal_path_valid(c: CandidateInput, ctx: GateContext) -> str | None:
     if c.causal_distance >= 4:
         return "REJECT_TOO_DISTANT"
     if c.causal_distance == 3 and not (
-            evidence_tier_of(c) in STRONG_TIERS
+            evidence_tier_of(c) in RELATIONSHIP_TIERS
             and materiality_grade(c.materiality) == "HIGH"):
         return "REJECT_LOW_PRIORITY"
     return None
@@ -332,11 +362,15 @@ def _check_contradiction_free(c: CandidateInput, ctx: GateContext) -> str | None
 def _check_counterfactual_valid(c: CandidateInput, ctx: GateContext) -> str | None:
     """Semantic counterfactual verdict (Task 9 wires the verifier): would
     this claim be false if the event had not happened? NOT_SUPPORTED means
-    the story survives the event's removal. An unknown verdict fails
-    closed. UNCERTAIN passes but can never be primary (graded below)."""
+    the story survives the event's removal -- a generic macro claim. An
+    unrecognized verdict is NOT the same finding: it means the check did not
+    produce an answer, which is a validator failure, not evidence about the
+    candidate. UNCERTAIN passes but can never be primary (graded below)."""
     verdict = (c.counterfactual or "").strip().upper()
-    if verdict not in COUNTERFACTUAL_VERDICTS or verdict == "NOT_SUPPORTED":
+    if verdict == "NOT_SUPPORTED":
         return "REJECT_NOT_EVENT_SPECIFIC"
+    if verdict not in COUNTERFACTUAL_VERDICTS:
+        return "REJECT_VALIDATOR_UNAVAILABLE"
     return None
 
 
@@ -350,14 +384,20 @@ def _check_quality_valid(c: CandidateInput, ctx: GateContext) -> str | None:
 
 
 def _check_verified(c: CandidateInput, ctx: GateContext) -> str | None:
-    """Independent verification is mandatory. Unavailable verification is
-    its own state so postmortems can separate "the verifier said no" from
-    "the verifier never ran" (INV-005/016)."""
-    if c.independently_verified:
-        return None
+    """Independent verification is mandatory, and availability is checked
+    FIRST, unconditionally: when the verifier never ran, a True
+    `independently_verified` flag is not a verdict, it is an upstream
+    default (the narrow path's in-call self-check, a budget overrun that
+    skipped verification entirely). Short-circuiting on the flag let that
+    default authorize display -- fail-open at the one gate that exists to
+    fail closed (INV-005/016). Unavailable verification keeps its own state
+    so postmortems can separate "the verifier said no" from "the verifier
+    never ran"."""
     if not c.verification_available:
         return "REJECT_VALIDATOR_UNAVAILABLE"
-    return "REJECT_UNVERIFIED"
+    if not c.independently_verified:
+        return "REJECT_UNVERIFIED"
+    return None
 
 
 GATE_SEQUENCE: list[tuple[str, Callable[[CandidateInput, GateContext], str | None]]] = [
@@ -396,6 +436,7 @@ def evaluate_candidate(candidate: CandidateInput,
                 final_state=state, display_tier=TIER_EXCLUDED,
                 gates_passed=passed, rejection_reason=state,
                 materiality_grade=grade, ticker=candidate.ticker,
+                dedup_key=candidate_identity(candidate),
                 materiality=candidate.materiality, confidence=candidate.confidence,
             )
         passed.append(name)
@@ -403,8 +444,8 @@ def evaluate_candidate(candidate: CandidateInput,
     return GateDecision(
         final_state=DISPLAY_ELIGIBLE, display_tier=_display_tier(candidate, ctx),
         gates_passed=passed, rejection_reason=None, materiality_grade=grade,
-        ticker=candidate.ticker, materiality=candidate.materiality,
-        confidence=candidate.confidence,
+        ticker=candidate.ticker, dedup_key=candidate_identity(candidate),
+        materiality=candidate.materiality, confidence=candidate.confidence,
     )
 
 
@@ -425,12 +466,15 @@ def _primary_authorized(candidate: CandidateInput, ctx: GateContext) -> bool:
         return False
     if quality == "fallback" and not ctx.fallback_primary_allowed:
         return False
-    if tier not in STRONG_TIERS:
-        return False                                   # tier D is a deep dive
     if candidate.causal_distance >= 3:
         return False
-    if candidate.causal_distance == 2 and grade != "HIGH":
-        return False
+    if candidate.causal_distance == 2:
+        # Two hops out, "the article was about them" (SUBJECT) is not
+        # evidence about the transmission chain -- only a relationship
+        # record is (owner ruling, Task 4 review).
+        return tier in RELATIONSHIP_TIERS and grade == "HIGH"
+    if tier not in STRONG_TIERS:
+        return False                                   # tier D is a deep dive
     return True
 
 
@@ -450,12 +494,18 @@ def _rank_key(decision: GateDecision) -> tuple:
             decision.ticker)
 
 
+def _decision_identity(decision: GateDecision) -> str:
+    return decision.dedup_key or decision.ticker
+
+
 def finalize_alert_decisions(decisions: list[GateDecision],
                              context: GateContext | None = None) -> list[GateDecision]:
     """Alert-scoped policy that a single candidate cannot decide alone:
 
     1. Dedup -- the same company twice in one alert keeps the higher
-       materiality occurrence; the other becomes REJECT_DUPLICATE.
+       materiality occurrence; the other becomes REJECT_DUPLICATE. Identity
+       is the RESOLVED company (`dedup_key`), not the ticker string: two
+       tickers naming one company are one row to the reader.
     2. Primary cap -- at most ``impact_max_primary_companies`` primaries per
        alert, ranked deterministically; the overflow is demoted to
        secondary_deep_dive with the note ``primary_cap_overflow`` (demoted,
@@ -466,19 +516,20 @@ def finalize_alert_decisions(decisions: list[GateDecision],
     ctx = context if context is not None else GateContext()
     out = list(decisions)
 
-    winner_by_ticker: dict[str, int] = {}
+    winner_by_company: dict[str, int] = {}
     for index, decision in enumerate(out):
         if decision.final_state != DISPLAY_ELIGIBLE:
             continue
-        previous = winner_by_ticker.get(decision.ticker)
+        identity = _decision_identity(decision)
+        previous = winner_by_company.get(identity)
         if previous is None:
-            winner_by_ticker[decision.ticker] = index
+            winner_by_company[identity] = index
             continue
         if _rank_key(out[index]) < _rank_key(out[previous]):
             keep, drop = index, previous
         else:
             keep, drop = previous, index
-        winner_by_ticker[decision.ticker] = keep
+        winner_by_company[identity] = keep
         out[drop] = replace(
             out[drop], final_state="REJECT_DUPLICATE", display_tier=TIER_EXCLUDED,
             rejection_reason="REJECT_DUPLICATE", notes=NOTE_DUPLICATE,

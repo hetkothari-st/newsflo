@@ -88,13 +88,15 @@ def test_strict_entries_carry_gate_decision(db_session, strict_mode):
 
 
 def test_strict_no_business_profile_is_insufficient_evidence(db_session, strict_mode):
-    """Task 4 / canonical policy table: a company the system cannot even
-    describe cannot carry a mechanism claim on tier-C evidence."""
-    _company_row(db_session, verified_node="crude_price", business_desc=None)
+    """Task 4 / canonical policy table: a company the system can neither
+    describe nor show an exposure record for cannot carry a mechanism claim
+    unless the evidence is structured tier A/B."""
+    _company_row(db_session, business_desc=None)   # no desc, no exposure row
     entries = _v3_entries(db_session, _result([_graph_company()]))
 
     assert entries[0]["display_tier"] == "excluded"
     assert entries[0]["gate_state"] == "REJECT_INSUFFICIENT_EVIDENCE"
+    assert "BUSINESS_MODEL_VALID" not in entries[0]["gates_passed"]
 
 
 def test_strict_unverified_candidate_excluded(db_session, strict_mode):
@@ -105,14 +107,83 @@ def test_strict_unverified_candidate_excluded(db_session, strict_mode):
     assert entries[0]["gate_state"] == "REJECT_UNVERIFIED"
 
 
-def test_strict_budget_exhausted_fails_closed(db_session, strict_mode):
-    """INV-005/016: verification never ran -> nothing may display."""
+@pytest.mark.parametrize("verified", [False, True])
+def test_strict_budget_exhausted_fails_closed(db_session, strict_mode, verified):
+    """INV-005/016: verification never ran -> nothing may display, INCLUDING
+    a company carrying verified=True. Budget exhaustion skips verification
+    entirely, so that flag is the engine's own in-call self-check, not an
+    independent verdict -- the gate must not let it through (Task 4 review
+    C1: this exact combination was fail-open end to end)."""
     _company_row(db_session, verified_node="crude_price")
     entries = _v3_entries(db_session, _result(
-        [_graph_company(verified=False)], quality="budget_exhausted"))
+        [_graph_company(verified=verified)], quality="budget_exhausted"))
 
     assert entries[0]["display_tier"] == "excluded"
     assert entries[0]["gate_state"] == "REJECT_VALIDATOR_UNAVAILABLE"
+
+
+def test_strict_verifier_outage_fails_closed_even_when_verified(db_session, strict_mode):
+    """Same fail-open shape via the other path: the verifier router died,
+    the result says so in metrics, and the company still carries
+    verified=True from an earlier stage."""
+    from app.analysis.impact_graph.schemas import ImpactGraphResult
+
+    _company_row(db_session, verified_node="crude_price")
+    result = ImpactGraphResult(
+        category="commodity", event_type="crude_oil", facts="crude up 5%",
+        event_label="crude supply shock", named_entities=[],
+        companies=[_graph_company(verified=True)], edges=[_graph_edge()],
+        gaps=[], ranking=[], analysis_provider="gemini",
+        analysis_quality="authoritative", metrics={"verification_unavailable": 1},
+    )
+    entries = _v3_entries(db_session, result)
+
+    assert entries[0]["gate_state"] == "REJECT_VALIDATOR_UNAVAILABLE"
+
+
+def test_strict_exposure_row_alone_supports_business_model_gate(db_session, strict_mode):
+    """Task 4 review I3: a fresh verified exposure row for the mechanism's
+    own node IS a grounded statement about the business at that dimension --
+    a company with no business_desc is not automatically unpublishable."""
+    _company_row(db_session, verified_node="crude_price", business_desc=None)
+    entries = _v3_entries(db_session, _result([_graph_company()]))
+
+    assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
+    assert "BUSINESS_MODEL_VALID" in entries[0]["gates_passed"]
+
+
+def test_strict_duplicate_company_second_occurrence_rejected(db_session, strict_mode):
+    """Task 4 review I2: two candidates resolving to ONE company row are one
+    row to the reader. The second is REJECT_DUPLICATE with its decision
+    preserved -- not silently swallowed by ticker-keyed collection."""
+    _company_row(db_session, verified_node="crude_price")
+    entries = _v3_entries(db_session, _result([
+        _graph_company(materiality=0.8),
+        _graph_company(materiality=0.5, rationale="second bite at the same company"),
+    ]))
+
+    assert len(entries) == 2
+    assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
+    assert entries[1]["gate_state"] == "REJECT_DUPLICATE"
+    assert entries[1]["display_tier"] == "excluded"
+
+
+def test_transitional_counterfactual_constant_must_die_with_task9():
+    """PINNED (Task 4 review M5). The pipeline currently hands the gate a
+    hardcoded counterfactual verdict of "SUPPORTED" because no component
+    computes the semantic counterfactual yet -- COUNTERFACTUAL_VALID is
+    therefore live but unreachable from production.
+
+    TASK 9 MUST DELETE THIS TEST when it wires the verifier's real verdict
+    into _gate_candidates. If Task 9 ships and this test still passes, the
+    placeholder outlived its excuse and the gate is quietly rubber-stamping
+    every candidate's event-specificity."""
+    import inspect
+
+    from app.pipeline import _gate_candidates
+
+    source = inspect.getsource(_gate_candidates)
+    assert 'counterfactual="SUPPORTED"' in source
 
 
 def test_strict_dangling_causal_path_not_event_specific(db_session, strict_mode):
