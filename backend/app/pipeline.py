@@ -11,7 +11,6 @@ from app.alerting.sender import send_pending_notifications
 from app.analysis.impact_graph.engine import analyze_article_v3
 from app.analysis.refinement import REFINEMENT_PENDING, refine_alert
 from app.analysis.schemas import AnalysisOutput, CATEGORIES
-from app.calibration.blender import get_calibrated_magnitude, get_calibration_health
 from app.companies.history import bulk_past_mentions, mentions_before
 from app.companies.market import infer_market
 from app.companies.resolution import resolve_companies
@@ -67,14 +66,22 @@ def _confidence_multiplier(causal_distance: int | None, impact_level: str) -> fl
 
 # Minimum confidence_score for an AlertCompany row to be persisted.
 #
+# Applies ONLY to legacy (pre-v3-gate) entries -- ones with no "gate_state"
+# key, i.e. impact_engine_v4_strict was off when they were built (see
+# _persist_alert). A gated v3 entry already went through the executable
+# publication gate (spec Sec5/Sec35, app.pipeline._gate_candidates) before
+# reaching here: DISPLAY_ELIGIBLE/primary or DISPLAY_ELIGIBLE/secondary
+# entries persist on the gate's own authority, and excluded ones never
+# arrive at all (filtered out earlier in _persist_alert). Stacking this
+# floor on top of that decision would let a low confidence_score silently
+# override a gate that already ruled the company in -- two authorities
+# disagreeing about the same row, with this one winning by accident. See
+# docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/task-3-brief.md.
+#
 # Deliberately modest, and NOT the relevance defence. Measured on production
 # data, a floor of 40 removes 20 rows of 881 -- and only 16 of 557
 # sector_inference rows (2%), the exact category that produced the reported
-# bug. Median confidence_score is 50 at every impact level because
-# calibration (weight 0.30) and rulebook match (0.20) contribute 0.0 for
-# nearly every row, so half the weight is inert and scores cluster. Raising
-# the floor to 50 would cut correct direct_mention rows at the median while
-# still keeping half the fan-out.
+# bug.
 #
 # Relevance is enforced structurally instead: basis-keyed bucketing
 # (app.market.ripple_layers), candidate grounding (app.companies.candidates),
@@ -86,12 +93,11 @@ def _confidence_multiplier(causal_distance: int | None, impact_level: str) -> fl
 # post-LEVEL_CONFIDENCE_MULTIPLIER value stored in confidence_score. The
 # floor and the multiplier answer different questions -- "is this
 # reasoning well-evidenced?" vs. "how far from the article is this?" -- and
-# compounding them was never intended: with calibration contributing 0.0 for
-# nearly every row, a typical pre-multiplier score of ~69 survives the floor
-# fine on its own, but 69 * 0.45 (indirect_l2's multiplier) = 31, BELOW this
-# floor -- so comparing the floor to the post-multiplier value meant no
-# indirect_l2 row could ever be persisted, for any article, silently killing
-# the entire L2 cascade stage.
+# compounding them was never intended: a typical pre-multiplier score of ~69
+# survives the floor fine on its own, but 69 * 0.45 (indirect_l2's
+# multiplier) = 31, BELOW this floor -- so comparing the floor to the
+# post-multiplier value meant no indirect_l2 row could ever be persisted,
+# for any article, silently killing the entire L2 cascade stage.
 CONFIDENCE_FLOOR = 40
 
 
@@ -276,10 +282,27 @@ def _build_alert_company(
     session: Session, alert_id: int, article: Article, category: str, entry: dict,
 ) -> tuple[AlertCompany, int]:
     """Build one AlertCompany row (unattached -- caller must session.add it)
-    from a resolved entry dict, computing calibration/confidence fresh. Split
-    out of _persist_alert so a one-off re-analysis script can attach fresh
-    rows to an EXISTING alert without duplicating this calibration logic --
-    see backend/reanalyze_cascade.py.
+    from a resolved entry dict, computing confidence fresh. Split out of
+    _persist_alert so a one-off re-analysis script can attach fresh rows to
+    an EXISTING alert without duplicating this logic -- see
+    backend/reanalyze_cascade.py.
+
+    Magnitude is always the deterministic value the analysis produced
+    (entry["magnitude_low"]/["magnitude_high"], monotonic in impact_strength
+    for v3 -- see _v3_entries), never blended with realized-outcome
+    CalibrationSample stats: app.calibration.blender.get_calibrated_magnitude
+    used to override it once enough samples existed, which meant how a
+    company's stock actually moved after past, unrelated articles could
+    silently widen or narrow THIS article's stated magnitude range. See
+    docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/task-3-brief.md.
+    `confidence` ("llm_estimate") documents that provenance for the reader;
+    nothing currently sets it to "calibrated".
+
+    `category` is accepted-and-unused: it fed the calibration lookups this
+    function no longer makes, but stays a required positional so this
+    function's call signature (also used directly by
+    backend/reanalyze_cascade.py) doesn't have to change everywhere for an
+    internal implementation detail.
 
     Returns (alert_company, pre_multiplier_score): the AlertCompany's own
     confidence_score is the LEVEL_CONFIDENCE_MULTIPLIER-discounted value
@@ -289,20 +312,17 @@ def _build_alert_company(
     comment) -- returned here rather than recomputed by the caller so this
     stays the single place that calls compute_confidence.
     """
-    calibrated = get_calibrated_magnitude(session, category=category, company_id=entry["company_id"])
-    if calibrated is not None:
-        magnitude_low, magnitude_high = calibrated
-        confidence = "calibrated"
-    else:
-        magnitude_low, magnitude_high = entry["magnitude_low"], entry["magnitude_high"]
-        confidence = "llm_estimate"
+    magnitude_low, magnitude_high = entry["magnitude_low"], entry["magnitude_high"]
+    confidence = "llm_estimate"
 
     reasons = entry.get("reasons") or []
     evidence_refs = entry.get("evidence_refs") or []
     matched_rule_ids = [ref for ref in evidence_refs if get_rule(ref) is not None]
-    health = get_calibration_health(session, category=category, company_id=entry["company_id"])
 
     company_obj = session.get(Company, entry["company_id"])
+    # Fetched and persisted purely as an observational market fact (see
+    # return_1m/return_3m/contradiction_note below) -- NOT read by
+    # compute_confidence, which never sees this snapshot at all.
     snapshot = get_or_fetch_financial_snapshot(session, company_obj.ticker) if company_obj else None
     contradiction_note = detect_price_contradiction(
         entry["direction"], snapshot["return_1m"] if snapshot else None,
@@ -313,13 +333,10 @@ def _build_alert_company(
     ).total_seconds() / 3600
 
     result = compute_confidence(
-        calibration_sample_count=health["sample_count"],
-        calibration_hit_rate=health["hit_rate"],
         claim_count=len(reasons),
         evidence_ref_count=len(evidence_refs),
         rule_matched=bool(matched_rule_ids),
         source_credibility=source_credibility(article.source),
-        reasoning_consistent=contradiction_note is None,
         article_age_hours=article_age_hours,
     )
 
@@ -601,11 +618,17 @@ def _persist_alert(
     kept_entries = []
     for entry in entries:
         alert_company, pre_multiplier_score = _build_alert_company(session, alert.id, article, category, entry)
-        # Floor check is against the PRE-multiplier score, not the
-        # LEVEL_CONFIDENCE_MULTIPLIER-discounted alert_company.confidence_score
-        # -- see CONFIDENCE_FLOOR's own comment. Compounding the two meant no
-        # indirect_l2 row (0.45x) could ever clear the floor.
-        if pre_multiplier_score < CONFIDENCE_FLOOR:
+        # A gated (v3) entry already passed (or was filtered out for
+        # failing) the executable publication gate above -- that gate is
+        # the SOLE persistence authority for it (spec Sec5/Sec35; see
+        # CONFIDENCE_FLOOR's own comment). Re-applying a confidence-score
+        # floor on top would let a low fundamental-evidence score silently
+        # veto a row the gate already ruled DISPLAY_ELIGIBLE, or vice
+        # versa keep a row the gate already excluded -- two authorities
+        # deciding the same question. Only a legacy (ungated) entry, which
+        # never went through the gate at all, still needs this floor as
+        # its only persistence check.
+        if "gate_state" not in entry and pre_multiplier_score < CONFIDENCE_FLOOR:
             logger.info(
                 "dropping company_id=%s from alert_id=%s: confidence %s below floor %s",
                 entry["company_id"], alert.id, pre_multiplier_score, CONFIDENCE_FLOOR,
@@ -941,10 +964,14 @@ def _v3_entries(session: Session, result) -> list[dict]:
         if company.parent_type == "company":
             parent = session.query(Company).filter_by(ticker=company.parent_id).one_or_none()
             parent_company_id = parent.id if parent else None
-        # Magnitude band derived monotonically from impact_strength -- a
-        # placeholder the calibration blender overrides with measured
-        # event-volatility data wherever that exists (same override path
-        # the old cascade's LLM magnitudes went through).
+        # Magnitude band derived monotonically from impact_strength -- the
+        # value that is actually persisted, full stop. It used to be a
+        # placeholder the calibration blender (app.calibration.blender.
+        # get_calibrated_magnitude) overrode with measured realized-outcome
+        # stats once enough samples existed; that override is removed (see
+        # docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/
+        # task-3-brief.md) so this formula is the whole story now, not a
+        # fallback.
         magnitude_high = round(0.5 + 4.5 * company.impact_strength, 1)
         magnitude_low = round(max(0.1, magnitude_high / 3), 1)
         # Legacy coercion: pre-strict consumers assume direction is binary,

@@ -246,12 +246,18 @@ def test_process_new_articles_coerces_an_out_of_taxonomy_category_to_other(db_se
     assert refreshed_article.category == "other"
 
 
-def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_session, monkeypatch):
+def test_process_new_articles_never_uses_calibrated_magnitude_despite_enough_samples(db_session, monkeypatch):
+    """Realized-outcome CalibrationSample stats must never override the
+    deterministic, impact_strength-derived magnitude -- see
+    docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/task-3-brief.md.
+    This is the exact scenario that USED to trigger a calibration blend
+    (>=5 samples for the same category/company); it must now be a no-op."""
     company = Company(ticker="RELIANCE.NS", name="Reliance Industries", sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
     db_session.add(company)
     db_session.commit()
 
-    # 5 samples of [1, 2, 3, 4, 5] for (oil_gas, this company) -> mean = 3.0, pstdev = sqrt(2).
+    # 5 samples of [1, 2, 3, 4, 5] for (oil_gas, this company) -- would have
+    # blended to mean=3.0, pstdev=sqrt(2) under the old, now-removed path.
     for i, actual in enumerate([1.0, 2.0, 3.0, 4.0, 5.0]):
         db_session.add(CalibrationSample(
             alert_company_id=i + 1, category="oil_gas", company_id=company.id,
@@ -281,10 +287,12 @@ def test_process_new_articles_uses_calibrated_magnitude_when_enough_samples(db_s
     assert created == 1
 
     ac = db_session.query(AlertCompany).one()
-    assert ac.confidence == "calibrated"
-    # mean([1,2,3,4,5]) = 3.0, pstdev = sqrt(2) ~= 1.41421356
-    assert ac.magnitude_low == pytest.approx(3.0 - 2 ** 0.5)
-    assert ac.magnitude_high == pytest.approx(3.0 + 2 ** 0.5)
+    assert ac.confidence == "llm_estimate"
+    # Deterministic formula from impact_strength (see _v3_entries):
+    # high = round(0.5 + 4.5*0.6, 1) = 3.2, low = round(max(0.1, 3.2/3), 1) = 1.1.
+    # NOT the calibration blend's mean=3.0 +/- pstdev=sqrt(2).
+    assert ac.magnitude_low == pytest.approx(1.1)
+    assert ac.magnitude_high == pytest.approx(3.2)
 
 
 def test_process_new_articles_sends_email_notification_for_holder(db_session, monkeypatch):
@@ -746,11 +754,12 @@ def test_process_new_articles_persists_financial_snapshot_and_contradiction(db_s
             time_horizon="Short-Term", mechanism="test mechanism", rationale="refiner margin up",
             reasons=["Refining margins widen."],
             # A matched rule (plus the fully-cited claim) keeps this row's
-            # confidence_score above CONFIDENCE_FLOOR despite the reasoning-
-            # consistency penalty below, so the row this test asserts on is
-            # actually persisted rather than dropped by the floor -- the
-            # contradiction-detection behavior under test is independent of
-            # evidence completeness.
+            # confidence_score comfortably above CONFIDENCE_FLOOR -- the
+            # price contradiction stubbed in below no longer affects
+            # confidence_score at all (see
+            # docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/
+            # task-3-brief.md), so this is just an ordinary well-evidenced
+            # row that happens to also carry a contradiction_note.
             evidence_refs=["RULE_CRUDE_OIL_UP"],
         )],
     )

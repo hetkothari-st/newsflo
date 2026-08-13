@@ -66,7 +66,13 @@ def test_full_pipeline_from_rss_entry_to_alert(db_session, monkeypatch):
     fastapi_app.dependency_overrides.clear()
 
 
-def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_session, monkeypatch):
+def test_full_pipeline_never_shows_calibrated_confidence_despite_enough_samples(db_session, monkeypatch):
+    """Realized-outcome CalibrationSample stats must never reach the API
+    response as a "calibrated" magnitude override -- see
+    docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/task-3-brief.md.
+    This is the exact scenario (>=5 samples for the same category/company)
+    that USED to trigger a calibration blend end-to-end; it must now be a
+    no-op all the way out to the API."""
     company = Company(
         ticker="RELIANCE.NS", name="Reliance Industries",
         sector="oil_gas", index_tier="NIFTY50", market_cap=1_800_000.0,
@@ -74,8 +80,9 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
     db_session.add(company)
     db_session.commit()
 
-    # Pre-seed 5 historical outcomes of [1, 2, 3, 4, 5] for (oil_gas, this company)
-    # -> mean = 3.0, pstdev = sqrt(2) ~= 1.41421356 -> calibrated range applies.
+    # Pre-seed 5 historical outcomes of [1, 2, 3, 4, 5] for (oil_gas, this
+    # company) -- would have blended to mean=3.0, pstdev=sqrt(2) under the
+    # old, now-removed calibration-override path.
     for i, actual in enumerate([1.0, 2.0, 3.0, 4.0, 5.0]):
         db_session.add(CalibrationSample(
             alert_company_id=i + 1, category="oil_gas", company_id=company.id,
@@ -121,9 +128,12 @@ def test_full_pipeline_shows_calibrated_confidence_with_enough_samples(db_sessio
     response = client.get("/api/alerts")
     assert response.status_code == 200
     company_payload = response.json()[0]["companies"][0]
-    assert company_payload["confidence"] == "calibrated"
-    assert company_payload["magnitude_low"] == pytest.approx(3.0 - 2 ** 0.5)
-    assert company_payload["magnitude_high"] == pytest.approx(3.0 + 2 ** 0.5)
+    assert company_payload["confidence"] == "llm_estimate"
+    # Deterministic formula from impact_strength (see app.pipeline._v3_entries):
+    # high = round(0.5 + 4.5*0.6, 1) = 3.2, low = round(max(0.1, 3.2/3), 1) = 1.1.
+    # NOT the calibration blend's mean=3.0 +/- pstdev=sqrt(2).
+    assert company_payload["magnitude_low"] == pytest.approx(1.1)
+    assert company_payload["magnitude_high"] == pytest.approx(3.2)
 
     fastapi_app.dependency_overrides.clear()
 

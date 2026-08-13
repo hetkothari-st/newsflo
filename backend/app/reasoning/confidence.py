@@ -1,30 +1,36 @@
-"""Deterministic Confidence Engine. Computes confidence_score from evidence,
-calibration history, and reasoning-quality signals instead of asking the LLM
-to self-rate its own confidence -- see
+"""Deterministic Confidence Engine. Computes confidence_score from evidence
+completeness, rulebook match, source credibility, and article freshness
+instead of asking the LLM to self-rate its own confidence -- see
 docs/superpowers/specs/2026-07-15-reasoning-engine-upgrade-design.md.
 
+Deliberately excludes anything derived from realized market movement data
+(historical outcome hit-rate, reasoning-vs-movement contradiction) -- see
+docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/task-3-brief.md. A
+fundamental judgment about a company must not be scored, up or down, by
+what its shares did afterward; that coupling let a real market panic quietly
+delete an alert's own confidence in the ORIGINAL reasoning that (correctly
+or not) motivated the panic. Market observation now lives entirely outside
+this engine -- app.reasoning.financial_context still computes and persists
+it on the row, but nothing here reads it.
+
 compute_confidence is a pure function: every input is a plain value the
-caller has already looked up (from CalibrationSample stats, the resolved
-company entry, and the source article), so this module has no DB or network
-dependency and is fully unit-testable with fixed inputs.
+caller has already looked up (from the resolved company entry and the
+source article), so this module has no DB or network dependency and is
+fully unit-testable with fixed inputs.
 """
 
 from dataclasses import dataclass, field
 
 # Weights sum to 1.0. Kept as separate named constants (not one dict literal)
-# so a future calibration-health review can retune a single weight without
-# hunting through compute_confidence's body.
-WEIGHT_HISTORICAL_CALIBRATION = 0.30
-WEIGHT_EVIDENCE_COMPLETENESS = 0.20
-WEIGHT_RULEBOOK_MATCH = 0.20
-WEIGHT_SOURCE_CREDIBILITY = 0.10
-WEIGHT_REASONING_CONSISTENCY = 0.10
-WEIGHT_DATA_FRESHNESS = 0.10
-
-# Mirrors app.calibration.blender.CALIBRATION_SAMPLE_THRESHOLD -- duplicated
-# rather than imported to keep this module dependency-free (no DB imports);
-# both must be changed together if ever retuned.
-CALIBRATION_SAMPLE_THRESHOLD = 5
+# so a future review can retune a single weight without hunting through
+# compute_confidence's body. Renormalized (proportionally, from the original
+# 0.20/0.20/0.10/0.10) after WEIGHT_HISTORICAL_CALIBRATION (0.30) and
+# WEIGHT_REASONING_CONSISTENCY (0.10) were removed -- both were derived from
+# realized market movement, not fundamental evidence quality.
+WEIGHT_EVIDENCE_COMPLETENESS = 1 / 3
+WEIGHT_RULEBOOK_MATCH = 1 / 3
+WEIGHT_SOURCE_CREDIBILITY = 1 / 6
+WEIGHT_DATA_FRESHNESS = 1 / 6
 
 # Static per-source scores for known RSS feeds (see
 # app/ingestion/sources.py::RSS_FEEDS). Deliberately small and roughly equal
@@ -73,33 +79,14 @@ def _weighted(components: list[tuple[float, float]]) -> float:
 
 def compute_confidence(
     *,
-    calibration_sample_count: int,
-    calibration_hit_rate: float | None,
     claim_count: int,
     evidence_ref_count: int,
     rule_matched: bool,
     source_credibility: float,
-    reasoning_consistent: bool,
     article_age_hours: float,
 ) -> ConfidenceResult:
     contributors: list[str] = []
     penalties: list[str] = []
-
-    # Historical calibration: 0 until enough real-outcome samples exist (same
-    # threshold app.calibration.blender uses for magnitude blending), then
-    # hit_rate itself IS the 0-1 component score.
-    if calibration_sample_count < CALIBRATION_SAMPLE_THRESHOLD or calibration_hit_rate is None:
-        historical_component = 0.0
-        penalties.append(
-            f"No historical calibration yet ({calibration_sample_count} samples, "
-            f"need {CALIBRATION_SAMPLE_THRESHOLD})"
-        )
-    else:
-        historical_component = calibration_hit_rate
-        contributors.append(
-            f"Historical calibration: {calibration_hit_rate:.0%} hit rate over "
-            f"{calibration_sample_count} samples"
-        )
 
     # Evidence completeness: fraction of claims that cite at least one piece
     # of evidence. claim_count == 0 is treated as fully covered (nothing to
@@ -120,10 +107,6 @@ def compute_confidence(
         penalties.append("No rulebook rule matched -- generic reasoning only")
 
     source_component = max(0.0, min(1.0, source_credibility))
-
-    consistency_component = 1.0 if reasoning_consistent else 0.0
-    if not reasoning_consistent:
-        penalties.append("Reasoning flagged as internally inconsistent")
 
     # Freshness: linear decay to 0 over 7 days (168h) -- older than that
     # contributes nothing, since news relevance genuinely fades.
@@ -159,9 +142,7 @@ def compute_confidence(
     # ever scored lower than before this change; a full set of refs still
     # scores exactly as it always did.
     applicable = [
-        (historical_component, WEIGHT_HISTORICAL_CALIBRATION),
         (source_component, WEIGHT_SOURCE_CREDIBILITY),
-        (consistency_component, WEIGHT_REASONING_CONSISTENCY),
         (freshness_component, WEIGHT_DATA_FRESHNESS),
     ]
     evidence_scored = applicable + [

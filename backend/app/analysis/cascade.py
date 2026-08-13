@@ -1123,11 +1123,12 @@ def _identify_companies(
 
 # Fallback magnitude band applied ONLY to salvaged companies that llama
 # emitted without magnitude fields. Deliberately the most conservative
-# band in the taxonomy: the calibration blender
-# (app.calibration.blender.get_calibrated_magnitude) overrides stored
-# magnitudes with measured event-volatility data wherever available, so
-# this placeholder mainly needs to be honest about uncertainty, not
-# precise.
+# band in the taxonomy -- nothing downstream widens or narrows it (see
+# docs/superpowers/sdd/2026-08-13-newsflo-corrective-v4/task-3-brief.md:
+# app.calibration.blender.get_calibrated_magnitude no longer overrides
+# persisted magnitudes with realized-outcome stats), so this placeholder
+# needs to be honest about uncertainty on its own, not just until a
+# calibration blend arrives.
 _SALVAGE_MAGNITUDE_LOW = 1.0
 _SALVAGE_MAGNITUDE_HIGH = 3.0
 
