@@ -59,6 +59,7 @@ _PROVENANCED_EXPOSURE_TYPES = ("SUPPLY_LINK", "MANUAL", "CURATED")
 
 def classify_evidence(
     session: Session, company, subject_tickers: set[str],
+    fresh_cache_tickers: frozenset[str] = frozenset(),
 ) -> tuple[str, str, list[dict]]:
     """Deterministic evidence class + tier + backing EvidenceRecord
     payloads for the publication gate. Order matters -- each check either
@@ -88,6 +89,47 @@ def classify_evidence(
        Staleness (incl. review_after expiry) still applies to every case --
        a stale row is not usable evidence at all, so it falls through
        exactly like "no row".
+
+       SELF-ECHO GUARD (owner-ruled cross-finding, T19/T20 audit,
+       corrective-v4 Task 18 follow-up): `fresh_cache_tickers` is the set
+       of tickers `_write_exposure_cache` (engine.py) ACTUALLY UPSERTED a
+       CompanyNodeExposure row for in THIS run -- populated from
+       `_GraphState.fresh_cache_tickers`, filled in exactly where
+       `_verify_companies` calls `_write_exposure_cache(..., exposure_
+       exists=True, ...)`, nowhere else. For any such ticker, this branch
+       is SKIPPED entirely -- read on for why.
+
+       `_write_exposure_cache` upserts that row in the SAME run, BEFORE
+       app.pipeline._gate_candidates ever calls this function (still
+       pre-Alert-flush, same DB session). Without this guard, an accepted
+       candidate's own just-written row -- not any independent history --
+       is what classify_evidence reads back, so a verified, article-
+       central candidate could self-echo straight to Tier D and could
+       never classify as ARTICLE_SUBJECT (SUBJECT, primary-capable) even
+       when it plainly was the article's own subject: the narrow path
+       could essentially never produce a primary claim this way, since
+       MODEL_VERIFIED_PRIOR is capped at secondary_deep_dive.
+
+       Deliberately NOT `company.verified` (every GraphCompany.verified
+       True ticker in the result) despite that being the plan-round
+       suggestion -- measured against the actual test suite, that coarser
+       signal wrongly excludes the single most common fixture pattern
+       used throughout this codebase's OWN tests (a hand-built, already-
+       `verified=True` GraphCompany paired with a CompanyNodeExposure row
+       set up directly by the test to simulate a genuine, independent
+       PRIOR -- never a self-write at all, since these tests never call
+       `_write_exposure_cache`). `company.verified=True` also does not
+       imply a cache row was ever written this run in the first place:
+       the narrow path's low-risk branch sets it from the in-call self-
+       check alone, without `_verify_companies` (and therefore `_write_
+       exposure_cache`) ever running. Tracking the ACTUAL cache-write set
+       instead of the broader verified set is exact (no guessing about
+       what MIGHT have been written) and leaves every existing "prior
+       exposure row + independently verified candidate" test fixture
+       byte-for-byte unaffected -- it only fires for a ticker this run's
+       own `_write_exposure_cache` genuinely touched. A row for a
+       DIFFERENT, older alert (nobody wrote to it this run) is unaffected
+       and still classifies MODEL_VERIFIED_PRIOR / D exactly as before.
     4. The article's own subject list is genuine evidence about the
        company at distance 1 -- ARTICLE_SUBJECT / SUBJECT, with a record
        documenting that the article named the company as its subject.
@@ -147,6 +189,12 @@ def classify_evidence(
         if cached is not None and exposure_row_is_fresh(cached, row):
             provenance = cached.provenance_type
             if provenance in _PROVENANCED_EXPOSURE_TYPES:
+                # Independently sourced (a human or a linked artifact
+                # wrote this, never `_write_exposure_cache` -- see
+                # _PROVENANCED_EXPOSURE_TYPES) -- genuine evidence
+                # regardless of whether this run's verifier also accepted
+                # the same candidate, so the self-echo guard below does
+                # not apply here.
                 payload = {
                     "source_type": "provenanced_exposure",
                     "source_name": provenance,
@@ -158,9 +206,17 @@ def classify_evidence(
                     "supports_claim": True,
                 }
                 return "VERIFIED_RELATIONSHIP", "C", [payload]
-            if provenance is None:
-                return "LEGACY_UNVERIFIED", "D", []
-            return "MODEL_VERIFIED_PRIOR", "D", []
+            # Self-echo guard (see docstring): MODEL_VERIFIED/LEGACY_
+            # UNVERIFIED rows are never independent evidence to begin with
+            # -- they are the system's own prior. For a ticker THIS run's
+            # verifier just accepted, the row sitting here may well BE
+            # that exact acceptance's own write; fall through to the
+            # weaker classes instead of crediting a candidate with its own
+            # say-so.
+            if company.ticker not in fresh_cache_tickers:
+                if provenance is None:
+                    return "LEGACY_UNVERIFIED", "D", []
+                return "MODEL_VERIFIED_PRIOR", "D", []
 
     if company.ticker in subject_tickers:
         payload = {

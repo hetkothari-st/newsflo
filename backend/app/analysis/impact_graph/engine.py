@@ -88,6 +88,17 @@ class _GraphState:
     # without going through analyze_article_v3 (e.g. a unit test).
     subjects_cache: list | None = None
     ambiguous_entities: set = field(default_factory=set)
+    # Self-echo guard input (owner-ruled cross-finding, corrective-v4 Task
+    # 18 follow-up): tickers `_write_exposure_cache` ACTUALLY wrote a
+    # positive CompanyNodeExposure row for in THIS run -- filled in
+    # exactly where `_verify_companies` calls it with exposure_exists=True,
+    # nowhere else. Threaded out via ImpactGraphResult.fresh_cache_tickers
+    # so app.pipeline._gate_candidates can tell classify_evidence which
+    # rows might be this run's own just-written self-certification rather
+    # than a genuine independent prior -- see evidence.classify_evidence's
+    # docstring for the full rationale and why this is NOT simply "every
+    # verified=True ticker".
+    fresh_cache_tickers: set = field(default_factory=set)
     # Observability (spec §30) -- graph-quality counters, logged and shipped
     # on ImpactGraphResult.metrics.
     metrics: dict = field(default_factory=lambda: {
@@ -1104,6 +1115,11 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
         for company in state.companies.values():
             if company.verified:
                 _write_exposure_cache(session, company, exposure_exists=True, alert_id=alert_id)
+                # Self-echo guard input (see _GraphState.fresh_cache_tickers'
+                # own comment): this exact write is what
+                # classify_evidence must not read back as independent
+                # evidence for this same candidate.
+                state.fresh_cache_tickers.add(company.ticker)
 
 
 def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bool,
@@ -1299,6 +1315,11 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         analysis_provider=router.provider, analysis_quality=router.quality,
         metrics=dict(state.metrics),
         ambiguous_entities=sorted(state.ambiguous_entities),
+        # Never None here (only an old deserialized cache entry lacks it) --
+        # state.subjects_cache was seeded above, even when empty (`[]`, not
+        # unset).
+        subject_tickers=[s.ticker for s in (state.subjects_cache or [])],
+        fresh_cache_tickers=sorted(state.fresh_cache_tickers),
     )
 
 

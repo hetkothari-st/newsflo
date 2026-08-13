@@ -701,6 +701,28 @@ class ImpactGraphResult(BaseModel):
     # ever proposed it, so no GraphCompany carries its name). Default
     # empty so cached pre-Task-18 results deserialize unchanged.
     ambiguous_entities: list[str] = Field(default_factory=list)
+    # Resolved article-subject tickers (corrective-v4 Task 18 follow-up,
+    # MINOR finding: _subject_companies_ex double-run). analyze_article_v3
+    # already resolves this once via `state.subjects_cache`;
+    # app.pipeline._gate_candidates used to re-run the SAME alias-matcher
+    # pass from scratch just to recover this list. `None` (not `[]`) is the
+    # deliberate sentinel for "not populated by this analysis" -- a
+    # RESULT SERIALIZED BEFORE THIS FIELD EXISTED (app.pipeline.
+    # get_cached_v3 replays ImpactGraphResult JSON that can be
+    # V3_CACHE_TTL_DAYS old) deserializes with this field absent, and
+    # `_gate_candidates` must fall back to recomputing rather than
+    # silently treating a merely-unpopulated list as "no subjects" for
+    # that old, still-valid cached result.
+    subject_tickers: list[str] | None = None
+    # Self-echo guard input (corrective-v4 Task 18 follow-up, owner-ruled
+    # cross-finding): tickers `_write_exposure_cache` actually wrote a
+    # positive CompanyNodeExposure row for THIS run (engine._GraphState.
+    # fresh_cache_tickers) -- see app.analysis.impact_graph.evidence.
+    # classify_evidence's docstring. Empty (never None) is the correct,
+    # safe default for a result deserialized before this field existed:
+    # "nothing tracked as freshly written" degrades to the PRE-fix
+    # behavior for that old cached result, never to over-exclusion.
+    fresh_cache_tickers: list[str] = Field(default_factory=list)
     companies: list[GraphCompany] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     gaps: list[dict] = Field(default_factory=list)

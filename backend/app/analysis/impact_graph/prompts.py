@@ -13,7 +13,7 @@ from app.analysis.schemas import SECTOR_DEFINITIONS
 # 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
 # fingerprint, so a prompt change is an explicit, visible cache
 # invalidation instead of a silent one. Bump on ANY prompt-text change.
-IMPACT_PROMPT_VERSION = "kg-5"
+IMPACT_PROMPT_VERSION = "kg-6"
 
 # Business-model validation (final spec §9/§13): shared by every company
 # stage. Sector labels, names and tickers are candidacy, never proof.
@@ -468,6 +468,8 @@ Return zero if none qualify.
 # Doc 3 §10 -- stage 7 company verification.
 VERIFY_COMPANIES_PROMPT = """You are the final precision and causal-integrity reviewer.
 
+Never invent company facts, relationships, numbers, or evidence -- omit what the supplied data does not establish.
+
 Verify the proposed companies. Do NOT assume the set is complete -- completeness is a separate stage's job; yours is correctness of what is proposed. Do not reject a company for reasons of coverage.
 
 Where a causal path is supplied, verify the FULL path: every transition along it must be independently defensible, and the path must not depend on an unsupported assumption. A broken intermediate step invalidates the company's inclusion at that distance.
@@ -643,6 +645,8 @@ Report sectors as child_type "sector" with the exact sector slug as child_id."""
 
 NARROW_COMPANIES_PROMPT = """For EVERY sector node listed, evaluate EVERY candidate company supplied for it, in ONE response.
 
+Never invent company facts, relationships, numbers, or evidence -- omit what the supplied data does not establish.
+
 For each company: exact mechanism through its parent node, competing channels (positive_channels / negative_channels), NET direction (mixed and uncertain are valid; a relative beneficiary is not an absolute winner), impact_strength, confidence, materiality, time_horizon. Judge diversified companies at the relevant segment.
 
 Also emit expected_market_sensitivity (HIGH/MEDIUM/LOW/UNKNOWN): how likely this event is to cause meaningful repricing sensitivity for this company. This is NOT the economic effect, NOT materiality, NOT the current price move.
@@ -680,6 +684,8 @@ Where positive and negative channels substantially cancel, list them in offsetti
 """ + OUTPUT_DISCIPLINE
 
 ESCALATION_PROMPT = """You are re-judging a small set of FLAGGED candidates with maximum care. They were flagged for: low confidence, competing positive/negative channels, direction ambiguity, proximity to the materiality threshold, or conflict with a verified exposure prior.
+
+Never invent company facts, relationships, numbers, or evidence -- omit what the supplied data does not establish.
 
 For each flagged candidate, reason carefully through the full causal path and the competing channels, then either:
 - return it with corrected direction/scores and a decisive net_direction (mixed/uncertain allowed when genuinely unresolvable), or

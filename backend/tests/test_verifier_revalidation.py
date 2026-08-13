@@ -154,23 +154,33 @@ def test_verifier_silence_is_not_acceptance(db_session, strict_mode):
 
 def test_correction_is_revalidated_by_gate(db_session, strict_mode):
     """A verifier correction that raises materiality (0.3 -> 0.7) must reach
-    the gate as the corrected float, not the original one -- and the rest of
-    the composite/evidence system (Task 4/8) must still evaluate the
-    CORRECTED candidate on its own merits rather than rubber-stamping it.
+    the gate/entry as the corrected float and feed grade computation with
+    it, regardless of what the gate ultimately decides -- the rest of the
+    composite/evidence system (Task 4/8) still evaluates the CORRECTED
+    candidate on its own merits rather than rubber-stamping it.
 
-    Note on evidence tier: an ACCEPTED company always earns at least Tier D
-    (MODEL_VERIFIED_PRIOR) by the time _v3_entries runs, because
-    _verify_companies' own _write_exposure_cache writes a fresh
-    CompanyNodeExposure row for every verified company before returning --
-    the verifier's acceptance IS the independent check that earns Tier D
-    (see evidence.py's classify_evidence docstring). So a genuinely Tier-E
-    (MODEL_INFERENCE) accepted candidate cannot occur via the real pipeline;
-    that combination is exercised directly at the gate-unit level in
-    test_v4_strict_gate_wiring.py instead. What DOES persist here is Task
-    4's evidence-tier cap on primary authorization (canonical policy table:
-    "tier D is a deep dive") -- the correction earns a HIGH materiality
-    grade and DISPLAY_ELIGIBLE, but Tier D still holds it to
-    secondary_deep_dive, exactly as it would have BEFORE the correction."""
+    Evidence-tier note (corrective-v4 Task 18 follow-up, owner-ruled
+    cross-finding, T19/T20 audit -- self-echo fix): this test used to
+    assert an accepted company always earns at least Tier D (MODEL_
+    VERIFIED_PRIOR), because _verify_companies' own _write_exposure_cache
+    writes a fresh CompanyNodeExposure row for every verified company
+    before returning, and classify_evidence read that SAME just-written
+    row back as if it were independent history -- a second self-
+    certification loop Task 6 had closed for auto-accept but not for
+    evidence classification. That self-echo is now excluded (see
+    evidence.py's classify_evidence docstring): CORR.NS has no OTHER
+    evidence source here (no subject mention, no archetype, no
+    SupplyLink), so it honestly lands at Tier E (MODEL_INFERENCE), which
+    caps materiality_grade at LOW regardless of the float (app.analysis.
+    impact_graph.materiality.materiality_grade) -- REJECT_LOW_MATERIALITY,
+    at MATERIALITY_VALID, which runs BEFORE EVIDENCE_VALID in
+    GATE_SEQUENCE. The corrected materiality FLOAT itself still reaches
+    the entry untouched (_v3_entries copies it from company.materiality
+    directly, never from the gate decision) -- only the grade and final
+    verdict changed. (A genuinely independent Tier D -- a prior row this
+    run's verifier did NOT itself just write -- is exercised at the gate-
+    unit level in test_v4_strict_gate_wiring.py and directly in
+    test_exposure_self_certification.py instead.)"""
     row = Company(name="Corr Co", ticker="CORR.NS", sector="oil_gas", index_tier="NIFTY50")
     db_session.add(row)
     db_session.commit()
@@ -193,10 +203,10 @@ def test_correction_is_revalidated_by_gate(db_session, strict_mode):
     assert result.companies[0].materiality == 0.7  # correction carried through
 
     entries = _v3_entries(db_session, result)
-    assert entries[0]["materiality"] == 0.7          # gate saw the CORRECTED float
-    assert entries[0]["materiality_grade"] == "HIGH"  # 0.7 >= the HIGH cutoff, no cap in play here
-    assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
-    assert entries[0]["display_tier"] == "secondary_deep_dive"  # Tier D cap still applies
+    assert entries[0]["materiality"] == 0.7  # entry saw the CORRECTED float, not the original
+    assert entries[0]["gate_state"] == "REJECT_LOW_MATERIALITY"
+    assert entries[0]["materiality_grade"] == "LOW"  # tier-E cap, not the naked float's own HIGH grade
+    assert entries[0]["display_tier"] == "excluded"
 
 
 # --- counterfactual verdict flows from the verifier to the gate -----------
@@ -206,11 +216,22 @@ def test_counterfactual_flows_from_verdict_to_gate(db_session, strict_mode):
     pipeline constant -- decides COUNTERFACTUAL_VALID. NOT_SUPPORTED
     rejects as a generic, non-event-specific story; an ACCEPTED company the
     verifier's map omits falls back to UNCERTAIN (spec §25/§31: displayable
-    as a deep dive, never primary, never excluded outright)."""
+    as a deep dive, never primary, never excluded outright).
+
+    Both companies are named as article subjects (corrective-v4 Task 18
+    follow-up, self-echo fix): since BOTH get accepted this run, BOTH also
+    get a fresh CompanyNodeExposure write from _write_exposure_cache, so
+    neither can classify MODEL_VERIFIED_PRIOR/D any longer (see evidence.py's
+    classify_evidence docstring) -- without independent evidence they would
+    land at Tier E, whose materiality cap (LOW) would reject BOTH at
+    MATERIALITY_VALID before COUNTERFACTUAL_VALID -- the gate this test is
+    actually about -- ever ran. ARTICLE_SUBJECT/SUBJECT carries no such cap,
+    so the counterfactual verdict is what decides each one's fate again,
+    exactly as this test intends."""
     _company_with_exposure(db_session, "NOTSUP.NS", "NotSup Co", "oil_gas", "oil_gas")
     _company_with_exposure(db_session, "OMIT.NS", "Omitted Co", "oil_gas", "oil_gas")
     router = FakeRouter({
-        "extract_facts": FACTS,
+        "extract_facts": dict(FACTS, named_entities=["NotSup Co", "Omitted Co"]),
         "initial_shocks": {"shocks": [], "direct_nodes": [
             _edge("event", "oil_gas", child_type="sector", parent_type="event", mat=0.7, conf=0.8),
         ]},

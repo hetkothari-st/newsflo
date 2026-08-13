@@ -247,6 +247,102 @@ def test_legacy_alert_companies_duplicates_deduped_on_upgrade(tmp_path):
     assert [r[0] for r in rows] == [expected_survivor]
 
 
+def test_legacy_dedupe_repoints_fk_children_to_survivor(tmp_path):
+    """Review-round finding (IMPORTANT): the pre-dedupe DELETE above
+    orphans any child row still pointing at a deleted duplicate --
+    CalibrationSample/CarOutcome/EmailNotification/AlertCompanyTranslation
+    all carry ForeignKey("alert_companies.id"), and SQLite FK enforcement
+    is off by default, so the DELETE would silently orphan them rather
+    than error. 0006 must repoint every child row to the survivor first
+    (or drop it, on a unique-constraint collision with a row the survivor
+    already owns) before the duplicate rows are deleted."""
+    import sqlite3
+
+    db = tmp_path / "legacy_dupes_fk.db"
+    url = f"sqlite:///{db}"
+    env = dict(os.environ, DATABASE_URL=url)
+    stamp0005 = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "0005"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert stamp0005.returncode == 0, stamp0005.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO articles (source, url, title, content, fetched_at, status) "
+            "VALUES ('t','https://x','x','c', datetime('now'), 'ANALYZED')")
+        article_id = conn.execute("SELECT id FROM articles").fetchone()[0]
+        conn.execute(
+            "INSERT INTO alerts (article_id, category, prompt_version, knowledge_version, "
+            "refinement_attempts, created_at) "
+            "VALUES (?, 'other', 'v1', 'v1', 0, datetime('now'))", (article_id,))
+        alert_id = conn.execute("SELECT id FROM alerts").fetchone()[0]
+        conn.execute(
+            "INSERT INTO companies (ticker, name, sector, index_tier, tradeability) "
+            "VALUES ('DUP2.NS', 'Dup Co 2', 'other', 'OTHER', 'NORMAL')")
+        company_id = conn.execute("SELECT id FROM companies").fetchone()[0]
+        inserted_ids = []
+        for _ in range(2):
+            conn.execute(
+                "INSERT INTO alert_companies "
+                "(alert_id, company_id, direction, magnitude_low, magnitude_high, "
+                "confidence_score, time_horizon, basis, confidence, impact_level) "
+                "VALUES (?, ?, 'bullish', 1.0, 2.0, 50, 'Short-Term', 'direct_mention', "
+                "'llm_estimate', 'direct')", (alert_id, company_id))
+            inserted_ids.append(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        conn.commit()
+        survivor_id = max(inserted_ids)
+        loser_id = min(inserted_ids)
+
+        # A child row attached to the NON-survivor, on a child table whose
+        # own unique constraint is (alert_company_id, horizon_days) --
+        # not a collision case (the survivor has no calibration_samples
+        # row at all yet), so this must simply be REPOINTED.
+        conn.execute(
+            "INSERT INTO calibration_samples "
+            "(alert_company_id, category, company_id, direction, magnitude_actual, horizon_days, sampled_at) "
+            "VALUES (?, 'other', ?, 'bullish', 2.0, 1, datetime('now'))",
+            (loser_id, company_id))
+        calibration_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # A car_outcomes row on EACH of the two duplicates -- that table's
+        # unique constraint is on alert_company_id ALONE, so repointing
+        # the loser's row onto the survivor MUST collide; the survivor's
+        # own row must be the one that survives.
+        conn.execute(
+            "INSERT INTO car_outcomes (alert_company_id, company_id, category, "
+            "day0_excess_move_pct, car_pct, computed_at) "
+            "VALUES (?, ?, 'other', 99.0, 99.0, datetime('now'))", (survivor_id, company_id))
+        survivor_car_outcome_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO car_outcomes (alert_company_id, company_id, category, "
+            "day0_excess_move_pct, car_pct, computed_at) "
+            "VALUES (?, ?, 'other', 1.0, 1.0, datetime('now'))", (loser_id, company_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    upgrade = _run_alembic(url)
+    assert upgrade.returncode == 0, upgrade.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        cal_rows = conn.execute(
+            "SELECT id, alert_company_id FROM calibration_samples WHERE id = ?",
+            (calibration_id,)).fetchall()
+        assert cal_rows == [(calibration_id, survivor_id)], (
+            "child row attached to the non-survivor must be repointed at the survivor")
+
+        car_rows = conn.execute(
+            "SELECT id, alert_company_id, day0_excess_move_pct FROM car_outcomes"
+        ).fetchall()
+        assert car_rows == [(survivor_car_outcome_id, survivor_id, 99.0)], (
+            "on a unique-constraint collision the survivor's OWN row must win, "
+            "the loser's dropped -- never the other way, and never both left in place")
+    finally:
+        conn.close()
+
+
 def test_upgrade_on_legacy_created_db(tmp_path):
     """A DB created by the old create_all/_ADDED_COLUMNS path must accept
     `alembic stamp baseline` + upgrade without error."""

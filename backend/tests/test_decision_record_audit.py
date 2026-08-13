@@ -19,7 +19,7 @@ from app.config import settings
 from app.main import app
 from app.models import (
     Alert, AlertCompany, Article, Company, CompanyDecisionRecord, CompanyNodeExposure,
-    SupplyLink, utcnow,
+    EvidenceRecord, SupplyLink, utcnow,
 )
 from app.pipeline import _gate_candidates, _persist_alert, _v3_edges, _v3_entries
 from app.routers.articles import get_db
@@ -518,3 +518,82 @@ def test_audit_endpoint_ordered_by_final_state_then_ticker(db_session, monkeypat
         assert states == sorted(states)
     finally:
         app.dependency_overrides.clear()
+
+
+# --- review-round fix: reuse copies the FULL completeness column set ------
+
+def test_reuse_copies_gate_audit_trail_completeness_columns(db_session, strict_mode):
+    """Review-round finding (CRITICAL): _copy_gate_audit_trail (the dedup-
+    reuse path's audit-trail copy, corrective-v4 Task 12) was written
+    before Task 18 added 7 completeness columns to CompanyDecisionRecord
+    and never updated -- every reused alert's decision records silently
+    lost gate_inputs_json/discovery_sources_json/evidence_ids_json/
+    provider/model/analysis_quality/correction_json (left NULL). Now
+    copied: the first 6 verbatim (they describe the SAME gate walk as
+    candidate_json/analysis_version, which were already preserved
+    verbatim); evidence_ids_json REMAPPED through the same evidence_id_map
+    as candidate_json.evidence_ids, since its ids point at EvidenceRecord
+    rows that get new ids under the new alert."""
+    from app.pipeline import _copy_gate_audit_trail
+
+    prior_article = Article(source="s", url="https://ex.com/prior-copy", title="t",
+                            content="c", status="ANALYZED")
+    db_session.add(prior_article)
+    db_session.commit()
+    prior_alert = Alert(article_id=prior_article.id, category="commodity")
+    db_session.add(prior_alert)
+    db_session.commit()
+    evidence = EvidenceRecord(
+        alert_id=prior_alert.id, company_id=None, source_type="article", source_name="article",
+        fact_text="named subject of the article", evidence_class="ARTICLE_COMPANY_MENTION",
+        evidence_tier="SUBJECT", supports_claim=True)
+    db_session.add(evidence)
+    db_session.commit()
+
+    db_session.add(CompanyDecisionRecord(
+        alert_id=prior_alert.id, company_id=None, ticker="ONGC.NS",
+        final_state="DISPLAY_ELIGIBLE", display_tier="primary",
+        rejection_reason=None, gates_passed_json=json.dumps(["ENTITY_VALID"]),
+        evidence_class="ARTICLE_SUBJECT", materiality_grade="HIGH",
+        candidate_json=json.dumps({"mechanism": "m", "evidence_ids": [evidence.id]}),
+        analysis_version="kg-6/schema-1",
+        gate_inputs_json=json.dumps({"ticker": "ONGC.NS", "entity_status": "resolved"}),
+        evidence_ids_json=json.dumps([evidence.id]),
+        discovery_sources_json=json.dumps(["subject"]),
+        provider="gemini", model="gemini-3.1-pro-preview", analysis_quality="authoritative",
+        correction_json=json.dumps({"materiality": 0.5}),
+    ))
+    db_session.commit()
+
+    new_article = Article(source="s", url="https://ex.com/new-copy", title="t",
+                          content="c", status="ANALYZED")
+    db_session.add(new_article)
+    db_session.commit()
+    new_alert = Alert(article_id=new_article.id, category="commodity")
+    db_session.add(new_alert)
+    db_session.commit()
+
+    _copy_gate_audit_trail(db_session, prior_alert.id, new_alert.id)
+
+    prior = db_session.query(CompanyDecisionRecord).filter_by(alert_id=prior_alert.id).one()
+    copied = db_session.query(CompanyDecisionRecord).filter_by(alert_id=new_alert.id).one()
+
+    assert copied.gate_inputs_json == prior.gate_inputs_json
+    assert copied.discovery_sources_json == prior.discovery_sources_json
+    assert copied.provider == prior.provider
+    assert copied.model == prior.model
+    assert copied.analysis_quality == prior.analysis_quality
+    assert copied.correction_json == prior.correction_json
+
+    # evidence_ids_json is REMAPPED (new EvidenceRecord ids), never
+    # literally byte-identical to the prior's -- it must resolve to a
+    # real, freshly-copied row carrying the SAME content, and must never
+    # be left pointing at the prior alert's own evidence.
+    new_evidence_ids = json.loads(copied.evidence_ids_json)
+    assert new_evidence_ids != json.loads(prior.evidence_ids_json)
+    new_evidence = db_session.get(EvidenceRecord, new_evidence_ids[0])
+    assert new_evidence.alert_id == new_alert.id
+    assert new_evidence.fact_text == evidence.fact_text
+    # candidate_json's own evidence_ids must point at the SAME copied
+    # row -- the two columns never drift apart from each other post-copy.
+    assert json.loads(copied.candidate_json)["evidence_ids"] == new_evidence_ids

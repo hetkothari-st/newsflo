@@ -914,6 +914,19 @@ _COMPANY_PROMPT_NAMES = [
 _ABSTENTION_TOKENS = ("zero", "omit", "omission", "none", "reject")
 _CANDIDATE_RESTRICTION_TOKENS = ("candidate list", "supplied", "candidates from")
 
+# RULED (corrective-v4 Task 18 follow-up, per-stage INV-017): three of the
+# six carried NO invention prohibition of their own -- only the shared
+# SYSTEM_PROMPT prefix's -- confirmed by direct inspection (`"invent" in
+# constant.lower()`) before this fix landed. Each now carries its own
+# explicit line; this is the set the STRONGER, static_prefix-independent
+# assertion below applies to. The other three (DIRECT_COMPANIES_PROMPT,
+# RIPPLE_COMPANIES_PROMPT, MECHANISM_MAPPING_PROMPT) already had their own
+# text and are not required to change, though they're not excluded from a
+# future tightening.
+_OWN_INVENTION_PROHIBITION_REQUIRED = frozenset({
+    "NARROW_COMPANIES_PROMPT", "ESCALATION_PROMPT", "VERIFY_COMPANIES_PROMPT",
+})
+
 
 @pytest.mark.parametrize("prompt_name", _COMPANY_PROMPT_NAMES)
 def test_inv017_company_prompts_forbid_invention_and_allow_abstention(prompt_name):
@@ -928,7 +941,15 @@ def test_inv017_company_prompts_forbid_invention_and_allow_abstention(prompt_nam
       clause fails all six of these at once (and the guard below names it).
     - the STAGE constant's OWN text must restrict selection to the supplied
       candidate list and permit abstention/rejection. That is per-stage and
-      cannot be satisfied by the shared prefix."""
+      cannot be satisfied by the shared prefix.
+
+    A THIRD, stronger check applies to NARROW_COMPANIES_PROMPT/
+    ESCALATION_PROMPT/VERIFY_COMPANIES_PROMPT specifically: their OWN text
+    (not merely the delivered, SYSTEM_PROMPT-prefixed text) must carry the
+    invention prohibition -- dropping the static_prefix delivery workaround
+    these three used to rely on entirely, since a future stage-prompt
+    refactor that changes what gets prefixed must not silently re-open
+    them."""
     from app.analysis.impact_graph import prompts
 
     constant = getattr(prompts, prompt_name)
@@ -936,6 +957,10 @@ def test_inv017_company_prompts_forbid_invention_and_allow_abstention(prompt_nam
     own = constant.lower()
 
     assert "invent" in delivered, f"{prompt_name}: no invention prohibition reaches the model"
+    if prompt_name in _OWN_INVENTION_PROHIBITION_REQUIRED:
+        assert "invent" in own, (
+            f"{prompt_name}: relies on the shared SYSTEM_PROMPT prefix alone -- "
+            "needs its own invention prohibition line")
     assert any(token in own for token in _CANDIDATE_RESTRICTION_TOKENS), (
         f"{prompt_name}: does not restrict the model to the supplied candidates")
     assert any(token in own for token in _ABSTENTION_TOKENS), (

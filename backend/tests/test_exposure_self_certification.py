@@ -161,6 +161,118 @@ def test_review_after_expiry_downgrades_row(db_session, strict_mode):
     assert payloads == []
 
 
+# --- self-echo guard (owner-ruled cross-finding, T19/T20 audit) ----------
+# CompanyNodeExposure rows are read BEFORE the ARTICLE_SUBJECT check
+# (evidence.py step 3 precedes step 4), and _write_exposure_cache stamps a
+# fresh MODEL_VERIFIED row for every candidate _verify_companies accepts --
+# in the SAME session, BEFORE app.pipeline._gate_candidates ever calls
+# classify_evidence. Without the guard below, an accepted, article-central
+# candidate could self-echo straight to Tier D and could never classify
+# ARTICLE_SUBJECT (SUBJECT, primary-capable).
+#
+# The signal is `fresh_cache_tickers` -- exactly the tickers `_write_
+# exposure_cache` touched THIS run (engine._GraphState.fresh_cache_
+# tickers, threaded via ImpactGraphResult) -- NOT `company.verified`
+# generally. That broader flag was the plan round's first suggestion but
+# measured wrong against this very test file: `_graph_company(verified=
+# True)` paired with a CompanyNodeExposure row set up directly by the test
+# (as every other test in this file does, to simulate a genuine prior) is
+# the standard fixture shape here, and it never calls `_write_exposure_
+# cache` at all -- using `.verified` as the signal would have wrongly
+# excluded every one of those rows too.
+
+def test_fresh_cache_ticker_subject_classifies_article_subject_not_prior(db_session, strict_mode):
+    """A ticker THIS run's `_write_exposure_cache` actually wrote to (so
+    the row sitting here may well BE that exact write) must classify by
+    what it actually IS -- the article's own named subject -- not by its
+    own just-written self-echo."""
+    from app.analysis.impact_graph.evidence import classify_evidence
+
+    row = _company(db_session, business_desc="Upstream oil and gas explorer")
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="verified crude exposure",
+        provenance_type="MODEL_VERIFIED", verified_at=utcnow()))
+    db_session.commit()
+
+    company = _graph_company(verified=True)
+    evidence_class, evidence_tier, payloads = classify_evidence(
+        db_session, company, subject_tickers={"ONGC.NS"},
+        fresh_cache_tickers=frozenset({"ONGC.NS"}))
+
+    assert evidence_class == "ARTICLE_SUBJECT"
+    assert evidence_tier == "SUBJECT"
+    assert payloads and payloads[0]["fact_text"] == "named subject of the article"
+    assert evidence_class != "MODEL_VERIFIED_PRIOR"
+
+
+def test_genuinely_prior_row_still_classifies_as_d_prior(db_session, strict_mode):
+    """A row `_write_exposure_cache` did NOT just touch this run -- a
+    different, older alert's acceptance -- is unaffected by the guard:
+    still classifies MODEL_VERIFIED_PRIOR / D exactly as before the fix.
+    `fresh_cache_tickers` deliberately does NOT contain this ticker,
+    modeling "some OTHER candidate's cache write happened this run, not
+    this one" (this row genuinely predates the current analysis)."""
+    from app.analysis.impact_graph.evidence import classify_evidence
+
+    row = _company(db_session, business_desc="Upstream oil and gas explorer")
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="verified crude exposure",
+        provenance_type="MODEL_VERIFIED", verified_at=utcnow(),
+        source_alert_id=4242))  # an older, unrelated alert
+    db_session.commit()
+
+    company = _graph_company(verified=True)
+    # This ticker is NOT a subject and NOT in fresh_cache_tickers this run
+    # (a different candidate's cache write happened instead) -- the
+    # genuinely prior row still stands.
+    evidence_class, evidence_tier, payloads = classify_evidence(
+        db_session, company, subject_tickers=set(),
+        fresh_cache_tickers=frozenset({"SOMEOTHER.NS"}))
+
+    assert evidence_class == "MODEL_VERIFIED_PRIOR"
+    assert evidence_tier == "D"
+    assert payloads == []
+
+    # And the default call (no fresh_cache_tickers argument at all --
+    # every pre-existing caller/test in this module, including every OTHER
+    # test in this very file) is unaffected too.
+    evidence_class_default, _tier, _payloads = classify_evidence(db_session, company, set())
+    assert evidence_class_default == "MODEL_VERIFIED_PRIOR"
+
+
+def test_engine_level_fresh_write_threads_through_to_gate_as_subject(db_session, strict_mode):
+    """End-to-end (not just the classify_evidence unit): a REAL
+    analyze_article_v3 run that verifies and cache-writes a company which
+    is ALSO the article's own subject reaches the publication gate
+    classified ARTICLE_SUBJECT, not MODEL_VERIFIED_PRIOR -- the fix as it
+    actually operates through the full pipeline, not only via a hand-fed
+    `fresh_cache_tickers` argument."""
+    from tests.test_impact_graph import FACTS, FakeRouter, _company as _co, _company_entry
+    from tests.test_impact_graph_optimization import _direct_sector_setup
+    from app.analysis.impact_graph.engine import analyze_article_v3
+    from app.pipeline import _v3_entries
+
+    _co(db_session, "CACHED.NS", "Cached Co", "oil_gas")
+
+    router = FakeRouter(_direct_sector_setup({
+        "extract_facts": dict(FACTS, named_entities=["Cached Co"]),
+        "map_companies": {"companies": [_company_entry("CACHED.NS", "Cached Co")]},
+        "verify_companies": {"accept": ["CACHED.NS"], "reject": [],
+                             "counterfactual": {"CACHED.NS": "SUPPORTED"}},
+    }))
+    result = analyze_article_v3(router, "t", "c", session=db_session)
+
+    assert result.companies and result.companies[0].verified is True
+    assert "CACHED.NS" in result.fresh_cache_tickers, (
+        "the verifier accepted this company -- _write_exposure_cache must have run for it")
+
+    entries = _v3_entries(db_session, result)
+    assert entries[0]["evidence_class"] == "ARTICLE_SUBJECT"
+    assert entries[0]["evidence_class"] != "MODEL_VERIFIED_PRIOR"
+
+
 # --- legacy NULL-provenance rows are priors, not permanent authority -----
 
 def test_legacy_null_provenance_is_not_permanently_authoritative(db_session, strict_mode):

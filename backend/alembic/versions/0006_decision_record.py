@@ -32,6 +32,56 @@ _DECISION_RECORD_COLUMNS = [
     ("correction_json", sa.Text()),
 ]
 
+# Review-round fix (Task 18): every table carrying
+# ForeignKey("alert_companies.id") -- SQLite has FK enforcement OFF by
+# default, so the original pre-dedupe DELETE below would have silently
+# orphaned any of these children still pointing at a deleted duplicate row.
+# (table, unique columns on that table EXCLUDING alert_company_id itself --
+# empty list means alert_company_id alone is unique). Matches app/models.py
+# exactly: CalibrationSample(alert_company_id, horizon_days),
+# CarOutcome(alert_company_id) alone, EmailNotification(user_id,
+# alert_company_id), AlertCompanyTranslation(alert_company_id, lang).
+_ALERT_COMPANY_CHILD_TABLES: list[tuple[str, list[str]]] = [
+    ("calibration_samples", ["horizon_days"]),
+    ("car_outcomes", []),
+    ("email_notifications", ["user_id"]),
+    ("alert_company_translations", ["lang"]),
+]
+
+
+def _repoint_or_drop_children(bind, loser_id: int, keep_id: int) -> None:
+    """Before a duplicate `alert_companies` row is deleted, every child row
+    that still points at it must be repointed to the survivor -- or, if the
+    survivor already has a row occupying that same unique-constraint slot,
+    dropped instead (the survivor's own history wins; a duplicate's child
+    row is discarded, never left to violate the child table's own unique
+    constraint on UPDATE). Processed one loser at a time, so a later loser
+    correctly collides against an EARLIER loser's just-repointed row, not
+    only against rows that existed before this migration started."""
+    for table, key_cols in _ALERT_COMPANY_CHILD_TABLES:
+        select_cols = ", ".join(["id", *key_cols])
+        rows = bind.execute(sa.text(
+            f"SELECT {select_cols} FROM {table} WHERE alert_company_id = :loser_id"
+        ), {"loser_id": loser_id}).fetchall()
+        for row in rows:
+            child_id = row[0]
+            key_values = dict(zip(key_cols, row[1:]))
+            if key_cols:
+                where_clause = " AND ".join(f"{c} = :{c}" for c in key_cols)
+                collision = bind.execute(sa.text(
+                    f"SELECT id FROM {table} WHERE alert_company_id = :keep_id AND {where_clause}"
+                ), {"keep_id": keep_id, **key_values}).fetchone()
+            else:
+                collision = bind.execute(sa.text(
+                    f"SELECT id FROM {table} WHERE alert_company_id = :keep_id"
+                ), {"keep_id": keep_id}).fetchone()
+            if collision is not None:
+                bind.execute(sa.text(f"DELETE FROM {table} WHERE id = :id"), {"id": child_id})
+            else:
+                bind.execute(sa.text(
+                    f"UPDATE {table} SET alert_company_id = :keep_id WHERE id = :id"
+                ), {"keep_id": keep_id, "id": child_id})
+
 
 def upgrade() -> None:
     """Upgrade schema."""
@@ -68,6 +118,12 @@ def upgrade() -> None:
         "FROM alert_companies GROUP BY alert_id, company_id HAVING COUNT(*) > 1"
     )).fetchall()
     for alert_id, company_id, keep_id in dupes:
+        losers = bind.execute(sa.text(
+            "SELECT id FROM alert_companies WHERE alert_id = :alert_id "
+            "AND company_id = :company_id AND id != :keep_id"
+        ), {"alert_id": alert_id, "company_id": company_id, "keep_id": keep_id}).fetchall()
+        for (loser_id,) in losers:
+            _repoint_or_drop_children(bind, loser_id, keep_id)
         bind.execute(sa.text(
             "DELETE FROM alert_companies WHERE alert_id = :alert_id "
             "AND company_id = :company_id AND id != :keep_id"

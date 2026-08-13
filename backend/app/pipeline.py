@@ -702,6 +702,26 @@ def _copy_gate_audit_trail(session: Session, prior_alert_id: int, new_alert_id: 
         # .get(eid, eid) fallback is defensive only, never dropping a
         # reference outright if that invariant is ever violated.
         candidate["evidence_ids"] = [evidence_id_map.get(eid, eid) for eid in old_evidence_ids]
+        # Fix (review round, corrective-v4 Task 18 follow-up): this loop
+        # used to copy only the pre-Task-18 columns, silently dropping the
+        # completeness columns Task 18 added -- every reused alert's audit
+        # trail lost exactly the data that task exists to preserve.
+        # gate_inputs_json/discovery_sources_json/provider/model/
+        # analysis_quality/correction_json describe the SAME gate walk as
+        # candidate_json/analysis_version (never regenerated, same
+        # reasoning as those two), so they're copied verbatim. evidence_
+        # ids_json is the ONE exception: like candidate_json.evidence_ids
+        # above, its ids point at EvidenceRecord rows, which get NEW ids
+        # under new_alert_id -- copying it verbatim would leave it pointing
+        # at another alert's (or nothing's) evidence, so it goes through
+        # the SAME evidence_id_map remap, from the SAME source list, so the
+        # two columns can never drift apart from each other post-copy.
+        old_evidence_ids_json = (
+            json.loads(record.evidence_ids_json) if record.evidence_ids_json else []
+        )
+        remapped_evidence_ids_json = [
+            evidence_id_map.get(eid, eid) for eid in old_evidence_ids_json
+        ]
         session.add(CompanyDecisionRecord(
             alert_id=new_alert_id, company_id=record.company_id, ticker=record.ticker,
             final_state=record.final_state, display_tier=record.display_tier,
@@ -713,6 +733,13 @@ def _copy_gate_audit_trail(session: Session, prior_alert_id: int, new_alert_id: 
             # PRESERVED, not regenerated (see docstring): this row
             # describes the gate run that actually produced it.
             analysis_version=record.analysis_version,
+            gate_inputs_json=record.gate_inputs_json,
+            evidence_ids_json=json.dumps(remapped_evidence_ids_json),
+            discovery_sources_json=record.discovery_sources_json,
+            provider=record.provider,
+            model=record.model,
+            analysis_quality=record.analysis_quality,
+            correction_json=record.correction_json,
         ))
     session.flush()
 
@@ -1152,27 +1179,50 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
     `evidence_payloads` are EvidenceRecord payload dicts (Task 5) -- not
     yet persisted, since no Alert id exists at this point; see
     app.analysis.impact_graph.evidence.persist_evidence."""
-    from app.analysis.impact_graph.engine import _subject_companies_ex
     from app.analysis.impact_graph.evidence import classify_evidence
     from app.analysis.impact_graph.materiality import materiality_grade as composite_materiality_grade
     from app.analysis.impact_graph.publication_gate import CandidateInput, GateContext, evaluate_candidate
-    from app.analysis.impact_graph.schemas import EventFacts
 
-    # Reuse the engine's deterministic subject resolver on the result's
-    # carried entity names -- same alias matcher, no LLM. `ambiguous_entity_names`
-    # holds entities the matcher found genuinely ambiguous (Task 7); the
-    # ONLY safe cross-reference back to a specific GraphCompany is exact
-    # name equality -- this module's whole design rejects substring/fuzzy
-    # matching as a false-confidence hazard (see matcher.py), so a
-    # GraphCompany's own `entity_ambiguous` flag (set by its producer) is
-    # the primary signal and this is a defensive fallback, not the main path.
-    subject_facts = EventFacts(
-        event="", facts="", category=result.category,
-        event_type=result.event_type or "",
-        named_entities=list(result.named_entities or []),
-    )
-    subjects, ambiguous_entity_names = _subject_companies_ex(session, subject_facts)
-    subject_tickers = {row.ticker for row in subjects}
+    # Subject/ambiguity resolution (Task 7's alias-matcher pass) -- reused
+    # from analyze_article_v3's own single resolution when the result
+    # carries it (corrective-v4 Task 18 follow-up, MINOR finding: this used
+    # to unconditionally re-run the SAME matcher pass from scratch here,
+    # even though engine._GraphState.subjects_cache had already computed it
+    # once). `result.subject_tickers is None` is the honest fallback for a
+    # result serialized BEFORE that field existed (get_cached_v3 can replay
+    # an ImpactGraphResult up to V3_CACHE_TTL_DAYS old) -- recompute exactly
+    # as before rather than treating "field absent" as "no subjects".
+    # `ambiguous_entity_names` holds entities the matcher found genuinely
+    # ambiguous (Task 7); the ONLY safe cross-reference back to a specific
+    # GraphCompany is exact name equality -- this module's whole design
+    # rejects substring/fuzzy matching as a false-confidence hazard (see
+    # matcher.py), so a GraphCompany's own `entity_ambiguous` flag (set by
+    # its producer) is the primary signal and this is a defensive fallback,
+    # not the main path.
+    if result.subject_tickers is not None:
+        subject_tickers = set(result.subject_tickers)
+        ambiguous_entity_names = set(result.ambiguous_entities)
+    else:
+        from app.analysis.impact_graph.engine import _subject_companies_ex
+        from app.analysis.impact_graph.schemas import EventFacts
+
+        subject_facts = EventFacts(
+            event="", facts="", category=result.category,
+            event_type=result.event_type or "",
+            named_entities=list(result.named_entities or []),
+        )
+        subjects, ambiguous_entity_names = _subject_companies_ex(session, subject_facts)
+        subject_tickers = {row.ticker for row in subjects}
+    # Self-echo guard input (owner-ruled cross-finding, see
+    # app.analysis.impact_graph.evidence.classify_evidence's docstring):
+    # exactly the tickers _write_exposure_cache wrote a fresh
+    # CompanyNodeExposure row for THIS run (engine._GraphState.
+    # fresh_cache_tickers, threaded out on the result) -- NOT every
+    # verified=True ticker, which would also catch the narrow path's
+    # low-risk in-call self-check (verified=True, cache never touched) and
+    # every test fixture that hand-builds an already-verified candidate
+    # alongside a genuinely independent prior row.
+    fresh_cache_tickers = frozenset(result.fresh_cache_tickers or [])
     # Budget exhaustion means the verifier never ran (existing behavior) AND
     # the analysis itself is degraded -- both truths, separately stated. A
     # "failed" analysis is the same story from a different failure mode
@@ -1189,7 +1239,7 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
     for company in result.companies:
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
         evidence_class, evidence_tier, evidence_payloads = classify_evidence(
-            session, company, subject_tickers)
+            session, company, subject_tickers, fresh_cache_tickers)
         # Entity tri-state (Task 7): the ticker resolving to a real Company
         # row is the normal case (GraphCompany.ticker comes from an
         # enum-locked candidate list). `entity_ambiguous` is the one signal
