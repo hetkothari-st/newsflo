@@ -45,3 +45,15 @@ def validate_or_none(text: str | None) -> str | None:
     if text is None:
         return None
     return text if validate_no_advice_language(text).is_valid else None
+
+
+# Exposed (not just private module constants) so app.analysis.refinement's
+# mechanism sanitizer can reuse the exact same percent/price-target
+# detectors when it strips only the offending sentence/clause out of an
+# otherwise-valid mechanism, instead of rejecting the whole string the way
+# validate_or_none does. Keeping one regex definition avoids the two
+# checks silently drifting apart (a why the sanitizer judges "clean"
+# because it uses a looser pattern is a why that could still carry a
+# percentage the compliance gate would reject elsewhere).
+PERCENT_RE = _PERCENT_RE
+TARGET_PRICE_RE = _TARGET_PRICE_RE

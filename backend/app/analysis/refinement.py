@@ -9,14 +9,16 @@ top of it. Built up across the plan's Tasks 4 (generate_event_summary), 5
 """
 import json
 import logging
+import re
 import time
 
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
+from app.companies.matching.normalize import normalize_name
 from app.config import settings
-from app.models import AlertRippleLayer, Company, TimelineEffect
-from app.reasoning.compliance import validate_or_none
+from app.models import AlertRippleLayer, Company, CompanyAlias, TimelineEffect
+from app.reasoning.compliance import PERCENT_RE, TARGET_PRICE_RE, validate_no_advice_language, validate_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -537,6 +539,197 @@ def generate_timeline_effects(client, title: str, facts: str) -> list[dict]:
     return valid
 
 
+# --- Task 13: post-generation closed-world validation + mechanism sanitizer ---
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_CLAUSE_SPLIT_RE = re.compile(r"[,;]")
+
+
+def _sanitize_mechanism(mechanism: str | None) -> str | None:
+    """Fallback for a strict-mode mechanism that fails validate_or_none
+    ONLY because of a percentage or price-target fragment (spec §32,
+    INV-014): the mechanism is otherwise a genuine, gate-validated,
+    company-specific explanation, so this salvages it by stripping just
+    the offending sentence -- or, if only part of a sentence is flagged,
+    just the offending comma/semicolon-separated clause -- rather than
+    discarding the whole thing the way validate_or_none does. Reuses
+    compliance.py's own PERCENT_RE/TARGET_PRICE_RE so this can never judge
+    something "clean" that the compliance gate would reject elsewhere.
+
+    Returns the surviving remainder, or None if nothing survives (every
+    sentence was flagged and had no salvageable clause) or if the
+    remainder still fails full compliance validation (e.g. it happens to
+    also contain buy/sell/hold language) -- a percentage must never reach
+    ac.why through this path either.
+    """
+    if not mechanism:
+        return None
+    kept_sentences = []
+    for sentence in _SENTENCE_SPLIT_RE.split(mechanism.strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if not (PERCENT_RE.search(sentence) or TARGET_PRICE_RE.search(sentence)):
+            kept_sentences.append(sentence)
+            continue
+        kept_clauses = [
+            clause.strip() for clause in _CLAUSE_SPLIT_RE.split(sentence)
+            if clause.strip() and not (PERCENT_RE.search(clause) or TARGET_PRICE_RE.search(clause))
+        ]
+        if kept_clauses:
+            kept_sentences.append(", ".join(kept_clauses))
+    if not kept_sentences:
+        return None
+    remainder = " ".join(kept_sentences).strip()
+    return remainder if validate_no_advice_language(remainder).is_valid else None
+
+
+# Closed-world percent token: matches compliance.py's PERCENT_RE shape
+# (unsigned here -- we only need the numeral to check literal presence in
+# alert_facts, a sign doesn't change whether the digits are grounded).
+_PERCENT_TOKEN_RE = re.compile(r"(\d+(?:\.\d+)?)\s?%")
+
+# Bounded, conservative n-gram extraction (n=1..3) over contiguous runs of
+# capitalized words -- the cheap proxy for "looks like a proper noun
+# phrase" this validator uses instead of a real NER model. Words joined by
+# '&' or '.' (e.g. "L&T", "D.B.Corp") stay inside one token.
+_CAP_WORD_RE = re.compile(r"[A-Za-z][A-Za-z&.]*")
+
+# Frequent capitalized false positives that are not company names -- common
+# sentence-leading words, generic institution words, and regulator/
+# government references that either never appear in company_aliases or
+# would falsely implicate a same-named company if they did. Kept small and
+# reviewed rather than exhaustive: the validator's own "only reject on a
+# definitive alias-DB hit" discipline is the real safety net, this list
+# just avoids wasting DB lookups on the noisiest cases.
+_NGRAM_STOPLIST = {
+    "the", "a", "an", "this", "that", "these", "those",
+    "india", "indian", "bharat",
+    "government", "ministry", "state", "union", "central", "national",
+    "reserve", "bank", "reserve bank", "reserve bank of india",
+    "sebi", "rbi", "nse", "bse",
+    "today", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+}
+
+
+def _extract_capitalized_ngrams(text: str) -> list[str]:
+    """Contiguous 1..3-word n-grams built only from runs of consecutive
+    capitalized words (a simple proper-noun-phrase heuristic) -- a run
+    breaks at the first lowercase-leading word, so "Tata Motors reported"
+    yields "Tata", "Motors", "Tata Motors" but never "Motors reported"."""
+    words = _CAP_WORD_RE.findall(text or "")
+    runs: list[list[str]] = []
+    current: list[str] = []
+    for word in words:
+        if word[:1].isupper():
+            current.append(word)
+        else:
+            if current:
+                runs.append(current)
+            current = []
+    if current:
+        runs.append(current)
+
+    ngrams = []
+    for run in runs:
+        for n in (1, 2, 3):
+            for i in range(len(run) - n + 1):
+                ngrams.append(" ".join(run[i:i + n]))
+    return ngrams
+
+
+def validate_closed_world(
+    text: str | None, alert_facts: str | None, allowed_company_names: set[str], session,
+) -> str | None:
+    """Post-generation gate for prose the compliance regexes alone can't
+    catch: a percentage that IS present but was never in the source facts
+    (a fabricated figure dressed up as a real one), or a company named that
+    the alert never actually covers (a hallucinated participant). Applies
+    to Alert.summary_short/summary_long and each TimelineEffect.description
+    -- text that is company-agnostic, plain-language prose that never
+    carries a number by design (spec: "closed world: describe ONLY what
+    the supplied facts state"), so unlike the per-company `why` there is
+    no salvageable partial version: any violation drops the WHOLE field/
+    entry, mirroring validate_or_none's all-or-nothing contract.
+
+    ``allowed_company_names`` is the alert's own tracked companies (built
+    by the caller from alert_companies); a company name matched in `text`
+    that is NOT in that set is still allowed if it appears literally in
+    ``alert_facts`` -- mentioned-in-the-source-evidence is not a
+    hallucination, it's the closed world the framing prompts already ask
+    the model to reason from.
+
+    Returns ``text`` unchanged, or None if rejected. Never raises: a
+    CompanyAlias lookup failure (DB unavailable, mid-migration, etc.)
+    fails OPEN with a logged warning -- this validator is a second-order
+    safety net over non-truth-bearing prose (it can never turn a wrong
+    summary into a right one, only sometimes catch an obviously fabricated
+    one), so its own unavailability must not silently erase every summary
+    and timeline entry an alert would otherwise have.
+    """
+    if not text:
+        return None
+
+    facts = alert_facts or ""
+    for match in _PERCENT_TOKEN_RE.finditer(text):
+        numeral = match.group(1)
+        if numeral not in facts:
+            logger.info(
+                "closed-world validation rejected text: percent %r not found in alert facts", match.group(0),
+            )
+            return None
+
+    try:
+        facts_lower = facts.lower()
+        for candidate in _extract_capitalized_ngrams(text):
+            if len(candidate) < 4:
+                continue
+            normalized = normalize_name(candidate)
+            if not normalized or normalized in _NGRAM_STOPLIST:
+                continue
+            alias = session.query(CompanyAlias).filter(CompanyAlias.normalized == normalized).first()
+            if alias is None:
+                continue
+            company = session.get(Company, alias.company_id)
+            if company is None:
+                continue
+            if company.name in allowed_company_names:
+                continue
+            if candidate.lower() in facts_lower:
+                continue
+            logger.info(
+                "closed-world validation rejected text: named company %r (company_id=%s) "
+                "not in the alert's company set and not found in alert facts",
+                company.name, company.id,
+            )
+            return None
+    except Exception as exc:
+        logger.warning("closed-world company validation unavailable (%s); failing open", exc)
+        return text
+
+    return text
+
+
+def divergence_line(economic_effect: str | None, reaction_direction: str | None) -> str | None:
+    """Deterministic template for the one case the feed must call out
+    explicitly: the fundamental exposure thesis (economic_effect: positive
+    /negative/mixed/uncertain/no_material_impact, app.analysis.impact_graph)
+    and the observed market reaction (reaction_direction: positive/
+    negative/flat/unknown, app.market.measure.classify_reaction) point in
+    OPPOSITE directions. Pure and total -- no DB, no LLM, exact strings so
+    Task 16's serialization can render it verbatim. Every other combination
+    (both agree, either is mixed/uncertain/no_material_impact, or the
+    reaction is flat/unknown) returns None: there is nothing genuinely
+    divergent to say, and this function only ever states a fact the
+    measurement layer already computed, never a prediction.
+    """
+    if economic_effect == "negative" and reaction_direction == "positive":
+        return "Stock is currently moving up despite a negative fundamental exposure thesis."
+    if economic_effect == "positive" and reaction_direction == "negative":
+        return "Stock is currently moving down despite a positive fundamental exposure thesis."
+    return None
+
+
 def refine_alert(client, session, alert, article, alert_companies: list, market_moves: list) -> None:
     """Populate the LLM-explanation fields on an already-measured,
     already-persisted alert: Alert.summary_short/summary_long,
@@ -562,10 +755,29 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     """
     facts = alert.facts or article.full_content or article.content
 
+    # The alert's own tracked companies -- the base allow-list
+    # validate_closed_world checks a named company against (a company
+    # mentioned in the source facts but NOT tracked here is still allowed,
+    # validate_closed_world itself falls back to a literal-substring check
+    # against `facts` for that case).
+    allowed_company_names = {
+        company.name for company in (
+            session.get(Company, ac.company_id) for ac in alert_companies
+        ) if company is not None
+    }
+
     summary = generate_event_summary(client, article.title, facts)
     if summary:
-        alert.summary_short = summary.get("summary_short")
-        alert.summary_long = summary.get("summary_long")
+        summary_short = validate_closed_world(
+            summary.get("summary_short"), facts, allowed_company_names, session)
+        summary_long = validate_closed_world(
+            summary.get("summary_long"), facts, allowed_company_names, session)
+        if summary.get("summary_short") is not None and summary_short is None:
+            logger.info("refine_alert: summary_short dropped by closed-world validation for alert_id=%s", alert.id)
+        if summary.get("summary_long") is not None and summary_long is None:
+            logger.info("refine_alert: summary_long dropped by closed-world validation for alert_id=%s", alert.id)
+        alert.summary_short = summary_short
+        alert.summary_long = summary_long
         if summary.get("is_unconfirmed") is not None:
             alert.is_unconfirmed = 1 if summary["is_unconfirmed"] else 0
 
@@ -575,12 +787,17 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     # impact_whys call (which handed the model the measured direction and
     # asked it to invent a story for it) is exactly the market-move
     # rationalization the spec forbids, so it never runs in strict mode.
+    # The mechanism has already passed the closed-world evidence gate
+    # upstream, so the only thing that can still block it here is the
+    # compliance regex (a % or price-target phrase); _sanitize_mechanism
+    # salvages the rest of an otherwise-valid mechanism rather than
+    # discarding a genuine, specific explanation over one flagged clause.
     strict_gated = settings.impact_engine_v4_strict and any(
         ac.display_tier for ac in alert_companies)
     if strict_gated:
         for ac in alert_companies:
             if ac.display_tier in ("primary", "secondary_deep_dive", "secondary") and ac.mechanism:
-                ac.why = ac.mechanism
+                ac.why = validate_or_none(ac.mechanism) or _sanitize_mechanism(ac.mechanism)
     else:
         moves_by_company_id = {m.company_id: m for m in market_moves}
         measured = []
@@ -610,7 +827,14 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     # row and card-back section. Regeneration replaces, never accumulates.
     session.query(TimelineEffect).filter_by(alert_id=alert.id).delete()
     for effect in generate_timeline_effects(client, article.title, facts):
-        session.add(TimelineEffect(alert_id=alert.id, horizon=effect["horizon"], description=effect["description"]))
+        description = validate_closed_world(effect["description"], facts, allowed_company_names, session)
+        if description is None:
+            logger.info(
+                "refine_alert: timeline effect dropped by closed-world validation "
+                "for alert_id=%s horizon=%s", alert.id, effect["horizon"],
+            )
+            continue
+        session.add(TimelineEffect(alert_id=alert.id, horizon=effect["horizon"], description=description))
 
     # Story-adaptive card-back sections (spec §5): every affected company
     # (measured or exposure-only) is offered to the model for grouping --
