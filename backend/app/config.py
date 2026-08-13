@@ -263,6 +263,20 @@ class Settings(BaseSettings):
     # measurement-reconciled behavior stays byte-identical until the strict
     # engine passes its shadow benchmark (spec §54).
     impact_engine_v4_strict: bool = os.environ.get("IMPACT_ENGINE_V4_STRICT", "false").lower() == "true"
+    # Publication-gate owner policy (corrective-v4 Task 4). These are the
+    # only switches that can loosen the gate, and both default to the strict
+    # answer -- a LOW-materiality company is excluded, and an analysis served
+    # by the fallback provider can never be a primary claim. Turning either
+    # on is an explicit owner decision, recorded in config, not a quiet
+    # code path.
+    impact_allow_low_materiality_deep_dive: bool = os.environ.get(
+        "IMPACT_ALLOW_LOW_MATERIALITY_DEEP_DIVE", "false").lower() == "true"
+    impact_allow_fallback_primary: bool = os.environ.get(
+        "IMPACT_ALLOW_FALLBACK_PRIMARY", "false").lower() == "true"
+    # Hard cap on primary companies per alert; the overflow is demoted to
+    # secondary_deep_dive (never dropped), ranked deterministically.
+    impact_max_primary_companies: int = int(os.environ.get(
+        "IMPACT_MAX_PRIMARY_COMPANIES", "10"))
 
     @property
     def gemini_stage_model_override_map(self) -> dict[str, str]:

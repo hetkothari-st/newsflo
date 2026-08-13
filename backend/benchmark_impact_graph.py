@@ -100,7 +100,8 @@ def run_v3(event, session):
         }
         payload["displayed"] = {
             t: result_dir for t, result_dir in payload["companies"].items()
-            if gate.get(t) and gate[t][1].display_tier in ("primary", "secondary")
+            if gate.get(t)
+            and gate[t][1].display_tier in ("primary", "secondary_deep_dive", "secondary")
         }
     return payload
 

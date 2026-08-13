@@ -609,6 +609,10 @@ def _persist_alert(
                     "confidence_f": entry.get("confidence_f"),
                     "mechanism": entry.get("mechanism"),
                     "rationale": entry.get("rationale"),
+                    # Alert-level finalization note (primary_cap_overflow,
+                    # duplicate_company) -- no column of its own until the
+                    # decision-record schema work, but never dropped.
+                    "decision_notes": entry.get("decision_notes"),
                 }),
                 analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
             ))
@@ -907,7 +911,7 @@ def _gate_candidates(session: Session, result) -> dict[str, object]:
     mode only). Returns ticker -> GateDecision."""
     from app.analysis.impact_graph.engine import _subject_companies
     from app.analysis.impact_graph.publication_gate import (
-        CandidateInput, evaluate_candidate,
+        EVIDENCE_CLASS_TO_TIER, CandidateInput, GateContext, evaluate_candidate,
     )
     from app.analysis.impact_graph.schemas import EventFacts
 
@@ -919,15 +923,23 @@ def _gate_candidates(session: Session, result) -> dict[str, object]:
         named_entities=list(result.named_entities or []),
     )
     subject_tickers = {row.ticker for row in _subject_companies(session, subject_facts)}
-    verification_available = result.analysis_quality != "budget_exhausted" and not (
+    # Budget exhaustion means the verifier never ran (existing behavior) AND
+    # the analysis itself is degraded -- both truths, separately stated.
+    budget_exhausted = result.analysis_quality == "budget_exhausted"
+    verification_available = not budget_exhausted and not (
         result.metrics or {}).get("verification_unavailable")
+    analysis_quality = _gate_quality(result.analysis_quality)
+    context = GateContext()
     decisions = {}
     for company in result.companies:
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
         evidence_class = _classify_evidence(session, company, subject_tickers)
         decisions[company.ticker] = (evidence_class, evaluate_candidate(CandidateInput(
             ticker=company.ticker,
-            entity_resolved=row is not None,
+            # Tri-state entity resolution lands in Task 7; the pipeline can
+            # only tell resolved from unresolved today, and says exactly that.
+            entity_status="resolved" if row is not None else "unresolved",
+            company_profile_present=bool(row is not None and (row.business_desc or "")),
             mechanism=company.mechanism or "",
             rationale=company.rationale or "",
             economic_effect=_persist_effect(company.economic_effect) or "",
@@ -937,12 +949,33 @@ def _gate_candidates(session: Session, result) -> dict[str, object]:
             independently_verified=bool(company.verified),
             verification_available=bool(verification_available),
             evidence_class=evidence_class,
+            evidence_tier=EVIDENCE_CLASS_TO_TIER.get(evidence_class, ""),
+            # Transitional: the semantic counterfactual verdict is wired from
+            # the verifier in Task 9. Until then the structural proxy
+            # (trigger_shock_present) is the only event-specificity evidence
+            # we have, and inventing an LLM verdict here would be worse than
+            # admitting that.
+            counterfactual="SUPPORTED",
+            analysis_quality=analysis_quality,
             positive_channels=list(company.positive_channels or []),
             negative_channels=list(company.negative_channels or []),
             net_direction=company.net_direction or "",
             trigger_shock_present=_roots_in_event(result, company),
-        )))
+        ), context))
     return decisions
+
+
+def _gate_quality(analysis_quality: str | None) -> str:
+    """ImpactGraphResult quality -> the gate's canonical four-way. Budget
+    exhaustion is a degraded analysis (and separately kills verification).
+    An unrecognized value fails closed as `failed` rather than being
+    charitably rounded up."""
+    quality = (analysis_quality or "").strip().lower()
+    if quality == "budget_exhausted":
+        return "degraded"
+    if quality in ("authoritative", "fallback", "degraded", "failed"):
+        return quality
+    return "failed"
 
 
 def _v3_entries(session: Session, result) -> list[dict]:
@@ -954,6 +987,18 @@ def _v3_entries(session: Session, result) -> list[dict]:
     gate_decisions = (
         _gate_candidates(session, result) if settings.impact_engine_v4_strict else {}
     )
+    if gate_decisions:
+        # Alert-level policy the per-candidate walk cannot decide alone:
+        # duplicate companies and the primary cap (spec canonical policy
+        # table). Demotion, never deletion (INV-015).
+        from app.analysis.impact_graph.publication_gate import finalize_alert_decisions
+
+        finalized = finalize_alert_decisions(
+            [decision for _, decision in gate_decisions.values()])
+        gate_decisions = {
+            decision.ticker: (gate_decisions[decision.ticker][0], decision)
+            for decision in finalized
+        }
     entries = []
     for company in result.companies:
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
@@ -1018,6 +1063,7 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 "rejection_reason": decision.rejection_reason,
                 "materiality_grade": decision.materiality_grade,
                 "evidence_class": evidence_class,
+                "decision_notes": decision.notes,
             })
     return entries
 

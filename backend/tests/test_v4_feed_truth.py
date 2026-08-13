@@ -75,6 +75,23 @@ def test_strict_unmeasured_alert_still_served_in_list(client, db_session, strict
     assert row["market_reaction"]["direction"] == "unknown"
 
 
+@pytest.mark.parametrize("tier", ["secondary_deep_dive", "secondary"])
+def test_strict_deep_dive_only_alert_is_served(client, db_session, strict_mode, tier):
+    """A gate-authorized deep dive is a published result: it keeps the
+    unmeasured alert servable. Both the current tier string and the legacy
+    "secondary" spelling count (Task 4)."""
+    alert = _seed(db_session, move_status="no_data", display_tier=tier)
+
+    assert [r["id"] for r in client.get("/api/feed-v2").json()] == [alert.id]
+
+
+def test_strict_excluded_only_alert_is_not_served(client, db_session, strict_mode):
+    """Nothing the gate authorized -> nothing to show."""
+    _seed(db_session, move_status="no_data", display_tier="excluded")
+
+    assert client.get("/api/feed-v2").json() == []
+
+
 def test_legacy_unmeasured_alert_stays_hidden(client, db_session, legacy_mode):
     _seed(db_session, move_status="no_data")
 

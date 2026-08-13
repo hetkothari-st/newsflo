@@ -21,8 +21,12 @@ def legacy_mode(monkeypatch):
 
 
 def _company_row(db, ticker="ONGC.NS", name="ONGC", sector="oil_gas",
-                 verified_node=None):
-    row = Company(name=name, ticker=ticker, sector=sector, index_tier="NIFTY50")
+                 verified_node=None, business_desc="Upstream oil and gas explorer"):
+    # business_desc is load-bearing since Task 4: BUSINESS_MODEL_VALID
+    # rejects a candidate whose company profile cannot support the claimed
+    # mechanism unless the evidence is structured tier A/B.
+    row = Company(name=name, ticker=ticker, sector=sector, index_tier="NIFTY50",
+                  business_desc=business_desc)
     db.add(row)
     db.commit()
     if verified_node is not None:
@@ -83,8 +87,18 @@ def test_strict_entries_carry_gate_decision(db_session, strict_mode):
     assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
 
 
+def test_strict_no_business_profile_is_insufficient_evidence(db_session, strict_mode):
+    """Task 4 / canonical policy table: a company the system cannot even
+    describe cannot carry a mechanism claim on tier-C evidence."""
+    _company_row(db_session, verified_node="crude_price", business_desc=None)
+    entries = _v3_entries(db_session, _result([_graph_company()]))
+
+    assert entries[0]["display_tier"] == "excluded"
+    assert entries[0]["gate_state"] == "REJECT_INSUFFICIENT_EVIDENCE"
+
+
 def test_strict_unverified_candidate_excluded(db_session, strict_mode):
-    _company_row(db_session)
+    _company_row(db_session, verified_node="crude_price")
     entries = _v3_entries(db_session, _result([_graph_company(verified=False)]))
 
     assert entries[0]["display_tier"] == "excluded"
@@ -93,7 +107,7 @@ def test_strict_unverified_candidate_excluded(db_session, strict_mode):
 
 def test_strict_budget_exhausted_fails_closed(db_session, strict_mode):
     """INV-005/016: verification never ran -> nothing may display."""
-    _company_row(db_session)
+    _company_row(db_session, verified_node="crude_price")
     entries = _v3_entries(db_session, _result(
         [_graph_company(verified=False)], quality="budget_exhausted"))
 
@@ -142,13 +156,34 @@ def test_strict_verified_relationship_upgrades_evidence(db_session, strict_mode)
     assert entries[0]["display_tier"] == "primary"
 
 
-def test_strict_model_inference_d2_is_secondary(db_session, strict_mode):
+def test_strict_model_inference_d2_is_insufficient_evidence(db_session, strict_mode):
+    """Policy change (corrective-v4 Task 4): tier E used to buy a quiet
+    secondary slot. Model inference alone now authorizes nothing at all."""
     d2 = _graph_company(causal_distance=2, materiality=0.7)
     _company_row(db_session)
     entries = _v3_entries(db_session, _result([d2]))
 
     assert entries[0]["evidence_class"] == "MODEL_INFERENCE"
-    assert entries[0]["display_tier"] == "secondary"
+    assert entries[0]["display_tier"] == "excluded"
+    assert entries[0]["gate_state"] == "REJECT_INSUFFICIENT_EVIDENCE"
+
+
+def test_strict_primary_cap_demotes_overflow_to_deep_dive(db_session, strict_mode, monkeypatch):
+    """finalize_alert_decisions runs at the alert boundary: the overflow is
+    demoted, never dropped (INV-015)."""
+    monkeypatch.setattr(settings, "impact_max_primary_companies", 1)
+    for i in range(2):
+        _company_row(db_session, ticker=f"CO{i}.NS", name=f"Co{i}",
+                     verified_node="crude_price")
+    companies = [_graph_company(ticker="CO0.NS", name="Co0", materiality=0.9),
+                 _graph_company(ticker="CO1.NS", name="Co1", materiality=0.7)]
+    entries = _v3_entries(db_session, _result(companies))
+
+    tiers = {e["display_tier"] for e in entries}
+    assert tiers == {"primary", "secondary_deep_dive"}
+    overflow = [e for e in entries if e["display_tier"] == "secondary_deep_dive"]
+    assert overflow[0]["decision_notes"] == "primary_cap_overflow"
+    assert len(entries) == 2
 
 
 def test_legacy_entries_have_no_gate_fields(db_session, legacy_mode):
@@ -178,7 +213,8 @@ def _persist(db, entries_result, monkeypatch=None):
 
 def test_strict_persist_skips_excluded_and_records_decisions(db_session, strict_mode):
     _company_row(db_session, verified_node="crude_price")
-    _company_row(db_session, ticker="WEAKCO.NS", name="WeakCo", sector="oil_gas")
+    _company_row(db_session, ticker="WEAKCO.NS", name="WeakCo", sector="oil_gas",
+                 verified_node="crude_price")
     result = _result([
         _graph_company(),                                              # primary
         _graph_company(ticker="WEAKCO.NS", name="WeakCo", verified=False),  # excluded

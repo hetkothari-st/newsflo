@@ -1,60 +1,93 @@
-"""Company publication gate (spec 2026-08-12 §5): the single deterministic
-authority for what reaches the user-facing feed.
+"""Company publication gate (spec 2026-08-12 §5, corrective-v4 Task 4): the
+single deterministic authority for what reaches the user-facing feed.
 
 Discovery (sector pools, archetypes, ripple branches, completeness audits,
 article subjects) proposes candidates; nothing it produces is publishable
-by itself. Every candidate walks the same gate sequence and either becomes
-DISPLAY_ELIGIBLE with a tier (primary/secondary) or terminates in a
-machine-readable REJECT_* state. Publication fails closed: a gate that
-cannot be evaluated rejects, it never waves through.
+by itself. Every candidate walks the same ordered state machine and either
+becomes DISPLAY_ELIGIBLE with a tier (primary / secondary_deep_dive) or
+terminates in a machine-readable REJECT_* state. Publication fails closed:
+a gate that cannot be evaluated rejects, it never waves through.
+
+The state machine is EXECUTABLE, not documentation: ``GATE_SEQUENCE`` is a
+list of ``(name, check)`` pairs and :func:`evaluate_candidate` does nothing
+but walk it. The constant IS the execution order (INV-006 by construction) --
+there is no second, hidden ordering in straight-line ``if`` statements that
+can drift away from it. Every state in ``REJECTION_STATES`` is reachable
+from at least one check; the parametrized reachability test pins that, which
+is what keeps the vocabulary from rotting into dead strings.
+
+Purity: this module reads the candidate, the per-alert context and owner
+policy config. No DB, no LLM, no market fields (INV-002 is enforced
+structurally by ``test_inv002_gate_input_has_no_market_fields``).
 
 Authority order (spec §64): deterministic policy here outranks any LLM
 output -- the model may propose and challenge, never overrule a rejection.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Callable
 
-# Gate sequence (spec §5). Order matters: gates_passed records progress in
-# this order until the first failure, which is the audit trail's spine.
-GATE_SEQUENCE = [
-    "ENTITY_VALID",
-    "BUSINESS_MODEL_VALID",
-    "MECHANISM_VALID",
-    "COMPANY_SPECIFIC_EXPOSURE_VALID",
-    "EVENT_APPLICABILITY_VALID",
-    "CAUSAL_PATH_VALID",
-    "MATERIALITY_VALID",
-    "EVIDENCE_VALID",
-    "CONTRADICTION_FREE",
-    "VERIFIED",
-]
+from app.config import settings
+
+# --- vocabulary -----------------------------------------------------------
 
 REJECTION_STATES = frozenset({
     "REJECT_ENTITY_AMBIGUOUS",
     "REJECT_UNKNOWN_COMPANY",
+    "REJECT_DUPLICATE",
     "REJECT_GENERIC_EXPOSURE",
     "REJECT_WEAK_MECHANISM",
     "REJECT_NOT_EVENT_SPECIFIC",
     "REJECT_TOO_DISTANT",
+    "REJECT_LOW_PRIORITY",
     "REJECT_LOW_MATERIALITY",
     "REJECT_NO_MATERIAL_IMPACT",
     "REJECT_INSUFFICIENT_EVIDENCE",
     "REJECT_CONTRADICTORY",
     "REJECT_UNVERIFIED",
-    "REJECT_DUPLICATE",
-    "REJECT_LOW_PRIORITY",
     "REJECT_VALIDATOR_UNAVAILABLE",
 })
 
-# Evidence classes (spec §9/§10). Ranked by what they may authorize:
-# - ARTICLE_SUBJECT / VERIFIED_RELATIONSHIP: primary-capable on their own.
-# - CURATED_ARCHETYPE (Tier D): primary only alongside HIGH materiality --
-#   archetype membership alone is a hint, never proof (INV-004).
-# - MODEL_INFERENCE (Tier E): secondary at best.
-# - ARTICLE_MARKET_OBSERVATION: "the stock fell" is a market fact, not
-#   fundamental evidence (INV-003); treated like model inference.
-PRIMARY_CAPABLE_EVIDENCE = frozenset({"ARTICLE_SUBJECT", "VERIFIED_RELATIONSHIP"})
-ARCHETYPE_EVIDENCE = "CURATED_ARCHETYPE"
-NEVER_PRIMARY_EVIDENCE = frozenset({"MODEL_INFERENCE", "ARTICLE_MARKET_OBSERVATION"})
+DISPLAY_ELIGIBLE = "DISPLAY_ELIGIBLE"
+
+# Display tiers. "secondary_deep_dive" is the serialized value; the legacy
+# "secondary" string stays readable on old rows (never written anew).
+TIER_PRIMARY = "primary"
+TIER_DEEP_DIVE = "secondary_deep_dive"
+TIER_EXCLUDED = "excluded"
+
+# Evidence tiers (canonical policy table):
+#   A/B        structured primary evidence records
+#   C          VERIFIED_RELATIONSHIP backed by an independent artifact
+#   SUBJECT    ARTICLE_SUBJECT -- primary-capable, C-equivalent
+#   D          curated archetype / model-verified prior / legacy unverified
+#   E          MODEL_INFERENCE -- never authorizes a published result
+#   MARKET_OBS ARTICLE_MARKET_OBSERVATION -- "the stock fell 3%" is a market
+#              fact, not fundamental evidence (INV-003)
+KNOWN_EVIDENCE_TIERS = frozenset({"A", "B", "C", "D", "E", "SUBJECT", "MARKET_OBS"})
+STRUCTURED_TIERS = frozenset({"A", "B"})
+STRONG_TIERS = frozenset({"A", "B", "C", "SUBJECT"})       # tier >= C
+NON_AUTHORIZING_TIERS = frozenset({"E", "MARKET_OBS"})
+
+# Transitional bridge from the legacy evidence-class vocabulary (Task 5
+# replaces the producer with a real classifier; the gate keeps reading
+# tiers either way).
+EVIDENCE_CLASS_TO_TIER = {
+    "ARTICLE_SUBJECT": "SUBJECT",
+    "VERIFIED_RELATIONSHIP": "C",
+    "CURATED_ARCHETYPE": "D",
+    "MODEL_VERIFIED_PRIOR": "D",
+    "LEGACY_UNVERIFIED": "D",
+    "MODEL_INFERENCE": "E",
+    "ARTICLE_MARKET_OBSERVATION": "MARKET_OBS",
+}
+
+ECONOMIC_EFFECTS = frozenset({
+    "positive", "negative", "mixed", "uncertain", "no_material_impact",
+})
+
+ANALYSIS_QUALITIES = frozenset({"authoritative", "fallback", "degraded", "failed"})
+
+COUNTERFACTUAL_VERDICTS = frozenset({"SUPPORTED", "NOT_SUPPORTED", "UNCERTAIN"})
 
 # Generic-exposure phrases (spec §28): reasoning interchangeable with a
 # sector statement cannot carry a company-specific claim.
@@ -71,37 +104,82 @@ _MATERIALITY_MEDIUM = 0.35
 
 _MIN_MECHANISM_CHARS = 20
 
+NOTE_PRIMARY_CAP_OVERFLOW = "primary_cap_overflow"
+NOTE_DUPLICATE = "duplicate_company"
 
-@dataclass
+
+# --- data ------------------------------------------------------------------
+
+@dataclass(frozen=True)
 class CandidateInput:
     """Everything the gate needs, resolved by the caller -- the gate itself
     never touches the DB or an LLM, which is what keeps it testable and
     incorruptible."""
     ticker: str
-    entity_resolved: bool
+    entity_status: str            # resolved | ambiguous | unresolved
+    company_profile_present: bool  # business_desc or exposure row for dimension
     mechanism: str
     rationale: str
-    economic_effect: str          # positive | negative | mixed | uncertain | no_material_impact
+    economic_effect: str          # canonical 5-way
     causal_distance: int
     materiality: float | None
     confidence: float | None
     independently_verified: bool
     verification_available: bool  # False when verification could not run at all
     evidence_class: str
+    counterfactual: str           # SUPPORTED | NOT_SUPPORTED | UNCERTAIN
+    analysis_quality: str         # authoritative | fallback | degraded | failed
+    # Derived from evidence_class when the caller has no classifier yet.
+    evidence_tier: str = ""
+    net_direction: str = ""
     positive_channels: list = field(default_factory=list)
     negative_channels: list = field(default_factory=list)
-    net_direction: str = ""
     trigger_shock_present: bool = True
 
 
-@dataclass
+@dataclass(frozen=True)
+class GateContext:
+    """Per-alert context + owner policy overrides. ``None`` on a policy
+    field means "read the deployed configuration" -- tests and callers can
+    pin a value without touching global settings."""
+    seen_tickers: frozenset = frozenset()
+    allow_low_materiality_deep_dive: bool | None = None
+    allow_fallback_primary: bool | None = None
+    max_primary_companies: int | None = None
+
+    @property
+    def low_materiality_deep_dive_allowed(self) -> bool:
+        if self.allow_low_materiality_deep_dive is None:
+            return bool(settings.impact_allow_low_materiality_deep_dive)
+        return bool(self.allow_low_materiality_deep_dive)
+
+    @property
+    def fallback_primary_allowed(self) -> bool:
+        if self.allow_fallback_primary is None:
+            return bool(settings.impact_allow_fallback_primary)
+        return bool(self.allow_fallback_primary)
+
+    @property
+    def primary_cap(self) -> int:
+        if self.max_primary_companies is None:
+            return int(settings.impact_max_primary_companies)
+        return int(self.max_primary_companies)
+
+
+@dataclass(frozen=True)
 class GateDecision:
     final_state: str              # DISPLAY_ELIGIBLE or a REJECT_* state
-    display_tier: str             # primary | secondary | excluded
+    display_tier: str             # primary | secondary_deep_dive | excluded
     gates_passed: list
     rejection_reason: str | None
     materiality_grade: str        # HIGH | MEDIUM | LOW | UNKNOWN
+    ticker: str = ""
+    materiality: float | None = None
+    confidence: float | None = None
+    notes: str | None = None
 
+
+# --- helpers ---------------------------------------------------------------
 
 def materiality_grade(value: float | None) -> str:
     if value is None:
@@ -113,13 +191,19 @@ def materiality_grade(value: float | None) -> str:
     return "LOW"
 
 
+def evidence_tier_of(candidate: CandidateInput) -> str:
+    """The candidate's declared tier, falling back to the legacy class map.
+    An unmappable class yields "" -- which EVIDENCE_VALID rejects rather
+    than guessing (fail closed)."""
+    tier = (candidate.evidence_tier or "").strip().upper()
+    if tier:
+        return tier
+    return EVIDENCE_CLASS_TO_TIER.get(candidate.evidence_class, "")
+
+
 def _is_generic_rationale(rationale: str) -> bool:
     lowered = (rationale or "").lower()
     return any(phrase in lowered for phrase in _GENERIC_PHRASES)
-
-
-def _net_as_direction(net_direction: str) -> str:
-    return net_direction if net_direction in ("bullish", "bearish") else "neutral"
 
 
 _EFFECT_AS_DIRECTION = {
@@ -128,113 +212,285 @@ _EFFECT_AS_DIRECTION = {
 }
 
 
-def evaluate_candidate(candidate: CandidateInput) -> GateDecision:
-    """Walk the gate sequence; first failure terminates. Returns the full
-    decision including the passed-gate trail for the audit record."""
-    passed: list = []
-    grade = materiality_grade(candidate.materiality)
+def _net_as_direction(net_direction: str) -> str:
+    return net_direction if net_direction in ("bullish", "bearish") else "neutral"
 
-    def reject(state: str) -> GateDecision:
-        return GateDecision(
-            final_state=state, display_tier="excluded", gates_passed=passed,
-            rejection_reason=state, materiality_grade=grade,
-        )
 
-    # ENTITY_VALID -- the ticker resolves to a real, tradeable company.
-    if not candidate.entity_resolved:
-        return reject("REJECT_UNKNOWN_COMPANY")
-    passed.append("ENTITY_VALID")
+# --- gate checks -----------------------------------------------------------
+# Each check answers one question and returns either None (pass) or the
+# rejection state that terminates the walk. They are pure functions of
+# (candidate, context) so the ordering below is the ONLY control flow.
 
-    # BUSINESS_MODEL_VALID / MECHANISM_VALID -- a real, articulated causal
-    # channel; a missing or trivial mechanism is not an analysis.
-    if len((candidate.mechanism or "").strip()) < _MIN_MECHANISM_CHARS:
-        return reject("REJECT_WEAK_MECHANISM")
-    passed.append("BUSINESS_MODEL_VALID")
-    passed.append("MECHANISM_VALID")
+def _check_entity_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """The ticker resolves to exactly one real, tradeable company."""
+    if c.entity_status == "ambiguous":
+        return "REJECT_ENTITY_AMBIGUOUS"
+    if c.entity_status != "resolved":
+        return "REJECT_UNKNOWN_COMPANY"
+    return None
 
-    # COMPANY_SPECIFIC_EXPOSURE_VALID -- generic sector prose only stands
-    # when a company-specific evidence record exists independently of it.
-    if (_is_generic_rationale(candidate.rationale)
-            and candidate.evidence_class not in PRIMARY_CAPABLE_EVIDENCE):
-        return reject("REJECT_GENERIC_EXPOSURE")
-    passed.append("COMPANY_SPECIFIC_EXPOSURE_VALID")
 
-    # EVENT_APPLICABILITY_VALID -- counterfactual proxy (spec §14): the
-    # causal path must root in this event's own shock; otherwise the claim
-    # survives the event's removal and is a generic macro story.
-    if not candidate.trigger_shock_present:
-        return reject("REJECT_NOT_EVENT_SPECIFIC")
-    passed.append("EVENT_APPLICABILITY_VALID")
+def _check_duplicate_free(c: CandidateInput, ctx: GateContext) -> str | None:
+    """The same company may appear once per alert. Batch-level dedup (which
+    of two occurrences wins) lives in finalize_alert_decisions; this catches
+    a caller that already accepted the ticker for this alert."""
+    if c.ticker in ctx.seen_tickers:
+        return "REJECT_DUPLICATE"
+    return None
 
-    # CAUSAL_PATH_VALID -- distance policy (spec §13). d4+ is a third-order
-    # chain: excluded outright, no policy override here (INV-013).
-    if candidate.causal_distance >= 4:
-        return reject("REJECT_TOO_DISTANT")
-    passed.append("CAUSAL_PATH_VALID")
 
-    # MATERIALITY_VALID -- NO_MATERIAL_IMPACT and UNKNOWN materiality never
-    # display; LOW survives only as secondary (graded below).
-    if candidate.economic_effect == "no_material_impact":
-        return reject("REJECT_NO_MATERIAL_IMPACT")
+def _check_business_model_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """The company profile must be able to support the claimed mechanism.
+    With no business description and no exposure record, only structured
+    primary evidence (tier A/B) can carry the claim."""
+    if not c.company_profile_present and evidence_tier_of(c) not in STRUCTURED_TIERS:
+        return "REJECT_INSUFFICIENT_EVIDENCE"
+    return None
+
+
+def _check_mechanism_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """A real, articulated causal channel; a missing or trivial mechanism is
+    not an analysis."""
+    if len((c.mechanism or "").strip()) < _MIN_MECHANISM_CHARS:
+        return "REJECT_WEAK_MECHANISM"
+    return None
+
+
+def _check_company_specific_exposure_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Generic sector prose only stands when the evidence itself is
+    company-specific (tier A/B/C/SUBJECT). At tier D/E the prose IS the
+    claim, and an interchangeable sector sentence cannot be one."""
+    if _is_generic_rationale(c.rationale) and evidence_tier_of(c) in ("D", "E"):
+        return "REJECT_GENERIC_EXPOSURE"
+    return None
+
+
+def _check_event_applicability_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Structural counterfactual proxy (spec §14): the causal path must root
+    in this event's own shock, otherwise the claim survives the event's
+    removal and is a generic macro story."""
+    if not c.trigger_shock_present:
+        return "REJECT_NOT_EVENT_SPECIFIC"
+    return None
+
+
+def _check_causal_path_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Distance policy (spec §13). d4+ is a third-order chain: excluded
+    outright, no policy override (INV-013). d3 survives only as a deep dive
+    and only with strong evidence AND high materiality."""
+    if c.causal_distance >= 4:
+        return "REJECT_TOO_DISTANT"
+    if c.causal_distance == 3 and not (
+            evidence_tier_of(c) in STRONG_TIERS
+            and materiality_grade(c.materiality) == "HIGH"):
+        return "REJECT_LOW_PRIORITY"
+    return None
+
+
+def _check_materiality_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """NO_MATERIAL_IMPACT never displays. UNKNOWN materiality is not a
+    small number, it is an unmeasured one -- it never displays either. LOW
+    displays only as a deep dive and only under explicit owner policy."""
+    if c.economic_effect == "no_material_impact":
+        return "REJECT_NO_MATERIAL_IMPACT"
+    grade = materiality_grade(c.materiality)
     if grade == "UNKNOWN":
-        return reject("REJECT_LOW_MATERIALITY")
-    passed.append("MATERIALITY_VALID")
+        return "REJECT_LOW_MATERIALITY"
+    if grade == "LOW" and not ctx.low_materiality_deep_dive_allowed:
+        return "REJECT_LOW_MATERIALITY"
+    return None
 
-    # EVIDENCE_VALID -- an evidence class outside the known vocabulary is a
-    # wiring bug; fail closed rather than guess.
-    known_evidence = (PRIMARY_CAPABLE_EVIDENCE | NEVER_PRIMARY_EVIDENCE
-                      | {ARCHETYPE_EVIDENCE})
-    if candidate.evidence_class not in known_evidence:
-        return reject("REJECT_INSUFFICIENT_EVIDENCE")
-    passed.append("EVIDENCE_VALID")
 
-    # CONTRADICTION_FREE -- effect and net direction must tell one story.
-    effect_dir = _EFFECT_AS_DIRECTION.get(candidate.economic_effect)
+def _check_evidence_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Tier E (model inference) and bare market observation never authorize
+    a published fundamental result (INV-003). An unknown tier is a wiring
+    bug: fail closed rather than guess. UNCERTAIN effects need tier >= C
+    and at least MEDIUM materiality to be worth a deep dive at all."""
+    tier = evidence_tier_of(c)
+    if tier not in KNOWN_EVIDENCE_TIERS:
+        return "REJECT_INSUFFICIENT_EVIDENCE"
+    if tier in NON_AUTHORIZING_TIERS:
+        return "REJECT_INSUFFICIENT_EVIDENCE"
+    if c.economic_effect == "uncertain" and not (
+            tier in STRONG_TIERS
+            and materiality_grade(c.materiality) in ("HIGH", "MEDIUM")):
+        return "REJECT_INSUFFICIENT_EVIDENCE"
+    return None
+
+
+def _check_contradiction_free(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Effect and net direction must tell one story; an unknown effect is
+    itself a contradiction with the closed vocabulary."""
+    effect_dir = _EFFECT_AS_DIRECTION.get(c.economic_effect)
     if effect_dir is None:
-        return reject("REJECT_CONTRADICTORY")
-    if candidate.net_direction and _net_as_direction(candidate.net_direction) != effect_dir:
-        return reject("REJECT_CONTRADICTORY")
-    passed.append("CONTRADICTION_FREE")
+        return "REJECT_CONTRADICTORY"
+    if c.net_direction and _net_as_direction(c.net_direction) != effect_dir:
+        return "REJECT_CONTRADICTORY"
+    return None
 
-    # VERIFIED -- independent verification is mandatory. Unavailable
-    # verification is its own state so postmortems can separate "the
-    # verifier said no" from "the verifier never ran" (INV-005/016).
-    if not candidate.independently_verified:
-        if not candidate.verification_available:
-            return reject("REJECT_VALIDATOR_UNAVAILABLE")
-        return reject("REJECT_UNVERIFIED")
-    passed.append("VERIFIED")
 
-    # --- DISPLAY_ELIGIBLE: grade the tier -------------------------------
-    tier = _display_tier(candidate, grade)
+def _check_counterfactual_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Semantic counterfactual verdict (Task 9 wires the verifier): would
+    this claim be false if the event had not happened? NOT_SUPPORTED means
+    the story survives the event's removal. An unknown verdict fails
+    closed. UNCERTAIN passes but can never be primary (graded below)."""
+    verdict = (c.counterfactual or "").strip().upper()
+    if verdict not in COUNTERFACTUAL_VERDICTS or verdict == "NOT_SUPPORTED":
+        return "REJECT_NOT_EVENT_SPECIFIC"
+    return None
+
+
+def _check_quality_valid(c: CandidateInput, ctx: GateContext) -> str | None:
+    """A failed (or unrecognized) analysis pipeline cannot authorize
+    display: the gate could not actually be evaluated on real output."""
+    quality = (c.analysis_quality or "").strip().lower()
+    if quality not in ANALYSIS_QUALITIES or quality == "failed":
+        return "REJECT_VALIDATOR_UNAVAILABLE"
+    return None
+
+
+def _check_verified(c: CandidateInput, ctx: GateContext) -> str | None:
+    """Independent verification is mandatory. Unavailable verification is
+    its own state so postmortems can separate "the verifier said no" from
+    "the verifier never ran" (INV-005/016)."""
+    if c.independently_verified:
+        return None
+    if not c.verification_available:
+        return "REJECT_VALIDATOR_UNAVAILABLE"
+    return "REJECT_UNVERIFIED"
+
+
+GATE_SEQUENCE: list[tuple[str, Callable[[CandidateInput, GateContext], str | None]]] = [
+    ("ENTITY_VALID", _check_entity_valid),
+    ("DUPLICATE_FREE", _check_duplicate_free),
+    ("BUSINESS_MODEL_VALID", _check_business_model_valid),
+    ("MECHANISM_VALID", _check_mechanism_valid),
+    ("COMPANY_SPECIFIC_EXPOSURE_VALID", _check_company_specific_exposure_valid),
+    ("EVENT_APPLICABILITY_VALID", _check_event_applicability_valid),
+    ("CAUSAL_PATH_VALID", _check_causal_path_valid),
+    ("MATERIALITY_VALID", _check_materiality_valid),
+    ("EVIDENCE_VALID", _check_evidence_valid),
+    ("CONTRADICTION_FREE", _check_contradiction_free),
+    ("COUNTERFACTUAL_VALID", _check_counterfactual_valid),
+    ("QUALITY_VALID", _check_quality_valid),
+    ("VERIFIED", _check_verified),
+]
+
+GATE_NAMES = [name for name, _ in GATE_SEQUENCE]
+
+
+# --- evaluation ------------------------------------------------------------
+
+def evaluate_candidate(candidate: CandidateInput,
+                       context: GateContext | None = None) -> GateDecision:
+    """Walk GATE_SEQUENCE in order; the first check that returns a state
+    terminates the walk. Nothing outside the sequence can reject."""
+    ctx = context if context is not None else GateContext()
+    grade = materiality_grade(candidate.materiality)
+    passed: list = []
+
+    for name, check in GATE_SEQUENCE:
+        state = check(candidate, ctx)
+        if state is not None:
+            return GateDecision(
+                final_state=state, display_tier=TIER_EXCLUDED,
+                gates_passed=passed, rejection_reason=state,
+                materiality_grade=grade, ticker=candidate.ticker,
+                materiality=candidate.materiality, confidence=candidate.confidence,
+            )
+        passed.append(name)
+
     return GateDecision(
-        final_state="DISPLAY_ELIGIBLE", display_tier=tier, gates_passed=passed,
-        rejection_reason=None, materiality_grade=grade,
+        final_state=DISPLAY_ELIGIBLE, display_tier=_display_tier(candidate, ctx),
+        gates_passed=passed, rejection_reason=None, materiality_grade=grade,
+        ticker=candidate.ticker, materiality=candidate.materiality,
+        confidence=candidate.confidence,
     )
 
 
-def _display_tier(candidate: CandidateInput, grade: str) -> str:
-    """Primary/secondary policy (spec §13/§15/§19/§26), applied only after
-    every mandatory gate passed."""
-    # UNCERTAIN never renders as a primary result (INV-012).
+def _primary_authorized(candidate: CandidateInput, ctx: GateContext) -> bool:
+    """Primary is the strongest claim the product makes; every doubt
+    downgrades it (spec §13/§15/§19/§26)."""
+    grade = materiality_grade(candidate.materiality)
+    tier = evidence_tier_of(candidate)
+    quality = (candidate.analysis_quality or "").strip().lower()
+
     if candidate.economic_effect == "uncertain":
-        return "secondary"
+        return False                                   # INV-012
     if grade == "LOW":
-        return "secondary"
-    # Tier E / market-observation evidence cannot authorize primary.
-    if candidate.evidence_class in NEVER_PRIMARY_EVIDENCE:
-        return "secondary"
-    distance = candidate.causal_distance
-    if distance >= 3:
-        return "secondary"
-    if distance == 2:
-        # d2 primary needs strong company-specific evidence AND high
-        # materiality (spec §13); anything less is secondary.
-        if (candidate.evidence_class in PRIMARY_CAPABLE_EVIDENCE
-                and grade == "HIGH"):
-            return "primary"
-        return "secondary"
-    # d1: archetype evidence still needs HIGH materiality for primary.
-    if candidate.evidence_class == ARCHETYPE_EVIDENCE and grade != "HIGH":
-        return "secondary"
-    return "primary"
+        return False
+    if (candidate.counterfactual or "").strip().upper() == "UNCERTAIN":
+        return False
+    if quality == "degraded":
+        return False
+    if quality == "fallback" and not ctx.fallback_primary_allowed:
+        return False
+    if tier not in STRONG_TIERS:
+        return False                                   # tier D is a deep dive
+    if candidate.causal_distance >= 3:
+        return False
+    if candidate.causal_distance == 2 and grade != "HIGH":
+        return False
+    return True
+
+
+def _display_tier(candidate: CandidateInput, ctx: GateContext) -> str:
+    """Tier grading runs only after every gate passed, so it can never
+    resurrect a rejected candidate -- it only chooses how loudly a
+    surviving one speaks."""
+    return TIER_PRIMARY if _primary_authorized(candidate, ctx) else TIER_DEEP_DIVE
+
+
+# --- alert-level finalization ---------------------------------------------
+
+def _rank_key(decision: GateDecision) -> tuple:
+    """Deterministic ranking: materiality, then confidence, then ticker.
+    Lower sorts first (i.e. best first)."""
+    return (-(decision.materiality or 0.0), -(decision.confidence or 0.0),
+            decision.ticker)
+
+
+def finalize_alert_decisions(decisions: list[GateDecision],
+                             context: GateContext | None = None) -> list[GateDecision]:
+    """Alert-scoped policy that a single candidate cannot decide alone:
+
+    1. Dedup -- the same company twice in one alert keeps the higher
+       materiality occurrence; the other becomes REJECT_DUPLICATE.
+    2. Primary cap -- at most ``impact_max_primary_companies`` primaries per
+       alert, ranked deterministically; the overflow is demoted to
+       secondary_deep_dive with the note ``primary_cap_overflow`` (demoted,
+       never deleted: INV-015).
+
+    Input order is preserved so the caller can zip results back onto rows.
+    """
+    ctx = context if context is not None else GateContext()
+    out = list(decisions)
+
+    winner_by_ticker: dict[str, int] = {}
+    for index, decision in enumerate(out):
+        if decision.final_state != DISPLAY_ELIGIBLE:
+            continue
+        previous = winner_by_ticker.get(decision.ticker)
+        if previous is None:
+            winner_by_ticker[decision.ticker] = index
+            continue
+        if _rank_key(out[index]) < _rank_key(out[previous]):
+            keep, drop = index, previous
+        else:
+            keep, drop = previous, index
+        winner_by_ticker[decision.ticker] = keep
+        out[drop] = replace(
+            out[drop], final_state="REJECT_DUPLICATE", display_tier=TIER_EXCLUDED,
+            rejection_reason="REJECT_DUPLICATE", notes=NOTE_DUPLICATE,
+        )
+
+    cap = ctx.primary_cap
+    if cap is not None and cap >= 0:
+        primaries = [i for i, d in enumerate(out)
+                     if d.final_state == DISPLAY_ELIGIBLE
+                     and d.display_tier == TIER_PRIMARY]
+        primaries.sort(key=lambda i: _rank_key(out[i]))
+        for index in primaries[cap:]:
+            out[index] = replace(out[index], display_tier=TIER_DEEP_DIVE,
+                                 notes=NOTE_PRIMARY_CAP_OVERFLOW)
+    return out

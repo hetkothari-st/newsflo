@@ -579,7 +579,7 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
         ac.display_tier for ac in alert_companies)
     if strict_gated:
         for ac in alert_companies:
-            if ac.display_tier in ("primary", "secondary") and ac.mechanism:
+            if ac.display_tier in ("primary", "secondary_deep_dive", "secondary") and ac.mechanism:
                 ac.why = ac.mechanism
     else:
         moves_by_company_id = {m.company_id: m for m in market_moves}

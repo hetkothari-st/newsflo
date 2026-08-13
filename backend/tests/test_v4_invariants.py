@@ -78,11 +78,14 @@ def test_scenario_omc_negative_and_airline_negative_pass_gate():
         ("INDIGO.NS", "ATF is ~40% of operating cost; crude spike raises fuel bill"),
     ):
         decision = evaluate_candidate(CandidateInput(
-            ticker=ticker, entity_resolved=True, mechanism=mechanism,
+            ticker=ticker, entity_status="resolved", company_profile_present=True,
+            mechanism=mechanism,
             rationale="company-specific cost exposure with limited near-term pass-through",
             economic_effect="negative", causal_distance=1, materiality=0.7,
             confidence=0.8, independently_verified=True,
             verification_available=True, evidence_class="VERIFIED_RELATIONSHIP",
+            evidence_tier="C", counterfactual="SUPPORTED",
+            analysis_quality="authoritative",
             negative_channels=["fuel cost"], net_direction="bearish"))
         assert decision.final_state == "DISPLAY_ELIGIBLE"
         assert decision.display_tier == "primary"
@@ -108,19 +111,25 @@ def test_company_entry_without_name_survives_registration():
 
 def test_scenario_generic_nbfc_macro_ripple_rejected():
     """Spec scenario #9: 'oil up -> inflation -> NBFC affected' is a
-    generic macro story -- rejected, machine-readable."""
+    generic macro story -- rejected, machine-readable. The gate order
+    (canonical policy table) catches the interchangeable sector prose at
+    COMPANY_SPECIFIC_EXPOSURE_VALID, before its distance/evidence problems
+    are even reached; the candidate is triply doomed and the earliest
+    honest reason is the one recorded."""
     from app.analysis.impact_graph.publication_gate import (
         CandidateInput, evaluate_candidate,
     )
 
     decision = evaluate_candidate(CandidateInput(
-        ticker="BAJFINANCE.NS", entity_resolved=True,
+        ticker="BAJFINANCE.NS", entity_status="resolved",
+        company_profile_present=True,
         mechanism="higher inflation could pressure consumer lending demand broadly",
         rationale="large company in the sector exposed to macro conditions",
         economic_effect="negative", causal_distance=3, materiality=0.4,
         confidence=0.5, independently_verified=True, verification_available=True,
-        evidence_class="MODEL_INFERENCE", negative_channels=["demand"],
-        net_direction="bearish"))
+        evidence_class="MODEL_INFERENCE", evidence_tier="E",
+        counterfactual="SUPPORTED", analysis_quality="authoritative",
+        negative_channels=["demand"], net_direction="bearish"))
 
     assert decision.final_state == "REJECT_GENERIC_EXPOSURE"
     assert decision.display_tier == "excluded"

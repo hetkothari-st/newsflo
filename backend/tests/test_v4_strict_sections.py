@@ -99,12 +99,16 @@ def test_strict_sections_group_by_effect_and_parent(db_session, strict_mode):
     assert sorted(tickers) == ["MRF.NS", "ONGC.NS"]
 
 
-def test_strict_secondary_companies_render_in_secondary_section_last(db_session, strict_mode):
+@pytest.mark.parametrize("deep_dive_tier", ["secondary_deep_dive", "secondary"])
+def test_strict_secondary_companies_render_in_secondary_section_last(
+        db_session, strict_mode, deep_dive_tier):
+    """"secondary_deep_dive" is the tier the gate writes now; "secondary" is
+    the legacy spelling on pre-Task-4 rows and must still render."""
     alert = _seed_alert(db_session)
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
                  economic_effect="positive", excess=1.0)
     _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
-                 economic_effect="negative", display_tier="secondary",
+                 economic_effect="negative", display_tier=deep_dive_tier,
                  causal_parent_id="road_freight_fuel_cost", materiality=0.3,
                  excess=-0.2)
 

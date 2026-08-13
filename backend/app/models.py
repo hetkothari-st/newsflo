@@ -433,7 +433,8 @@ class AlertCompany(Base):
     # derived from it. NULL on pre-upgrade rows.
     economic_effect = Column(String, nullable=True)
     # V4 strict publication gate (spec §5): the tier the gate authorized
-    # ("primary" | "secondary") and the terminal gate state. NULL on rows
+    # ("primary" | "secondary_deep_dive"; "secondary" on pre-Task-4 rows,
+    # still read, never written) and the terminal gate state. NULL on rows
     # persisted with the flag off -- legacy rows have no gate semantics,
     # and consumers must treat NULL as legacy, never as eligible.
     display_tier = Column(String, nullable=True)
@@ -576,7 +577,8 @@ class CompanyDecisionRecord(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
     ticker = Column(String, nullable=False)
     final_state = Column(String, nullable=False)     # DISPLAY_ELIGIBLE | REJECT_*
-    display_tier = Column(String, nullable=False)    # primary | secondary | excluded
+    # primary | secondary_deep_dive | excluded ("secondary" on legacy rows)
+    display_tier = Column(String, nullable=False)
     rejection_reason = Column(String, nullable=True)  # REJECT_* or NULL
     gates_passed_json = Column(Text, nullable=True)   # JSON list of gate names
     evidence_class = Column(String, nullable=True)

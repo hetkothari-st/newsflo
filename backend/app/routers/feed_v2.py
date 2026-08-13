@@ -113,9 +113,12 @@ def _unavailable_measurement() -> dict:
 
 def _strict_displayable(alert: Alert) -> bool:
     """Strict mode serves an unmeasured alert only when the publication
-    gate authorized at least one company for display."""
+    gate authorized at least one company for display. "secondary" is the
+    legacy spelling of "secondary_deep_dive" on pre-Task-4 rows -- readable
+    forever, never written again."""
     return settings.impact_engine_v4_strict and any(
-        ac.display_tier in ("primary", "secondary") for ac in alert.companies
+        ac.display_tier in ("primary", "secondary_deep_dive", "secondary")
+        for ac in alert.companies
     )
 
 

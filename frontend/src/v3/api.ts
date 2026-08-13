@@ -98,7 +98,9 @@ export interface LayerRow {
   // fundamental effect + tier, and the dead-zone-classified reaction.
   // Absent/null on legacy rows.
   economic_effect?: string | null;
-  display_tier?: 'primary' | 'secondary' | null;
+  // 'secondary' is the legacy spelling of 'secondary_deep_dive' on rows
+  // persisted before the executable gate; still served, never written anew.
+  display_tier?: 'primary' | 'secondary_deep_dive' | 'secondary' | null;
   reaction_direction?: 'positive' | 'negative' | 'flat' | 'unknown';
   // Subsystem D: empirical reaction range for this alert's news category.
   // Optional, mirroring how `fundamentals?:` above documents its

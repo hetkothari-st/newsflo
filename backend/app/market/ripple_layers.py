@@ -77,6 +77,11 @@ _EFFECT_PREFIX = {
     "mixed": "Mixed", "uncertain": "Uncertain",
     "no_material_impact": "No material impact",
 }
+# Gate display tiers. "secondary" is the legacy spelling of
+# "secondary_deep_dive" (pre-Task-4 rows): still read, never written.
+DEEP_DIVE_TIERS = ("secondary_deep_dive", "secondary")
+DISPLAYABLE_TIERS = ("primary",) + DEEP_DIVE_TIERS
+
 _EFFECT_ICON = {"positive": "win", "negative": "lose"}
 _DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative"}
 
@@ -90,7 +95,7 @@ def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
     gated = [
         (alert_company, rows_flat[i])
         for i, alert_company in enumerate(alert.companies)
-        if alert_company.display_tier in ("primary", "secondary")
+        if alert_company.display_tier in DISPLAYABLE_TIERS
     ]
     if not gated:
         return None
@@ -106,7 +111,7 @@ def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
     sections: dict[tuple[str, str], list] = {}
     secondary: list = []
     for alert_company, row in gated:
-        if alert_company.display_tier == "secondary":
+        if alert_company.display_tier in DEEP_DIVE_TIERS:
             secondary.append((alert_company, row))
         else:
             key = (_effect(alert_company), alert_company.causal_parent_id or "event")
