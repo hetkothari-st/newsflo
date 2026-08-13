@@ -19,7 +19,15 @@ export default function ExpandableTitle({ title }: { title: string }) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (el === null || open) return;
-    const check = () => setClamped(el.scrollHeight > el.clientHeight + 1);
+    const check = () => {
+      // The headline's line-height is < 1, so descenders overflow the
+      // line box and scrollHeight runs a few px past clientHeight even
+      // when every line is visible. Only a MISSING LINE counts as cut:
+      // require at least half a line of hidden text.
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 0;
+      const hidden = el.scrollHeight - el.clientHeight;
+      setClamped(lineHeight > 0 ? hidden > lineHeight * 0.5 : hidden > 4);
+    };
     check();
     const observer = new ResizeObserver(check);
     observer.observe(el);
