@@ -54,7 +54,15 @@ export default function ExpandableTitle({ title }: { title: string }) {
             setOpen((prev) => !prev);
           }}
           onTouchStart={swallow}
-          onTouchEnd={swallow}
+          onTouchEnd={(event) => {
+            // preventDefault on touchend cancels the browser's synthetic
+            // click, so a bare swallow left the button DEAD on touch
+            // screens (tap fired touchstart/touchend, click never came).
+            // Toggle here instead; the same preventDefault now also
+            // guarantees the click path can't double-toggle.
+            swallow(event);
+            setOpen((prev) => !prev);
+          }}
         >
           {open ? 'Less —' : 'More —'}
         </button>
