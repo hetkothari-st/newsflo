@@ -452,6 +452,13 @@ class GraphCompany(BaseModel):
     # of discarding it. Engine-internal only -- never populated by a model
     # (not present in any structured-output schema).
     secondary_mechanisms: list[str] = Field(default_factory=list)
+    # Verifier correction audit trail (corrective-v4 Task 18, spec sec54):
+    # the RAW per-company correction dict app.analysis.impact_graph.engine.
+    # _apply_company_correction applied (direction/causal_distance/
+    # materiality/confidence), if any. None means the verifier never
+    # corrected this candidate -- distinct from an empty dict, which would
+    # claim "the verifier looked and changed nothing".
+    applied_correction: dict | None = None
 
     @field_validator("expected_market_sensitivity", mode="before")
     @classmethod
@@ -684,6 +691,16 @@ class ImpactGraphResult(BaseModel):
     # ARTICLE_SUBJECT evidence classification (spec §9). Default empty so
     # cached pre-upgrade results deserialize unchanged.
     named_entities: list[str] = Field(default_factory=list)
+    # Entities the alias matcher found genuinely AMBIGUOUS -- multiple real,
+    # tradeable companies with no tiebreak (corrective-v4 Task 7's tri-
+    # state) -- resolved once in analyze_article_v3 via
+    # _subject_companies_ex and threaded out here (Task 18 ledger item a)
+    # so app.pipeline._persist_alert can write a durable
+    # REJECT_ENTITY_AMBIGUOUS decision record for an entity that never
+    # became a candidate AT ALL (it was dropped before any mapping call
+    # ever proposed it, so no GraphCompany carries its name). Default
+    # empty so cached pre-Task-18 results deserialize unchanged.
+    ambiguous_entities: list[str] = Field(default_factory=list)
     companies: list[GraphCompany] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     gaps: list[dict] = Field(default_factory=list)

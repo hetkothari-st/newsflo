@@ -79,6 +79,15 @@ class _GraphState:
     # keys already evaluated this article -- an economically equivalent
     # node never re-buys the same company-level evaluation.
     evaluated_exposures: set = field(default_factory=set)
+    # Article-subject resolution, computed ONCE up front by
+    # analyze_article_v3 (corrective-v4 Task 18) so every pool that needs
+    # subjects (_candidate_pool per node, _narrow_single_call once) reuses
+    # the SAME alias-matcher pass instead of re-querying the DB per call.
+    # None until seeded; _cached_subjects falls back to a direct
+    # _subject_companies call for any caller that constructs a _GraphState
+    # without going through analyze_article_v3 (e.g. a unit test).
+    subjects_cache: list | None = None
+    ambiguous_entities: set = field(default_factory=set)
     # Observability (spec §30) -- graph-quality counters, logged and shipped
     # on ImpactGraphResult.metrics.
     metrics: dict = field(default_factory=lambda: {
@@ -275,6 +284,21 @@ def _subject_companies_ex(session, facts: EventFacts) -> tuple[list, set[str]]:
     return subjects, ambiguous_entities
 
 
+def _cached_subjects(session, facts: EventFacts, state: "_GraphState") -> list:
+    """Subjects list for one article, computed once (corrective-v4 Task
+    18). `analyze_article_v3` seeds `state.subjects_cache` up front
+    alongside `state.ambiguous_entities`; every pool that used to call
+    `_subject_companies` directly (`_candidate_pool` -- once per node,
+    `_narrow_single_call` -- once) now reuses that single resolution
+    instead of re-running the alias matcher per call. Falls back to a
+    direct call for a caller that built its own `_GraphState` (a unit test
+    exercising `_candidate_pool` in isolation, say) without ever seeding
+    the cache."""
+    if state.subjects_cache is not None:
+        return state.subjects_cache
+    return _subject_companies(session, facts)
+
+
 # Provenance values a candidate-profile line may honestly call "verified"
 # (corrective-v4 Task 6): only an independently-sourced relationship, never
 # the system's own MODEL_VERIFIED prior or a NULL-provenance legacy row --
@@ -343,33 +367,55 @@ def _exposure_cache(session, node_key: str, tickers_to_ids: dict) -> tuple[dict,
     return positive, negative
 
 
-def _candidate_pool(session, facts: EventFacts, state: _GraphState, node: _Node) -> list:
+def _candidate_pool(session, facts: EventFacts, state: _GraphState,
+                    node: _Node) -> tuple[list, dict[str, str]]:
     """Exposure-based candidate pool (spec §9): sector nodes keep their
     sector pool; economic/commodity/policy nodes retrieve through the
     exposure ontology (node vocabulary -> exposed sectors) PLUS any company
     whose exposure to this exact node key was verified on an earlier event
     (relationship cache as retrieval index). Sector membership is no longer
-    the only road to candidacy."""
+    the only road to candidacy.
+
+    Also returns `source_by_ticker` (corrective-v4 Task 18, spec §35
+    discovery_sources): which of this call's THREE pools actually produced
+    each returned ticker -- "sector_pool" (sector membership or the
+    exposure-ontology hint), "relationship_cache" (a company whose
+    exposure to this exact node was verified on an earlier event, riding
+    the pool regardless of sector), or "subject" (the article names this
+    company -- always the most specific, so it overrides whatever tag the
+    ticker already carried). `_map_companies_for_node` relabels
+    "sector_pool" to "frontier" for a ripple/recursive call (node.distance
+    >= 2); "subject" and "relationship_cache" are identity-strength
+    signals that stay put regardless of hop."""
     from app.analysis.impact_graph.exposure import cached_exposed_companies, sectors_for_node
 
+    source_by_ticker: dict[str, str] = {}
     if node.sector is not None:
         candidates = candidate_companies(session, [node.sector])
         subject_sector = node.sector
+        for c in candidates:
+            source_by_ticker[c.ticker] = "sector_pool"
     else:
         hinted = sectors_for_node(node.node_id, node.label)
         candidates = candidate_companies(session, hinted) if hinted else []
         subject_sector = None
+        for c in candidates:
+            source_by_ticker[c.ticker] = "sector_pool"
         # Cache-verified exposures ride the pool regardless of sector.
         for cached in cached_exposed_companies(session, node.node_id):
             if all(c.ticker != cached.ticker for c in candidates):
                 candidates.insert(0, cached)
+            source_by_ticker[cached.ticker] = "relationship_cache"
     # Article-subject seeding: companies the article names always ride the
-    # list for their own sector, cap or no cap.
-    for subject in _subject_companies(session, facts):
-        if (subject_sector is None or subject.sector == subject_sector) \
-                and all(c.ticker != subject.ticker for c in candidates):
+    # list for their own sector, cap or no cap. Subject identity always
+    # wins the tag, even for a ticker the sector/cache pool already placed.
+    for subject in _cached_subjects(session, facts, state):
+        if subject_sector is not None and subject.sector != subject_sector:
+            continue
+        if all(c.ticker != subject.ticker for c in candidates):
             candidates.insert(0, subject)
-    return candidates
+        source_by_ticker[subject.ticker] = "subject"
+    return candidates, source_by_ticker
 
 
 def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
@@ -389,7 +435,18 @@ def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
         _skip("map_companies", "company_call_cap", node=node.node_id,
               cap=IMPACT_MAX_COMPANY_MAP_CALLS)
         return
-    candidates = _candidate_pool(session, facts, state, node)
+    candidates, source_by_ticker = _candidate_pool(session, facts, state, node)
+    if node.distance >= 2:
+        # Recursive/ripple expansion (corrective-v4 Task 18): a ticker the
+        # generic sector/exposure-ontology pool would otherwise tag
+        # "sector_pool" is relabeled "frontier" here -- the pool was
+        # reached via _expand_frontier, not the anchor distance-1 mapping
+        # call. "subject" and "relationship_cache" are identity-strength
+        # signals independent of hop count and stay as-is.
+        source_by_ticker = {
+            ticker: ("frontier" if source == "sector_pool" else source)
+            for ticker, source in source_by_ticker.items()
+        }
     candidates = [
         c for c in candidates
         if c.ticker not in state.companies and c.ticker not in state.rejected_tickers
@@ -451,7 +508,7 @@ def _map_companies_for_node(router: StageRouter, session, facts: EventFacts,
         state.gaps.append({"sector": node.sector, "impact_level": _legacy_level(node.distance),
                            "parent_ticker": None, "attempts": 4, "last_error": str(exc)[:500]})
         return
-    _register_company_entries(state, entries, node)
+    _register_company_entries(state, entries, node, source_by_ticker=source_by_ticker)
 
 
 def _legacy_level(distance: int) -> str:
@@ -643,9 +700,20 @@ def _merge_company(held: GraphCompany | None, newcomer: GraphCompany) -> GraphCo
 
 
 def _register_company_entries(state: _GraphState, entries: list[dict], node: _Node,
-                              mechanism_id: str | None = None) -> None:
+                              mechanism_id: str | None = None,
+                              source_by_ticker: dict[str, str] | None = None) -> None:
     """Shared validation/registration for mapping results (discovery floor
-    only -- final prune stays the single strict gate)."""
+    only -- final prune stays the single strict gate).
+
+    `discovery_source` (corrective-v4 Task 18, spec §35): the archetype
+    path's own mechanism id always wins ("archetype:<id>"); otherwise the
+    ticker's tag from `_candidate_pool`'s `source_by_ticker` (subject /
+    sector_pool / relationship_cache / frontier). A ticker missing from
+    that map -- a caller that never built one, or a mapping-call entry the
+    pool itself never proposed (the model can name a ticker outside its
+    own candidate list; schema_companies' ticker enum should prevent this
+    but is not proven airtight here) -- falls back to "sector_pool" as the
+    single most common source; best-effort, not a hard guarantee."""
     for entry in entries:
         ticker = entry.get("ticker")
         try:
@@ -653,7 +721,10 @@ def _register_company_entries(state: _GraphState, entries: list[dict], node: _No
                 **{**{k: v for k, v in entry.items() if k in GraphCompany.model_fields},
                    "causal_distance": node.distance,
                    "parent_type": node.node_type, "parent_id": node.node_id,
-                   "discovery_source": f"archetype:{mechanism_id}" if mechanism_id else ""},
+                   "discovery_source": (
+                       f"archetype:{mechanism_id}" if mechanism_id
+                       else (source_by_ticker or {}).get(ticker, "sector_pool")
+                   )},
             ).clamp()
         except ValidationError as exc:
             logger.warning("impact-graph company entry rejected by schema: %s", exc)
@@ -899,7 +970,15 @@ def _apply_company_correction(company: GraphCompany, correction: dict) -> None:
     `economic_effect` consistent. A direction flip re-derives the effect;
     a correction to "neutral" leaves mixed/uncertain effects alone, since
     those already render as neutral direction -- flattening them would
-    destroy the mixed-channel truth (spec §42)."""
+    destroy the mixed-channel truth (spec §42).
+
+    Also retains the RAW correction on `company.applied_correction`
+    (corrective-v4 Task 18, spec §54): before this, a correction's own
+    values were applied in place and then lost -- nothing recorded THAT a
+    correction happened or what it said, so a postmortem could not tell a
+    verifier-corrected company from one the model got right the first
+    time. Excludes "ticker" (redundant with `company.ticker` itself)."""
+    company.applied_correction = {k: v for k, v in correction.items() if k != "ticker"}
     direction = correction.get("direction")
     if direction in ("bullish", "bearish", "neutral"):
         company.direction = direction
@@ -1174,6 +1253,16 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
                 article_id, tier, facts.event_type, tier_caps)
 
     state = _GraphState()
+    # Article-subject resolution runs ONCE here (corrective-v4 Task 18),
+    # not per-node/per-call -- see _cached_subjects. Also the sole place
+    # `ambiguous_entities` is captured: entities the alias matcher found
+    # genuinely ambiguous never seed a candidate (dropped in
+    # _subject_companies_ex before any mapping call could propose them),
+    # so this is the only record of their existence that survives to
+    # ImpactGraphResult -- see the field's own docstring.
+    subjects, ambiguous_entity_names = _subject_companies_ex(session, facts)
+    state.subjects_cache = subjects
+    state.ambiguous_entities = ambiguous_entity_names
 
     try:
         if tier == "narrow" and settings.impact_narrow_single_call:
@@ -1209,6 +1298,7 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
         edges=state.edges, gaps=state.gaps, ranking=ranking,
         analysis_provider=router.provider, analysis_quality=router.quality,
         metrics=dict(state.metrics),
+        ambiguous_entities=sorted(state.ambiguous_entities),
     )
 
 
@@ -1267,7 +1357,8 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
 
     # Batched company mapping: one call covering every sector node.
     sector_nodes = [n for n in state.nodes.values() if n.sector is not None]
-    subjects = _subject_companies(session, facts) if session is not None else []
+    subjects = _cached_subjects(session, facts, state) if session is not None else []
+    subject_tickers = {s.ticker for s in subjects}
     if session is None or (not sector_nodes and not subjects):
         _skip("narrow_companies", "no_sector_nodes_no_subjects", article=article_id)
         return
@@ -1354,7 +1445,13 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         try:
             company = GraphCompany(
                 **{**entry, "causal_distance": node.distance,
-                   "parent_type": node.node_type, "parent_id": node.node_id},
+                   "parent_type": node.node_type, "parent_id": node.node_id,
+                   # Corrective-v4 Task 18: the narrow (single-call) path
+                   # has no per-node relationship-cache pool of its own --
+                   # only the article-subject block and the per-sector
+                   # candidate list -- so the tag is binary, ticker
+                   # membership in `subject_tickers` vs everything else.
+                   "discovery_source": "subject" if ticker in subject_tickers else "sector_pool"},
             ).clamp()
         except ValidationError as exc:
             logger.warning("narrow single-call company rejected by schema: %s", exc)
@@ -1391,6 +1488,7 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
                 mechanism=(top_shock.mechanism if top_shock else facts.event)[:200],
                 rationale="Named subject of this article; direction reflects the measured market reaction.",
                 net_direction="uncertain", verified=False,
+                discovery_source="subject_fallback",
             )
         _skip("narrow_companies", "subject_fallback_persisted", count=len(state.companies))
 

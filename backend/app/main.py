@@ -29,7 +29,8 @@ from app.prices.kite_ws_client import run_hub_client
 from app.prices.live_price import LIVE_PRICE_CACHE
 from app.routers import (
     alerts, articles, auth, calendar, car_review, categories, companies, feed_v2, holdings,
-    portfolio_connect, pulse_live, source_health, stock_deep_dive, translation, watchlist, ws,
+    internal_audit, portfolio_connect, pulse_live, source_health, stock_deep_dive, translation,
+    watchlist, ws,
 )
 from app.scheduler import start_scheduler
 from app.ws.manager import manager
@@ -55,6 +56,7 @@ app.include_router(companies.router)
 app.include_router(categories.router)
 app.include_router(watchlist.router)
 app.include_router(translation.router)
+app.include_router(internal_audit.router)
 app.include_router(ws.router)
 
 # Holds a strong reference to the background hub-client task for the app's

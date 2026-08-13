@@ -136,10 +136,12 @@ def test_ambiguous_entity_decision_persists_in_record(db_session, strict_mode):
 def test_unresolved_ticker_stays_unknown_company_not_ambiguous(db_session, strict_mode):
     """No Company row and no ambiguity flag: the honest state is 'we don't
     know this company', not 'ambiguous' -- the two must not be conflated.
-    Tested at `_gate_candidates` directly: `_v3_entries` skips a company
-    whose ticker never resolves to a row before it ever reaches the gate
-    (pre-existing behavior, unrelated to Task 7), so REJECT_UNKNOWN_COMPANY
-    itself is only observable one layer down."""
+    Tested at `_gate_candidates` directly here (unit level, no DB writes).
+    `_v3_entries`/`_persist_alert` surfacing this same REJECT_UNKNOWN_
+    COMPANY decision as a durable company_id=NULL CompanyDecisionRecord
+    (corrective-v4 Task 18, ledger parked item b -- `_v3_entries` used to
+    silently skip an unresolved ticker before it ever reached the gate) is
+    covered end to end in test_decision_record_audit.py."""
     _, _, _, decision = _gate_candidates(
         db_session, _result([_graph_company(ticker="NOPE.NS", name="Nope")]))[0]
     assert decision.final_state == "REJECT_UNKNOWN_COMPANY"

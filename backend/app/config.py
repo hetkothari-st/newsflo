@@ -282,6 +282,13 @@ class Settings(BaseSettings):
     # secondary_deep_dive (never dropped), ranked deterministically.
     impact_max_primary_companies: int = int(os.environ.get(
         "IMPACT_MAX_PRIMARY_COMPANIES", "10"))
+    # Internal decision-record read path (corrective-v4 Task 18). The
+    # router mounts unconditionally; the endpoint itself 404s when this is
+    # off, so nothing about its EXISTENCE ever depends on this flag (no
+    # information leak about whether the feature is deployed at all).
+    # Default false: CompanyDecisionRecord rows carry gate_inputs_json/
+    # candidate_json snapshots not meant for casual exposure.
+    debug_audit_api: bool = os.environ.get("DEBUG_AUDIT_API", "false").lower() == "true"
 
     @property
     def gemini_stage_model_override_map(self) -> dict[str, str]:

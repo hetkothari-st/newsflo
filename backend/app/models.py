@@ -452,6 +452,15 @@ class AlertCompany(Base):
     # separately-measured market-reaction layer. NULL on pre-task-10 rows.
     expected_market_sensitivity = Column(String, nullable=True)
 
+    __table_args__ = (
+        # Corrective-v4 Task 18 (plan-gap carry): a bug anywhere upstream
+        # that calls _build_alert_company twice for the same candidate used
+        # to silently double a company's card on the feed -- migration 0006
+        # pre-dedupes any legacy violation (keeping MAX(id)) before adding
+        # this constraint.
+        UniqueConstraint("alert_id", "company_id", name="uq_alert_company_alert_company"),
+    )
+
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
     parent_company = relationship("Company", foreign_keys=[parent_company_id])
@@ -520,6 +529,13 @@ class ImpactEdge(Base):
     # NULL on pre-upgrade rows.
     economic_effect = Column(String, nullable=True)
     verification_status = Column(String, nullable=True)  # verified | pruned | unverified
+
+    __table_args__ = (
+        # Corrective-v4 Task 18 (plan-gap carry): the audit report script
+        # and the internal decisions endpoint both look up an alert's whole
+        # edge set; alert_id carried no index before migration 0006.
+        Index("ix_impact_edges_alert_id", "alert_id"),
+    )
 
     alert = relationship("Alert", back_populates="impact_edges")
 
@@ -619,7 +635,40 @@ class CompanyDecisionRecord(Base):
     materiality_grade = Column(String, nullable=True)  # HIGH | MEDIUM | LOW | UNKNOWN
     candidate_json = Column(Text, nullable=True)       # gate-input snapshot
     analysis_version = Column(String, nullable=True)   # prompt/schema version pair
+    # Decision-record completeness (spec sec54, corrective-v4 Task 18): the
+    # full audit trail a postmortem needs without re-running paid analysis.
+    # discovery_sources_json: GraphCompany.discovery_source (see
+    # app.analysis.impact_graph.engine), JSON list-wrapped for a future
+    # multi-source merge; "unknown" is the honest value for a candidate
+    # whose discovery path was never stamped.
+    discovery_sources_json = Column(Text, nullable=True)
+    # Full CandidateInput dataclasses.asdict() (app.analysis.impact_graph.
+    # publication_gate) -- the EXACT input the gate walked, not a
+    # reconstruction from this row's other columns.
+    gate_inputs_json = Column(Text, nullable=True)
+    # EvidenceRecord ids this candidate's classification produced --
+    # duplicated out of candidate_json.evidence_ids as its own column so a
+    # query never has to parse JSON to join to evidence_records.
+    evidence_ids_json = Column(Text, nullable=True)
+    provider = Column(String, nullable=True)          # gemini | groq
+    model = Column(String, nullable=True)              # best-effort model name for `provider`
+    analysis_quality = Column(String, nullable=True)   # authoritative | fallback | degraded | failed
+    # The verifier's raw per-company correction dict (app.analysis.
+    # impact_graph.engine._apply_company_correction), NULL when the
+    # verifier never corrected this candidate.
+    correction_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        # LEDGER RULING (corrective-v4 Task 18, supersedes the plan's
+        # UniqueConstraint on alert_id/ticker/analysis_version): a
+        # REJECT_DUPLICATE row for the same ticker in the same alert is
+        # part of the audit trail, not a data-integrity defect -- a unique
+        # constraint here would reject exactly the rows this table exists
+        # to keep. A composite index supports lookups without constraining
+        # cardinality.
+        Index("ix_decision_alert_ticker", "alert_id", "ticker"),
+    )
 
     alert = relationship("Alert")
     company = relationship("Company")

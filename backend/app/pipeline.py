@@ -717,11 +717,28 @@ def _copy_gate_audit_trail(session: Session, prior_alert_id: int, new_alert_id: 
     session.flush()
 
 
+def _analysis_model_for_provider(provider: str | None) -> str | None:
+    """Best-effort model name for the decision-record audit trail (spec
+    sec54, corrective-v4 Task 18). The router records which PROVIDER served
+    an alert (app.analysis.impact_graph.router.StageRouter.provider) but not
+    which specific model -- stage overrides
+    (settings.gemini_stage_model_override_map) can diverge per call, so
+    this names the common-case reasoning-stage model for that provider,
+    not a per-call-exact audit. An unrecognized provider is returned as-is
+    (never invented into a guessed model name)."""
+    if provider == "gemini":
+        return settings.gemini_reasoning_model
+    if provider == "groq":
+        return settings.groq_aux_model
+    return provider
+
+
 def _persist_alert(
     session: Session, article: Article, category: str, entries: list[dict], event_type: str | None = None,
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
     analysis_provider: str | None = None, analysis_quality: str | None = None,
     event_cause: str | None = None, reused_from_alert_id: int | None = None,
+    ambiguous_entities: list[str] | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -737,6 +754,15 @@ def _persist_alert(
     _copy_gate_audit_trail instead of being synthesized fresh from `entries`
     (see that function's docstring for why: the gate walk ran once, not
     twice).
+
+    `ambiguous_entities`: ImpactGraphResult.ambiguous_entities (corrective-
+    v4 Task 18, ledger parked item a) -- entity names the alias matcher
+    found genuinely ambiguous and that therefore NEVER became a candidate
+    at all (dropped before any mapping call could propose them, so no
+    `entries` row exists for them either). Only meaningful on the fresh-
+    analysis path; the dedup-reuse path leaves it None and relies on
+    _copy_gate_audit_trail to carry over whatever ambiguous-entity records
+    the prior alert already wrote.
     """
     # The tool schema constrains `category` to CATEGORIES, but that's a
     # request-time hint, not a guarantee -- defend against a provider that
@@ -778,14 +804,20 @@ def _persist_alert(
         # excluded entries never become AlertCompany rows. Legacy entries
         # (no gate fields) skip both branches untouched.
         gated_entries = [e for e in entries if "gate_state" in e]
-        if gated_entries:
+        if gated_entries or (settings.impact_engine_v4_strict and ambiguous_entities):
             from app.analysis.impact_graph.evidence import persist_evidence
             from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
             from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
             from app.models import CompanyDecisionRecord
 
             for entry in gated_entries:
-                company_row = session.get(Company, entry["company_id"])
+                # company_id is None for a ticker that never resolved to a
+                # Company row (ledger parked item b) -- session.get with a
+                # None pk is invalid, so that case skips straight to None.
+                company_row = (
+                    session.get(Company, entry["company_id"])
+                    if entry.get("company_id") is not None else None
+                )
                 # Turn this candidate's EvidenceRecord payloads (Task 5) into
                 # real rows now that the Alert exists -- classify_evidence
                 # (called earlier, pre-flush) could only hand back plain
@@ -793,11 +825,14 @@ def _persist_alert(
                 # ids survive past this loop (candidate_json below is the
                 # decision record's copy).
                 evidence_ids = persist_evidence(
-                    session, alert.id, entry["company_id"], entry.get("evidence_payloads") or [])
+                    session, alert.id, entry.get("company_id"), entry.get("evidence_payloads") or [])
                 entry["evidence_ids"] = evidence_ids
                 session.add(CompanyDecisionRecord(
-                    alert_id=alert.id, company_id=entry["company_id"],
-                    ticker=company_row.ticker if company_row else str(entry["company_id"]),
+                    alert_id=alert.id, company_id=entry.get("company_id"),
+                    ticker=(
+                        company_row.ticker if company_row
+                        else (entry.get("ticker") or str(entry.get("company_id")))
+                    ),
                     final_state=entry["gate_state"], display_tier=entry["display_tier"],
                     rejection_reason=entry.get("rejection_reason"),
                     gates_passed_json=json.dumps(entry.get("gates_passed") or []),
@@ -817,8 +852,42 @@ def _persist_alert(
                         "evidence_ids": evidence_ids,
                     }),
                     analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+                    # Decision-record completeness (spec sec54, corrective-v4
+                    # Task 18).
+                    gate_inputs_json=json.dumps(entry.get("gate_inputs") or {}),
+                    evidence_ids_json=json.dumps(evidence_ids),
+                    discovery_sources_json=json.dumps([entry.get("discovery_source") or "unknown"]),
+                    provider=analysis_provider,
+                    model=_analysis_model_for_provider(analysis_provider),
+                    analysis_quality=analysis_quality,
+                    correction_json=(
+                        json.dumps(entry["applied_correction"])
+                        if entry.get("applied_correction") else None
+                    ),
                 ))
             entries = [e for e in entries if e.get("display_tier") != "excluded"]
+
+            # Ledger parked item (a), corrective-v4 Task 18: entities the
+            # alias matcher found genuinely ambiguous never seed a
+            # candidate at all -- they are dropped in
+            # engine._subject_companies_ex before any mapping call could
+            # ever propose them, so no `entries` row (and no REJECT_
+            # ENTITY_AMBIGUOUS from the loop above, which only covers a
+            # ticker that DID reach a GraphCompany) exists for them. This
+            # is the one durable record of that invisible drop, keyed by
+            # the entity's own name since there is no ticker or company_id
+            # to attach to.
+            if ambiguous_entities:
+                for name in ambiguous_entities:
+                    session.add(CompanyDecisionRecord(
+                        alert_id=alert.id, company_id=None, ticker=(name or "")[:64],
+                        final_state="REJECT_ENTITY_AMBIGUOUS", display_tier="excluded",
+                        rejection_reason="REJECT_ENTITY_AMBIGUOUS",
+                        analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+                        provider=analysis_provider,
+                        model=_analysis_model_for_provider(analysis_provider),
+                        analysis_quality=analysis_quality,
+                    ))
 
     alert_companies = []
     kept_entries = []
@@ -1251,8 +1320,39 @@ def _v3_entries(session: Session, result) -> list[dict]:
     entries = []
     for company_index, company in enumerate(result.companies):
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
+        gated = gate_decisions[company_index] if gate_decisions else None
         if row is None:
             logger.warning("v3 company %s did not resolve to a Company row; skipped", company.ticker)
+            # Ledger parked item (b), corrective-v4 Task 18: the ticker
+            # still walked the gate above (ENTITY_VALID rejects it with
+            # entity_status="unresolved" -> REJECT_UNKNOWN_COMPANY) --
+            # that decision must stay durable even though no AlertCompany
+            # row can ever exist for a company_id that doesn't resolve. A
+            # minimal company_id=None entry carries just enough for
+            # _persist_alert's decision-record write; REJECT_UNKNOWN_
+            # COMPANY always yields display_tier "excluded", so the
+            # `!= "excluded"` filter below drops it before
+            # _build_alert_company ever sees it.
+            if gated is not None:
+                evidence_class, evidence_tier, evidence_payloads, decision = gated
+                entries.append({
+                    "company_id": None, "ticker": company.ticker,
+                    "display_tier": decision.display_tier,
+                    "gate_state": decision.final_state,
+                    "gates_passed": decision.gates_passed,
+                    "rejection_reason": decision.rejection_reason,
+                    "materiality_grade": decision.materiality_grade,
+                    "evidence_class": evidence_class, "evidence_tier": evidence_tier,
+                    "evidence_payloads": evidence_payloads,
+                    "decision_notes": decision.notes,
+                    "gate_inputs": decision.candidate_snapshot,
+                    "economic_effect": _persist_effect(company.economic_effect),
+                    "causal_distance": company.causal_distance,
+                    "materiality": company.materiality, "confidence_f": company.confidence,
+                    "mechanism": company.mechanism, "rationale": company.rationale,
+                    "discovery_source": company.discovery_source,
+                    "applied_correction": company.applied_correction,
+                })
             continue
         parent_company_id = None
         if company.parent_type == "company":
@@ -1311,10 +1411,15 @@ def _v3_entries(session: Session, result) -> list[dict]:
             # measured price move (app.market.measure runs later and
             # separately).
             "expected_market_sensitivity": company.expected_market_sensitivity,
+            # Decision-record completeness (spec sec54, corrective-v4 Task
+            # 18): carried on every entry (not only gated ones) so
+            # _persist_alert's gated branch can read them without a second
+            # pass over result.companies.
+            "discovery_source": company.discovery_source,
+            "applied_correction": company.applied_correction,
         })
         # Positional, not ticker-keyed: two candidates can name one company
         # and each keeps its own decision (one of them REJECT_DUPLICATE).
-        gated = gate_decisions[company_index] if gate_decisions else None
         if gated is not None:
             evidence_class, evidence_tier, evidence_payloads, decision = gated
             entries[-1].update({
@@ -1332,6 +1437,9 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 # sets "evidence_ids" (the resulting row ids) alongside.
                 "evidence_payloads": evidence_payloads,
                 "decision_notes": decision.notes,
+                # Full CandidateInput the gate walked (Task 18) -- the
+                # decision record's gate_inputs_json.
+                "gate_inputs": decision.candidate_snapshot,
             })
     return entries
 
@@ -1568,6 +1676,7 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 client=claude_client, facts=result.facts,
                 analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
                 event_cause=result.event_cause,
+                ambiguous_entities=result.ambiguous_entities,
             )
         except Exception:
             logger.exception("persist failed for article_id=%s; marked for retry", article.id)

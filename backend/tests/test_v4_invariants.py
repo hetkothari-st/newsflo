@@ -35,7 +35,15 @@ def test_inv002_gate_input_has_no_market_fields():
 
 def test_inv011_unresolvable_ticker_never_persisted(db_session, strict_mode):
     """INV-011: a ticker with no Company row is omitted at the adapter --
-    an invented ticker cannot become a persisted AlertCompany."""
+    an invented ticker cannot become a persisted AlertCompany.
+
+    Corrective-v4 Task 18 (ledger parked item b): the ticker's gate walk
+    (ENTITY_VALID -> REJECT_UNKNOWN_COMPANY) now survives to _v3_entries as
+    an audit-only entry (company_id=None, display_tier="excluded") so
+    _persist_alert can write a durable CompanyDecisionRecord for it --
+    INV-011 is about AlertCompany persistence specifically, not about the
+    entries list being empty; see test_decision_record_audit.py for the
+    audit-record side of this."""
     from app.pipeline import _v3_entries
     from app.analysis.impact_graph.schemas import GraphCompany, ImpactGraphResult
 
@@ -48,7 +56,12 @@ def test_inv011_unresolvable_ticker_never_persisted(db_session, strict_mode):
     result = ImpactGraphResult(category="commodity", event_type="crude_oil",
                                facts="f", companies=[ghost], edges=[])
 
-    assert _v3_entries(db_session, result) == []
+    entries = _v3_entries(db_session, result)
+    # No entry may carry a real company_id -- the ghost ticker's own entry
+    # has company_id=None and display_tier="excluded", which
+    # _persist_alert filters out before ever building an AlertCompany.
+    assert all(e.get("company_id") is None for e in entries)
+    assert all(e.get("display_tier") in (None, "excluded") for e in entries)
 
 
 def test_inv017_018_prompt_contracts_forbid_invention():

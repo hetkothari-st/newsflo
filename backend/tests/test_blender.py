@@ -61,21 +61,26 @@ def test_calibration_health_computes_hit_rate_and_mean_error(db_session):
     company = Company(ticker="X.NS", name="X", sector="oil_gas", index_tier="NIFTY50")
     db_session.add(company)
     db_session.commit()
-    article = Article(source="test", url="https://example.com/health", title="t")
-    db_session.add(article)
+    article1 = Article(source="test", url="https://example.com/health-1", title="t")
+    article2 = Article(source="test", url="https://example.com/health-2", title="t")
+    db_session.add_all([article1, article2])
     db_session.commit()
-    alert = Alert(article_id=article.id, category="oil_energy")
-    db_session.add(alert)
+    alert1 = Alert(article_id=article1.id, category="oil_energy")
+    alert2 = Alert(article_id=article2.id, category="oil_energy")
+    db_session.add_all([alert1, alert2])
     db_session.commit()
 
-    # Two predictions, both originally "bullish": one correct (actual also
-    # bullish), one wrong (actual bearish) -- hit_rate must be 0.5.
+    # Two predictions (from two separate alerts -- corrective-v4 Task 18
+    # added a UniqueConstraint(alert_id, company_id) on alert_companies, so
+    # one company can carry at most one row per alert), both originally
+    # "bullish": one correct (actual also bullish), one wrong (actual
+    # bearish) -- hit_rate must be 0.5.
     ac1 = AlertCompany(
-        alert_id=alert.id, company_id=company.id, direction="bullish",
+        alert_id=alert1.id, company_id=company.id, direction="bullish",
         magnitude_low=2.0, magnitude_high=4.0, rationale="x", basis="direct_mention",
     )
     ac2 = AlertCompany(
-        alert_id=alert.id, company_id=company.id, direction="bullish",
+        alert_id=alert2.id, company_id=company.id, direction="bullish",
         magnitude_low=2.0, magnitude_high=4.0, rationale="x", basis="direct_mention",
     )
     db_session.add_all([ac1, ac2])

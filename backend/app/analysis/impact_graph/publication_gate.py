@@ -23,7 +23,7 @@ structurally by ``test_inv002_gate_input_has_no_market_fields``).
 Authority order (spec §64): deterministic policy here outranks any LLM
 output -- the model may propose and challenge, never overrule a rejection.
 """
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Callable
 
 from app.config import settings
@@ -248,6 +248,12 @@ class GateDecision:
     materiality: float | None = None
     confidence: float | None = None
     notes: str | None = None
+    # Full CandidateInput.asdict() the gate walked (corrective-v4 Task 18,
+    # spec sec54): the decision record's durable "here is EXACTLY what the
+    # gate saw" field. A caller that builds a GateDecision by hand (tests,
+    # the dedup-reuse copy path) gets the honest default {} rather than a
+    # reconstruction -- this is populated ONLY by evaluate_candidate below.
+    candidate_snapshot: dict = field(default_factory=dict)
 
 
 # --- helpers ---------------------------------------------------------------
@@ -492,6 +498,9 @@ def evaluate_candidate(candidate: CandidateInput,
     ctx = context if context is not None else GateContext()
     grade = _effective_grade(candidate)
     passed: list = []
+    # dataclasses.asdict deep-copies -- safe to hand out without the
+    # caller being able to mutate the CandidateInput back through it.
+    snapshot = asdict(candidate)
 
     for name, check in GATE_SEQUENCE:
         state = check(candidate, ctx)
@@ -502,6 +511,7 @@ def evaluate_candidate(candidate: CandidateInput,
                 materiality_grade=grade, ticker=candidate.ticker,
                 dedup_key=candidate_identity(candidate),
                 materiality=candidate.materiality, confidence=candidate.confidence,
+                candidate_snapshot=snapshot,
             )
         passed.append(name)
 
@@ -510,6 +520,7 @@ def evaluate_candidate(candidate: CandidateInput,
         gates_passed=passed, rejection_reason=None, materiality_grade=grade,
         ticker=candidate.ticker, dedup_key=candidate_identity(candidate),
         materiality=candidate.materiality, confidence=candidate.confidence,
+        candidate_snapshot=snapshot,
     )
 
 
