@@ -72,6 +72,24 @@ export function levelOf(row: ChartRow): number {
   return Math.min(row.layerIndex + 1, 4) + (row.relationship === 'DIRECT' ? 0 : 1) - 1 || 2;
 }
 
+/* Same per-row up/down/neutral rule chartComponents.tsx's bucketByEffect
+   uses for the split chart's actual bucketing (kept duplicated here
+   rather than imported, to avoid a chartsData <-> chartComponents
+   import cycle): economic_effect wins when present, legacy
+   AlertCompany.direction is the fallback ONLY for rows with no
+   economic_effect at all. Used solely to decide whether the split chart
+   has both a winner and a loser to show -- not to color anything. */
+function rowEffectSign(row: ChartRow): 'up' | 'down' | 'neutral' {
+  if (row.economic_effect) {
+    if (row.economic_effect === 'positive') return 'up';
+    if (row.economic_effect === 'negative') return 'down';
+    return 'neutral';
+  }
+  if (row.direction === 'bullish') return 'up';
+  if (row.direction === 'bearish') return 'down';
+  return 'neutral';
+}
+
 export function availableCharts(detail: AlertDetail): ChartMeta[] {
   const rows = flattenRows(detail);
   const measured = rows.filter((row) => row.excess_move_pct != null);
@@ -83,8 +101,8 @@ export function availableCharts(detail: AlertDetail): ChartMeta[] {
     levels: rows.length > 0 && detail.layers.length >= 2,
     intensity: rows.some((row) => row.intensity?.score != null),
     split:
-      rows.some((row) => row.direction === 'bullish') &&
-      rows.some((row) => row.direction === 'bearish'),
+      rows.some((row) => rowEffectSign(row) === 'up') &&
+      rows.some((row) => rowEffectSign(row) === 'down'),
     sectors: sectors.size >= 2,
     timeline: timeline.length > 0,
     economicChain: timeline.length >= 2,

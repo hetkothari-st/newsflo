@@ -19,14 +19,30 @@ function moveClass(value: number | null | undefined): string {
   return value < 0 ? 'down' : 'up';
 }
 
-/* Winners/losers/neutral split keyed on the row's gate-authoritative
-   economic_effect when present (spec §38: a stock trading green on news
-   that hurts its actual business is not a "winner") -- falls back to the
-   legacy AlertCompany.direction ONLY for rows with no economic_effect at
-   all (pre-gate alerts). A row with no measured move always lands in
-   neutral regardless of effect -- nothing to chart as a winner/loser;
-   mixed/uncertain/no_material_impact effects land in neutral too, never
-   dropped from the chart. */
+/* The ONE per-row classification both the winners/losers/neutral bucket
+   AND every node's color derive from -- keyed on the row's gate-
+   authoritative economic_effect when present (spec §38: a stock trading
+   green on news that hurts its actual business is not a "winner", and
+   must not render green either) -- falls back to the legacy
+   AlertCompany.direction ONLY for rows with no economic_effect at all
+   (pre-gate alerts). A row with no measured move is always neutral
+   regardless of effect; mixed/uncertain/no_material_impact effects are
+   neutral too, never dropped from the chart. Node color must NEVER be
+   computed separately from bucket placement (that let a +2.0% excess
+   render green inside the "Negative impact" column) -- every renderer
+   below calls this same function for both. */
+function effectClass(row: ChartRow): 'up' | 'down' | 'flat' {
+  if (row.excess_move_pct == null) return 'flat';
+  if (row.economic_effect) {
+    if (row.economic_effect === 'positive') return 'up';
+    if (row.economic_effect === 'negative') return 'down';
+    return 'flat';
+  }
+  if (row.direction === 'bullish') return 'up';
+  if (row.direction === 'bearish') return 'down';
+  return 'flat';
+}
+
 function bucketByEffect(rows: ChartRow[]): {
   winners: ChartRow[];
   losers: ChartRow[];
@@ -36,21 +52,10 @@ function bucketByEffect(rows: ChartRow[]): {
   const losers: ChartRow[] = [];
   const neutral: ChartRow[] = [];
   for (const row of rows) {
-    if (row.excess_move_pct == null) {
-      neutral.push(row);
-      continue;
-    }
-    if (row.economic_effect) {
-      if (row.economic_effect === 'positive') winners.push(row);
-      else if (row.economic_effect === 'negative') losers.push(row);
-      else neutral.push(row);
-    } else if (row.direction === 'bullish') {
-      winners.push(row);
-    } else if (row.direction === 'bearish') {
-      losers.push(row);
-    } else {
-      neutral.push(row);
-    }
+    const cls = effectClass(row);
+    if (cls === 'up') winners.push(row);
+    else if (cls === 'down') losers.push(row);
+    else neutral.push(row);
   }
   return { winners, losers, neutral };
 }
@@ -517,16 +522,22 @@ export function CSplit({ detail }: { detail: AlertDetail }) {
   const rows = flattenRows(detail);
   const { winners, losers, neutral } = bucketByEffect(rows);
   const col = (list: ChartRow[]) =>
-    list.map((row) => (
-      <div className={`cnode wide ${moveClass(row.excess_move_pct)}`} key={row.ticker} data-ticker={row.ticker}>
-        <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
-        <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
-        <span className="cnode-nm">{row.name}</span>
-        <span className={`cnode-mv ${moveClass(row.excess_move_pct)}`}>
-          {row.excess_move_pct == null ? 'exposure' : fmtPct(row.excess_move_pct)}
-        </span>
-      </div>
-    ));
+    list.map((row) => {
+      // Node color follows the SAME effect key that placed this row in
+      // its column -- never the raw excess sign, or a +2.0% excess would
+      // render green inside the "Negative impact" column (spec §38/§39).
+      const cls = effectClass(row);
+      return (
+        <div className={`cnode wide ${cls}`} key={row.ticker} data-ticker={row.ticker}>
+          <LogoV4 logoUrl={row.logo_url} ticker={row.ticker} name={row.name} />
+          <span className="cnode-tk">{row.ticker.split('.')[0]}</span>
+          <span className="cnode-nm">{row.name}</span>
+          <span className={`cnode-mv ${cls}`}>
+            {row.excess_move_pct == null ? 'exposure' : fmtPct(row.excess_move_pct)}
+          </span>
+        </div>
+      );
+    });
   return (
     <div className="csplit">
       <div className="csplit-cols">
@@ -762,7 +773,10 @@ export function CKnowledge({ detail }: { detail: AlertDetail }) {
   const member = (row: ChartRow): KnowMember => ({
     label: row.ticker.split('.')[0].slice(0, 7),
     sub: row.excess_move_pct == null ? 'exp' : fmtPct(row.excess_move_pct),
-    cls: moveClass(row.excess_move_pct),
+    // Same effect key as the Winners/Losers/Exposure bucket this member
+    // was sorted into (including in the all-rows "Companies" satellite,
+    // which lists every row regardless of bucket) -- never the raw sign.
+    cls: effectClass(row),
     logoUrl: row.logo_url,
     ticker: row.ticker,
     name: row.name,

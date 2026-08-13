@@ -181,6 +181,15 @@ describe('CSplit bucketing', () => {
     // "negative" -- the fundamental verdict wins, it lands in losers.
     expect(container.querySelector('.csplit-col.down [data-ticker="A.NS"]')).not.toBeNull();
     expect(container.querySelector('.csplit-col.up [data-ticker="A.NS"]')).toBeNull();
+    // Node color must follow the SAME effect key as bucket placement --
+    // A.NS has a +2.0% excess move but its economic_effect is negative,
+    // so the node itself must render "down"/red, never green off the
+    // raw positive sign (the bug this fix addresses).
+    const nodeA = container.querySelector('[data-ticker="A.NS"]');
+    expect(nodeA).not.toBeNull();
+    expect(nodeA!.className.split(' ')).toContain('down');
+    expect(nodeA!.className.split(' ')).not.toContain('up');
+    expect(container.querySelector('[data-ticker="A.NS"] .cnode-mv')?.className.split(' ')).toContain('down');
     // B.NS: no economic_effect at all (legacy row) -- direction fallback
     // still applies, it lands in winners.
     expect(container.querySelector('.csplit-col.up [data-ticker="B.NS"]')).not.toBeNull();
