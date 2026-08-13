@@ -24,9 +24,13 @@ from app.config import GEMINI_THINKING_BUDGETS
 
 # The per-call context keys a caller may attach for telemetry (cost-opt
 # spec P1). Filtered to this set so a caller's dict can never collide with
-# the explicit CallUsage kwargs.
+# the explicit CallUsage kwargs. "retries"/"fallback" (corrective-v4 Task
+# 15) let StageRouter._call_protected report its ladder position -- how
+# many rungs preceded this attempt, and whether this is the primary rung --
+# straight onto the CallUsage row via **context in usage_from_gemini below.
 _CONTEXT_KEYS = frozenset({
     "parent_node", "mechanism_id", "candidate_count", "prompt_version", "schema_version",
+    "retries", "fallback",
 })
 
 logger = logging.getLogger(__name__)

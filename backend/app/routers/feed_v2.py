@@ -310,6 +310,11 @@ def get_feed_v2_alert(
     )
     translations = _bulk_translations(db, [alert], lang)
     result = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
+    # Alert-level quality ladder (corrective-v4 Task 15): authoritative |
+    # fallback | degraded | failed | budget_exhausted, or None on a
+    # pre-v3 alert. Frontend consumption is a later task; this is the
+    # minimal, honest wire-through.
+    result["analysis_quality"] = alert.analysis_quality
     # Layered card back (spec v2 §5/§7): every affected company, grouped by
     # relationship into ordered winners/losers layers.
     result["layers"] = compute_ripple_layers(db, alert, held_company_ids)

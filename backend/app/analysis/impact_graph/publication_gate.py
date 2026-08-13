@@ -47,6 +47,13 @@ REJECTION_STATES = frozenset({
     "REJECT_VALIDATOR_UNAVAILABLE",
 })
 
+# Gate policy version (corrective-v4 Task 15): bumped whenever the gate's
+# decision logic changes in a way that could flip a previously-cached
+# analysis's outcome. Threaded into the v3 result cache key and the
+# stage-cache fingerprint so a policy bump is an EXPLICIT invalidation,
+# never a silent replay of a decision made under the old rules.
+POLICY_VERSION = "pol-1"
+
 DISPLAY_ELIGIBLE = "DISPLAY_ELIGIBLE"
 
 # Display tiers. "secondary_deep_dive" is the serialized value; the legacy

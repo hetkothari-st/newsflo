@@ -25,6 +25,7 @@ import logging
 from datetime import timedelta
 
 from app.analysis.impact_graph.gemini_json import GeminiJSONClient, GeminiJSONError
+from app.analysis.impact_graph.publication_gate import POLICY_VERSION
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -55,8 +56,24 @@ class StageRouter:
         self._groq = groq_client
         self._session = session  # durable stage cache; None (tests) = no caching
         self.provider = "gemini" if (protected and self._gemini) else "groq"
-        self.quality = "authoritative"
+        # Provider-identity honesty (corrective-v4 Task 15): a NON-protected
+        # article is served by Groq from the very first call, by explicit
+        # configuration -- never "authoritative" from construction onward.
+        # Only a protected article routed to Gemini starts authoritative;
+        # everything else earns a lower quality, it never inherits one.
+        self.quality = "authoritative" if self.provider == "gemini" else "fallback"
         self.stage_cache_hits = 0
+        # Which prompt variant actually served the current call: "full" is
+        # the caller's real dynamic_suffix, "compact" is the trimmed
+        # rung-3 retry. Only a "full" + authoritative result is ever cache-
+        # eligible (see call()/`_cache_put`) -- a compact-context answer is
+        # a different, cheaper question and must never be replayed as if it
+        # were the full-context one.
+        self._served_variant = "full"
+        # Telemetry mirror of the same fact (spec: "sets context_compacted
+        # metric"), exposed on the instance for callers/tests that want it
+        # without reaching into the private variant flag.
+        self.context_compacted = False
         # Spend-cap circuit breaker (2026-08-12): a monthly-cap 429 is
         # terminal for the WHOLE run, not one stage -- once seen, every
         # remaining call skips the Gemini rungs entirely instead of
@@ -98,7 +115,9 @@ class StageRouter:
                         stage, self.article_id)
             self._record_cache_hit(stage, context)
             return cached
-        quality_before, provider_before = self.quality, self.provider
+        # Reset per-call; only a rung that actually serves this call may
+        # set it back to "compact" (see _call_protected).
+        self._served_variant = "full"
         if self.protected and self._gemini is not None:
             result = self._call_protected(
                 stage, schema=schema, static_prefix=static_prefix,
@@ -109,15 +128,19 @@ class StageRouter:
         else:
             result = self._call_groq(stage, schema=schema, static_prefix=static_prefix,
                                      dynamic_suffix=dynamic_suffix)
-        # Cache-poisoning guard (2026-08-12): a result served by a LOWER
-        # ladder rung (degraded/fallback) is never cached -- a later retry
-        # with a healthy provider must re-earn the authoritative result,
-        # not replay the degraded one as if it were fine.
-        if self.quality == quality_before and self.provider == provider_before:
+        # Cache-poisoning guard (corrective-v4 Task 15): an ABSOLUTE check,
+        # not a before/after delta -- a delta comparison only caught a
+        # DOWNGRADE that happened on THIS call, so a router that entered
+        # this call already degraded/fallback (e.g. non-protected, or a
+        # prior stage's budget_exhausted) could still cache a "no change"
+        # result as if it were fine. Only "the served result is genuinely
+        # authoritative, from the full context" may ever be written back.
+        if self.quality == "authoritative" and self._served_variant == "full":
             self._cache_put(fingerprint, stage, result)
         else:
-            logger.info("impact-graph cache_put skipped stage=%s reason=served_by_lower_rung "
-                        "quality=%s article=%s", stage, self.quality, self.article_id)
+            logger.info("impact-graph cache_put skipped stage=%s reason=not_authoritative_full "
+                        "quality=%s served_variant=%s article=%s",
+                        stage, self.quality, self._served_variant, self.article_id)
         return result
 
     @staticmethod
@@ -151,11 +174,21 @@ class StageRouter:
     # -- durable stage cache ----------------------------------------------
 
     def _fingerprint(self, stage: str, schema: dict, static_prefix: str,
-                     seed: str) -> str:
+                     seed: str, variant: str = "full") -> str:
         """Semantic-cache key (cost-opt spec P12): stage + model + prompt/
         schema/knowledge versions + static prefix + the caller's semantic
         seed (or raw suffix when no seed was supplied). Version components
-        make every prompt/registry change an EXPLICIT invalidation."""
+        make every prompt/registry change an EXPLICIT invalidation.
+
+        Corrective-v4 Task 15 adds three more explicit-invalidation
+        components: the strict-mode flag (v4-strict and legacy runs must
+        never share a cache entry -- their publication semantics differ),
+        POLICY_VERSION (a gate policy bump must invalidate every cached
+        stage result it could have judged differently), and `variant`
+        ("full" | "compact") -- the caller always looks up "full" (the
+        cache never stores a compact-context result under any key; see
+        call()), but keeping the marker in the payload documents the
+        contract in the hash itself rather than leaving it implicit."""
         model, _ = self._model_for(stage) if (self.protected and self._gemini) \
             else (settings.groq_aux_model, "")
         try:
@@ -166,6 +199,7 @@ class StageRouter:
             stage, model, self._prompt_version(), self._schema_version(),
             KNOWLEDGE_REGISTRY_VERSION, static_prefix, seed,
             json.dumps(schema, sort_keys=True),
+            str(int(settings.impact_engine_v4_strict)), POLICY_VERSION, variant,
         ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -185,7 +219,17 @@ class StageRouter:
                 created = created.replace(tzinfo=timezone.utc)
             if created is not None and created < age_limit:
                 return None
-            return json.loads(row.result_json)
+            stored = json.loads(row.result_json)
+            # Envelope shape (Task 15, forward safety): {"__cache_envelope":
+            # 1, "quality": ..., "result": ...}. A raw dict (every row
+            # written before this shipped) carries no quality of its own --
+            # treated as "authoritative" legacy, matching the fact that
+            # this row could only have been written back when the OLD
+            # (buggy, delta-comparison) guard judged it fit to cache.
+            if isinstance(stored, dict) and stored.get("__cache_envelope") == 1:
+                self._degrade(stored.get("quality") or "authoritative")
+                return stored.get("result")
+            return stored
         except Exception:  # noqa: BLE001 -- cache trouble must never fail an analysis
             logger.warning("stage cache read failed", exc_info=True)
             return None
@@ -197,9 +241,10 @@ class StageRouter:
             from app.models import LLMStageCache, utcnow
 
             if self._session.query(LLMStageCache).filter_by(fingerprint=fingerprint).one_or_none() is None:
+                envelope = {"__cache_envelope": 1, "quality": self.quality, "result": result}
                 self._session.add(LLMStageCache(
                     fingerprint=fingerprint, stage=stage, article_id=self.article_id,
-                    model=self._fingerprint_model(stage), result_json=json.dumps(result),
+                    model=self._fingerprint_model(stage), result_json=json.dumps(envelope),
                 ))
                 # Opportunistic TTL sweep -- keeps the table bounded without
                 # its own scheduler job.
@@ -241,31 +286,44 @@ class StageRouter:
                         context: dict | None = None) -> dict:
         model, default_thinking = self._model_for(stage)
         thinking = thinking or default_thinking
+        # 5-tuples: (model, suffix, thinking_level, degrade_to, variant).
+        # `variant` tracks whether the rung's suffix is the caller's real
+        # dynamic_suffix ("full") or the trimmed compact_suffix ("compact")
+        # -- call() reads self._served_variant after this returns to decide
+        # cache eligibility (Task 15: a compact-context answer must never
+        # be cached under the full-context key).
         attempts = [
-            (model, dynamic_suffix, thinking, None),
-            (model, dynamic_suffix, thinking, None),  # plain retry
+            (model, dynamic_suffix, thinking, None, "full"),
+            (model, dynamic_suffix, thinking, None, "full"),  # plain retry
         ]
         if compact_suffix:
-            attempts.append((model, compact_suffix, thinking, None))
+            attempts.append((model, compact_suffix, thinking, None, "compact"))
         attempts.append((settings.gemini_fallback_model, compact_suffix or dynamic_suffix,
-                         "medium", "degraded"))
+                         "medium", "degraded", "compact" if compact_suffix else "full"))
 
         last_error: Exception | None = None
         if self.gemini_capped:
             attempts = []
             last_error = GeminiJSONError("skipped: monthly spend cap already hit this run",
                                          status_code=429)
-        for attempt_model, suffix, level, degrade_to in attempts:
+        for idx, (attempt_model, suffix, level, degrade_to, variant) in enumerate(attempts):
             try:
                 result = self._gemini.generate(
                     model=attempt_model, schema=schema, static_prefix=static_prefix,
                     dynamic_suffix=suffix, thinking=level,
                     max_output_tokens=max_output_tokens, stage=stage,
-                    article_id=self.article_id, budget=self.budget, context=context,
+                    article_id=self.article_id, budget=self.budget,
+                    # Telemetry (spec: retries/fallback populated from the
+                    # ladder position, not left permanently None): this
+                    # attempt's index IS the retry count that preceded it,
+                    # and any rung past the first is "not the primary rung".
+                    context={**(context or {}), "retries": idx, "fallback": idx > 0},
                 )
                 if degrade_to:
                     self._degrade(degrade_to)
                     logger.warning("impact-graph %s served DEGRADED by %s", stage, attempt_model)
+                self._served_variant = variant
+                self.context_compacted = self.context_compacted or (variant == "compact")
                 return result
             except GeminiJSONError as exc:
                 last_error = exc
@@ -283,6 +341,15 @@ class StageRouter:
                                          dynamic_suffix=dynamic_suffix)
                 self.provider = "groq"
                 self._degrade("fallback")
+                self._served_variant = "full"  # groq always sees the full dynamic_suffix
+                # Groq's own client path records its usage inside
+                # RotatingClient/GroqAdapter (app.analysis.claude_client),
+                # which has no `context`-style extension point for
+                # retries/fallback -- a structural gap this task does not
+                # widen. This summary line is the documented substitute
+                # (spec: "add a router-level summary log line instead").
+                logger.info("impact-graph call_summary stage=%s provider=groq fallback=True "
+                            "retries=%s article=%s", stage, len(attempts), self.article_id)
                 logger.warning("impact-graph %s served by GROQ FALLBACK (quality=fallback)", stage)
                 return result
             except Exception as exc:  # noqa: BLE001 -- ladder end, report the Gemini error
@@ -311,4 +378,7 @@ class StageRouter:
         call = next((tc for tc in tool_calls if tc.function.name == "emit"), None)
         if call is None:
             raise StageRouterError(f"{stage}: groq returned no structured result")
-        return json.loads(call.function.arguments)
+        try:
+            return json.loads(call.function.arguments)
+        except (TypeError, ValueError) as exc:
+            raise StageRouterError(f"{stage}: groq tool args were not valid JSON: {exc}") from exc

@@ -1,6 +1,7 @@
 """Durable stage-result cache (retry-burn fix 2026-08-11): a retried
 analysis must replay completed stage calls from the DB with zero provider
 traffic; failures are never cached; input drift is a plain miss."""
+import json
 from datetime import timedelta
 
 import pytest
@@ -86,3 +87,39 @@ def test_no_session_means_no_caching_but_working_calls():
     router._gemini = gemini
     assert _call(router) == {"ok": 1}
     assert _call(router) == {"ok": 2}  # no cache without a session
+
+
+# --- Task 15: cache poisoning fix -----------------------------------------
+
+def test_cached_row_is_stored_as_a_quality_envelope(db_session):
+    """Forward-safety format (corrective-v4 Task 15): a freshly written row
+    carries its quality alongside the result, not just the bare result."""
+    router = _router(db_session, _CountingGemini())
+    _call(router)
+    row = db_session.query(LLMStageCache).one()
+    stored = json.loads(row.result_json)
+    assert stored == {"__cache_envelope": 1, "quality": "authoritative", "result": {"ok": 1}}
+
+
+def test_non_protected_router_never_populates_the_stage_cache(db_session):
+    """A non-protected (Groq) router starts at quality="fallback" from
+    construction (Task 15) -- its calls can never satisfy the absolute
+    quality=="authoritative" cache-write guard, so llm_stage_cache stays
+    empty across a run that never touched Gemini at all."""
+    class _GroqOK:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    from types import SimpleNamespace
+                    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+                        tool_calls=[SimpleNamespace(function=SimpleNamespace(
+                            name="emit", arguments=json.dumps({"ok": True})))],
+                    ))])
+
+    router = StageRouter(protected=False, gemini_api_key=None, groq_client=_GroqOK(),
+                         article_id=9, session=db_session)
+    result = _call(router)
+    assert result == {"ok": True}
+    assert router.quality == "fallback"
+    assert db_session.query(LLMStageCache).count() == 0

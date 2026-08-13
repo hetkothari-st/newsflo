@@ -363,6 +363,7 @@ def test_router_groq_fallback_is_loudly_marked():
                     ))])
 
     router = StageRouter(protected=True, gemini_api_key="k", groq_client=_GroqOK())
+    assert router.quality == "authoritative"  # protected + gemini starts authoritative
     router._gemini = _FlakyGemini(fail_times=99)
     result = router.call("initial_shocks", schema={}, static_prefix="s", dynamic_suffix="d")
     assert result == {"ok": True}
@@ -375,9 +376,16 @@ def test_non_protected_articles_route_to_groq_as_configured():
         pass
     router = StageRouter(protected=False, gemini_api_key="k",
                          groq_client=None)
+    # Provider identity is honest from CONSTRUCTION, not just after a
+    # failed call: a non-protected router is Groq-served and never
+    # "authoritative" (corrective-v4 Task 15) -- Groq is never the premium
+    # path pretending otherwise.
+    assert router.provider == "groq"
+    assert router.quality == "fallback"
     with pytest.raises(StageRouterError):
         router.call("initial_shocks", schema={}, static_prefix="s", dynamic_suffix="d")
     assert router.provider == "groq"  # non-protected never claims gemini
+    assert router.quality == "fallback"  # still fallback, never escalated by a failure
 
 
 # 17: telemetry -- budget accumulates cached/thinking tokens per stage

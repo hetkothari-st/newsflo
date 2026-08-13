@@ -38,6 +38,16 @@ logger = logging.getLogger(__name__)
 # genuine republish) never gets silently reused with stale reasoning.
 DEDUP_LOOKBACK_HOURS = 24
 
+# TTL for the v3 (impact-graph) result cache (corrective-v4 Task 15). The
+# content-hash key alone made a months-old row replay forever even after
+# prompt/schema/policy versions had all moved on around it -- the versioned
+# key (see _v3_cache_key) already invalidates on any of those bumps, but a
+# row that matches every version AND is genuinely stale (weeks old, from a
+# world where the same article text got re-ingested) still should not
+# replay indefinitely. 7 days covers every real retry/dedup path with
+# margin while keeping old rows from silently outliving their relevance.
+V3_CACHE_TTL_DAYS = 7
+
 # An indirect company's confidence is never higher than what the same
 # evidence would produce for a direct one -- the LLM's own knowledge of a
 # supplier/customer relationship is inherently less certain than a company
@@ -120,19 +130,48 @@ def _content_hash(article: Article) -> str:
     return hashlib.sha256((article.title + "\n" + article_text(article)).encode()).hexdigest()
 
 
+def _v3_cache_key(article: Article) -> str:
+    """Prefixed, VERSIONED hash keyspace for the v3 result cache (corrective-
+    v4 Task 15). "v3:" keeps a v2 AnalysisOutput blob from ever being
+    mis-parsed as a v3 result (unchanged from before); the four version
+    components that follow make every prompt/schema/knowledge-registry/
+    gate-policy bump an EXPLICIT cache miss, and the strict-mode flag keeps
+    a v4-strict run from ever replaying a legacy-gated one's result (their
+    publication semantics differ). A row keyed under the OLD two-part
+    "v3:<hash>" scheme (every row written before this shipped) simply
+    never matches this key -- an automatic, zero-code miss, not a
+    special-cased "is this a legacy key" branch."""
+    from app.analysis.impact_graph.knowledge import KNOWLEDGE_REGISTRY_VERSION
+    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+    from app.analysis.impact_graph.publication_gate import POLICY_VERSION
+    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+
+    strict_flag = int(settings.impact_engine_v4_strict)
+    return (f"v3:{POLICY_VERSION}:{IMPACT_PROMPT_VERSION}:{IMPACT_SCHEMA_VERSION}:"
+            f"{KNOWLEDGE_REGISTRY_VERSION}:{strict_flag}:{_content_hash(article)}")
+
+
 def get_cached_v3(session: Session, article: Article):
-    """Impact-graph v3 twin of get_cached_analysis. Prefixed hash keyspace
-    so a v2 AnalysisOutput blob can never be mis-parsed as a v3 result."""
+    """Impact-graph v3 twin of get_cached_analysis. Versioned hash keyspace
+    (see _v3_cache_key) plus a TTL: a row that matches the current key but
+    is older than V3_CACHE_TTL_DAYS is treated as a miss rather than
+    replayed forever."""
     from app.analysis.impact_graph.schemas import ImpactGraphResult
 
-    cached = session.query(AnalysisCache).filter_by(content_hash="v3:" + _content_hash(article)).one_or_none()
+    cached = session.query(AnalysisCache).filter_by(content_hash=_v3_cache_key(article)).one_or_none()
     if cached is None:
         return None
+    created = cached.created_at
+    if created is not None:
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created < utcnow() - timedelta(days=V3_CACHE_TTL_DAYS):
+            return None
     return ImpactGraphResult.model_validate_json(cached.output_json)
 
 
 def store_v3_cache(session: Session, article: Article, result) -> None:
-    session.add(AnalysisCache(content_hash="v3:" + _content_hash(article), output_json=result.model_dump_json()))
+    session.add(AnalysisCache(content_hash=_v3_cache_key(article), output_json=result.model_dump_json()))
 
 
 def get_cached_analysis(session: Session, article: Article) -> AnalysisOutput | None:
@@ -1273,8 +1312,19 @@ def _build_v3_router(session: Session, article: Article, groq_client):
     from app.analysis.impact_graph.router import StageRouter
 
     protected = grant_paid_analysis(session, article) and bool(settings.gemini_paid_api_key)
+    # Free-Gemini wiring (corrective-v4 Task 15, benchmark parity with
+    # benchmark_impact_graph.py): a router is always CONSTRUCTED with
+    # whichever Gemini key is available, paid preferred -- but `protected`
+    # above stays gated on the PAID key alone, unchanged. A free-tier-only
+    # key never flips an article into the protected/paid-owned path; it
+    # only means a router built for a non-protected article carries a
+    # usable _gemini client that today's routing never reaches (self.call
+    # only dispatches to it when self.protected is True), so this is
+    # config wiring only -- no live call, no behavior change, until a
+    # future stage explicitly opts a non-protected route into it.
+    gemini_api_key = settings.gemini_paid_api_key or settings.gemini_api_key or None
     return StageRouter(
-        protected=protected, gemini_api_key=settings.gemini_paid_api_key or None,
+        protected=protected, gemini_api_key=gemini_api_key,
         groq_client=groq_client, article_id=article.id,
         budget=ArticleBudget(article_id=article.id),
         # Durable stage cache: retries replay completed stages for free.
