@@ -13,7 +13,8 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.analysis.impact_graph.publication_gate import is_gated
+from app.analysis.impact_graph.publication_gate import is_gated, materiality_grade
+from app.analysis.refinement import divergence_line
 from app.companies.branding import logo_url
 from app.companies.descriptions import sourced_description
 from app.companies.fundamentals import fundamentals_payload
@@ -156,22 +157,34 @@ _EFFECT_ICON = {"positive": "win", "negative": "lose"}
 _DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative"}
 
 
-def _strict_sections(alert: Alert, rows_flat: list[dict]) -> list[dict] | None:
+def _strict_sections(
+    alert: Alert, rows_flat: list[dict], include_secondary: bool = True,
+) -> list[dict] | None:
     """Deterministic section assembly for gate-validated alerts (spec
     §23-§26): direction comes from economic_effect, membership from the
     publication gate's tier, labels from the controlled taxonomy. Returns
     None when no company clears DISPLAYABLE_TIERS (compute_ripple_layers'
     structural gate turns that into [], never a fall-through to the 3-tier
     path -- see corrective-v4 Task 12: gate_state != NULL makes the legacy
-    generator structurally unreachable, not merely undesired)."""
+    generator structurally unreachable, not merely undesired).
+
+    ``include_secondary`` (corrective-v4 Task 16, owner decision): the main
+    feed contract is PRIMARY only -- "/api/feed-v2 -> PRIMARY only ...
+    SECONDARY_DEEP_DIVE should be a separate explicit retrieval path". False
+    (the feed's setting) drops every secondary_deep_dive/legacy-"secondary"
+    company from `gated` entirely -- not merely from a trailing section --
+    so it never shapes a mixed primary section, and no trailing "Secondary"
+    section is appended. True (the deep-dive builder's setting) keeps the
+    existing inclusive behavior byte-identical."""
     # Keyed on alert_company_id, not position: rows_flat and alert.companies
     # happen to share an order today, but a positional pairing is a latent
     # bug waiting for either list to be re-sorted or filtered independently.
     rows_by_alert_company_id = {row["alert_company_id"]: row for row in rows_flat}
+    allowed_tiers = DISPLAYABLE_TIERS if include_secondary else ("primary",)
     gated = [
         (alert_company, rows_by_alert_company_id[alert_company.id])
         for alert_company in alert.companies
-        if alert_company.display_tier in DISPLAYABLE_TIERS
+        if alert_company.display_tier in allowed_tiers
     ]
     if not gated:
         return None
@@ -297,14 +310,25 @@ def _layer_note(edges: list[ImpactEdge], relationship: str) -> str | None:
     return None
 
 
-def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[int]) -> list[dict]:
+def compute_ripple_layers(
+    session: Session, alert: Alert, held_company_ids: set[int], include_secondary: bool = False,
+) -> list[dict]:
     """Ordered layers for one alert's card back. Each layer:
     {title, relationship, icon ('win'|'lose'|'side'), note (str|None),
     rows: [...]} -- rows carry ticker, name, sector, cap_tier,
     liquidity_tier, delivery_pct, direction, excess_move_pct,
     intensity, is_exposure_only, in_my_holdings, why, business_desc,
     fundamentals, volatility_range, logo_url. Every affected company appears exactly once (peak included
-    -- the card back is the complete who's-affected view, spec §2)."""
+    -- the card back is the complete who's-affected view, spec §2).
+
+    ``include_secondary`` (corrective-v4 Task 16) only affects gate-
+    validated (is_gated) alerts -- the legacy 3-tier path below always
+    renders every company regardless of this flag, unchanged. Default False
+    is the main feed's contract (spec §52, owner decision: "/api/feed-v2 ->
+    PRIMARY only"); app.routers.feed_v2's card-back route passes it
+    unchanged. app.routers.stock_deep_dive's internal analysis surface
+    passes True to keep seeing secondary/deep-dive companies -- that
+    endpoint isn't the public "normal feed" the owner's ruling targets."""
     moves_by_company_id = {
         m.company_id: m for m in session.query(MarketMove).filter_by(alert_id=alert.id).all()
     }
@@ -324,6 +348,11 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         for company_id in (edge.to_company_id, edge.from_company_id):
             if company_id is not None and company_id not in relation_by_company_id:
                 relation_by_company_id[company_id] = edge.relation
+
+    # Computed once, reused both for row-level field gating (below) and the
+    # structural gate at the bottom of this function -- a single evaluation
+    # so the two can never observe different alert_company snapshots.
+    alert_is_gated = is_gated(alert.companies)
 
     rows_flat: list[dict] = []
     contexts: list[RowContext] = []
@@ -403,6 +432,28 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
         if not exposure_only and move is not None and move.excess_move_pct is not None:
             row["excess_move_pct"] = move.excess_move_pct
             row["intensity"] = _intensity_for_company_move(session, company, move, breadth_score)
+        if alert_is_gated:
+            # Authoritative gate-derived fields (corrective-v4 Task 16) --
+            # gated rows only, so a legacy (ungated) row's dict stays
+            # byte-identical to its pre-Task-16 shape.
+            row["mechanism"] = alert_company.mechanism
+            # Deterministic from the stored float (app.analysis.impact_graph.
+            # publication_gate.materiality_grade), NOT re-derived from any
+            # CompanyDecisionRecord -- that audit row can be absent (non-
+            # strict analysis paths never write one) and is keyed by ticker,
+            # not alert_company_id, so it is not a reliable per-row source.
+            row["materiality_grade"] = materiality_grade(alert_company.materiality)
+            row["confidence_band"] = alert_company.confidence_band
+            row["impact_type"] = (
+                None if alert_company.causal_distance is None
+                else "direct" if alert_company.causal_distance == 1
+                else "indirect"
+            )
+            row["expected_market_sensitivity"] = alert_company.expected_market_sensitivity
+            # Task 13 template: states outright when the fundamental thesis
+            # and the observed reaction point opposite ways; None otherwise
+            # (both truths already ride on the row, never overwritten).
+            row["divergence"] = divergence_line(alert_company.economic_effect, row["reaction_direction"])
         rows_flat.append(row)
         bucket_keys.append(relationship)
         is_fanout.append(alert_company.basis == "sector_inference")
@@ -427,8 +478,8 @@ def compute_ripple_layers(session: Session, alert: Alert, held_company_ids: set[
     # DISPLAYABLE_TIERS) still returns [] here, never a fall-through.
     # The 3-tier path below runs ONLY when the alert is not gated at all,
     # and stays byte-identical for those alerts (existing tests pin it).
-    if is_gated(alert.companies):
-        return _strict_sections(alert, rows_flat) or []
+    if alert_is_gated:
+        return _strict_sections(alert, rows_flat, include_secondary) or []
 
     def _sorted(rows: list[dict]) -> list[dict]:
         return sorted(rows, key=lambda r: r["intensity"]["score"] if r["intensity"] else -1, reverse=True)

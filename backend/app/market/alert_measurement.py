@@ -76,7 +76,9 @@ def _intensity_for_company_move(session: Session, company: Company, move: Market
     )
 
 
-def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
+def compute_alert_measurement(
+    session: Session, alert: Alert, company_ids: set[int] | None = None,
+) -> dict | None:
     """Returns None if this alert has no company with a real measured
     excess move (measurement_status == "ok") -- an alert with nothing
     measured has no headline number to show and must be omitted from the
@@ -88,6 +90,16 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     no measurement at all: there is no company row to name as the peak, so
     the peak is meaningless and this degrades the same way as the
     `not moves` case above rather than raising.
+
+    ``company_ids`` (corrective-v4 Task 16, spec §52): when given, ONLY
+    MarketMove rows for these company ids are considered for peak/verdict/
+    intensity/breadth/market_reaction -- an empty set means "no company is
+    eligible" and this returns None, same as "nothing measured". None (the
+    default) considers every measured company on the alert, unchanged.
+    app.routers.feed_v2 passes the gate-authorized PRIMARY company ids for
+    a gated alert, so a secondary/deep-dive or rejected company's bigger
+    move can never become the event's headline number; ungated (legacy)
+    alerts always pass None.
 
     Otherwise returns a dict with: excess_move_pct, direction
     ("bullish"|"bearish"), raw_move_pct, sector_move_pct, volume_multiple
@@ -106,6 +118,8 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
         .filter(MarketMove.alert_id == alert.id, MarketMove.measurement_status == "ok")
         .all()
     )
+    if company_ids is not None:
+        moves = [m for m in moves if m.company_id in company_ids]
     if not moves:
         return None
 

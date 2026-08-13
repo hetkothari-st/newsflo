@@ -31,7 +31,7 @@ def legacy_mode(monkeypatch):
     monkeypatch.setattr(settings, "impact_engine_v4_strict", False)
 
 
-def _seed(db, *, move_status="ok", excess=-2.5, display_tier="primary"):
+def _seed(db, *, move_status="ok", excess=-2.5, display_tier="primary", gate_state="DISPLAY_ELIGIBLE"):
     article = Article(source="s", provider="finnhub", url="https://ex.com/a",
                       title="Crude oil spikes on supply shock", content="c",
                       status="ALERTED")
@@ -45,7 +45,7 @@ def _seed(db, *, move_status="ok", excess=-2.5, display_tier="primary"):
         alert_id=alert.id, company_id=company.id, direction="bearish",
         magnitude_low=1.0, magnitude_high=3.0, rationale="thesis",
         basis="direct_mention", economic_effect="negative",
-        display_tier=display_tier, gate_state="DISPLAY_ELIGIBLE",
+        display_tier=display_tier, gate_state=gate_state,
         causal_parent_type="economic_node", causal_parent_id="crude_price",
         causal_distance=1, materiality=0.7, mechanism="crude-linked input costs",
     ))
@@ -76,13 +76,19 @@ def test_strict_unmeasured_alert_still_served_in_list(client, db_session, strict
 
 
 @pytest.mark.parametrize("tier", ["secondary_deep_dive", "secondary"])
-def test_strict_deep_dive_only_alert_is_served(client, db_session, strict_mode, tier):
-    """A gate-authorized deep dive is a published result: it keeps the
-    unmeasured alert servable. Both the current tier string and the legacy
-    "secondary" spelling count (Task 4)."""
-    alert = _seed(db_session, move_status="no_data", display_tier=tier)
+def test_strict_deep_dive_only_alert_is_absent_from_list(client, db_session, strict_mode, tier):
+    """Corrective-v4 Task 16 (owner decision, verbatim): "/api/feed-v2 ->
+    PRIMARY only ... SECONDARY_DEEP_DIVE should be a separate explicit
+    retrieval path". This INVERTS the pre-Task-16 pin (a deep-dive-only
+    gate result used to keep the unmeasured alert servable in the main
+    list) -- a secondary/deep-dive-only alert has zero PRIMARY companies,
+    so it no longer headlines the normal feed at all. Its positive
+    counterpart ("present via GET /api/feed-v2/{id}/deep-dive") lives in
+    test_feed_primary_only.py. Both the current tier string and the legacy
+    "secondary" spelling are covered (Task 4)."""
+    _seed(db_session, move_status="no_data", display_tier=tier)
 
-    assert [r["id"] for r in client.get("/api/feed-v2").json()] == [alert.id]
+    assert client.get("/api/feed-v2").json() == []
 
 
 def test_strict_excluded_only_alert_is_not_served(client, db_session, strict_mode):
@@ -92,8 +98,30 @@ def test_strict_excluded_only_alert_is_not_served(client, db_session, strict_mod
     assert client.get("/api/feed-v2").json() == []
 
 
-def test_legacy_unmeasured_alert_stays_hidden(client, db_session, legacy_mode):
-    _seed(db_session, move_status="no_data")
+def test_legacy_mode_gated_unmeasured_alert_still_served(client, db_session, legacy_mode):
+    """Corrective-v4 Task 16 (owner ruling): once gate output is persisted
+    on a row it is authoritative REGARDLESS of impact_engine_v4_strict --
+    same "structural, not modal" discipline Task 12 already applies to
+    section rendering. This seed has ALWAYS carried gate_state=
+    "DISPLAY_ELIGIBLE" + display_tier="primary" (i.e. gated with a primary
+    company), so the pre-Task-16 "stays hidden with the flag off" pin was
+    testing "flag off despite gate data present" -- the owner's Task 16
+    ruling deliberately INVERTS that combination, same shape as Task 12's
+    inversion of section rendering. See
+    test_legacy_mode_truly_ungated_alert_stays_hidden below for the actual
+    "flag off, no gate data at all" case this test's old name claimed to
+    cover."""
+    alert = _seed(db_session, move_status="no_data")
+
+    assert [r["id"] for r in client.get("/api/feed-v2").json()] == [alert.id]
+
+
+def test_legacy_mode_truly_ungated_alert_stays_hidden(client, db_session, legacy_mode):
+    """The real "flag off" scenario: an alert with NO gate data at all
+    (gate_state AND display_tier both NULL, i.e. is_gated() is False)
+    stays hidden when unmeasured -- legacy behavior is untouched by
+    Task 16."""
+    _seed(db_session, move_status="no_data", display_tier=None, gate_state=None)
 
     assert client.get("/api/feed-v2").json() == []
 
@@ -110,8 +138,16 @@ def test_strict_detail_serves_unmeasured_alert_with_layers(client, db_session, s
     assert detail["layers"][0]["icon"] == "lose"  # from economic_effect
 
 
-def test_legacy_detail_404s_unmeasured_alert(client, db_session, legacy_mode):
+def test_legacy_mode_gated_detail_serves_unmeasured_alert(client, db_session, legacy_mode):
+    """Same Task 16 inversion as test_legacy_mode_gated_unmeasured_alert_
+    still_served above, for the detail route."""
     alert = _seed(db_session, move_status="no_data")
+
+    assert client.get(f"/api/feed-v2/{alert.id}").status_code == 200
+
+
+def test_legacy_mode_truly_ungated_detail_404s_unmeasured_alert(client, db_session, legacy_mode):
+    alert = _seed(db_session, move_status="no_data", display_tier=None, gate_state=None)
 
     assert client.get(f"/api/feed-v2/{alert.id}").status_code == 404
 

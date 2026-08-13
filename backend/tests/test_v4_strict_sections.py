@@ -112,7 +112,10 @@ def test_strict_secondary_companies_render_in_secondary_section_last(
                  causal_parent_id="road_freight_fuel_cost", materiality=0.3,
                  excess=-0.2)
 
-    layers = compute_ripple_layers(db_session, alert, set())
+    # include_secondary=True (corrective-v4 Task 16): this test pins the
+    # deep-dive builder's inclusive behavior directly; the feed's own
+    # default (False) is covered by test_feed_primary_only.py.
+    layers = compute_ripple_layers(db_session, alert, set(), include_secondary=True)
 
     assert layers[-1]["relationship"] == "SECONDARY"
     assert [r["ticker"] for r in layers[-1]["rows"]] == ["BLUEDART.NS"]

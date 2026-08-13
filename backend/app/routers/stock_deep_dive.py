@@ -121,7 +121,11 @@ def get_stock_deep_dive(
     result["why"] = translated_why or alert_company.why
     result["rationale"] = (translated[0] if translated and translated[0] else None) or alert_company.rationale
     result["volatility_range"] = volatility_range_payload(db, company, alert.category)
-    for layer in compute_ripple_layers(db, alert, held_company_ids):
+    # include_secondary=True (corrective-v4 Task 16): this is the internal
+    # per-stock analysis surface, not the public "normal feed" the owner's
+    # PRIMARY-only ruling targets -- a secondary/deep-dive company tapped
+    # from here must still find its own section.
+    for layer in compute_ripple_layers(db, alert, held_company_ids, include_secondary=True):
         if any(row["ticker"] == company.ticker for row in layer["rows"]):
             result["section_title"] = layer["title"]
             break

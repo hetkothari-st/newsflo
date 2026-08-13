@@ -11,6 +11,7 @@ from datetime import date as date_cls
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
+from app.analysis.impact_graph.publication_gate import is_gated
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.config import settings
 from app.companies.branding import logo_url
@@ -33,7 +34,7 @@ from app.market.discovery import (
 from app.market.cap_tier import cap_tier_map
 from app.market.ripple_layers import compute_ripple_layers
 from app.market.timeline_entries import get_timeline_entries
-from app.models import Alert, AlertCompany, Article, Company, Holding, User
+from app.models import Alert, AlertCompany, Article, Company, CompanyDecisionRecord, Holding, User
 from app.routers.articles import get_db
 
 # -- COMMENTED OUT (superseded by compute_ripple_layers, spec v2 §5/§7's
@@ -115,15 +116,32 @@ def _unavailable_measurement() -> dict:
     }
 
 
+def _primary_company_ids(alert: Alert) -> set[int]:
+    """The gate-authorized PRIMARY company ids on this alert (corrective-v4
+    Task 16, spec §52). Empty for an alert with no primary company at all
+    (secondary/deep-dive-only or excluded-only) -- the main feed never
+    headlines on those."""
+    return {ac.company_id for ac in alert.companies if ac.display_tier == "primary"}
+
+
 def _strict_displayable(alert: Alert) -> bool:
-    """Strict mode serves an unmeasured alert only when the publication
-    gate authorized at least one company for display. "secondary" is the
-    legacy spelling of "secondary_deep_dive" on pre-Task-4 rows -- readable
-    forever, never written again."""
-    return settings.impact_engine_v4_strict and any(
-        ac.display_tier in ("primary", "secondary_deep_dive", "secondary")
-        for ac in alert.companies
-    )
+    """Owner ruling (corrective-v4 Task 16, carrying forward Task 12's
+    structural discipline): a gate-authorized alert with >=1 PRIMARY
+    company stays servable via the unavailable-measurement placeholder
+    REGARDLESS of settings.impact_engine_v4_strict -- once the gate's tier
+    output is persisted on a row it is authoritative, the same "structural,
+    not modal" rule app.analysis.impact_graph.publication_gate.is_gated
+    already applies to section rendering. An alert carries display_tier ==
+    "primary" only on a row the gate itself set, so this check alone is
+    already gate-scoped -- no separate is_gated() call needed, and an
+    ungated (legacy, all-NULL display_tier) alert always reads False here,
+    same as before this task (the flag-gated legacy behavior for THOSE
+    alerts is unchanged). "secondary"/"secondary_deep_dive"-only or
+    excluded-only alerts no longer count -- PRIMARY only, spec §52: the
+    normal feed's headline/top-company calc considers only PRIMARY; a
+    secondary-only alert is reachable solely via GET
+    /api/feed-v2/{id}/deep-dive."""
+    return any(ac.display_tier == "primary" for ac in alert.companies)
 
 
 def _query_with_relations(db: Session):
@@ -190,7 +208,13 @@ def list_feed_v2_alerts(
         # language wire mirrors ingested before the language gate shipped.
         if not is_english_text(alert.article.title):
             continue
-        measurement = compute_alert_measurement(db, alert)
+        # PRIMARY-only headline (spec §52, corrective-v4 Task 16): a gated
+        # alert's peak/verdict/intensity/breadth can only come from a
+        # PRIMARY company -- secondary/deep-dive/rejected movers, however
+        # large, never headline. Ungated (legacy) alerts pass None
+        # (unchanged: every measured company is still eligible).
+        company_ids = _primary_company_ids(alert) if is_gated(alert.companies) else None
+        measurement = compute_alert_measurement(db, alert, company_ids=company_ids)
         if measurement is None and _strict_displayable(alert):
             measurement = _unavailable_measurement()
         if measurement is not None:
@@ -279,6 +303,65 @@ def get_portfolio_overlay(
     }
 
 
+# NOTE: declared before the catch-all /{alert_id} for the same reason as
+# /discovery/{tab} and /portfolio above -- though in this case it wouldn't
+# actually collide anyway (the extra "/deep-dive" segment means /{alert_id}
+# alone never matches this URL shape), declaring the more specific path
+# first keeps the file's ordering convention consistent and obviously safe.
+@router.get("/{alert_id}/deep-dive")
+def get_feed_v2_deep_dive(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """Explicit deep-dive surface (spec §52, corrective-v4 Task 16, owner
+    decision, verbatim): "/api/feed-v2 -> PRIMARY only; /api/feed-v2/{id}/
+    deep-dive -> optional PRIMARY + SECONDARY_DEEP_DIVE + rejected-summary."
+    A gated-analysis-only surface: an ungated (legacy, pre-gate) alert has
+    no gate/tier/rejection data to show here at all, so it 404s rather than
+    silently returning an empty shell -- the normal feed-v2 detail route
+    stays the place a legacy alert is served from. {primary, secondary}
+    reuse compute_ripple_layers' section shape (same "title"/"relationship"
+    /"icon"/"note"/"rows" dicts the card back already renders); "secondary"
+    is the ONE trailing SECONDARY-relationship section split back out, not
+    re-fetched, so both halves are guaranteed consistent with a single
+    ripple-layers computation. rejected_summary is the machine-readable
+    audit trail (why a candidate never reached ANY display tier) from
+    CompanyDecisionRecord -- REJECT_* rows for this alert only."""
+    alert = _query_with_relations(db).filter(Alert.id == alert_id).first()
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if not is_gated(alert.companies):
+        raise HTTPException(status_code=404, detail="Deep dive is only available for gate-analyzed alerts")
+
+    held_company_ids = _held_company_ids(db, current_user)
+    sections = compute_ripple_layers(db, alert, held_company_ids, include_secondary=True)
+    primary_sections = [s for s in sections if s["relationship"] != "SECONDARY"]
+    secondary_sections = [s for s in sections if s["relationship"] == "SECONDARY"]
+
+    rejected = (
+        db.query(CompanyDecisionRecord)
+        .filter(
+            CompanyDecisionRecord.alert_id == alert_id,
+            CompanyDecisionRecord.final_state.like("REJECT_%"),
+        )
+        .order_by(CompanyDecisionRecord.ticker.asc())
+        .all()
+    )
+    return {
+        "primary": primary_sections,
+        "secondary": secondary_sections,
+        "rejected_summary": [
+            {
+                "ticker": r.ticker,
+                "rejection_reason": r.rejection_reason,
+                "materiality_grade": r.materiality_grade,
+            }
+            for r in rejected
+        ],
+    }
+
+
 @router.get("/{alert_id}")
 def get_feed_v2_alert(
     alert_id: int,
@@ -297,7 +380,10 @@ def get_feed_v2_alert(
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    measurement = compute_alert_measurement(db, alert)
+    # PRIMARY-only headline (spec §52, corrective-v4 Task 16) -- same
+    # discipline as the list route above.
+    company_ids = _primary_company_ids(alert) if is_gated(alert.companies) else None
+    measurement = compute_alert_measurement(db, alert, company_ids=company_ids)
     if measurement is None:
         if _strict_displayable(alert):
             measurement = _unavailable_measurement()
@@ -316,8 +402,12 @@ def get_feed_v2_alert(
     # minimal, honest wire-through.
     result["analysis_quality"] = alert.analysis_quality
     # Layered card back (spec v2 §5/§7): every affected company, grouped by
-    # relationship into ordered winners/losers layers.
-    result["layers"] = compute_ripple_layers(db, alert, held_company_ids)
+    # relationship into ordered winners/losers layers. include_secondary=
+    # False (corrective-v4 Task 16, spec §52): the normal feed's card back
+    # is PRIMARY only for a gated alert -- secondary/deep-dive companies
+    # are reachable only through GET /api/feed-v2/{id}/deep-dive. No effect
+    # on an ungated (legacy) alert's 3-tier rendering.
+    result["layers"] = compute_ripple_layers(db, alert, held_company_ids, include_secondary=False)
     # Translated per-company `why` overlay (silent English fallback).
     whys = bulk_alert_company_whys(
         db, [row["alert_company_id"] for layer in result["layers"] for row in layer["rows"]], lang,
