@@ -560,6 +560,77 @@ def _judge_candidates(router: StageRouter, state: _GraphState, *, stage_prompt: 
     return merged
 
 
+def _union_preserve_order(a: list[str], b: list[str]) -> list[str]:
+    merged = list(a)
+    for item in b:
+        if item not in merged:
+            merged.append(item)
+    return merged
+
+
+def _merge_company(held: GraphCompany | None, newcomer: GraphCompany) -> GraphCompany:
+    """Multi-channel merge (corrective-v4 task 11): a company can be a
+    real economic subject of MORE THAN ONE mechanism in the same graph --
+    the second proposal must never silently vanish behind a best-wins
+    discard. The higher-impact record's parent/mechanism stays primary
+    (what the UI leads with); the other's mechanism is preserved in
+    `secondary_mechanisms` and every channel list is unioned, never
+    replaced.
+
+    Same-direction (or one-sided) proposals: primary's scores/effect
+    stand as the base -- this is still one coherent story, just with a
+    second corroborating/contributing channel.
+
+    Genuinely CONFLICTING proposals (one positive, one negative) become a
+    `mixed` verdict -- a coin-flip discard would silently pick a "winner"
+    the article's own graph does not support. confidence drops to the
+    min of the two (the conflict IS the uncertainty); materiality takes
+    the max (the bigger channel governs whether this is worth showing).
+
+    A mixed/uncertain incumbent absorbing a directional newcomer (or vice
+    versa) stays mixed -- the ambiguity does not resolve just because one
+    side had a cleaner story."""
+    if held is None:
+        return newcomer
+    if newcomer.impact_strength > held.impact_strength:
+        primary, secondary = newcomer, held
+    else:
+        primary, secondary = held, newcomer
+
+    merged = primary.model_copy(deep=True)
+    merged.positive_channels = _union_preserve_order(primary.positive_channels, secondary.positive_channels)
+    merged.negative_channels = _union_preserve_order(primary.negative_channels, secondary.negative_channels)
+    merged.offsetting_channels = _union_preserve_order(primary.offsetting_channels, secondary.offsetting_channels)
+    if secondary.mechanism and secondary.mechanism != primary.mechanism:
+        merged.secondary_mechanisms = _union_preserve_order(
+            primary.secondary_mechanisms, [secondary.mechanism])
+
+    effects = {held.economic_effect, newcomer.economic_effect}
+    if effects == {"positive", "negative"}:
+        merged.economic_effect = "mixed"
+        merged.net_direction = "mixed"
+        merged.direction = effect_to_direction("mixed")
+        merged.confidence = min(held.confidence, newcomer.confidence)
+        merged.materiality = max(
+            held.materiality if held.materiality is not None else 0.0,
+            newcomer.materiality if newcomer.materiality is not None else 0.0,
+        )
+        # Both sides of a real conflict must show non-empty -- fall back to
+        # the mechanism sentence itself when a side never stated a channel
+        # bullet, rather than leaving the display asymmetric.
+        if not merged.positive_channels:
+            source = held if held.economic_effect == "positive" else newcomer
+            merged.positive_channels = [source.mechanism] if source.mechanism else []
+        if not merged.negative_channels:
+            source = held if held.economic_effect == "negative" else newcomer
+            merged.negative_channels = [source.mechanism] if source.mechanism else []
+    elif "mixed" in effects or "uncertain" in effects:
+        merged.economic_effect = "mixed"
+        merged.net_direction = "mixed"
+        merged.direction = effect_to_direction("mixed")
+    return merged
+
+
 def _register_company_entries(state: _GraphState, entries: list[dict], node: _Node,
                               mechanism_id: str | None = None) -> None:
     """Shared validation/registration for mapping results (discovery floor
@@ -580,9 +651,7 @@ def _register_company_entries(state: _GraphState, entries: list[dict], node: _No
         if not _passes_discovery(company.materiality or 0.0, company.confidence):
             state.rejected_tickers.add(ticker)
             continue
-        held = state.companies.get(ticker)
-        if held is None or company.impact_strength > held.impact_strength:
-            state.companies[ticker] = company
+        state.companies[ticker] = _merge_company(state.companies.get(ticker), company)
 
 
 def _archetype_mapping(router: StageRouter, session, facts: EventFacts,
@@ -1286,9 +1355,7 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
             state.rejected_tickers.add(ticker)
             continue
         company.verified = True  # in-call self-check; independent verify below when risky
-        held = state.companies.get(ticker)
-        if held is None or company.impact_strength > held.impact_strength:
-            state.companies[ticker] = company
+        state.companies[ticker] = _merge_company(state.companies.get(ticker), company)
 
     # FINAL materiality pruning (spec §15): strict thresholds once, after
     # all discovery. Mixed/uncertain gate on materiality only.

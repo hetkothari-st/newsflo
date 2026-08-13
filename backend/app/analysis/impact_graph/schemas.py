@@ -446,6 +446,12 @@ class GraphCompany(BaseModel):
     # observation). Optional in every company schema -- an omission is the
     # honest "UNKNOWN", never a guess.
     expected_market_sensitivity: str = "UNKNOWN"
+    # Multi-channel merge (task 11): when a second mechanism proposes the
+    # SAME company, engine._merge_company keeps the higher-impact record's
+    # mechanism as primary and appends the other's mechanism here instead
+    # of discarding it. Engine-internal only -- never populated by a model
+    # (not present in any structured-output schema).
+    secondary_mechanisms: list[str] = Field(default_factory=list)
 
     @field_validator("expected_market_sensitivity", mode="before")
     @classmethod

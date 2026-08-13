@@ -1124,8 +1124,12 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 "offsetting_channels": company.offsetting_channels,
                 "net_direction": company.net_direction or company.direction,
                 "relative_beneficiary": company.relative_beneficiary,
+                # Multi-channel merge (corrective-v4 task 11): the other
+                # mechanism(s) a competing candidate contributed, preserved
+                # instead of silently discarded by the old best-wins merge.
+                "secondary_mechanisms": company.secondary_mechanisms,
             }) if (company.positive_channels or company.negative_channels
-                   or company.net_direction) else None,
+                   or company.net_direction or company.secondary_mechanisms) else None,
             # Expected market sensitivity (task 10): straight from
             # GraphCompany.expected_market_sensitivity -- set by the
             # mapping-stage model's own judgment, never derived from any
