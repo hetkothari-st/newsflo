@@ -46,6 +46,13 @@ def _graph_company(**overrides):
         mechanism="upstream crude realization: higher price lifts revenue per barrel",
         rationale="unhedged upstream producer with crude-linked realization",
         net_direction="bullish", economic_effect="positive", verified=True,
+        # These tests exercise gates OTHER than COUNTERFACTUAL_VALID; a
+        # verifier-delivered SUPPORTED keeps that gate a non-factor here
+        # (Task 9 killed the pipeline's old hardcoded "SUPPORTED" constant,
+        # but GraphCompany itself now defaults counterfactual="" -- the
+        # "verifier never reached this company" state, which would reject
+        # every one of these fixtures on a gate they are not testing).
+        counterfactual="SUPPORTED",
     )
     payload.update(overrides)
     return GraphCompany(**payload)
@@ -170,23 +177,17 @@ def test_strict_duplicate_company_second_occurrence_rejected(db_session, strict_
     assert entries[1]["display_tier"] == "excluded"
 
 
-def test_transitional_counterfactual_constant_must_die_with_task9():
-    """PINNED (Task 4 review M5). The pipeline currently hands the gate a
-    hardcoded counterfactual verdict of "SUPPORTED" because no component
-    computes the semantic counterfactual yet -- COUNTERFACTUAL_VALID is
-    therefore live but unreachable from production.
+def test_counterfactual_wired_from_graph_company_not_hardcoded(db_session, strict_mode):
+    """Task 9 replacement for the killed transitional-constant pin: the
+    gate's counterfactual input is the real per-company verdict carried on
+    GraphCompany, not a literal in _gate_candidates. An empty verdict (the
+    engine default -- verifier never reached this company at all) fails
+    closed even though every other gate would pass this candidate."""
+    _company_row(db_session, verified_node="crude_price")
+    entries = _v3_entries(db_session, _result([_graph_company(counterfactual="")]))
 
-    TASK 9 MUST DELETE THIS TEST when it wires the verifier's real verdict
-    into _gate_candidates. If Task 9 ships and this test still passes, the
-    placeholder outlived its excuse and the gate is quietly rubber-stamping
-    every candidate's event-specificity."""
-    import inspect
-
-    from app.pipeline import _gate_candidates
-
-    source = inspect.getsource(_gate_candidates)
-    assert 'counterfactual="SUPPORTED"' in source
-
+    assert entries[0]["gate_state"] == "REJECT_VALIDATOR_UNAVAILABLE"
+    assert entries[0]["display_tier"] == "excluded"
 
 def test_strict_dangling_causal_path_not_event_specific(db_session, strict_mode):
     """A company whose parent chain does not root in this event's own

@@ -41,6 +41,12 @@ def _graph_company(**overrides):
         mechanism="upstream crude realization: higher price lifts revenue per barrel",
         rationale="unhedged upstream producer with crude-linked realization",
         net_direction="bullish", economic_effect="positive", verified=True,
+        # These tests exercise the exposure-cache self-certification gates,
+        # not COUNTERFACTUAL_VALID -- a verifier-delivered SUPPORTED keeps
+        # that gate a non-factor (GraphCompany now defaults
+        # counterfactual="", the "verifier never reached this company"
+        # fail-closed state, corrective-v4 Task 9).
+        counterfactual="SUPPORTED",
     )
     payload.update(overrides)
     return GraphCompany(**payload)

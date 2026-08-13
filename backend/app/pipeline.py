@@ -923,9 +923,14 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
     subjects, ambiguous_entity_names = _subject_companies_ex(session, subject_facts)
     subject_tickers = {row.ticker for row in subjects}
     # Budget exhaustion means the verifier never ran (existing behavior) AND
-    # the analysis itself is degraded -- both truths, separately stated.
+    # the analysis itself is degraded -- both truths, separately stated. A
+    # "failed" analysis is the same story from a different failure mode
+    # (Task 9): whatever companies made it into `result.companies` came out
+    # of a pipeline run that could not complete, so nothing about their
+    # verification can be trusted either.
     budget_exhausted = result.analysis_quality == "budget_exhausted"
-    verification_available = not budget_exhausted and not (
+    analysis_failed = (result.analysis_quality or "").strip().lower() == "failed"
+    verification_available = not budget_exhausted and not analysis_failed and not (
         result.metrics or {}).get("verification_unavailable")
     analysis_quality = _gate_quality(result.analysis_quality)
     context = GateContext()
@@ -980,12 +985,14 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             verification_available=bool(verification_available),
             evidence_class=evidence_class,
             evidence_tier=evidence_tier,
-            # Transitional: the semantic counterfactual verdict is wired from
-            # the verifier in Task 9. Until then the structural proxy
-            # (trigger_shock_present) is the only event-specificity evidence
-            # we have, and inventing an LLM verdict here would be worse than
-            # admitting that.
-            counterfactual="SUPPORTED",
+            # Semantic counterfactual verdict (Task 9): the verifier's real
+            # per-company answer, carried through corrections/omission
+            # handling in app.analysis.impact_graph.engine._verify_companies.
+            # "" (verifier never reached this company at all) is a distinct,
+            # more severe state than "UNCERTAIN" (verifier ran, no answer for
+            # this ticker) -- the gate's SAFE semantics already treat both as
+            # non-primary, and "" additionally fails closed entirely.
+            counterfactual=company.counterfactual or "",
             analysis_quality=analysis_quality,
             positive_channels=list(company.positive_channels or []),
             negative_channels=list(company.negative_channels or []),

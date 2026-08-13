@@ -23,8 +23,8 @@ from app.analysis.impact_graph import prompts
 from app.analysis.impact_graph.budget import ArticleBudget
 from app.analysis.impact_graph.router import StageRouter, StageRouterError
 from app.analysis.impact_graph.schemas import (
-    CHILD_TYPES, PARENT_TYPES, SCHEMA_EDGE_VERDICTS, SCHEMA_FACTS, SCHEMA_RIPPLE,
-    SCHEMA_SHOCKS, EventFacts, GraphCompany, GraphEdge, ImpactGraphResult,
+    CHILD_TYPES, COUNTERFACTUAL_VERDICTS, PARENT_TYPES, SCHEMA_EDGE_VERDICTS, SCHEMA_FACTS,
+    SCHEMA_RIPPLE, SCHEMA_SHOCKS, EventFacts, GraphCompany, GraphEdge, ImpactGraphResult,
     direction_to_effect, effect_to_direction,
     schema_companies, schema_company_verdicts, schema_ranking,
 )
@@ -913,7 +913,33 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
         _apply_company_correction(company, correction)
     for ticker in accepted:
         state.companies[ticker].verified = True
-    # A company with neither verdict is KEPT (omission is not rejection).
+    # Counterfactual verdicts (Task 9): a ticker -> verdict map, validated
+    # against both the enum and state.companies (an unknown ticker or a
+    # garbage verdict is dropped, never trusted) -- applied to every company
+    # STILL IN state.companies, not only the accepted ones, so an explicit
+    # verdict the model gave for some other reason is never silently thrown
+    # away. An ACCEPTED company the model omitted from this map is not "no
+    # answer" in the same sense as a company the verifier never reached at
+    # all -- the verifier ran and looked at the whole set, so silence on one
+    # accepted ticker is graded UNCERTAIN (displayable as a deep dive, never
+    # primary -- spec §25/§31) rather than left "" (which the gate reads as
+    # REJECT_VALIDATOR_UNAVAILABLE, the "verifier never ran" state). A
+    # company with no accept, no reject, AND no counterfactual entry -- pure
+    # silence on every question -- keeps "" and fails exactly that closed.
+    counterfactual_map = raw.get("counterfactual", {}) or {}
+    for ticker, company in state.companies.items():
+        verdict = counterfactual_map.get(ticker)
+        if verdict in COUNTERFACTUAL_VERDICTS:
+            company.counterfactual = verdict
+        elif ticker in accepted:
+            company.counterfactual = "UNCERTAIN"
+    # A company with neither an accept nor a reject verdict stays in
+    # state.companies (still visible for the run's bookkeeping) but its
+    # `verified` flag was reset to False before this call and is never set
+    # True here -- silence is not acceptance, so REJECT_UNVERIFIED (or, if
+    # the counterfactual question was equally unanswered, the earlier
+    # REJECT_VALIDATOR_UNAVAILABLE) applies at the gate exactly as if the
+    # verifier had explicitly said no.
     # Positive relationships from verified companies feed the cache.
     if session is not None:
         for company in state.companies.values():
@@ -1303,10 +1329,25 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
     )
     if settings.impact_engine_v4_strict:
         risky = True
-    if companies and risky and not budget.exceeded:
+    if companies and risky:
         for company in companies:
             company.verified = False
-        _verify_companies(router, session, facts, state, alert_id=article_id)
+        if budget.exceeded:
+            # Symmetric with the broad path's hard-overrun branch below
+            # (spec §5, INV-005/016): a risky result that needed
+            # independent verification but ran out of budget for it is
+            # exactly as unverified as a verifier outage. Both signals are
+            # recorded -- the metric for the "why", router.quality for the
+            # ImpactGraphResult.analysis_quality the gate actually reads --
+            # so REJECT_VALIDATOR_UNAVAILABLE fires the same way it would if
+            # the verifier call itself had raised.
+            state.metrics["verification_unavailable"] = 1
+            router.quality = "budget_exhausted"
+            logger.warning(
+                "impact-graph narrow-path hard budget overrun skipped verification "
+                "at article=%s: %s", article_id, budget.summary())
+        else:
+            _verify_companies(router, session, facts, state, alert_id=article_id)
 
 
 def _build_graph(router: StageRouter, session, facts: EventFacts,

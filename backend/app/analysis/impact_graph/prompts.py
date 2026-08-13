@@ -13,7 +13,7 @@ from app.analysis.schemas import SECTOR_DEFINITIONS
 # 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
 # fingerprint, so a prompt change is an explicit, visible cache
 # invalidation instead of a silent one. Bump on ANY prompt-text change.
-IMPACT_PROMPT_VERSION = "kg-3"
+IMPACT_PROMPT_VERSION = "kg-4"
 
 # Business-model validation (final spec §9/§13): shared by every company
 # stage. Sector labels, names and tickers are candidacy, never proof.
@@ -516,7 +516,14 @@ A large rejection rate is acceptable.
 
 The goal is a high-integrity final graph.
 
-When a distance or direction is wrong but the company otherwise belongs, keep belongs=true and supply corrected_distance / corrected_direction."""
+When a distance or direction is wrong but the company otherwise belongs, keep belongs=true and supply corrected_distance / corrected_direction.
+
+COUNTERFACTUAL: for every company you keep, answer counterfactual:
+"If this event/shock had not occurred, would the claimed company impact
+substantially weaken or disappear?" SUPPORTED = yes, the impact depends on
+this event. NOT_SUPPORTED = the claim would stand anyway (it is a generic
+story, not this event's effect). UNCERTAIN = cannot determine. Never infer
+support from the company's stock-price movement."""
 
 
 # Doc 3 §11 -- stage 8 edge verification.

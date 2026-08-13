@@ -24,6 +24,12 @@ TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
 PARENT_TYPES = ["event", "economic_node", "sector", "commodity", "policy", "company"]
 CHILD_TYPES = ["economic_node", "sector", "commodity", "policy", "company"]
 DIRECTIONS = ["bullish", "bearish", "neutral"]
+# Semantic counterfactual verdict (corrective-v4 Task 9, spec §14): would the
+# claimed company impact substantially weaken or disappear if this event had
+# not occurred? SUPPORTED/NOT_SUPPORTED/UNCERTAIN -- see
+# app.analysis.impact_graph.publication_gate.COUNTERFACTUAL_VERDICTS for the
+# gate-side consumer of this same vocabulary.
+COUNTERFACTUAL_VERDICTS = ["SUPPORTED", "NOT_SUPPORTED", "UNCERTAIN"]
 # Canonical fundamental-effect vocabulary (corrective plan 2026-08-13 task 2,
 # superseding the 2026-08-12 §11 5-way that still conflated "neutral" with
 # genuine no-material-impact): a DISTINCT five-way enum. mixed ("both real
@@ -380,6 +386,15 @@ class GraphCompany(BaseModel):
     # the normal case is an unambiguous ticker from the enum-locked
     # candidate list.
     entity_ambiguous: bool = False
+    # Semantic counterfactual verdict (corrective-v4 Task 9): "" means no
+    # verdict has been delivered yet -- the gate's COUNTERFACTUAL_VALID
+    # check treats an unrecognized value as REJECT_VALIDATOR_UNAVAILABLE,
+    # the same fail-closed stance as an unverified company. Only
+    # app.analysis.impact_graph.engine._verify_companies ever writes a real
+    # value here (from the verifier's per-ticker verdict map, or an explicit
+    # UNCERTAIN fallback when the verifier ran but omitted this ticker); a
+    # company the verifier never reached at all keeps "".
+    counterfactual: str = ""
 
     def clamp(self) -> "GraphCompany":
         self.impact_strength = _clamp(self.impact_strength)
@@ -494,6 +509,16 @@ def schema_company_verdicts(valid_tickers: list[str]) -> dict:
                     },
                     "required": ["ticker"],
                 },
+            },
+            # Ticker -> counterfactual verdict (Task 9): a map rather than a
+            # per-company object field keeps the accept/reject/corrections
+            # contract token-cheap -- one extra key, not a shape change to
+            # every existing array. Keys are validated against
+            # state.companies in the engine, not trusted as ticker identity
+            # on their own.
+            "counterfactual": {
+                "type": "object",
+                "additionalProperties": {"type": "string", "enum": COUNTERFACTUAL_VERDICTS},
             },
         },
         "required": ["accept", "reject"],
