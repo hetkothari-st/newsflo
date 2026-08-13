@@ -100,9 +100,20 @@ def pulse_live(
             "title": row.title,
             "url": row.url,
             "summary": (row.content or "")[:300],
-            "published_at": row.published_at.isoformat() if row.published_at else None,
-            "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
+            # Stored naive-UTC; the marker matters -- without it the
+            # browser parses the string as LOCAL time and the IST clock
+            # renders 5.5h early.
+            "published_at": _utc_iso(row.published_at),
+            "fetched_at": _utc_iso(row.fetched_at),
             "image_url": row.image_url or None,  # "" = scrape attempted, no image found
         }
         for row in rows
     ]
+
+
+def _utc_iso(moment: datetime | None) -> str | None:
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.isoformat()

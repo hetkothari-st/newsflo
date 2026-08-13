@@ -34,3 +34,27 @@ def test_pulse_live_scopes_to_one_ist_day(db_session):
     assert [item["title"] for item in latest] == ["early morning"]  # latest IST day only
     assert [item["title"] for item in back] == ["late night"]
     assert [(d["date"], d["count"]) for d in dates] == [("2026-08-11", 1), ("2026-08-10", 1)]
+
+
+def test_pulse_live_timestamps_carry_utc_marker(db_session):
+    """Stored naive-UTC; serialized WITHOUT a zone marker the browser
+    parses the string as local (IST) time and the wire clock renders
+    5.5h early (caught live 2026-08-13)."""
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.models import Article
+    from app.routers.articles import get_db
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    db_session.add(Article(
+        source="pulse_zerodha", provider="pulse_zerodha", url="https://x/1",
+        title="t", content="c",
+        published_at=datetime(2026, 8, 13, 6, 41, 41),  # naive UTC, as stored
+    ))
+    db_session.commit()
+
+    row = TestClient(app).get("/api/pulse-live?limit=5").json()[0]
+
+    assert row["published_at"].endswith("+00:00")
+    app.dependency_overrides.clear()
