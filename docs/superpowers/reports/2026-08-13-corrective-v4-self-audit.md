@@ -730,3 +730,25 @@ where the guarantee is structural-for-gated-data rather than absolute.
 | Every PRIMARY company has an auditable causal/evidence/materiality chain | **Holds** — `CompanyDecisionRecord` + `EvidenceRecord` per candidate, incl. rejections |
 | The system can abstain | **Holds** — abstention_precision 3/3, rejection_recall 19/19 offline |
 | Live mode remains OFF until separately authorized | **Holds** — verified absent from every env/deploy artifact |
+
+---
+
+# ADDENDUM — Final whole-branch review + fix wave (post-self-audit)
+
+After this report was committed, an independent whole-branch review (c37999b..964ce63) returned **MERGEABLE-AFTER-FIXES** with 1 Critical + 8 blocking Important findings. All nine were fixed in commit `c9b58bc` and verified by a scoped re-review (all ADDRESSED, no new breakage):
+
+1. **C1** Boot migrations: `tools/migrate_on_boot.py` (stamp-aware: legacy DBs stamped 0001 then upgraded; empty DBs upgraded; failure = non-zero exit) now runs in the Dockerfile CMD before uvicorn; `main.py` warns when the schema is behind head. Previously nothing ever applied migrations 0002-0007 to an existing DB while flag-independent code wrote the new columns.
+2. **I1** Market→fundamental direction reconciliation now skips GATED rows structurally (per-row `gate_state`/`display_tier` check) in both `measure_and_reconcile_alert_companies` and `remeasure_no_data_moves` — a flag-off scheduler run can no longer overwrite gated rows' direction or delete their rationale.
+3. **I2** The same-run exposure self-echo guard now also covers `_company_profile_supports_mechanism` (second reader of `CompanyNodeExposure`).
+4. **I3** Composite materiality grade persisted (`alert_companies.materiality_grade`, migration 0007) and served; naked-float grade is legacy-row fallback only.
+5. **I4** Dedup-reuse and `CompanyDecisionRecord.analysis_version` now use the full 4-part version (prompt/schema/policy/knowledge); old 2-part records never match → fresh analysis (expect a temporary reuse-miss cost after deploy).
+6. **I5** Frontend tolerates the honest "measurement unavailable" payload (null moves render "—", no crash).
+7. **I9** One shared `effectRules.ts` drives both chart availability and bucketing (empty-column mismatch dead).
+8. **I10** Deck level detection understands gated `MECH:`/`SECONDARY` relationship keys.
+9. **I11** Internal audit endpoint requires authentication in addition to the debug flag; flag-off still 404s before any auth signal.
+
+Final verification after the wave: backend **2060 passed / 2 skipped**; offline benchmark 23/23 fixtures, all labeled expectations met; offline suite 6/6 PASS; frontend tsc clean, **763 passed / 4 skipped**.
+
+Deploy cautions recorded by the fix implementer: rehearse `migrate_on_boot` against production Postgres before first deploy; migration 0006's dedupe/repointing runs against live data on first boot — **back up first**; pre-0007 gated rows keep the float-grade fallback until re-analysis.
+
+Remaining BEFORE-CANARY items (not merge blockers, from the final review): spec §61 observability counters (the canary monitoring list — canary cannot run without them), §46 prompt-contract clauses (5 of 11 mandated clauses appear in no prompt), Discover surface tier filter (I6), a UI consumer for the deep-dive endpoint (I7 — owner product decision), chart `moveClass` zero-handling unification (I8). Spec-delivery gaps under-reported by the original self-audit are the final review's items 1-10 (observability, `run_shadow_replay`, prompt clauses, pass-through/hedging/segment-weight fields, event-model fields, structured business-model validation depth, flag-off decision-record coverage, unpopulated EvidenceRecord columns, benchmark scope framing, legacy visualize deck).
