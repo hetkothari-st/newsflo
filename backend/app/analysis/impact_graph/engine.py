@@ -241,24 +241,38 @@ def _subject_companies(session, facts: EventFacts) -> list:
     live) could be structurally absent from its own story's candidates.
     Subjects are prepended to candidate lists and never count against the
     per-call cap. Free -- no LLM involvement."""
-    from app.companies.matching.matcher import resolve
+    return _subject_companies_ex(session, facts)[0]
+
+
+def _subject_companies_ex(session, facts: EventFacts) -> tuple[list, set[str]]:
+    """`_subject_companies` plus the set of named entities the alias matcher
+    found genuinely AMBIGUOUS -- multiple real, tradeable companies with no
+    tiebreak -- rather than simply absent (corrective-v4 Task 7). Either way
+    the entity omits from `subjects` ("omit rather than mismatch" holds),
+    but the two failure modes are not the same fact and postmortems
+    shouldn't have to guess which one happened. app.pipeline._gate_candidates
+    consumes the ambiguous set to tell REJECT_ENTITY_AMBIGUOUS apart from
+    REJECT_UNKNOWN_COMPANY."""
+    from app.companies.matching.matcher import resolve_with_ambiguity
     from app.models import Company as CompanyRow
 
     if session is None:
-        return []
-    subjects, seen = [], set()
+        return [], set()
+    subjects, seen, ambiguous_entities = [], set(), set()
     for entity in (facts.named_entities or [])[:12]:
         try:
-            match = resolve(session, None, entity)
+            match, ambiguous = resolve_with_ambiguity(session, None, entity)
         except Exception:  # noqa: BLE001 -- matcher trouble never blocks analysis
             continue
+        if ambiguous:
+            ambiguous_entities.add(entity)
         if match is None or match.company_id in seen:
             continue
         row = session.get(CompanyRow, match.company_id)
         if row is not None and row.market == "INDIA" and row.tradeability == "NORMAL":
             seen.add(match.company_id)
             subjects.append(row)
-    return subjects
+    return subjects, ambiguous_entities
 
 
 # Provenance values a candidate-profile line may honestly call "verified"

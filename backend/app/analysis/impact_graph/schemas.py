@@ -371,6 +371,15 @@ class GraphCompany(BaseModel):
     # Derived from net_direction/direction when the model omits it; the
     # legacy 3-way direction stays the market-facing view.
     economic_effect: str = ""
+    # Entity tri-state (corrective-v4 Task 7): the alias matcher found
+    # MULTIPLE real, tradeable companies for the entity that named this
+    # candidate and could not tiebreak between them -- a different failure
+    # from "no company matched at all". The publication gate reads this to
+    # emit REJECT_ENTITY_AMBIGUOUS instead of the generic
+    # REJECT_UNKNOWN_COMPANY (app.pipeline._gate_candidates). Default False:
+    # the normal case is an unambiguous ticker from the enum-locked
+    # candidate list.
+    entity_ambiguous: bool = False
 
     def clamp(self) -> "GraphCompany":
         self.impact_strength = _clamp(self.impact_strength)

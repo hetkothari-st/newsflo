@@ -154,3 +154,87 @@ def test_alias_rung_wins_over_company_name_fallback_when_aliases_exist(universe)
     result = matcher.resolve(universe, ticker=None, name="Apollo Tyres Limited")
     assert result.company_id == _company_id(universe, "APOLLOTYRE.NS")
     assert result.method == "alias"
+
+
+# --- resolve_with_ambiguity: tri-state (corrective-v4 Task 7) -------------
+#
+# `resolve()` has always collapsed "no match" and "multiple real matches,
+# no tiebreak" to the same None. These tests pin the richer signal
+# `resolve_with_ambiguity` exposes without changing `resolve()`'s own
+# contract (every test above still holds unmodified).
+
+def test_apollo_alone_is_absent_not_ambiguous(universe):
+    # "Apollo" alone never reaches ANY rung's multi-hit branch: no alias's
+    # normalized form equals "apollo", and it's too short to clear the
+    # fuzzy-match threshold against either "Apollo Tyres" or "Apollo
+    # Hospitals" -- so the honest state is "no match", not "ambiguous".
+    # (Real collisions need a rung that actually returns >1 candidate --
+    # see test_alias_exact_collision_between_two_tradeable_companies below.)
+    match, ambiguous = matcher.resolve_with_ambiguity(universe, ticker=None, name="Apollo")
+    assert match is None
+    assert ambiguous is False
+
+
+def test_alias_exact_collision_between_two_tradeable_companies_is_ambiguous(db_session):
+    """The real shape of alias-rung ambiguity: two DIFFERENT, both-tradeable
+    companies whose legal name normalizes identically. No tiebreak is
+    possible, and that must be reported as ambiguous, not absent."""
+    db_session.add_all([
+        Company(ticker="TWA.NS", name="Twin Alpha Limited", sector="other",
+               index_tier="OTHER", tradeability="NORMAL"),
+        Company(ticker="TWB.NS", name="Twin Alpha Limited", sector="other",
+               index_tier="OTHER", tradeability="NORMAL"),
+    ])
+    db_session.commit()
+    aliases.rebuild_aliases(db_session)
+
+    match, ambiguous = matcher.resolve_with_ambiguity(
+        db_session, ticker=None, name="Twin Alpha Limited")
+    assert match is None
+    assert ambiguous is True
+
+
+def test_unknown_name_is_absent_not_ambiguous(universe):
+    match, ambiguous = matcher.resolve_with_ambiguity(
+        universe, ticker=None, name="Totally Fictional Corp")
+    assert match is None
+    assert ambiguous is False
+
+
+def test_unique_alias_match_is_unambiguous(universe):
+    match, ambiguous = matcher.resolve_with_ambiguity(
+        universe, ticker=None, name="Apollo Tyres Ltd")
+    assert match.company_id == _company_id(universe, "APOLLOTYRE.NS")
+    assert ambiguous is False
+
+
+def test_tradeability_tiebreak_is_not_ambiguous(universe):
+    match, ambiguous = matcher.resolve_with_ambiguity(
+        universe, ticker=None, name="Reliance Industries Limited")
+    assert match.company_id == _company_id(universe, "RELIANCE.NS")
+    assert ambiguous is False
+
+
+def test_company_name_fallback_collision_is_reported_ambiguous(db_session):
+    db_session.add_all([
+        Company(ticker="DUP1.NS", name="Duplicate Name Limited", sector="other", index_tier="OTHER"),
+        Company(ticker="DUP2.NS", name="Duplicate Name Limited", sector="other", index_tier="OTHER"),
+    ])
+    db_session.commit()
+
+    match, ambiguous = matcher.resolve_with_ambiguity(
+        db_session, ticker=None, name="Duplicate Name Limited")
+    assert match is None
+    assert ambiguous is True
+
+
+def test_ticker_match_is_never_ambiguous(universe):
+    match, ambiguous = matcher.resolve_with_ambiguity(
+        universe, ticker="APOLLOTYRE.NS", name=None)
+    assert match.company_id == _company_id(universe, "APOLLOTYRE.NS")
+    assert ambiguous is False
+
+
+def test_resolve_still_discards_the_ambiguity_flag(universe):
+    # resolve() itself is unchanged: still a plain MatchResult | None.
+    assert matcher.resolve(universe, ticker=None, name="Apollo") is None

@@ -901,19 +901,26 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
     `evidence_payloads` are EvidenceRecord payload dicts (Task 5) -- not
     yet persisted, since no Alert id exists at this point; see
     app.analysis.impact_graph.evidence.persist_evidence."""
-    from app.analysis.impact_graph.engine import _subject_companies
+    from app.analysis.impact_graph.engine import _subject_companies_ex
     from app.analysis.impact_graph.evidence import classify_evidence
     from app.analysis.impact_graph.publication_gate import CandidateInput, GateContext, evaluate_candidate
     from app.analysis.impact_graph.schemas import EventFacts
 
     # Reuse the engine's deterministic subject resolver on the result's
-    # carried entity names -- same alias matcher, no LLM.
+    # carried entity names -- same alias matcher, no LLM. `ambiguous_entity_names`
+    # holds entities the matcher found genuinely ambiguous (Task 7); the
+    # ONLY safe cross-reference back to a specific GraphCompany is exact
+    # name equality -- this module's whole design rejects substring/fuzzy
+    # matching as a false-confidence hazard (see matcher.py), so a
+    # GraphCompany's own `entity_ambiguous` flag (set by its producer) is
+    # the primary signal and this is a defensive fallback, not the main path.
     subject_facts = EventFacts(
         event="", facts="", category=result.category,
         event_type=result.event_type or "",
         named_entities=list(result.named_entities or []),
     )
-    subject_tickers = {row.ticker for row in _subject_companies(session, subject_facts)}
+    subjects, ambiguous_entity_names = _subject_companies_ex(session, subject_facts)
+    subject_tickers = {row.ticker for row in subjects}
     # Budget exhaustion means the verifier never ran (existing behavior) AND
     # the analysis itself is degraded -- both truths, separately stated.
     budget_exhausted = result.analysis_quality == "budget_exhausted"
@@ -926,14 +933,25 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
         row = session.query(Company).filter_by(ticker=company.ticker).one_or_none()
         evidence_class, evidence_tier, evidence_payloads = classify_evidence(
             session, company, subject_tickers)
+        # Entity tri-state (Task 7): the ticker resolving to a real Company
+        # row is the normal case (GraphCompany.ticker comes from an
+        # enum-locked candidate list). `entity_ambiguous` is the one signal
+        # that overrides "resolved"/"unresolved" with a third, more honest
+        # state -- the matcher found MULTIPLE real companies for the entity
+        # that named this candidate and could not tell them apart.
+        entity_ambiguous = bool(company.entity_ambiguous) or (
+            company.name in ambiguous_entity_names)
+        entity_status = (
+            "ambiguous" if entity_ambiguous
+            else "resolved" if row is not None
+            else "unresolved"
+        )
         decisions.append((evidence_class, evidence_tier, evidence_payloads, evaluate_candidate(CandidateInput(
             ticker=company.ticker,
             # Resolved-company identity: the dedup key finalize uses, so two
             # tickers naming one company collapse to one published row.
             company_key=str(row.id) if row is not None else "",
-            # Tri-state entity resolution lands in Task 7; the pipeline can
-            # only tell resolved from unresolved today, and says exactly that.
-            entity_status="resolved" if row is not None else "unresolved",
+            entity_status=entity_status,
             company_profile_present=_company_profile_supports_mechanism(
                 session, row, company),
             mechanism=company.mechanism or "",

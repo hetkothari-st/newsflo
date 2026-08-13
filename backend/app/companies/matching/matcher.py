@@ -68,48 +68,66 @@ class MatchResult:
     score: float = 1.0
 
 
-def _disambiguate(session: Session, company_ids: list[int], method: str) -> MatchResult | None:
-    """One candidate wins outright. Several candidates resolve to None,
-    unless exactly one of them is normally tradeable -- the realistic
-    collision once dormant shells enter the table."""
+def _disambiguate_ex(
+    session: Session, company_ids: list[int], method: str,
+) -> tuple[MatchResult | None, bool]:
+    """One candidate wins outright. Several candidates resolve to (None,
+    ambiguous=True), unless exactly one of them is normally tradeable -- the
+    realistic collision once dormant shells enter the table. The bool is
+    the ONLY signal a caller has to tell "we found nothing" apart from "we
+    found more than one real company and can't tell which" -- both used to
+    collapse to the same None (corrective-v4 Task 7)."""
     unique = list(dict.fromkeys(company_ids))
     if not unique:
-        return None
+        return None, False
     if len(unique) == 1:
-        return MatchResult(unique[0], method)
+        return MatchResult(unique[0], method), False
 
     tradeable = [
         company_id for company_id, in session.query(Company.id)
         .filter(Company.id.in_(unique), Company.tradeability == "NORMAL").all()
     ]
     if len(tradeable) == 1:
-        return MatchResult(tradeable[0], f"{method}+tradeability_tiebreak")
-    return None
+        return MatchResult(tradeable[0], f"{method}+tradeability_tiebreak"), False
+    return None, True
 
 
-def resolve(
+def _disambiguate(session: Session, company_ids: list[int], method: str) -> MatchResult | None:
+    return _disambiguate_ex(session, company_ids, method)[0]
+
+
+def resolve_with_ambiguity(
     session: Session, ticker: str | None, name: str | None, isin: str | None = None,
-) -> MatchResult | None:
+) -> tuple[MatchResult | None, bool]:
+    """Same ladder as `resolve()`, plus the one bit `resolve()` throws away:
+    whether the winning rung actually found MULTIPLE distinct companies it
+    could not tiebreak, rather than finding none at all. `resolve()` is now
+    a thin wrapper over this that keeps its old, ambiguity-blind contract
+    for the ~60 existing call sites that only ever wanted the match itself.
+
+    Ticker and ISIN lookups are exact-equality on a unique/indexed column,
+    so they can never be ambiguous by construction -- only the name-based
+    rungs (alias, company_name, token_set, fuzzy) can be."""
     if ticker:
         company = session.query(Company).filter_by(ticker=ticker.strip()).one_or_none()
         if company is not None:
-            return MatchResult(company.id, "ticker")
+            return MatchResult(company.id, "ticker"), False
 
     if isin:
         company = session.query(Company).filter_by(isin=isin.strip().upper()).one_or_none()
         if company is not None:
-            return MatchResult(company.id, "isin")
+            return MatchResult(company.id, "isin"), False
 
     normalized = normalize_name(name)
     if not normalized:
-        return None
+        return None, False
 
     exact = [
         company_id for company_id, in
         session.query(CompanyAlias.company_id).filter_by(normalized=normalized).all()
     ]
     if exact:
-        return _disambiguate(session, exact, "alias")
+        return _disambiguate_ex(session, exact, "alias")
 
     # Fallback for a stale/empty/missing alias table -- see module docstring.
     # Exact equality on the same normalized form the LEGAL alias would use,
@@ -121,11 +139,11 @@ def resolve(
         if normalize_name(company_name) == normalized
     ]
     if company_name_hits:
-        return _disambiguate(session, company_name_hits, "company_name")
+        return _disambiguate_ex(session, company_name_hits, "company_name")
 
     mention_tokens = tokens(name)
     if not mention_tokens:
-        return None
+        return None, False
 
     candidates = (
         session.query(CompanyAlias.company_id, CompanyAlias.normalized).all()
@@ -136,7 +154,7 @@ def resolve(
         if frozenset(alias_normalized.split(" ")) == mention_tokens
     ]
     if token_hits:
-        return _disambiguate(session, token_hits, "token_set")
+        return _disambiguate_ex(session, token_hits, "token_set")
 
     scored: list[tuple[float, int]] = []
     for company_id, alias_normalized in candidates:
@@ -150,10 +168,19 @@ def resolve(
             scored.append((score, company_id))
 
     if not scored:
-        return None
+        return None, False
     scored.sort(reverse=True)
     best_score, best_id = scored[0]
     runners = [s for s, cid in scored if cid != best_id]
     if runners and best_score - max(runners) < FUZZY_MIN_MARGIN:
-        return None
-    return MatchResult(best_id, "fuzzy", best_score)
+        # Two candidates close enough in score that picking the leader would
+        # be a guess dressed up as confidence -- genuinely ambiguous, not
+        # simply "no fuzzy match reached the threshold".
+        return None, True
+    return MatchResult(best_id, "fuzzy", best_score), False
+
+
+def resolve(
+    session: Session, ticker: str | None, name: str | None, isin: str | None = None,
+) -> MatchResult | None:
+    return resolve_with_ambiguity(session, ticker, name, isin)[0]
