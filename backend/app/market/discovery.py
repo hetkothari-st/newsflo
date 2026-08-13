@@ -89,10 +89,20 @@ def compute_materiality_feed(session: Session) -> list[dict]:
 
 def compute_related_to_holdings(session: Session, current_user: User | None) -> list[dict]:
     """Path 2 (spec §6): start from a stock the user owns -> surface the
-    smaller suppliers, users, substitutes and pure-play peers the same
-    news touches (the cascade's parent_company chain). Held companies
-    themselves are excluded -- this is discovery, not the portfolio view.
-    Anonymous users get an empty list (the UI explains why)."""
+    other companies the same news touches. Two link signals, strongest
+    first per row:
+
+    1. The cascade's parent_company chain (kept where it exists) -- but
+       the v3 engine's causal parents are economic nodes/sectors, not
+       companies, so parent_company_id is almost never set anymore
+       (3 rows in the whole production DB); relying on it alone left the
+       tab permanently empty.
+    2. Co-affection (the v3-era signal): a non-held company in the SAME
+       alert as a held one, via_ticker = the held company that links it.
+
+    Held companies themselves are excluded -- this is discovery, not the
+    portfolio view. Anonymous users get an empty list (the UI explains
+    why)."""
     if current_user is None:
         return []
     held_company_ids = {
@@ -101,16 +111,42 @@ def compute_related_to_holdings(session: Session, current_user: User | None) -> 
     if not held_company_ids:
         return []
     cap_tiers = _cap_tiers(session)
+    rows = _today_measured_rows(session)
+
+    # Which alerts touch a holding, and through which held company --
+    # scan ALL of today's alert companies (not only measured ones): a
+    # held large cap with a failed measurement still links its alert.
+    start_utc, end_utc = day_utc_window(today_ist())
+    held_rows = (
+        session.query(AlertCompany)
+        .join(Alert, AlertCompany.alert_id == Alert.id)
+        .options(selectinload(AlertCompany.company))
+        .filter(
+            Alert.created_at >= start_utc,
+            Alert.created_at < end_utc,
+            AlertCompany.company_id.in_(held_company_ids),
+        )
+        .all()
+    )
+    held_ticker_by_alert: dict[int, str] = {}
+    for held in held_rows:
+        held_ticker_by_alert.setdefault(held.alert_id, held.company.ticker)
+
     entries = []
-    for alert_company, move, alert in _today_measured_rows(session):
+    for alert_company, move, alert in rows:
         if alert_company.company_id in held_company_ids:
             continue
-        if alert_company.parent_company_id not in held_company_ids:
+        via_ticker = None
+        if alert_company.parent_company_id in held_company_ids:
+            via_ticker = (
+                alert_company.parent_company.ticker if alert_company.parent_company else None
+            )
+        elif alert.id in held_ticker_by_alert:
+            via_ticker = held_ticker_by_alert[alert.id]
+        else:
             continue
         entry = _entry(alert_company, move, alert, cap_tiers)
-        entry["via_ticker"] = (
-            alert_company.parent_company.ticker if alert_company.parent_company else None
-        )
+        entry["via_ticker"] = via_ticker
         entries.append(entry)
     entries.sort(
         key=lambda e: abs(e["excess_move_pct"]) if e["excess_move_pct"] is not None else 0,
@@ -119,18 +155,35 @@ def compute_related_to_holdings(session: Session, current_user: User | None) -> 
     return entries[:RESULT_LIMIT]
 
 
+# Fallback floor for the unusual tab: relative volume below this is
+# ordinary churn, not worth surfacing even on a quiet day.
+FALLBACK_VOLUME_MULTIPLE = 1.5
+
+
 def compute_unusual_activity(session: Session) -> list[dict]:
     """Path 3 (spec §6): small/micro caps with abnormal volume today, each
     flagged by whether the delivery data makes the move trustworthy or
-    speculative (low_delivery / thin_trading flags on every entry)."""
+    speculative (low_delivery / thin_trading flags on every entry).
+
+    Production reality (measured 2026-08-13): the feed skews large-cap
+    and quiet days top out below the 2.0x threshold, so the strict filter
+    rendered the tab permanently empty. When nothing clears the strict
+    bar, fall back to today's highest-relative-volume movers -- any cap
+    tier, still at least FALLBACK_VOLUME_MULTIPLE -- rather than showing
+    nothing. Honest empty only when nothing traded unusually at all."""
     cap_tiers = _cap_tiers(session)
-    entries = []
-    for alert_company, move, alert in _today_measured_rows(session):
+    rows = _today_measured_rows(session)
+
+    strict, fallback = [], []
+    for alert_company, move, alert in rows:
+        if move.volume_multiple is None:
+            continue
         tier = cap_tiers.get(alert_company.company.ticker)
-        if tier not in ("SMALL", "MICRO"):
-            continue
-        if move.volume_multiple is None or move.volume_multiple < config.UNUSUAL_VOLUME_MULTIPLE:
-            continue
-        entries.append(_entry(alert_company, move, alert, cap_tiers))
+        if tier in ("SMALL", "MICRO") and move.volume_multiple >= config.UNUSUAL_VOLUME_MULTIPLE:
+            strict.append(_entry(alert_company, move, alert, cap_tiers))
+        elif move.volume_multiple >= FALLBACK_VOLUME_MULTIPLE:
+            fallback.append(_entry(alert_company, move, alert, cap_tiers))
+
+    entries = strict if strict else fallback
     entries.sort(key=lambda e: e["volume_multiple"], reverse=True)
     return entries[:RESULT_LIMIT]

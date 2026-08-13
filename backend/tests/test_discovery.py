@@ -109,6 +109,60 @@ def test_unusual_tab_only_lists_small_micro_with_abnormal_volume(db_session):
     app.dependency_overrides.clear()
 
 
+def test_holdings_tab_surfaces_co_affected_companies_without_parent_link(db_session):
+    """The v3 engine's causal parents are economic nodes/sectors, not
+    companies, so parent_company_id is almost never set (3 rows in the
+    whole production DB) -- the parent-chain match alone left the tab
+    permanently empty. Co-affection is the v3-era signal: a non-held
+    company in the SAME alert as a held one surfaces, via the held
+    ticker."""
+    _override_db(db_session)
+    parent, child, alert = _seed_today(db_session)
+    # Sever the legacy parent link -- v3 rows look like this.
+    ac = db_session.query(AlertCompany).filter_by(company_id=child.id).one()
+    ac.parent_company_id = None
+    db_session.commit()
+
+    user = User(email="co@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(Holding(user_id=user.id, company_id=parent.id, quantity=10))
+    db_session.commit()
+
+    from app.auth.dependencies import get_current_user_optional
+    app.dependency_overrides[get_current_user_optional] = lambda: user
+    client = TestClient(app)
+
+    body = client.get("/api/feed-v2/discovery/holdings").json()
+
+    assert [row["ticker"] for row in body] == ["TINY.NS"]
+    assert body[0]["via_ticker"] == "BIG.NS"  # the held company that links it
+    app.dependency_overrides.clear()
+
+
+def test_unusual_tab_falls_back_to_highest_relative_volume(db_session):
+    """Production reality: the feed skews large-cap and quiet days top out
+    below the 2.0x threshold (measured 2026-08-13: best of the day was
+    1.9x) -- the strict small/micro filter rendered the tab permanently
+    empty. When nothing clears the strict bar, fall back to today's
+    highest-relative-volume movers (any cap, still >= the fallback floor)
+    rather than showing nothing."""
+    _override_db(db_session)
+    parent, child, alert = _seed_today(db_session)
+    # Kill the strict qualifier: micro child's volume no longer abnormal.
+    move = db_session.query(MarketMove).filter_by(company_id=child.id).one()
+    move.volume_multiple = 1.2
+    db_session.commit()
+    # BIG.NS (LARGE, 2.6x) fails the strict small/micro rule but is the
+    # day's clear volume mover -> fallback surfaces it.
+    client = TestClient(app)
+
+    body = client.get("/api/feed-v2/discovery/unusual").json()
+
+    assert [row["ticker"] for row in body] == ["BIG.NS"]
+    app.dependency_overrides.clear()
+
+
 def test_holdings_tab_is_empty_for_anonymous_users(db_session):
     _override_db(db_session)
     _seed_today(db_session)
