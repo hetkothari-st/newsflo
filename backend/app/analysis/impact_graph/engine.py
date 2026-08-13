@@ -547,7 +547,7 @@ def _register_company_entries(state: _GraphState, entries: list[dict], node: _No
             logger.warning("impact-graph company entry rejected by schema: %s", exc)
             continue
         state.metrics["companies_considered"] += 1
-        if not _passes_discovery(company.materiality, company.confidence):
+        if not _passes_discovery(company.materiality or 0.0, company.confidence):
             state.rejected_tickers.add(ticker)
             continue
         held = state.companies.get(ticker)
@@ -750,7 +750,7 @@ def _final_materiality_prune(state: _GraphState) -> None:
         company = state.companies[ticker]
         thresholds = impact_thresholds_for_distance(company.causal_distance)
         mixed = company.net_direction in ("mixed", "uncertain")
-        ok_materiality = company.materiality >= thresholds["materiality"]
+        ok_materiality = (company.materiality or 0.0) >= thresholds["materiality"]
         ok_confidence = mixed or company.confidence >= thresholds["confidence"]
         parent_alive = company.parent_id == EVENT_NODE_ID or company.parent_id in state.nodes
         # Neutral is not a garbage category (eligibility directive §11): a
@@ -758,7 +758,7 @@ def _final_materiality_prune(state: _GraphState) -> None:
         # association, not an offsetting analysis -- prune it. A genuine
         # offset carries both channel lists.
         neutral_garbage = (
-            company.economic_effect == "neutral"
+            company.economic_effect == "no_material_impact"
             and not (company.positive_channels and company.negative_channels)
             and not company.offsetting_channels
         )
@@ -848,7 +848,7 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
 
     listing = "\n".join(
         f"- {c.ticker} ({c.name}) d{c.causal_distance} {c.direction} net={c.net_direction or '-'} "
-        f"impact={c.impact_strength:.2f} conf={c.confidence:.2f} mat={c.materiality:.2f} "
+        f"impact={c.impact_strength:.2f} conf={c.confidence:.2f} mat={(c.materiality or 0.0):.2f} "
         f"parent={c.parent_type}:{c.parent_id} :: {c.mechanism[:140]}\n"
         f"  path: {_company_path(c)}"
         for c in to_verify
@@ -991,7 +991,7 @@ def _rank(state: _GraphState) -> list[dict]:
     companies = list(state.companies.values())
     if not companies:
         return []
-    companies.sort(key=lambda c: (c.impact_strength, c.materiality, c.confidence, c.ticker),
+    companies.sort(key=lambda c: (c.impact_strength, c.materiality or 0.0, c.confidence, c.ticker),
                    reverse=True)
     ranking = []
     for company in companies:
@@ -1229,7 +1229,7 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         state.metrics["companies_considered"] += 1
         # DISCOVERY floor only here; the strict distance thresholds -- and
         # mixed/uncertain survival handling -- run in the final prune below.
-        if not _passes_discovery(company.materiality, company.confidence):
+        if not _passes_discovery(company.materiality or 0.0, company.confidence):
             state.rejected_tickers.add(ticker)
             continue
         company.verified = True  # in-call self-check; independent verify below when risky

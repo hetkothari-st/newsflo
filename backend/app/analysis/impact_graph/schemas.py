@@ -24,11 +24,20 @@ TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
 PARENT_TYPES = ["event", "economic_node", "sector", "commodity", "policy", "company"]
 CHILD_TYPES = ["economic_node", "sector", "commodity", "policy", "company"]
 DIRECTIONS = ["bullish", "bearish", "neutral"]
-# Canonical fundamental-effect vocabulary (architecture upgrade 2026-08-12
-# §11): the graph describes ECONOMIC effect; mixed and uncertain are valid
-# and must survive every stage. The legacy 3-way `direction` is DERIVED
-# from this, never independently generated.
-ECONOMIC_EFFECTS = ["positive", "negative", "mixed", "uncertain", "neutral"]
+# Canonical fundamental-effect vocabulary (corrective plan 2026-08-13 task 2,
+# superseding the 2026-08-12 §11 5-way that still conflated "neutral" with
+# genuine no-material-impact): a DISTINCT five-way enum. mixed ("both real
+# channels present"), uncertain ("we don't know enough") and
+# no_material_impact ("we know enough to conclude it doesn't matter") never
+# collapse into each other. The legacy 3-way `direction` is DERIVED from
+# this, never independently generated, and stays compat-only.
+ECONOMIC_EFFECTS = ["positive", "negative", "mixed", "uncertain", "no_material_impact"]
+# Model-facing enum only: Gemini structured-output schemas still accept the
+# legacy "neutral" spelling as INPUT (existing prompts were written against
+# it) alongside the canonical five. normalize_effect() maps it to
+# "no_material_impact" at the parse boundary -- "neutral" must never be the
+# canonical, in-process, or persisted value.
+_ECONOMIC_EFFECT_INPUT_ENUM = ECONOMIC_EFFECTS + ["neutral"]
 # Channel-audit verdicts (spec §5): the audit exists for coverage, so the
 # vocabulary distinguishes "not applicable" from "plausible but uncertain"
 # -- uncertain is NOT a discard.
@@ -36,9 +45,9 @@ CHANNEL_VERDICTS = ["material", "potential", "not_applicable", "uncertain"]
 
 _EFFECT_TO_DIRECTION = {
     "positive": "bullish", "negative": "bearish",
-    "mixed": "neutral", "uncertain": "neutral", "neutral": "neutral",
+    "mixed": "neutral", "uncertain": "neutral", "no_material_impact": "neutral",
 }
-_DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative", "neutral": "neutral"}
+_DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative", "neutral": "no_material_impact"}
 
 
 def effect_to_direction(effect: str) -> str:
@@ -46,7 +55,21 @@ def effect_to_direction(effect: str) -> str:
 
 
 def direction_to_effect(direction: str) -> str:
-    return _DIRECTION_TO_EFFECT.get(direction, "neutral")
+    return _DIRECTION_TO_EFFECT.get(direction, "no_material_impact")
+
+
+def normalize_effect(value: str | None) -> str:
+    """Parse-boundary normalizer (corrective plan task 2): "neutral" is a
+    legacy/compat alias for "no_material_impact", accepted as INPUT (models
+    were prompted with it, old cached rows may carry it) but never the
+    canonical vocabulary. Anything else unrecognized falls back to
+    "uncertain" -- the honest "we don't know enough" default, never a
+    silently invented "no_material_impact"."""
+    if value == "neutral":
+        return "no_material_impact"
+    if value in ECONOMIC_EFFECTS:
+        return value
+    return "uncertain"
 
 
 def _clamp(value, low=0.0, high=1.0) -> float:
@@ -149,8 +172,11 @@ class GraphEdge(BaseModel):
 
     def reconcile_effect(self) -> "GraphEdge":
         """economic_effect is truth; direction is the derived legacy view.
-        Mixed/uncertain are preserved in economic_effect even though the
-        3-way direction collapses them to neutral."""
+        Mixed/uncertain/no_material_impact are preserved in economic_effect
+        even though the 3-way direction collapses all three to neutral. A
+        model-supplied "neutral" is the legacy alias, normalized here."""
+        if self.economic_effect:
+            self.economic_effect = normalize_effect(self.economic_effect)
         if self.economic_effect not in ECONOMIC_EFFECTS:
             self.economic_effect = direction_to_effect(self.direction)
         if self.direction not in DIRECTIONS:
@@ -170,7 +196,7 @@ _EDGE_PROPS = {
     "child_label": {"type": "string"},
     "child_sector": {"type": "string"},
     "direction": {"type": "string", "enum": DIRECTIONS},
-    "economic_effect": {"type": "string", "enum": ECONOMIC_EFFECTS},
+    "economic_effect": {"type": "string", "enum": _ECONOMIC_EFFECT_INPUT_ENUM},
     "mechanism": {"type": "string"},
     "impact_strength": {"type": "number"},
     "confidence": {"type": "number"},
@@ -307,7 +333,11 @@ class GraphCompany(BaseModel):
     direction: str = ""
     impact_strength: float = 0.0
     confidence: float = 0.0
-    materiality: float = 0.0
+    # Optional (corrective plan task 2): a model omission must stay
+    # representable as "we don't know" rather than being invented as 0.0 --
+    # 0.0 and "unknown" are different claims (materiality_grade() already
+    # treats None as its own UNKNOWN grade downstream).
+    materiality: float | None = None
     causal_distance: int = 1
     time_horizon: str = "Short-Term"
     parent_type: str = "event"
@@ -345,16 +375,24 @@ class GraphCompany(BaseModel):
     def clamp(self) -> "GraphCompany":
         self.impact_strength = _clamp(self.impact_strength)
         self.confidence = _clamp(self.confidence)
-        self.materiality = _clamp(self.materiality)
+        # None (omitted) is never invented into 0.0 -- only clamp a value
+        # the model actually supplied.
+        if self.materiality is not None:
+            self.materiality = _clamp(self.materiality)
         return self.reconcile_effect()
 
     def reconcile_effect(self) -> "GraphCompany":
         """Fill economic_effect from net_direction (which already carries
         mixed/uncertain) or direction; never overwrite a model-supplied
-        value. Direction falls back to the effect-derived legacy view."""
+        value. Direction falls back to the effect-derived legacy view. A
+        model-supplied "neutral" (on economic_effect or net_direction) is
+        the legacy alias, normalized to "no_material_impact" -- mixed and
+        uncertain are never collapsed into it."""
+        if self.economic_effect:
+            self.economic_effect = normalize_effect(self.economic_effect)
         if self.economic_effect not in ECONOMIC_EFFECTS:
             if self.net_direction in ("mixed", "uncertain", "neutral"):
-                self.economic_effect = self.net_direction
+                self.economic_effect = normalize_effect(self.net_direction)
             elif self.net_direction in ("bullish", "bearish"):
                 self.economic_effect = direction_to_effect(self.net_direction)
             else:
@@ -395,7 +433,7 @@ def schema_companies(valid_tickers: list[str]) -> dict:
                         "negative_channels": {"type": "array", "items": {"type": "string"}},
                         "offsetting_channels": {"type": "array", "items": {"type": "string"}},
                         "net_direction": {"type": "string", "enum": NET_DIRECTIONS},
-                        "economic_effect": {"type": "string", "enum": ECONOMIC_EFFECTS},
+                        "economic_effect": {"type": "string", "enum": _ECONOMIC_EFFECT_INPUT_ENUM},
                         "relative_beneficiary": {"type": "boolean"},
                         "key_points": {"type": "array", "items": {"type": "string"}},
                         "reasons": {"type": "array", "items": {"type": "string"}},

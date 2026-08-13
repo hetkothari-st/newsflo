@@ -426,9 +426,10 @@ class AlertCompany(Base):
     # positive_channels/negative_channels/net_direction/
     # relative_beneficiary. NULL on pre-optimization rows.
     channels_json = Column(Text, nullable=True)
-    # Fundamental economic effect (architecture upgrade 2026-08-12 §11):
-    # positive | negative | mixed | uncertain | neutral. The canonical
-    # 5-way truth; `direction` above stays the market-facing legacy view
+    # Fundamental economic effect (corrective plan task 2, 2026-08-13):
+    # positive | negative | mixed | uncertain | no_material_impact. The
+    # canonical 5-way DISTINCT truth ("neutral" is a legacy alias, never
+    # stored here); `direction` above stays the market-facing legacy view
     # derived from it. NULL on pre-upgrade rows.
     economic_effect = Column(String, nullable=True)
     # V4 strict publication gate (spec §5): the tier the gate authorized

@@ -164,6 +164,18 @@ def _as_aware_utc(dt):
     return dt
 
 
+def _persist_effect(value: str | None) -> str | None:
+    """Persist-boundary alias mapping (corrective plan task 2): "neutral"
+    must never reach an economic_effect column -- it normalizes to
+    "no_material_impact" like every other parse boundary. Absent stays
+    absent (never invented into "uncertain"); this only rewrites a value
+    that is actually present."""
+    if not value:
+        return None
+    from app.analysis.impact_graph.schemas import normalize_effect
+    return normalize_effect(value)
+
+
 def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
     """Shape one live-push payload identical to a single GET /api/alerts entry,
     MINUS the per-viewer ``in_my_holdings`` flag.
@@ -353,7 +365,7 @@ def _build_alert_company(
         causal_parent_id=entry.get("causal_parent_id"),
         mechanism=entry.get("mechanism"),
         channels_json=entry.get("channels_json"),
-        economic_effect=entry.get("economic_effect"),
+        economic_effect=_persist_effect(entry.get("economic_effect")),
         # V4 strict gate outcome -- None for legacy (ungated) entries.
         display_tier=entry.get("display_tier"),
         gate_state=entry.get("gate_state"),
@@ -574,7 +586,7 @@ def _persist_alert(
                 evidence_class=entry.get("evidence_class"),
                 materiality_grade=entry.get("materiality_grade"),
                 candidate_json=json.dumps({
-                    "economic_effect": entry.get("economic_effect"),
+                    "economic_effect": _persist_effect(entry.get("economic_effect")),
                     "causal_distance": entry.get("causal_distance"),
                     "materiality": entry.get("materiality"),
                     "confidence_f": entry.get("confidence_f"),
@@ -662,7 +674,7 @@ def _persist_alert(
             impact_strength=edge.get("impact_strength"), confidence_f=edge.get("confidence_f"),
             materiality=edge.get("materiality"), time_horizon=edge.get("time_horizon"),
             verification_status=edge.get("verification_status"),
-            economic_effect=edge.get("economic_effect"),
+            economic_effect=_persist_effect(edge.get("economic_effect")),
         ))
 
     # Prefer a real story photo: a missing OR generic (publisher-logo)
@@ -895,7 +907,7 @@ def _gate_candidates(session: Session, result) -> dict[str, object]:
             entity_resolved=row is not None,
             mechanism=company.mechanism or "",
             rationale=company.rationale or "",
-            economic_effect=company.economic_effect or "",
+            economic_effect=_persist_effect(company.economic_effect) or "",
             causal_distance=company.causal_distance,
             materiality=company.materiality,
             confidence=company.confidence,
@@ -959,7 +971,7 @@ def _v3_entries(session: Session, result) -> list[dict]:
             "confidence_f": company.confidence, "materiality": company.materiality,
             "causal_parent_type": company.parent_type, "causal_parent_id": company.parent_id,
             "mechanism": company.mechanism,
-            "economic_effect": company.economic_effect or None,
+            "economic_effect": _persist_effect(company.economic_effect),
             "channels_json": json.dumps({
                 "positive_channels": company.positive_channels,
                 "negative_channels": company.negative_channels,
@@ -1015,7 +1027,7 @@ def _v3_edges(result) -> list[dict]:
             "impact_strength": edge.impact_strength, "confidence_f": edge.confidence,
             "materiality": edge.materiality, "time_horizon": edge.time_horizon,
             "verification_status": edge.verification_status,
-            "economic_effect": edge.economic_effect or None,
+            "economic_effect": _persist_effect(edge.economic_effect),
         })
     for company in result.companies:
         edges.append({
@@ -1029,7 +1041,7 @@ def _v3_edges(result) -> list[dict]:
             "impact_strength": company.impact_strength, "confidence_f": company.confidence,
             "materiality": company.materiality, "time_horizon": company.time_horizon,
             "verification_status": "verified" if company.verified else "unverified",
-            "economic_effect": company.economic_effect or None,
+            "economic_effect": _persist_effect(company.economic_effect),
         })
     return edges
 

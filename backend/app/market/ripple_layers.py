@@ -74,7 +74,8 @@ _TAXONOMY_LABELS = {
 
 _EFFECT_PREFIX = {
     "positive": "Positive", "negative": "Negative",
-    "mixed": "Mixed", "uncertain": "Uncertain", "neutral": "Neutral",
+    "mixed": "Mixed", "uncertain": "Uncertain",
+    "no_material_impact": "No material impact",
 }
 _EFFECT_ICON = {"positive": "win", "negative": "lose"}
 _DIRECTION_TO_EFFECT = {"bullish": "positive", "bearish": "negative"}

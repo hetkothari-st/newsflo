@@ -98,9 +98,22 @@ def test_missing_trigger_shock_rejected_as_not_event_specific():
 
 
 def test_neutral_effect_not_displayed():
-    """NO_MATERIAL_IMPACT (vocab 'neutral') never renders (spec §19)."""
+    """NO_MATERIAL_IMPACT never renders (spec §19)."""
     decision = evaluate_candidate(_candidate(
-        economic_effect="neutral", net_direction="neutral"))
+        economic_effect="no_material_impact", net_direction="neutral"))
+    assert decision.final_state == "REJECT_NO_MATERIAL_IMPACT"
+    assert decision.display_tier == "excluded"
+
+
+def test_legacy_neutral_alias_normalizes_to_no_material_impact_before_gate():
+    """"neutral" is a legacy/compat alias (corrective plan task 2) accepted
+    at parse boundaries and mapped to "no_material_impact" -- a candidate
+    built from a normalize_effect()-passed value must reject the same way
+    a directly no_material_impact candidate does."""
+    from app.analysis.impact_graph.schemas import normalize_effect
+
+    decision = evaluate_candidate(_candidate(
+        economic_effect=normalize_effect("neutral"), net_direction="neutral"))
     assert decision.final_state == "REJECT_NO_MATERIAL_IMPACT"
     assert decision.display_tier == "excluded"
 

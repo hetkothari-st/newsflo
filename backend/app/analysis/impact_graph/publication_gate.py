@@ -81,7 +81,7 @@ class CandidateInput:
     entity_resolved: bool
     mechanism: str
     rationale: str
-    economic_effect: str          # positive | negative | mixed | uncertain | neutral
+    economic_effect: str          # positive | negative | mixed | uncertain | no_material_impact
     causal_distance: int
     materiality: float | None
     confidence: float | None
@@ -124,7 +124,7 @@ def _net_as_direction(net_direction: str) -> str:
 
 _EFFECT_AS_DIRECTION = {
     "positive": "bullish", "negative": "bearish",
-    "mixed": "neutral", "uncertain": "neutral", "neutral": "neutral",
+    "mixed": "neutral", "uncertain": "neutral", "no_material_impact": "neutral",
 }
 
 
@@ -174,7 +174,7 @@ def evaluate_candidate(candidate: CandidateInput) -> GateDecision:
 
     # MATERIALITY_VALID -- NO_MATERIAL_IMPACT and UNKNOWN materiality never
     # display; LOW survives only as secondary (graded below).
-    if candidate.economic_effect == "neutral":
+    if candidate.economic_effect == "no_material_impact":
         return reject("REJECT_NO_MATERIAL_IMPACT")
     if grade == "UNKNOWN":
         return reject("REJECT_LOW_MATERIALITY")
