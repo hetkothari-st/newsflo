@@ -100,6 +100,9 @@ def _run_ingestion_and_analysis() -> None:
     handled per-article by process_new_articles (retry once, then
     ANALYSIS_FAILED) — this only guards against the pipeline call itself
     raising, so one bad run never crashes the scheduler thread."""
+    if settings.analysis_paused:
+        logger.info("Analysis cycle skipped: ANALYSIS_PAUSED (articles queue as NEW)")
+        return
     session = SessionLocal()
     try:
         client = build_client(
@@ -180,6 +183,8 @@ def _run_analysis_retry() -> None:
     most one extra 2-attempt round per article per hour, never a hot loop
     against a dead quota. Only TODAY's articles -- older news re-analyzed
     now would surface into the current feed as stale alerts."""
+    if settings.analysis_paused:
+        return
     from app.ist_time import day_utc_window, today_ist
     from app.models import Article
 

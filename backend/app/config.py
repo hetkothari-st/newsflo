@@ -74,6 +74,11 @@ class Settings(BaseSettings):
             keys.append(self.translation_groq_api_key_2)
         return keys
     enable_scheduler: bool = os.environ.get("ENABLE_SCHEDULER", "false").lower() == "true"
+    # Pause NEW feed stories without stopping ingestion: raw articles (and
+    # the pulse wire) keep landing, but the analysis pipeline that turns
+    # them into alerts is skipped -- articles queue as status=NEW and are
+    # analyzed when the flag is lifted. Feed tab freezes, Pulse tab lives.
+    analysis_paused: bool = os.environ.get("ANALYSIS_PAUSED", "false").lower() == "true"
     # Lets a non-production deployment (e.g. a UI-preview service sharing
     # the production database) opt back in to demo-seeded feed stories.
     # Production leaves this unset: demo-marked articles never reach its
