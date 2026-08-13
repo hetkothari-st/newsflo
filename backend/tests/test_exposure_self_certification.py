@@ -478,3 +478,195 @@ def test_prompt_prior_label_does_not_claim_verified():
         mechanism="rating-agency confirmed exposure", provenance_type="SUPPLY_LINK")
     lines_provenanced = _candidate_profile_lines([candidate], {"ONGC.NS": provenanced})
     assert "VERIFIED EXPOSURE (provenanced)" in lines_provenanced
+
+
+def _naive_utc(value):
+    """SQLite round-trips DateTime(timezone=True) as NAIVE UTC, so a value
+    read back from the DB cannot be compared against an aware utcnow()
+    directly. Normalise both sides to naive UTC rather than asserting on
+    string equality."""
+    return value.replace(tzinfo=None) if getattr(value, "tzinfo", None) else value
+
+
+# --- protected provenance is READ-ONLY to the cache writer ---------------
+# Corrective-v4 Task 21 review, owner ruling. _write_exposure_cache used to
+# stamp provenance_type="MODEL_VERIFIED" over EVERY existing row on upsert,
+# including the SUPPLY_LINK/MANUAL/CURATED rows that are the only kind
+# classify_evidence may grant Tier C for. Because the writer runs inside the
+# engine and app.pipeline._gate_candidates runs after it, a curated row was
+# already downgraded by the time the gate read it -- AND the ticker was in
+# fresh_cache_tickers, so the self-echo guard skipped the row entirely. Net
+# effect: a curated exposure record could not survive one analysis pass, and
+# SupplyLink was the only Tier-C route that worked in practice.
+
+@pytest.mark.parametrize("provenance_type", ["SUPPLY_LINK", "MANUAL", "CURATED"])
+def test_protected_row_survives_a_verified_model_run_untouched(db_session, provenance_type):
+    """A curated/manual/supply-link row is left EXACTLY as it was: same
+    provenance, same recorded terms, and -- importantly -- the same
+    review_after, since a model run must not extend a curated row's review
+    life."""
+    from app.analysis.impact_graph.engine import _write_exposure_cache
+
+    row = _company(db_session, business_desc="Upstream oil and gas explorer")
+    curated_at = utcnow() - timedelta(days=30)
+    curated_review = curated_at + timedelta(days=365)
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.9, mechanism="curated: crude realization exposure",
+        provenance_type=provenance_type, source_url="https://curated.example/note",
+        verified_at=curated_at, review_after=curated_review,
+        verification_version="curated-v1"))
+    db_session.commit()
+
+    wrote = _write_exposure_cache(
+        db_session, _graph_company(impact_strength=0.1,
+                                   mechanism="model's own per-event wording"),
+        exposure_exists=True, alert_id=99)
+    db_session.commit()
+
+    assert wrote is False, "a protected row must report that nothing was written"
+    cached = db_session.query(CompanyNodeExposure).one()
+    assert cached.provenance_type == provenance_type
+    assert cached.strength == 0.9
+    assert cached.mechanism == "curated: crude realization exposure"
+    assert cached.verification_version == "curated-v1"
+    assert cached.source_alert_id is None
+    # Review life is NOT extended by an automated pass.
+    assert _naive_utc(cached.review_after) == _naive_utc(curated_review)
+    assert _naive_utc(cached.verified_at) == _naive_utc(curated_at)
+
+
+def test_protected_row_still_classifies_tier_c_after_a_verified_run(db_session, strict_mode):
+    """The point of the fix, stated as the outcome that matters: run the
+    writer exactly as _verify_companies does for an accepted company, then
+    classify -- the row must still be VERIFIED_RELATIONSHIP / C."""
+    from app.analysis.impact_graph.engine import _write_exposure_cache
+    from app.analysis.impact_graph.evidence import classify_evidence
+
+    row = _company(db_session, business_desc="Upstream oil and gas explorer")
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.9, mechanism="curated: crude realization exposure",
+        provenance_type="CURATED", source_url="https://curated.example/note",
+        verified_at=utcnow(), review_after=utcnow() + timedelta(days=365)))
+    db_session.commit()
+
+    company = _graph_company()
+    _write_exposure_cache(db_session, company, exposure_exists=True, alert_id=7)
+    db_session.commit()
+
+    evidence_class, evidence_tier, payloads = classify_evidence(db_session, company, set())
+
+    assert (evidence_class, evidence_tier) == ("VERIFIED_RELATIONSHIP", "C")
+    assert payloads and payloads[0]["source_name"] == "CURATED"
+
+
+def test_model_verified_and_null_rows_still_update_as_before(db_session):
+    """The fix is narrow: an ordinary MODEL_VERIFIED row (and a legacy
+    NULL-provenance one) keeps being refreshed exactly as it always was."""
+    from app.analysis.impact_graph.engine import _write_exposure_cache
+
+    row = _company(db_session)
+    stale_at = utcnow() - timedelta(days=80)
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.2, mechanism="old wording", provenance_type="MODEL_VERIFIED",
+        verified_at=stale_at, review_after=stale_at + timedelta(days=90)))
+    db_session.commit()
+
+    wrote = _write_exposure_cache(
+        db_session, _graph_company(impact_strength=0.77, mechanism="fresh wording"),
+        exposure_exists=True, alert_id=42)
+    db_session.commit()
+
+    assert wrote is True
+    cached = db_session.query(CompanyNodeExposure).one()
+    assert cached.strength == 0.77
+    assert cached.mechanism == "fresh wording"
+    assert cached.provenance_type == "MODEL_VERIFIED"
+    assert cached.source_alert_id == 42
+    assert _naive_utc(cached.verified_at) > _naive_utc(stale_at)
+    assert _naive_utc(cached.review_after) > _naive_utc(stale_at + timedelta(days=90))
+
+    # A legacy NULL-provenance row is a prior too, not protected: it is
+    # upgraded to MODEL_VERIFIED on the next write, unchanged behaviour.
+    other = _company(db_session, ticker="LEGACY.NS", name="Legacy Co")
+    db_session.add(CompanyNodeExposure(
+        company_id=other.id, node_key="crude_price", exposure_exists=1,
+        strength=0.3, mechanism="legacy", provenance_type=None, verified_at=stale_at))
+    db_session.commit()
+
+    assert _write_exposure_cache(
+        db_session, _graph_company(ticker="LEGACY.NS", name="Legacy Co"),
+        exposure_exists=True, alert_id=43) is True
+    db_session.commit()
+    legacy = (db_session.query(CompanyNodeExposure)
+              .filter_by(company_id=other.id).one())
+    assert legacy.provenance_type == "MODEL_VERIFIED"
+
+
+def test_negative_write_cannot_kill_a_curated_relationship(db_session):
+    """A structural verifier rejection writes exposure_exists=0, which
+    _exposure_cache reads as "do not even offer this company as a candidate"
+    on future events. One model rejection must not be able to delete a
+    human-established relationship: the model judged THIS event's claim, not
+    the existence of the link."""
+    from app.analysis.impact_graph.engine import _write_exposure_cache
+
+    row = _company(db_session)
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.9, mechanism="curated: crude realization exposure",
+        provenance_type="SUPPLY_LINK", verified_at=utcnow(),
+        review_after=utcnow() + timedelta(days=365)))
+    db_session.commit()
+
+    wrote = _write_exposure_cache(db_session, _graph_company(),
+                                  exposure_exists=False, alert_id=11)
+    db_session.commit()
+
+    assert wrote is False
+    cached = db_session.query(CompanyNodeExposure).one()
+    assert cached.exposure_exists == 1
+    assert cached.provenance_type == "SUPPLY_LINK"
+    assert cached.strength == 0.9
+
+
+def test_skipped_protected_write_is_not_recorded_as_a_self_echo(db_session, strict_mode):
+    """End-to-end through the real engine: an accepted company whose only
+    cache row is CURATED must NOT land in fresh_cache_tickers -- that set
+    exists to discount the writes THIS RUN made, and no write happened. The
+    consequence is the whole point: classify_evidence still reads the row,
+    so the candidate keeps its Tier-C evidence instead of falling through to
+    model inference."""
+    from app.analysis.impact_graph.engine import analyze_article_v3
+    from app.pipeline import _v3_entries
+    from tests.test_impact_graph import FACTS, FakeRouter, _company as _co, _company_entry
+    from tests.test_impact_graph_optimization import _direct_sector_setup
+
+    row = _co(db_session, "CURATED.NS", "Curated Co", "oil_gas")
+    row.business_desc = "Upstream oil and gas explorer"
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="oil_gas", exposure_exists=1,
+        strength=0.9, mechanism="curated: crude realization exposure",
+        provenance_type="CURATED", source_url="https://curated.example/note",
+        verified_at=utcnow(), review_after=utcnow() + timedelta(days=365)))
+    db_session.commit()
+
+    router = FakeRouter(_direct_sector_setup({
+        "map_companies": {"companies": [_company_entry("CURATED.NS", "Curated Co")]},
+        "verify_companies": {"accept": ["CURATED.NS"], "reject": [],
+                             "counterfactual": {"CURATED.NS": "SUPPORTED"}},
+    }))
+    result = analyze_article_v3(router, "t", "c", session=db_session)
+
+    assert result.companies and result.companies[0].verified is True
+    assert "CURATED.NS" not in result.fresh_cache_tickers, (
+        "no write happened, so there is no self-echo to guard against")
+
+    cached = db_session.query(CompanyNodeExposure).one()
+    assert cached.provenance_type == "CURATED"
+
+    entries = _v3_entries(db_session, result)
+    assert entries[0]["evidence_class"] == "VERIFIED_RELATIONSHIP"
+    assert entries[0]["evidence_tier"] == "C"

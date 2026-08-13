@@ -1114,18 +1114,29 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
     if session is not None:
         for company in state.companies.values():
             if company.verified:
-                _write_exposure_cache(session, company, exposure_exists=True, alert_id=alert_id)
                 # Self-echo guard input (see _GraphState.fresh_cache_tickers'
-                # own comment): this exact write is what
-                # classify_evidence must not read back as independent
-                # evidence for this same candidate.
-                state.fresh_cache_tickers.add(company.ticker)
+                # own comment): this exact write is what classify_evidence
+                # must not read back as independent evidence for this same
+                # candidate. A write that was SKIPPED (protected provenance
+                # -- SUPPLY_LINK/MANUAL/CURATED, corrective-v4 Task 21
+                # review) is not a self-echo at all: that row predates this
+                # run and was written by a human or a linked artifact, so it
+                # stays genuine independent evidence and must NOT be
+                # discounted.
+                if _write_exposure_cache(session, company, exposure_exists=True,
+                                         alert_id=alert_id):
+                    state.fresh_cache_tickers.add(company.ticker)
 
 
 def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bool,
-                          alert_id: int | None) -> None:
+                          alert_id: int | None) -> bool:
     """Upsert one (company, node) relationship row. BASE exposure only:
     mechanism is the company-level channel, never the event narrative.
+
+    Returns True when this call actually wrote, False when it deliberately
+    left an existing row alone (see the protected-provenance rule below) --
+    the caller needs to know, because only a REAL write is a self-echo the
+    evidence classifier must discount.
 
     provenance_type is MODEL_VERIFIED (corrective-v4 Task 6, spec §8/§9),
     never VERIFIED_RELATIONSHIP: this row records the CURRENT VERIFIER'S
@@ -1136,14 +1147,51 @@ def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bo
     candidate's evidence on its own; it only seeds candidacy and an
     unconfirmed prompt prior. review_after gives the prior a 90-day
     expiry -- exposure_row_is_fresh treats a row past it as stale, so
-    acceptance re-earns its place instead of compounding forever."""
+    acceptance re-earns its place instead of compounding forever.
+
+    PROTECTED PROVENANCE (corrective-v4 Task 21 review, owner ruling): a
+    row whose provenance_type is in `_PROVENANCED_EXPOSURE_TYPES`
+    (SUPPLY_LINK / MANUAL / CURATED -- the same vocabulary this module's
+    prompt annotation and evidence.classify_evidence use) was written
+    by a human or a linked artifact, NOT by this function -- it is the one
+    kind of CompanyNodeExposure that classify_evidence may grant Tier C
+    for. Such a row is READ-ONLY to this writer: the upsert skips it
+    entirely rather than stamping MODEL_VERIFIED over it.
+
+    The bug this closes: the overwrite ran on every verified run, so a
+    curated row was downgraded to MODEL_VERIFIED before app.pipeline.
+    _gate_candidates ever read it (this function runs inside the engine,
+    the gate runs after), AND the ticker was then in fresh_cache_tickers,
+    so the self-echo guard skipped the row altogether. A curated exposure
+    record could not survive a single analysis pass, which left SupplyLink
+    as the only Tier-C route that worked in practice.
+
+    The skip is TOTAL, not partial:
+
+    * provenance stays -- obviously, that is the defect;
+    * strength/mechanism stay -- a model's per-event numbers must not
+      silently rewrite a curated relationship's recorded terms;
+    * verified_at/review_after are NOT refreshed -- a model run must not
+      extend a curated row's review life. The row's 90-day (or NULL,
+      never-expiring) checkpoint belongs to whoever curated it; letting an
+      automated pass keep pushing it forward would recreate the
+      compounding-prior problem Task 6 fixed, just one level up.
+
+    Negative writes (``exposure_exists=False``, from a structural verifier
+    rejection) skip protected rows for the same reason and one stronger
+    one: a model deciding this candidate does not apply to THIS event is
+    not evidence that the curated RELATIONSHIP does not exist, and a
+    negative row is read as "do not even offer this company as a
+    candidate" (see _exposure_cache). One model rejection must not be able
+    to delete a human-established link from every future event.
+    """
     from datetime import timedelta
 
     from app.models import Company as CompanyRow, CompanyNodeExposure, utcnow
 
     row = session.query(CompanyRow).filter_by(ticker=company.ticker).one_or_none()
     if row is None:
-        return
+        return False
     existing = (
         session.query(CompanyNodeExposure)
         .filter_by(company_id=row.id, node_key=company.parent_id)
@@ -1162,15 +1210,22 @@ def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bo
             review_after=review_after,
             verification_version=prompts.IMPACT_PROMPT_VERSION,
         ))
-    else:
-        existing.exposure_exists = 1 if exposure_exists else 0
-        existing.strength = company.impact_strength if exposure_exists else None
-        existing.mechanism = company.mechanism[:300] if exposure_exists else existing.mechanism
-        existing.verified_at = now
-        existing.source_alert_id = alert_id
-        existing.provenance_type = "MODEL_VERIFIED"
-        existing.review_after = review_after
-        existing.verification_version = prompts.IMPACT_PROMPT_VERSION
+        return True
+    if existing.provenance_type in _PROVENANCED_EXPOSURE_TYPES:
+        logger.info(
+            "impact-graph exposure cache skipped protected row company=%s node=%s "
+            "provenance=%s exposure_exists=%s",
+            company.ticker, company.parent_id, existing.provenance_type, exposure_exists)
+        return False
+    existing.exposure_exists = 1 if exposure_exists else 0
+    existing.strength = company.impact_strength if exposure_exists else None
+    existing.mechanism = company.mechanism[:300] if exposure_exists else existing.mechanism
+    existing.verified_at = now
+    existing.source_alert_id = alert_id
+    existing.provenance_type = "MODEL_VERIFIED"
+    existing.review_after = review_after
+    existing.verification_version = prompts.IMPACT_PROMPT_VERSION
+    return True
 
 
 def _verify_edges(router: StageRouter, facts: EventFacts, state: _GraphState) -> None:
