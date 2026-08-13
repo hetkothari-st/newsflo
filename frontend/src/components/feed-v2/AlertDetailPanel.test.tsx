@@ -22,7 +22,7 @@ function makeAlert(overrides: Partial<FeedV2Alert> = {}): FeedV2Alert {
       source: 'Economic Times', published_at: null,
     },
     excess_move_pct: -4.2,
-    direction: 'bearish',
+    direction: 'negative',
     raw_move_pct: -4.8,
     sector_move_pct: -0.6,
     volume_multiple: 3.1,

@@ -130,9 +130,21 @@ def test_daily_return_none_when_bars_span_a_feed_hole():
 
 
 def test_daily_return_tolerates_a_long_weekend():
-    bars = _bars([100.0, 102.0], [0.0, 0.0], ["2026-01-01", "2026-01-05"])
+    # 2026-01-02 is a Friday, 2026-01-05 the following Monday -- zero real
+    # NSE trading days fall strictly between them (only the weekend does),
+    # so the trading-day gap guard must treat this as consecutive sessions.
+    bars = _bars([100.0, 102.0], [0.0, 0.0], ["2026-01-02", "2026-01-05"])
 
     assert measure._daily_return_pct(bars) == pytest.approx(2.0)
+
+
+def test_daily_return_tolerates_a_holiday_cluster():
+    """A holiday cluster (here: Republic Day 2026, a Monday, right after a
+    weekend) must not read as a feed hole -- zero real trading days fall
+    strictly between the Friday close and the Tuesday reopen."""
+    bars = _bars([100.0, 103.0], [0.0, 0.0], ["2026-01-23", "2026-01-27"])
+
+    assert measure._daily_return_pct(bars) == pytest.approx(3.0)
 
 
 def test_measure_falls_back_to_nifty_when_sector_index_is_gappy(monkeypatch):

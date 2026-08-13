@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import timedelta, timezone
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.alerting.matcher import match_alert_to_holdings
@@ -501,8 +502,13 @@ _REMEASURE_BATCH = 40
 
 
 def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> int:
-    """Re-measure recent MarketMove rows stuck at measurement_status=
-    'no_data'. Measurement is one-shot at persist time, so a transient
+    """Re-measure recent MarketMove rows that are still not a trustworthy
+    final reading: measurement_status in ("no_data", "stale",
+    "data_invalid"), OR measurement_status == "ok" with bar_complete == 0
+    (a partial intraday snapshot recorded before the session closed --
+    Task 14: re-measuring it after close turns it into the real completed-
+    session reaction instead of leaving the mid-session number stuck
+    forever). Measurement is one-shot at persist time, so a transient
     price-fetch failure (yfinance burst rate-limit) used to orphan the
     alert forever: the feed only shows measured alerts, and nothing ever
     retried the measurement (production 2026-08-11: every alert on the
@@ -510,12 +516,18 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
     in place -- the (alert_id, company_id) unique constraint means a new
     row was never an option -- and reconciles AlertCompany.direction with
     the fresh measured move under the same rule as first-time measurement.
-    Returns how many rows became 'ok'."""
+    Returns how many rows were updated to a fresh 'ok' status."""
     cutoff = utcnow() - timedelta(days=_REMEASURE_WINDOW_DAYS)
     pending = (
         session.query(MarketMove)
         .join(Alert, MarketMove.alert_id == Alert.id)
-        .filter(MarketMove.measurement_status == "no_data", Alert.created_at >= cutoff)
+        .filter(
+            Alert.created_at >= cutoff,
+            or_(
+                MarketMove.measurement_status.in_(("no_data", "stale", "data_invalid")),
+                and_(MarketMove.measurement_status == "ok", MarketMove.bar_complete == 0),
+            ),
+        )
         .order_by(Alert.created_at.desc())
         .limit(limit)
         .all()
@@ -529,12 +541,13 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
         event_time = _as_aware_utc(alert_row.created_at) if alert_row is not None else None
         fresh = measure_company_move(session, company, event_time=event_time)
         if fresh.measurement_status != "ok":
-            continue  # still no data -- leave the honest no_data row alone
+            continue  # still not measurable -- leave the honest row alone
         for column in (
             "raw_move_pct", "sector_move_pct", "benchmark_ticker", "excess_move_pct",
             "volume", "avg_volume_20d", "volume_multiple", "vol_normalized",
             "materiality", "avg_traded_value", "measured_at", "measurement_status",
-            "last_bar_date", "bar_complete",
+            "last_bar_date", "bar_complete", "data_quality", "session_state",
+            "reaction_significance",
         ):
             setattr(move, column, getattr(fresh, column))
         # move.category keeps its persist-time stamp (recategorization safety).

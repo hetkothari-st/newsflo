@@ -36,11 +36,17 @@ SECTOR_INDEX_MAP: dict[str, str] = {
     "other": NIFTY50_TICKER,
 }
 
-# Sectors whose SECTOR_INDEX_MAP value is the Nifty 50 fallback rather than a
-# real sector index -- must exactly match the sectors mapped to
-# NIFTY50_TICKER above.
+# Sectors whose SECTOR_INDEX_MAP value is a fallback rather than a REAL
+# sector-specific index -- includes both the Nifty 50 fallback sectors
+# (must exactly match the sectors mapped to NIFTY50_TICKER above) AND
+# railways_transport, which maps to ^CNXINFRA (a borrowed EPC/industrials
+# proxy, not a dedicated transport index -- see SECTOR_INDEX_MAP's comment).
+# Flagging it here is the honest-fallback fix (Task 14): without it,
+# is_fallback_benchmark() silently claimed railways_transport had its own
+# real sector index just because SECTOR_INDEX_MAP has an entry for it.
 FALLBACK_SECTORS = frozenset({
     "telecom", "defense", "agriculture", "consumer_durables", "chemicals", "textiles", "other",
+    "railways_transport",
 })
 
 

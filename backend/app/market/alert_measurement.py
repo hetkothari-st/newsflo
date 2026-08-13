@@ -125,23 +125,30 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
     verdict = compute_verdict(
         is_unconfirmed=bool(alert.is_unconfirmed), excess_move_pct=peak.excess_move_pct,
     )
+    # Honest flag (2026-08-12 fix): derived from the benchmark ACTUALLY
+    # used, not from the sector's default mapping -- the stale-sector-
+    # index degrade (app.market.measure) can swap a sector-indexed company
+    # onto ^NSEI, and the sector-derived flag then lied ("vs sector index")
+    # about a Nifty-measured move. Computed once, reused by both the
+    # top-level field and the market_reaction object.
+    peak_is_fallback_benchmark = (
+        peak.benchmark_ticker == NIFTY50_TICKER or is_fallback_benchmark(peak_company.sector)
+    )
 
     return {
         "excess_move_pct": peak.excess_move_pct,
-        "direction": "bullish" if peak.excess_move_pct >= 0 else "bearish",
+        # Task 14: this used to be a raw sign(excess) -> "bullish"/"bearish"
+        # label with NO dead zone applied -- a +0.02% noise move read as a
+        # confident "bullish" winner. classify_reaction is the one
+        # sanctioned excess->direction mapping (spec §22); it is dead-zone
+        # aware and returns positive/negative/flat/unknown. BREAKING vocab
+        # change from the old bullish/bearish strings -- deliberate.
+        "direction": classify_reaction(peak.excess_move_pct),
         "raw_move_pct": peak.raw_move_pct,
         "sector_move_pct": peak.sector_move_pct,
         "volume_multiple": peak.volume_multiple,
         "benchmark_ticker": peak.benchmark_ticker,
-        # Honest flag (2026-08-12 fix): derived from the benchmark ACTUALLY
-        # used, not from the sector's default mapping -- the stale-sector-
-        # index degrade (app.market.measure) can swap a sector-indexed
-        # company onto ^NSEI, and the sector-derived flag then lied
-        # ("vs sector index") about a Nifty-measured move.
-        "is_fallback_benchmark": (
-            peak.benchmark_ticker == NIFTY50_TICKER
-            or is_fallback_benchmark(peak_company.sector)
-        ),
+        "is_fallback_benchmark": peak_is_fallback_benchmark,
         "peak_ticker": peak_company.ticker,
         "peak_company_id": peak_company.id,
         "peak_company_name": peak_company.name,
@@ -149,11 +156,21 @@ def compute_alert_measurement(session: Session, alert: Alert) -> dict | None:
         "intensity": intensity,
         "breadth_score": breadth_score,
         # Independent market-reaction object (spec §20/§22): classified
-        # through the dead zone, never a re-labeling of fundamentals.
+        # through the dead zone, never a re-labeling of fundamentals. Task
+        # 14 adds the raw numbers and integrity flags alongside the
+        # classification so a consumer never has to cross-reference the
+        # top-level fields to know what it's looking at.
         "market_reaction": {
             "status": "ok",
             "direction": classify_reaction(peak.excess_move_pct),
             "bar_complete": peak.bar_complete,
+            "raw_move_pct": peak.raw_move_pct,
+            "excess_move_pct": peak.excess_move_pct,
+            "benchmark_ticker": peak.benchmark_ticker,
+            "benchmark_is_fallback": peak_is_fallback_benchmark,
+            "data_quality": peak.data_quality,
+            "session_state": peak.session_state,
+            "reaction_significance": peak.reaction_significance,
         },
     }
 

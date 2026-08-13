@@ -106,8 +106,12 @@ def _unavailable_measurement() -> dict:
         "benchmark_ticker": None, "is_fallback_benchmark": False,
         "peak_ticker": None, "peak_company_id": None, "peak_company_name": None,
         "verdict": None, "intensity": None, "breadth_score": None,
-        "market_reaction": {"status": "unavailable", "direction": "unknown",
-                            "bar_complete": None},
+        "market_reaction": {
+            "status": "unavailable", "direction": "unknown", "bar_complete": None,
+            "raw_move_pct": None, "excess_move_pct": None, "benchmark_ticker": None,
+            "benchmark_is_fallback": False, "data_quality": None,
+            "session_state": None, "reaction_significance": "unknown",
+        },
     }
 
 

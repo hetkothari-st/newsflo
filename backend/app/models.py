@@ -801,13 +801,27 @@ class MarketMove(Base):
     # tier input (spec §4.6). Tier itself is derived on read, never stored.
     avg_traded_value = Column(Float, nullable=True)
     measured_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
-    measurement_status = Column(String, nullable=False)  # ok | no_data | stale
+    measurement_status = Column(String, nullable=False)  # ok | no_data | stale | data_invalid
     # Bar-integrity transparency (spec 2026-08-12 §21): the market date of
     # the bar this measurement read, and whether that bar was a completed
     # session (0 = measured mid-session, a partial intraday snapshot).
     # NULL on rows measured before these shipped.
     last_bar_date = Column(String, nullable=True)  # ISO date
     bar_complete = Column(Integer, nullable=True)  # 1 complete | 0 partial
+    # Market-integrity hardening (Task 14, spec §21/§22): data_quality is a
+    # finer-grained honesty signal than measurement_status alone --
+    # "ok"/"partial_bar"/"stale"/"invalid", or NULL when nothing was
+    # measured at all (no_data), a deliberately distinct "nothing to grade"
+    # state from any of the four. session_state is the NSE session state
+    # (open/closed/holiday, app.market.calendar.session_state) AT
+    # MEASUREMENT TIME, not read time. reaction_significance
+    # (significant/normal/noise/unknown, app.market.measure.
+    # reaction_significance) is a magnitude-worth-flagging judgment,
+    # distinct from classify_reaction's sign. All three NULL on rows
+    # measured before this column shipped.
+    data_quality = Column(String, nullable=True)
+    session_state = Column(String, nullable=True)
+    reaction_significance = Column(String, nullable=True)
 
     alert = relationship("Alert")
     company = relationship("Company")

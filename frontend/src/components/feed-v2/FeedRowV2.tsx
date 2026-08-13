@@ -57,7 +57,11 @@ export default function FeedRowV2({ alert, onOpen }: FeedRowV2Props) {
         <div className="mt-2 flex items-center gap-3">
           <span
             className={`shrink-0 font-data text-[17px] font-medium ${
-              alert.direction === 'bullish' ? 'text-bullish' : 'text-bearish'
+              alert.direction === 'positive'
+                ? 'text-bullish'
+                : alert.direction === 'negative'
+                  ? 'text-bearish'
+                  : 'text-muted'
             }`}
           >
             {excessText}

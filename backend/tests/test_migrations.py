@@ -70,6 +70,29 @@ def test_upgrade_head_adds_exposure_provenance_columns(tmp_path):
         assert column in columns, f"missing company_node_exposures.{column}"
 
 
+def test_upgrade_head_adds_market_integrity_columns(tmp_path):
+    """Corrective-v4 Task 14: the market-integrity fix's new market_moves
+    columns (0005) must exist on a fresh DB after `alembic upgrade head`,
+    not only via create_all."""
+    import sqlite3
+
+    db = tmp_path / "integrity.db"
+    url = f"sqlite:///{db}"
+    result = _run_alembic(url)
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        columns = {
+            row[1] for row in
+            conn.execute("PRAGMA table_info(market_moves)")
+        }
+    finally:
+        conn.close()
+    for column in ("data_quality", "session_state", "reaction_significance"):
+        assert column in columns, f"missing market_moves.{column}"
+
+
 def test_upgrade_on_legacy_created_db(tmp_path):
     """A DB created by the old create_all/_ADDED_COLUMNS path must accept
     `alembic stamp baseline` + upgrade without error."""

@@ -59,7 +59,7 @@ def test_single_measured_company_is_the_peak(db_session):
     result = compute_alert_measurement(db_session, alert)
 
     assert result["excess_move_pct"] == -4.2
-    assert result["direction"] == "bearish"
+    assert result["direction"] == "negative"
     assert result["raw_move_pct"] == -4.8
     assert result["sector_move_pct"] == -0.6
     assert result["volume_multiple"] == 3.0

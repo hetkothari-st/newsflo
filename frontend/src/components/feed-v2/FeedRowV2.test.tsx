@@ -12,7 +12,7 @@ function makeAlert(overrides: Partial<FeedV2Alert> = {}): FeedV2Alert {
     summary_long: null,
     article: { id: 1, image_url: null, title: 'Oil surges', url: 'https://example.com/a', source: 'test', published_at: null },
     excess_move_pct: -4.2,
-    direction: 'bearish',
+    direction: 'negative',
     raw_move_pct: -4.8,
     sector_move_pct: -0.6,
     volume_multiple: 3.1,
@@ -39,10 +39,10 @@ describe('FeedRowV2', () => {
   });
 
   it('shows a down arrow for a bearish move and a bullish text color class for an up move', () => {
-    const { rerender } = render(<FeedRowV2 alert={makeAlert({ direction: 'bearish' })} onOpen={() => {}} />);
+    const { rerender } = render(<FeedRowV2 alert={makeAlert({ direction: 'negative' })} onOpen={() => {}} />);
     expect(screen.getByText(/▼/)).toBeInTheDocument();
 
-    rerender(<FeedRowV2 alert={makeAlert({ direction: 'bullish', excess_move_pct: 3.0 })} onOpen={() => {}} />);
+    rerender(<FeedRowV2 alert={makeAlert({ direction: 'positive', excess_move_pct: 3.0 })} onOpen={() => {}} />);
     expect(screen.getByText(/▲/)).toBeInTheDocument();
   });
 

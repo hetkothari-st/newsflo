@@ -115,7 +115,13 @@ export interface FeedV2Alert {
   summary_long: string | null;
   article: FeedV2Article;
   excess_move_pct: number;
-  direction: 'bullish' | 'bearish';
+  // Task 14: dead-zone-classified reaction, NOT a raw sign(excess) label --
+  // the backend's compute_alert_measurement now derives this via
+  // classify_reaction (app.market.measure), same vocabulary as
+  // market_reaction.direction below. 'flat' covers moves inside the
+  // meaningful-move dead zone; 'unknown' is defensive (this alert always
+  // has a measured peak by the time it reaches the feed).
+  direction: 'positive' | 'negative' | 'flat' | 'unknown';
   raw_move_pct: number;
   sector_move_pct: number;
   volume_multiple: number | null;
