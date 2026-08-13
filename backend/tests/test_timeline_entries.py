@@ -35,6 +35,46 @@ def test_returns_empty_list_when_no_timeline_effects_exist(db_session):
     assert get_timeline_entries(db_session, alert) == []
 
 
+def test_duplicate_generations_collapse_to_latest_per_horizon(db_session):
+    """refine_alert historically APPENDED timeline rows on every re-run
+    (no delete-before-insert until 2026-08-12), so alerts carry stacked
+    generations of near-identical entries. Read time keeps only the most
+    recent row per horizon -- one entry per horizon, newest text wins."""
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    # First refinement run:
+    db_session.add(TimelineEffect(alert_id=alert.id, horizon="TODAY", description="Old immediate take."))
+    db_session.add(TimelineEffect(alert_id=alert.id, horizon="WEEKS", description="Old weeks take."))
+    # Second run appended near-duplicates (the historical bug):
+    db_session.add(TimelineEffect(alert_id=alert.id, horizon="TODAY", description="Fresh immediate take."))
+    db_session.add(TimelineEffect(alert_id=alert.id, horizon="WEEKS", description="Fresh weeks take."))
+    db_session.add(TimelineEffect(alert_id=alert.id, horizon="MONTHS", description="Months take."))
+    db_session.commit()
+
+    result = get_timeline_entries(db_session, alert)
+
+    assert [e["horizon"] for e in result] == ["TODAY", "WEEKS", "MONTHS"]
+    assert result[0]["description"] == "Fresh immediate take."
+    assert result[1]["description"] == "Fresh weeks take."
+
+
+def test_exact_duplicate_rows_render_once(db_session):
+    article = _article(db_session)
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    for _ in range(3):
+        db_session.add(TimelineEffect(alert_id=alert.id, horizon="DAYS",
+                                      description="Same text three times."))
+    db_session.commit()
+
+    result = get_timeline_entries(db_session, alert)
+
+    assert result == [{"horizon": "DAYS", "description": "Same text three times."}]
+
+
 def test_only_returns_entries_for_this_alert(db_session):
     article1 = _article(db_session)
     alert1 = Alert(article_id=article1.id, category="oil_gas")
