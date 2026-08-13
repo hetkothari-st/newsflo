@@ -88,6 +88,24 @@ def test_scenario_omc_negative_and_airline_negative_pass_gate():
         assert decision.display_tier == "primary"
 
 
+def test_company_entry_without_name_survives_registration():
+    """schema_companies makes `name` optional (token-opt compact contract)
+    but GraphCompany required it -- a live Gemini response omitting name
+    silently killed every returned company (benchmark run 2026-08-13:
+    P=0.0 because ALL companies died here). Ticker is the identity;
+    name defaults from it."""
+    from app.analysis.impact_graph.schemas import GraphCompany
+
+    company = GraphCompany(
+        ticker="TCS.NS", direction="bearish", impact_strength=0.6,
+        confidence=0.7, materiality=0.5, causal_distance=2,
+        time_horizon="Short-Term", parent_type="sector", parent_id="it",
+        mechanism="BFSI spending freeze cuts discretionary IT budgets",
+        rationale="large BFSI revenue share", net_direction="bearish")
+
+    assert company.name == "TCS.NS"
+
+
 def test_scenario_generic_nbfc_macro_ripple_rejected():
     """Spec scenario #9: 'oil up -> inflation -> NBFC affected' is a
     generic macro story -- rejected, machine-readable."""

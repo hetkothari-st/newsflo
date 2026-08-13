@@ -295,7 +295,15 @@ NET_DIRECTIONS = ["bullish", "bearish", "mixed", "uncertain", "neutral"]
 
 class GraphCompany(BaseModel):
     ticker: str
-    name: str
+    # Optional in schema_companies (token-opt compact contract) -- a model
+    # that omits it must not lose the company (live 2026-08-13: every
+    # returned company died in registration over the missing name).
+    # Defaults to the ticker; the DB row's real name wins downstream.
+    name: str = ""
+
+    def model_post_init(self, __context) -> None:
+        if not self.name:
+            self.name = self.ticker
     direction: str = ""
     impact_strength: float = 0.0
     confidence: float = 0.0

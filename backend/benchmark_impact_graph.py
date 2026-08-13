@@ -64,11 +64,18 @@ def run_v3(event, session):
     from app.analysis.impact_graph.engine import analyze_article_v3
     from app.analysis.impact_graph.router import StageRouter
     from app.config import settings
-    from app.pipeline import _build_v3_groq_client
 
+    # GEMINI ONLY -- no Groq client, ever (spec §47: a weaker fallback must
+    # not produce financial truth; a benchmark scored on Groq output is
+    # evidence of nothing). Paid key when present, free Gemini key
+    # otherwise; if Gemini is unavailable the event FAILS instead of
+    # silently degrading (2026-08-13, user directive).
+    gemini_key = settings.gemini_paid_api_key or settings.gemini_api_key or None
+    if not gemini_key:
+        raise RuntimeError("no Gemini key configured; benchmark never runs on Groq")
     router = StageRouter(
-        protected=bool(settings.gemini_paid_api_key), gemini_api_key=settings.gemini_paid_api_key or None,
-        groq_client=_build_v3_groq_client(), budget=ArticleBudget(),
+        protected=bool(settings.gemini_paid_api_key), gemini_api_key=gemini_key,
+        groq_client=None, budget=ArticleBudget(),
     )
     started = time.monotonic()
     result = analyze_article_v3(router, event["title"], event["body"], session=session)
@@ -179,7 +186,11 @@ def main() -> int:
                 results.append({"id": event["id"], "error": str(exc)[:300]})
                 continue
             s = score(event, run)
-            results.append({"id": event["id"], **s, "companies": run["companies"]})
+            row = {"id": event["id"], **s, "companies": run["companies"]}
+            if "displayed" in run:
+                row["displayed"] = run["displayed"]
+                row["gate"] = run["gate"]
+            results.append(row)
             print(f"   P={s['company_precision']} R={s['company_recall']} "
                   f"dir={s['direction_accuracy']} paths={s['path_recall']} "
                   f"depth={s['max_distance']} cost={s['cost']} {s['latency_s']}s", flush=True)
@@ -205,7 +216,9 @@ def main() -> int:
             if base is None:
                 continue
             before = set((base.get("companies") or {}))
-            after = set(r.get("displayed") or r.get("companies") or {})
+            # displayed == {} is a REAL answer (everything rejected) --
+            # `or` would silently fall back to the recall set and hide it.
+            after = set(r["displayed"] if "displayed" in r else (r.get("companies") or {}))
             dropped, added = sorted(before - after), sorted(after - before)
             if dropped or added:
                 print(f"   {r['id']}: -{dropped or '[]'} +{added or '[]'}")
