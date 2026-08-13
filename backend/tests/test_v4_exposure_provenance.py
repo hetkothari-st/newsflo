@@ -112,7 +112,11 @@ def test_evidence_classification_skips_stale_rows(db_session, strict_mode):
 # --- provenance on exposure writes ----------------------------------------
 
 def test_exposure_cache_write_stamps_provenance(db_session):
-    """New CompanyNodeExposure rows record how they were established."""
+    """New CompanyNodeExposure rows record how they were established.
+    provenance_type is MODEL_VERIFIED (corrective-v4 Task 6): this row is
+    the verifier's own acceptance of one candidate for one event, never an
+    independently-sourced fact -- VERIFIED_RELATIONSHIP is reserved for
+    provenance a SupplyLink or other real artifact establishes."""
     from app.analysis.impact_graph.engine import _write_exposure_cache
     from app.analysis.impact_graph.schemas import GraphCompany
 
@@ -126,8 +130,9 @@ def test_exposure_cache_write_stamps_provenance(db_session):
     _write_exposure_cache(db_session, company, exposure_exists=True, alert_id=7)
 
     stored = db_session.query(CompanyNodeExposure).filter_by(company_id=row.id).one()
-    assert stored.provenance_type == "VERIFIED_RELATIONSHIP"
+    assert stored.provenance_type == "MODEL_VERIFIED"
     assert stored.source_alert_id == 7
+    assert stored.review_after is not None
 
 
 # --- archetype provenance reaches the gate --------------------------------

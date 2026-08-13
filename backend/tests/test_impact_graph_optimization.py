@@ -57,7 +57,13 @@ def test_negative_relationship_cache_skips_candidate(db_session):
     assert "NOEXP.NS" not in captured["enum"] and "REAL.NS" in captured["enum"]
 
 
-def test_verified_relationship_cache_auto_accepts_and_skips_verify(db_session):
+def test_relationship_cache_seeds_candidacy_but_still_verifies(db_session):
+    """A positive relationship-cache row still rides the candidate pool
+    (retrieval index, spec §9) and still annotates the prompt with the
+    prior mechanism -- but corrective-v4 Task 6 removed the auto-accept
+    bypass this test used to pin: the cache can no longer substitute for
+    THIS event's verification. The candidate still reaches the verifier,
+    and its verdict decides."""
     row = _company(db_session, "CACHED.NS", "Cached Co", "oil_gas")
     db_session.add(CompanyNodeExposure(company_id=row.id, node_key="oil_gas",
                                        exposure_exists=1, strength=0.7,
@@ -67,7 +73,7 @@ def test_verified_relationship_cache_auto_accepts_and_skips_verify(db_session):
         {"map_companies": {"companies": [_company_entry("CACHED.NS", "Cached Co")]}}))
     result = analyze_article_v3(router, "t", "c", session=db_session)
     assert result.companies[0].verified is True
-    assert "verify_companies" not in router.calls  # nothing left to verify
+    assert "verify_companies" in router.calls  # no bypass: always verified
 
 
 def test_verification_accept_writes_positive_cache(db_session):

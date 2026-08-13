@@ -44,6 +44,32 @@ def test_upgrade_head_creates_evidence_table(tmp_path):
     assert "evidence_records" in tables
 
 
+def test_upgrade_head_adds_exposure_provenance_columns(tmp_path):
+    """Corrective-v4 Task 6: the exposure self-certification fix's new
+    company_node_exposures columns (0003) must exist on a fresh DB after
+    `alembic upgrade head`, not only via create_all."""
+    import sqlite3
+
+    db = tmp_path / "provenance.db"
+    url = f"sqlite:///{db}"
+    result = _run_alembic(url)
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        columns = {
+            row[1] for row in
+            conn.execute("PRAGMA table_info(company_node_exposures)")
+        }
+    finally:
+        conn.close()
+    for column in (
+        "review_after", "source_type", "source_url", "source_date",
+        "evidence_id", "verification_version",
+    ):
+        assert column in columns, f"missing company_node_exposures.{column}"
+
+
 def test_upgrade_on_legacy_created_db(tmp_path):
     """A DB created by the old create_all/_ADDED_COLUMNS path must accept
     `alembic stamp baseline` + upgrade without error."""

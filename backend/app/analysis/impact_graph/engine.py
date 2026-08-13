@@ -261,17 +261,34 @@ def _subject_companies(session, facts: EventFacts) -> list:
     return subjects
 
 
+# Provenance values a candidate-profile line may honestly call "verified"
+# (corrective-v4 Task 6): only an independently-sourced relationship, never
+# the system's own MODEL_VERIFIED prior or a NULL-provenance legacy row --
+# see app.analysis.impact_graph.evidence._PROVENANCED_EXPOSURE_TYPES, same
+# vocabulary.
+_PROVENANCED_EXPOSURE_TYPES = ("SUPPLY_LINK", "MANUAL", "CURATED")
+
+
 def _candidate_profile_lines(candidates, cached_by_ticker: dict) -> str:
     """Compact exposure-profile lines (token-opt P8): ticker | name |
     sub_sector | clipped business line -- never the full biography. A
-    cached BASE EXPOSURE replaces the generic description entirely: the
-    model gets the verified mechanism instead of rediscovering it."""
+    cached exposure row replaces the generic description entirely: the
+    model gets the prior mechanism instead of rediscovering it. The label
+    must not overclaim (Task 6, self-certification fix): a MODEL_VERIFIED
+    or NULL-provenance row is the model's OWN earlier acceptance, not an
+    independent check, so it reads as an unconfirmed prior the model may
+    freely override -- only a provenanced row (SUPPLY_LINK/MANUAL/CURATED)
+    may say "verified"."""
     lines = []
     for c in candidates:
         cached = cached_by_ticker.get(c.ticker)
         if cached is not None:
-            lines.append(f"- {c.ticker} ({c.name}) [KNOWN BASE EXPOSURE, verified: "
-                         f"{(cached.mechanism or 'exposure confirmed')[:90]}] "
+            mechanism = (cached.mechanism or "exposure confirmed")[:90]
+            if getattr(cached, "provenance_type", None) in _PROVENANCED_EXPOSURE_TYPES:
+                label = f"[VERIFIED EXPOSURE (provenanced): {mechanism}]"
+            else:
+                label = f"[PRIOR EXPOSURE (model-derived, unconfirmed): {mechanism}]"
+            lines.append(f"- {c.ticker} ({c.name}) {label} "
                          f"-- judge THIS event's specific effect; you may override if this event changes the relationship")
             continue
         seg = f" | {c.sub_sector}" if c.sub_sector else ""
@@ -282,8 +299,11 @@ def _candidate_profile_lines(candidates, cached_by_ticker: dict) -> str:
 
 def _exposure_cache(session, node_key: str, tickers_to_ids: dict) -> tuple[dict, set]:
     """(positive rows by ticker, negatively-cached tickers) for one
-    normalized node -- rows older than the company's own metadata are
-    ignored (stale-invalidation, token-opt P10)."""
+    normalized node -- stale rows are ignored. Freshness is delegated to
+    exposure_row_is_fresh (the ONE staleness rule every reader must apply,
+    spec §8; this reader used to reimplement it inline, an audited
+    defect -- corrective-v4 Task 6)."""
+    from app.analysis.impact_graph.exposure import exposure_row_is_fresh
     from app.models import CompanyNodeExposure
 
     if session is None or not tickers_to_ids:
@@ -300,12 +320,8 @@ def _exposure_cache(session, node_key: str, tickers_to_ids: dict) -> tuple[dict,
         ticker = ids_to_tickers.get(row.company_id)
         if ticker is None:
             continue
-        company = row.company
-        meta_as_of = getattr(company, "business_desc_as_of", None)
-        if meta_as_of is not None and row.verified_at is not None:
-            verified = row.verified_at.date() if hasattr(row.verified_at, "date") else row.verified_at
-            if meta_as_of > verified:
-                continue  # stale -- company metadata changed since verification
+        if not exposure_row_is_fresh(row, row.company):
+            continue  # stale -- company metadata changed since verification, or past review_after
         if row.exposure_exists:
             positive[ticker] = row
         else:
@@ -814,28 +830,24 @@ def _apply_company_correction(company: GraphCompany, correction: dict) -> None:
 def _verify_companies(router: StageRouter, session, facts: EventFacts,
                       state: _GraphState, alert_id: int | None = None) -> None:
     """Diff-contract verification (token-opt P17): the verifier returns
-    accept[]/reject[]/corrections{} and code applies them. Companies whose
-    (node, ticker) relationship is already cache-verified with the same
-    direction are auto-accepted deterministically and never re-sent."""
+    accept[]/reject[]/corrections{} and code applies them.
+
+    Every candidate faces THIS event's verification, always (corrective-v4
+    Task 6: the exposure self-certification loop is closed). There used to
+    be a deterministic pre-verification step here: a company whose
+    relationship cache already carried a positive row skipped the verifier
+    outright and was auto-accepted. That is exactly a self-certification
+    loop -- _write_exposure_cache below writes the row the NEXT event's
+    auto-accept would read back, so one LLM acceptance could keep
+    certifying itself forever without ever facing a current-event check
+    again. The cache still seeds candidacy (_candidate_pool /
+    _exposure_cache) and still annotates the prompt as a PRIOR the model
+    may override -- it may never again substitute for verification."""
     companies = list(state.companies.values())
     if not companies:
         return
 
-    # Deterministic pre-verification via the relationship cache.
-    to_verify = []
-    auto_accepted = 0
-    for company in companies:
-        cached = _cached_positive_for(session, company)
-        if cached is not None and (cached.strength or 0) > 0 and company.direction != "neutral":
-            company.verified = True
-            auto_accepted += 1
-        else:
-            to_verify.append(company)
-    if auto_accepted:
-        _skip("verify_companies", "relationship_cache_auto_accept", count=auto_accepted)
-    if not to_verify:
-        return
-
+    to_verify = companies
     tickers = [c.ticker for c in to_verify]
 
     def _company_path(company: GraphCompany) -> str:
@@ -895,29 +907,23 @@ def _verify_companies(router: StageRouter, session, facts: EventFacts,
                 _write_exposure_cache(session, company, exposure_exists=True, alert_id=alert_id)
 
 
-def _cached_positive_for(session, company: GraphCompany):
-    from app.analysis.impact_graph.exposure import exposure_row_is_fresh
-    from app.models import Company as CompanyRow, CompanyNodeExposure
-
-    if session is None:
-        return None
-    row = session.query(CompanyRow).filter_by(ticker=company.ticker).one_or_none()
-    if row is None:
-        return None
-    cached = (
-        session.query(CompanyNodeExposure)
-        .filter_by(company_id=row.id, node_key=company.parent_id, exposure_exists=1)
-        .one_or_none()
-    )
-    if cached is not None and not exposure_row_is_fresh(cached, row):
-        return None
-    return cached
-
-
 def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bool,
                           alert_id: int | None) -> None:
     """Upsert one (company, node) relationship row. BASE exposure only:
-    mechanism is the company-level channel, never the event narrative."""
+    mechanism is the company-level channel, never the event narrative.
+
+    provenance_type is MODEL_VERIFIED (corrective-v4 Task 6, spec §8/§9),
+    never VERIFIED_RELATIONSHIP: this row records the CURRENT VERIFIER'S
+    acceptance of this candidate for THIS event -- not an independently
+    sourced fact. app.analysis.impact_graph.evidence.classify_evidence
+    reads provenance_type back and refuses to grant Tier C for
+    MODEL_VERIFIED, precisely so this write can never certify a future
+    candidate's evidence on its own; it only seeds candidacy and an
+    unconfirmed prompt prior. review_after gives the prior a 90-day
+    expiry -- exposure_row_is_fresh treats a row past it as stale, so
+    acceptance re-earns its place instead of compounding forever."""
+    from datetime import timedelta
+
     from app.models import Company as CompanyRow, CompanyNodeExposure, utcnow
 
     row = session.query(CompanyRow).filter_by(ticker=company.ticker).one_or_none()
@@ -928,22 +934,28 @@ def _write_exposure_cache(session, company: GraphCompany, *, exposure_exists: bo
         .filter_by(company_id=row.id, node_key=company.parent_id)
         .one_or_none()
     )
+    now = utcnow()
+    review_after = now + timedelta(days=90)
     if existing is None:
         session.add(CompanyNodeExposure(
             company_id=row.id, node_key=company.parent_id,
             exposure_exists=1 if exposure_exists else 0,
             strength=company.impact_strength if exposure_exists else None,
             mechanism=company.mechanism[:300] if exposure_exists else None,
-            verified_at=utcnow(), source_alert_id=alert_id,
-            provenance_type="VERIFIED_RELATIONSHIP",
+            verified_at=now, source_alert_id=alert_id,
+            provenance_type="MODEL_VERIFIED",
+            review_after=review_after,
+            verification_version=prompts.IMPACT_PROMPT_VERSION,
         ))
     else:
         existing.exposure_exists = 1 if exposure_exists else 0
         existing.strength = company.impact_strength if exposure_exists else None
         existing.mechanism = company.mechanism[:300] if exposure_exists else existing.mechanism
-        existing.verified_at = utcnow()
+        existing.verified_at = now
         existing.source_alert_id = alert_id
-        existing.provenance_type = "VERIFIED_RELATIONSHIP"
+        existing.provenance_type = "MODEL_VERIFIED"
+        existing.review_after = review_after
+        existing.verification_version = prompts.IMPACT_PROMPT_VERSION
 
 
 def _verify_edges(router: StageRouter, facts: EventFacts, state: _GraphState) -> None:

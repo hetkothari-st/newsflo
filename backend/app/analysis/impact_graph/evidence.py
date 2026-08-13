@@ -26,6 +26,13 @@ _MARKET_OBSERVATION_PHRASES = (
     "shares dropped", "shares declined", "shares jumped", "shares surged",
 )
 
+# Provenance values that name an independently-sourced relationship, never
+# the system's own accepted prior (corrective-v4 Task 6, spec §8/§9). This
+# is the ONLY escape a CompanyNodeExposure row has to Tier C -- MODEL_VERIFIED
+# (what the verifier writes) and NULL (pre-provenance legacy rows) never
+# qualify, no matter how many times a model has re-confirmed them.
+_PROVENANCED_EXPOSURE_TYPES = ("SUPPLY_LINK", "MANUAL", "CURATED")
+
 
 def classify_evidence(
     session: Session, company, subject_tickers: set[str],
@@ -44,13 +51,20 @@ def classify_evidence(
        it is therefore the sole producer of Tier C (VERIFIED_RELATIONSHIP).
        Evidence classification only: the graph proposed the candidate, the
        link never does (no-auto-attribution stays intact).
-    3. A CompanyNodeExposure row is a PRIOR the system itself computed and
-       cached (app.analysis.impact_graph.engine._write_exposure_cache) --
-       not independent verification, regardless of who or what wrote it.
-       MODEL_VERIFIED_PRIOR / D, never VERIFIED_RELATIONSHIP / C (Task 6
-       adds a provenance-based escape once writers stamp real provenance).
-       Staleness still applies -- a stale row is not usable evidence at
-       all, so it falls through exactly like "no row".
+    3. A CompanyNodeExposure row is normally a PRIOR the system itself
+       computed and cached (app.analysis.impact_graph.engine.
+       _write_exposure_cache writes provenance_type=MODEL_VERIFIED) -- not
+       independent verification, so it earns only MODEL_VERIFIED_PRIOR / D.
+       A NULL-provenance row (written before provenance shipped) is the
+       same non-evidence, labeled LEGACY_UNVERIFIED / D instead so an old
+       row is never mistaken for a reviewed one. The ONE escape (Task 6,
+       spec §8/§9): provenance_type in (SUPPLY_LINK, MANUAL, CURATED) names
+       an independently-sourced relationship a human or a linked artifact
+       established, not the model re-confirming itself -- that alone earns
+       VERIFIED_RELATIONSHIP / C, with a real payload citing the source.
+       Staleness (incl. review_after expiry) still applies to every case --
+       a stale row is not usable evidence at all, so it falls through
+       exactly like "no row".
     4. The article's own subject list is genuine evidence about the
        company at distance 1 -- ARTICLE_SUBJECT / SUBJECT, with a record
        documenting that the article named the company as its subject.
@@ -108,6 +122,21 @@ def classify_evidence(
             .one_or_none()
         )
         if cached is not None and exposure_row_is_fresh(cached, row):
+            provenance = cached.provenance_type
+            if provenance in _PROVENANCED_EXPOSURE_TYPES:
+                payload = {
+                    "source_type": "provenanced_exposure",
+                    "source_name": provenance,
+                    "source_url": cached.source_url,
+                    "source_date": cached.source_date,
+                    "fact_text": cached.mechanism or "provenanced exposure",
+                    "evidence_class": "VERIFIED_RELATIONSHIP",
+                    "evidence_tier": "C",
+                    "supports_claim": True,
+                }
+                return "VERIFIED_RELATIONSHIP", "C", [payload]
+            if provenance is None:
+                return "LEGACY_UNVERIFIED", "D", []
             return "MODEL_VERIFIED_PRIOR", "D", []
 
     if company.ticker in subject_tickers:

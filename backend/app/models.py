@@ -554,11 +554,33 @@ class CompanyNodeExposure(Base):
     mechanism = Column(Text, nullable=True)  # base-exposure mechanism, one line
     verified_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     source_alert_id = Column(Integer, nullable=True)
-    # How this relationship was established (spec 2026-08-12 §8). Rows
-    # written by the verifier carry VERIFIED_RELATIONSHIP; NULL on rows
-    # from before provenance shipped (treated as verified -- they only
-    # ever came from the verification path).
+    # How this relationship was established (spec 2026-08-12 §8; corrective-
+    # v4 Task 6 narrows the vocabulary that matters for evidence): the
+    # verifier writes MODEL_VERIFIED -- the SYSTEM's own accepted prior,
+    # never independent evidence. Only SUPPLY_LINK / MANUAL / CURATED are
+    # independently-sourced provenance a claim may cite as Tier C
+    # (app.analysis.impact_graph.evidence.classify_evidence). NULL on rows
+    # from before provenance shipped -- classified LEGACY_UNVERIFIED, a
+    # candidacy prior only, same as MODEL_VERIFIED.
     provenance_type = Column(String, nullable=True)
+    # Independently-sourced provenance detail (Task 6): populated only when
+    # provenance_type is SUPPLY_LINK/MANUAL/CURATED. NULL on MODEL_VERIFIED
+    # rows -- there is no independent source to cite.
+    source_type = Column(String, nullable=True)
+    source_url = Column(String, nullable=True)
+    source_date = Column(Date, nullable=True)
+    evidence_id = Column(Integer, ForeignKey("evidence_records.id"), nullable=True)
+    # Prompt/schema version pair active when this row was written (Task 6) --
+    # lets a future audit tell which prompt generation produced a given
+    # prior without re-deriving it from source_alert_id.
+    verification_version = Column(String, nullable=True)
+    # Expiry checkpoint for the SELF-CERTIFICATION FIX (Task 6, spec §8/§9):
+    # a MODEL_VERIFIED prior compounds forever without one -- a company the
+    # verifier accepted once would keep auto-qualifying as "fresh" on every
+    # future event indefinitely. exposure_row_is_fresh treats a row past its
+    # own review_after as stale, same as metadata staleness. NULL means no
+    # checkpoint was set (rows from before this column existed).
+    review_after = Column(DateTime(timezone=True), nullable=True)
 
     company = relationship("Company")
 

@@ -125,15 +125,35 @@ def sectors_for_node(node_id: str, label: str = "") -> list[str]:
 
 
 def exposure_row_is_fresh(row, company) -> bool:
-    """THE staleness rule for CompanyNodeExposure rows (spec §8 freshness):
-    a row verified before the company's own metadata changed is unusable.
-    Every reader must apply this -- one reader checking while three don't
-    was exactly the bug (2026-08-12)."""
+    """THE staleness rule for CompanyNodeExposure rows (spec §8 freshness;
+    corrective-v4 Task 6 adds review_after): a row is unusable when EITHER
+    it was verified before the company's own metadata changed, OR it has
+    aged past its own review_after checkpoint -- a MODEL_VERIFIED prior
+    must periodically re-earn candidacy rather than compound forever
+    (spec §8/§9, the exposure self-certification fix). Every reader must
+    apply this -- one reader checking while three don't was exactly the
+    bug (2026-08-12)."""
     meta_as_of = getattr(company, "business_desc_as_of", None)
-    if meta_as_of is None or row.verified_at is None:
-        return True
-    verified = row.verified_at.date() if hasattr(row.verified_at, "date") else row.verified_at
-    return meta_as_of <= verified
+    if meta_as_of is not None and row.verified_at is not None:
+        verified = row.verified_at.date() if hasattr(row.verified_at, "date") else row.verified_at
+        if meta_as_of > verified:
+            return False
+    review_after = getattr(row, "review_after", None)
+    if review_after is not None:
+        from datetime import timezone
+
+        from app.models import utcnow
+
+        checkpoint = review_after
+        if checkpoint.tzinfo is None:
+            # SQLite round-trips DateTime(timezone=True) values as naive --
+            # coerce to UTC-aware so this never raises comparing aware vs
+            # naive (both sides of this comparison are UTC by construction:
+            # utcnow() and _write_exposure_cache's review_after).
+            checkpoint = checkpoint.replace(tzinfo=timezone.utc)
+        if utcnow() > checkpoint:
+            return False
+    return True
 
 
 def cached_exposed_companies(session: Session, node_key: str, limit: int = 15) -> list[Company]:
