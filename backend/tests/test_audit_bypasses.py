@@ -218,10 +218,14 @@ def test_bypass_dedup_reuse(db_session, monkeypatch, strict_mode):
     db_session.commit()
 
     # leg 3: current version -> reuse, with the audit trail copied.
-    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
-    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+    # The version string is the FULL 4-part contract (final-review finding
+    # I4: prompt/schema/gate-policy/knowledge-registry), not prompt+schema
+    # -- a POLICY_VERSION or KNOWLEDGE_REGISTRY_VERSION bump changes what
+    # the gate decides and must invalidate the reuse shortcut too.
+    from app.pipeline import analysis_version
 
-    current_version = f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}"
+    current_version = analysis_version()
+    assert len(current_version.split("/")) == 4
     for record in prior_records:
         record.analysis_version = current_version
     db_session.commit()

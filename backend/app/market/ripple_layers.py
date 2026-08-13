@@ -437,12 +437,30 @@ def compute_ripple_layers(
             # gated rows only, so a legacy (ungated) row's dict stays
             # byte-identical to its pre-Task-16 shape.
             row["mechanism"] = alert_company.mechanism
-            # Deterministic from the stored float (app.analysis.impact_graph.
-            # publication_gate.materiality_grade), NOT re-derived from any
+            # The COMPOSITE grade the gate evaluated, read straight off the
+            # row (final-review finding I3, column added by migration 0007).
+            #
+            # This used to be `materiality_grade(alert_company.materiality)`
+            # -- the NAKED-FLOAT grade -- under a comment claiming that was
+            # what the gate stored. It was not: the gate evaluates
+            # app.analysis.impact_graph.materiality.materiality_grade's
+            # COMPOSITE (the float capped by the company's exposure ordinal
+            # and the evidence tier), so a candidate the gate capped to
+            # MEDIUM was served to the reader as HIGH -- a grade no gate
+            # decision ever accepted. The composite is not recoverable from
+            # the float, hence the column.
+            #
+            # The naked-float fallback survives for LEGACY gated rows
+            # persisted before 0007 (materiality_grade NULL): the same value
+            # they have always been served, never worse. Still not read from
             # CompanyDecisionRecord -- that audit row can be absent (non-
             # strict analysis paths never write one) and is keyed by ticker,
             # not alert_company_id, so it is not a reliable per-row source.
-            row["materiality_grade"] = materiality_grade(alert_company.materiality)
+            row["materiality_grade"] = (
+                alert_company.materiality_grade
+                if alert_company.materiality_grade is not None
+                else materiality_grade(alert_company.materiality)
+            )
             row["confidence_band"] = alert_company.confidence_band
             row["impact_type"] = (
                 None if alert_company.causal_distance is None

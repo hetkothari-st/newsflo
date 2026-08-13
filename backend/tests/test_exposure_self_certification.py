@@ -670,3 +670,84 @@ def test_skipped_protected_write_is_not_recorded_as_a_self_echo(db_session, stri
     entries = _v3_entries(db_session, result)
     assert entries[0]["evidence_class"] == "VERIFIED_RELATIONSHIP"
     assert entries[0]["evidence_tier"] == "C"
+
+
+# --- self-echo guard at the SECOND reader (final-review finding I2) --------
+# `app.pipeline._company_profile_supports_mechanism` is the other reader of
+# CompanyNodeExposure in the gate path -- it feeds BUSINESS_MODEL_VALID.
+# classify_evidence has carried the guard since Task 18; this one did not,
+# and `_write_exposure_cache` refreshes an existing row IN PLACE. Via
+# SQLAlchemy's identity map, an EXPIRED row this run's own verifier just
+# re-stamped therefore reads back as FRESH here, so a candidate with no
+# business description at all could clear the business-model gate on the
+# strength of its own acceptance.
+
+def test_refreshed_expired_row_cannot_satisfy_business_model_gate(db_session, strict_mode):
+    """Expired (review_after in the past), curated-free row + a same-run
+    verifier acceptance that refreshes it in place -> BUSINESS_MODEL's
+    input must be False. The row is fresh by then, so only the guard can
+    tell it apart from an independent prior."""
+    from app.pipeline import _company_profile_supports_mechanism
+
+    row = _company(db_session, business_desc=None)
+    exposure = CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="model-verified crude exposure",
+        provenance_type="MODEL_VERIFIED", verified_at=utcnow() - timedelta(days=200),
+        review_after=utcnow() - timedelta(days=110))  # EXPIRED
+    db_session.add(exposure)
+    db_session.commit()
+
+    company = _graph_company(verified=True)
+    # Expired: not usable evidence for anyone, guard or no guard.
+    assert _company_profile_supports_mechanism(db_session, row, company) is False
+
+    # This run's `_write_exposure_cache` re-stamps the SAME row in place --
+    # exactly what engine.py does on a verifier acceptance.
+    exposure.verified_at = utcnow()
+    exposure.review_after = utcnow() + timedelta(days=90)
+    exposure.provenance_type = "MODEL_VERIFIED"
+    db_session.commit()
+
+    # Without the guard the refreshed row now reads as an independent
+    # prior -- this is the hole.
+    assert _company_profile_supports_mechanism(db_session, row, company) is True
+    # With this run's write declared, the row is the candidate's own echo
+    # and cannot ground the business-model claim.
+    assert _company_profile_supports_mechanism(
+        db_session, row, company, frozenset({"ONGC.NS"})) is False
+
+
+def test_guard_leaves_a_real_business_description_alone(db_session, strict_mode):
+    """The guard only discounts the EXPOSURE branch. A company with an
+    actual business description still satisfies BUSINESS_MODEL_VALID even
+    when this run wrote its cache row -- the description is not a
+    self-echo, and refusing it would reject genuinely grounded
+    candidates."""
+    from app.pipeline import _company_profile_supports_mechanism
+
+    row = _company(db_session, business_desc="Upstream oil and gas explorer")
+    company = _graph_company(verified=True)
+
+    assert _company_profile_supports_mechanism(
+        db_session, row, company, frozenset({"ONGC.NS"})) is True
+
+
+def test_guard_leaves_an_independent_prior_row_alone(db_session, strict_mode):
+    """A fresh row for a ticker this run did NOT write (some other
+    candidate's write happened instead) is a genuine prior and still
+    grounds the business-model claim -- byte-identical to pre-fix
+    behavior."""
+    from app.pipeline import _company_profile_supports_mechanism
+
+    row = _company(db_session, business_desc=None)
+    db_session.add(CompanyNodeExposure(
+        company_id=row.id, node_key="crude_price", exposure_exists=1,
+        strength=0.8, mechanism="model-verified crude exposure",
+        provenance_type="MODEL_VERIFIED", verified_at=utcnow(),
+        review_after=utcnow() + timedelta(days=90), source_alert_id=4242))
+    db_session.commit()
+
+    company = _graph_company(verified=True)
+    assert _company_profile_supports_mechanism(
+        db_session, row, company, frozenset({"SOMEOTHER.NS"})) is True

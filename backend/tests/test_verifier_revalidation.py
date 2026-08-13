@@ -167,19 +167,28 @@ def test_correction_is_revalidated_by_gate(db_session, strict_mode):
     before returning, and classify_evidence read that SAME just-written
     row back as if it were independent history -- a second self-
     certification loop Task 6 had closed for auto-accept but not for
-    evidence classification. That self-echo is now excluded (see
-    evidence.py's classify_evidence docstring): CORR.NS has no OTHER
-    evidence source here (no subject mention, no archetype, no
-    SupplyLink), so it honestly lands at Tier E (MODEL_INFERENCE), which
-    caps materiality_grade at LOW regardless of the float (app.analysis.
-    impact_graph.materiality.materiality_grade) -- REJECT_LOW_MATERIALITY,
-    at MATERIALITY_VALID, which runs BEFORE EVIDENCE_VALID in
-    GATE_SEQUENCE. The corrected materiality FLOAT itself still reaches
-    the entry untouched (_v3_entries copies it from company.materiality
-    directly, never from the gate decision) -- only the grade and final
-    verdict changed. (A genuinely independent Tier D -- a prior row this
-    run's verifier did NOT itself just write -- is exercised at the gate-
-    unit level in test_v4_strict_gate_wiring.py and directly in
+    evidence classification. That self-echo is excluded (see evidence.py's
+    classify_evidence docstring): CORR.NS has no OTHER evidence source
+    here (no subject mention, no archetype, no SupplyLink), so it honestly
+    lands at Tier E (MODEL_INFERENCE).
+
+    Rejection-state note (final-review finding I2): the SAME self-echo
+    also reached BUSINESS_MODEL_VALID through the second, unguarded reader
+    -- app.pipeline._company_profile_supports_mechanism -- which read the
+    just-written exposure row and reported company_profile_present=True
+    for a company with no business description at all. With that reader
+    guarded too, CORR.NS honestly has neither a description nor an
+    independent exposure record, and at Tier E cannot substitute
+    structured primary evidence: REJECT_INSUFFICIENT_EVIDENCE at
+    BUSINESS_MODEL_VALID, which runs BEFORE MATERIALITY_VALID (where this
+    used to land via the tier-E LOW cap). Either way the composite grade
+    is LOW, never the naked float's HIGH, and the corrected materiality
+    FLOAT still reaches the entry untouched (_v3_entries copies it from
+    company.materiality directly, never from the gate decision) -- what
+    the correction is revalidated INTO is the point, not which gate says
+    no. (A genuinely independent Tier D -- a prior row this run's verifier
+    did NOT itself just write -- is exercised at the gate-unit level in
+    test_v4_strict_gate_wiring.py and directly in
     test_exposure_self_certification.py instead.)"""
     row = Company(name="Corr Co", ticker="CORR.NS", sector="oil_gas", index_tier="NIFTY50")
     db_session.add(row)
@@ -204,7 +213,7 @@ def test_correction_is_revalidated_by_gate(db_session, strict_mode):
 
     entries = _v3_entries(db_session, result)
     assert entries[0]["materiality"] == 0.7  # entry saw the CORRECTED float, not the original
-    assert entries[0]["gate_state"] == "REJECT_LOW_MATERIALITY"
+    assert entries[0]["gate_state"] == "REJECT_INSUFFICIENT_EVIDENCE"
     assert entries[0]["materiality_grade"] == "LOW"  # tier-E cap, not the naked float's own HIGH grade
     assert entries[0]["display_tier"] == "excluded"
 

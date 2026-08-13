@@ -23,4 +23,10 @@ RUN python -m ctranslate2.converters.transformers \
 
 COPY backend/ ./
 COPY --from=frontend-build /frontend/dist ./app/static
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Migrations run at boot, BEFORE uvicorn -- schema ownership moved to
+# Alembic (app/db.py's _ADDED_COLUMNS is frozen), so init_db() alone can no
+# longer add a column to a PRE-EXISTING database. Without this step every
+# column added by 0002+ was missing in production while the code wrote it
+# unconditionally. `&&` is load-bearing: a failed migration must abort the
+# container, never leave it serving a half-migrated schema.
+CMD ["sh", "-c", "python tools/migrate_on_boot.py && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

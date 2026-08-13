@@ -162,9 +162,8 @@ def test_reused_alert_carries_its_facts_to_the_new_alert(db_session, monkeypatch
     this seeds a gated AlertCompany plus a matching CompanyDecisionRecord
     audit row -- a bare gate-less alert (this test's old fixture) no
     longer qualifies for the reuse shortcut at all."""
-    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
-    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
     from app.models import CompanyDecisionRecord
+    from app.pipeline import analysis_version
 
     company = Company(ticker="RELIANCE.NS", name="Reliance", sector="oil_gas", index_tier="NIFTY50")
     db_session.add(company)
@@ -188,7 +187,7 @@ def test_reused_alert_carries_its_facts_to_the_new_alert(db_session, monkeypatch
     db_session.add(CompanyDecisionRecord(
         alert_id=first_alert.id, company_id=company.id, ticker=company.ticker,
         final_state="DISPLAY_ELIGIBLE", display_tier="primary",
-        analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+        analysis_version=analysis_version(),
     ))
     db_session.commit()
 

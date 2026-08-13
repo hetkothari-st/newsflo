@@ -15,14 +15,21 @@ signals whether the feature is enabled (no information leak via route
 existence). Default off: these rows carry gate_inputs_json/candidate_json
 snapshots (full CandidateInput dumps, rationale text, mechanism prose) not
 meant for casual/production exposure.
+
+TWO conditions, both required (final-review finding I11): the flag AND an
+authenticated user. The flag alone was the whole protection, so anyone who
+knew the path could read the full audit trail of every alert on any
+deployment that had ever turned it on -- an unauthenticated data-exposure
+hole, not merely a debug convenience.
 """
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user_optional
 from app.config import settings
-from app.models import CompanyDecisionRecord
+from app.models import CompanyDecisionRecord, User
 from app.routers.articles import get_db
 
 router = APIRouter(prefix="/api/internal", tags=["internal"])
@@ -67,12 +74,32 @@ def _serialize(record: CompanyDecisionRecord) -> dict:
 
 
 @router.get("/decisions/{alert_id}")
-def get_decisions(alert_id: int, db: Session = Depends(get_db)):
-    # Fails closed as a 404, not a 403: the flag being off must read
-    # identically to the route not existing at all, so nothing about this
-    # feature's deployment status leaks from the response code alone.
+def get_decisions(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
+):
+    # ORDER IS LOAD-BEARING. Fails closed as a 404, not a 403: the flag
+    # being off must read identically to the route not existing at all, so
+    # nothing about this feature's deployment status leaks from the
+    # response code alone -- which is exactly why the auth check below is
+    # written by hand instead of declared as Depends(get_current_user).
+    # FastAPI resolves declared dependencies BEFORE the handler body, so a
+    # required-auth dependency would answer 401 on a flag-OFF deployment
+    # and hand an unauthenticated caller the one bit this router is built
+    # not to leak. `get_current_user_optional` never raises; it only
+    # resolves a bearer token when one is present.
     if not settings.debug_audit_api:
         raise HTTPException(status_code=404, detail="not found")
+    # Flag ON is not authorization (final-review finding I11): these rows
+    # are full CandidateInput dumps, rationale text and mechanism prose.
+    # Past this point the endpoint's existence is already admitted, so a
+    # plain 401 is the honest answer.
+    if user is None:
+        raise HTTPException(
+            status_code=401, detail="authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     records = (
         db.query(CompanyDecisionRecord)

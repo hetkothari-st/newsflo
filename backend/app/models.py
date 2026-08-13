@@ -445,6 +445,17 @@ class AlertCompany(Base):
     # and consumers must treat NULL as legacy, never as eligible.
     display_tier = Column(String, nullable=True)
     gate_state = Column(String, nullable=True)
+    # The COMPOSITE materiality grade the gate actually evaluated (final-
+    # review finding I3, migration 0007): app.analysis.impact_graph.
+    # materiality.materiality_grade's output -- the LLM's raw float capped
+    # by the company's own exposure ordinal and the evidence tier -- i.e.
+    # the exact value that rode on CandidateInput.materiality_grade. Stored
+    # because it CANNOT be recovered from `materiality` alone: re-deriving
+    # a grade from the naked float (what app.market.ripple_layers did) can
+    # serve HIGH for a candidate the gate capped to MEDIUM. NULL on legacy
+    # and ungated rows -- there is no composite grade for those, and one
+    # must never be invented.
+    materiality_grade = Column(String, nullable=True)
     # Expected market sensitivity (corrective-v4 task 10): HIGH/MEDIUM/LOW/
     # UNKNOWN, set ONLY from GraphCompany.expected_market_sensitivity (the
     # model's own judgment at mapping time) -- never derived from

@@ -292,6 +292,35 @@ def _normalize_title(title: str) -> str:
     return " ".join(title.strip().lower().split())
 
 
+def analysis_version() -> str:
+    """The FULL contract version a CompanyDecisionRecord was produced
+    under: prompt / schema / gate policy / knowledge registry.
+
+    Final-review finding I4: this used to be prompt/schema only, so a bump
+    to the publication gate's POLICY_VERSION or to the archetype
+    KNOWLEDGE_REGISTRY_VERSION -- either of which changes what the gate
+    decides and which mechanisms exist to decide about -- left the version
+    string identical, and the dedup-reuse shortcut happily copied decisions
+    made under the OLD contract onto a new alert. All four inputs move the
+    string now.
+
+    Written on every new record and compared in full by
+    _dedup_reuse_policy_allows. Pre-existing 2-part records simply never
+    match the 4-part string, so they fall through to a fresh analysis --
+    the correct fail-closed direction (no attempt is made to "upgrade" an
+    old string, which would be inventing a claim about a contract that was
+    never checked)."""
+    from app.analysis.impact_graph.knowledge import KNOWLEDGE_REGISTRY_VERSION
+    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
+    from app.analysis.impact_graph.publication_gate import POLICY_VERSION
+    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
+
+    return "/".join((
+        IMPACT_PROMPT_VERSION, IMPACT_SCHEMA_VERSION,
+        POLICY_VERSION, KNOWLEDGE_REGISTRY_VERSION,
+    ))
+
+
 def _dedup_reuse_policy_allows(session: Session, alert: Alert) -> bool:
     """Dedup-reuse gate (corrective-v4 Task 12): the title-dedup shortcut
     must never resurrect an alert whose companies never passed the
@@ -304,8 +333,9 @@ def _dedup_reuse_policy_allows(session: Session, alert: Alert) -> bool:
          nothing gate-authoritative to reuse);
       2. the prior alert has a durable CompanyDecisionRecord audit trail
          (written only in strict mode) whose analysis_version matches the
-         CURRENT prompt/schema version -- a version mismatch means the gate
-         contract has since changed and the old decision can't be trusted;
+         CURRENT analysis version -- a version mismatch means the contract
+         that produced the old decision has since changed and it can't be
+         trusted;
       3. the prior alert's own analysis_quality is "authoritative" (a
          degraded/fallback/budget_exhausted analysis is never reused).
     Any failure falls through to a fresh analysis, never a partial copy.
@@ -315,11 +345,9 @@ def _dedup_reuse_policy_allows(session: Session, alert: Alert) -> bool:
         return False
     if alert.analysis_quality != "authoritative":
         return False
-    from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
-    from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
     from app.models import CompanyDecisionRecord
 
-    current_version = f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}"
+    current_version = analysis_version()
     records = session.query(CompanyDecisionRecord).filter_by(alert_id=alert.id).all()
     if not records:
         return False
@@ -475,6 +503,11 @@ def _build_alert_company(
         # V4 strict gate outcome -- None for legacy (ungated) entries.
         display_tier=entry.get("display_tier"),
         gate_state=entry.get("gate_state"),
+        # The COMPOSITE grade the gate evaluated (final-review finding I3):
+        # the SAME value that went out on CandidateInput.materiality_grade
+        # and onto the decision record, not a grade re-derived from the raw
+        # float. _v3_entries sets it from GateDecision.materiality_grade.
+        materiality_grade=entry.get("materiality_grade"),
         # Expected market sensitivity (corrective-v4 task 10): set ONLY from
         # entry["expected_market_sensitivity"], which _v3_entries populates
         # from GraphCompany.expected_market_sensitivity directly -- never
@@ -553,6 +586,19 @@ def measure_and_reconcile_alert_companies(session: Session, alert_id: int, alert
         return market_moves
     moves_by_company_id = {m.company_id: m for m in market_moves}
     for alert_company in alert_companies:
+        # STRUCTURAL, not modal (final-review finding I1 -- same rule
+        # app.analysis.impact_graph.publication_gate.is_gated states, applied
+        # per row). The flag early-return above only protects gated rows
+        # while the flag is ON; a scheduler-driven remeasure with the flag
+        # OFF used to reach rows the gate had already ruled on and overwrite
+        # `direction` (NULLing rationale/key_points_json with it) from a
+        # market observation -- exactly the market-over-fundamental inversion
+        # INV-001 forbids, destroying gate output that is authoritative once
+        # persisted. A row carrying gate_state or display_tier is never
+        # reconciled, whatever the flag says; a legacy (all-NULL) row keeps
+        # its byte-identical pre-gate behavior.
+        if alert_company.gate_state is not None or alert_company.display_tier is not None:
+            continue
         move = moves_by_company_id.get(alert_company.company_id)
         if move is None or move.measurement_status != "ok" or move.excess_move_pct is None:
             continue
@@ -641,6 +687,16 @@ def remeasure_no_data_moves(session: Session, limit: int = _REMEASURE_BATCH) -> 
                 .filter_by(alert_id=move.alert_id, company_id=move.company_id)
                 .one_or_none()
             )
+            # Same structural gated-row skip as
+            # measure_and_reconcile_alert_companies (final-review finding
+            # I1): this is the scheduler-driven path that actually reached
+            # gated rows in production with the flag off. Gate output is
+            # authoritative once persisted -- never overwritten by a market
+            # observation, whatever the flag says.
+            if alert_company is not None and (
+                alert_company.gate_state is not None or alert_company.display_tier is not None
+            ):
+                alert_company = None
             if alert_company is not None and move.excess_move_pct is not None:
                 measured_direction = "bullish" if move.excess_move_pct >= 0 else "bearish"
                 if measured_direction != alert_company.direction:
@@ -833,8 +889,6 @@ def _persist_alert(
         gated_entries = [e for e in entries if "gate_state" in e]
         if gated_entries or (settings.impact_engine_v4_strict and ambiguous_entities):
             from app.analysis.impact_graph.evidence import persist_evidence
-            from app.analysis.impact_graph.prompts import IMPACT_PROMPT_VERSION
-            from app.analysis.impact_graph.schemas import IMPACT_SCHEMA_VERSION
             from app.models import CompanyDecisionRecord
 
             for entry in gated_entries:
@@ -878,7 +932,7 @@ def _persist_alert(
                         "decision_notes": entry.get("decision_notes"),
                         "evidence_ids": evidence_ids,
                     }),
-                    analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+                    analysis_version=analysis_version(),
                     # Decision-record completeness (spec sec54, corrective-v4
                     # Task 18).
                     gate_inputs_json=json.dumps(entry.get("gate_inputs") or {}),
@@ -910,7 +964,7 @@ def _persist_alert(
                         alert_id=alert.id, company_id=None, ticker=(name or "")[:64],
                         final_state="REJECT_ENTITY_AMBIGUOUS", display_tier="excluded",
                         rejection_reason="REJECT_ENTITY_AMBIGUOUS",
-                        analysis_version=f"{IMPACT_PROMPT_VERSION}/{IMPACT_SCHEMA_VERSION}",
+                        analysis_version=analysis_version(),
                         provider=analysis_provider,
                         model=_analysis_model_for_provider(analysis_provider),
                         analysis_quality=analysis_quality,
@@ -1147,17 +1201,36 @@ def _roots_in_event(result, company) -> bool:
     return False
 
 
-def _company_profile_supports_mechanism(session: Session, row, company) -> bool:
+def _company_profile_supports_mechanism(
+    session: Session, row, company, fresh_cache_tickers: frozenset[str] = frozenset(),
+) -> bool:
     """BUSINESS_MODEL_VALID's input (canonical policy table): can the system
     say anything grounded about this company's business at the mechanism's
     own dimension? A plain-language business description qualifies, and so
     does a FRESH verified exposure row for the parent node -- an exposure
     record IS a statement about the business at exactly this dimension, and
-    a company can easily have one without ever getting a description."""
+    a company can easily have one without ever getting a description.
+
+    SELF-ECHO GUARD (final-review finding I2), the SECOND reader of
+    CompanyNodeExposure in this module. `app.analysis.impact_graph.evidence.
+    classify_evidence` has carried this guard since Task 18; this function
+    did not, and it reads the same table for the same node in the same
+    session. `_write_exposure_cache` (engine.py) refreshes an existing row
+    IN PLACE -- via SQLAlchemy's identity map, an EXPIRED row this run's own
+    verifier just re-stamped reads back as fresh here, so a candidate could
+    clear BUSINESS_MODEL_VALID on the strength of its own acceptance rather
+    than any independent prior. `fresh_cache_tickers` is exactly the set of
+    tickers this run wrote a row for (ImpactGraphResult.fresh_cache_tickers,
+    the same input classify_evidence receives); for those, the exposure
+    branch is skipped entirely and only a real business description counts.
+    Default-empty so the legacy/test callers that pass three arguments keep
+    their existing behavior."""
     if row is None:
         return False
     if (row.business_desc or "").strip():
         return True
+    if company.ticker in fresh_cache_tickers:
+        return False
     from app.analysis.impact_graph.exposure import exposure_row_is_fresh
     from app.models import CompanyNodeExposure
 
@@ -1274,7 +1347,7 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             company_key=str(row.id) if row is not None else "",
             entity_status=entity_status,
             company_profile_present=_company_profile_supports_mechanism(
-                session, row, company),
+                session, row, company, fresh_cache_tickers),
             mechanism=company.mechanism or "",
             rationale=company.rationale or "",
             economic_effect=_persist_effect(company.economic_effect) or "",

@@ -85,8 +85,14 @@ export interface FeedAlert {
   // one sanctioned mapping now -- same vocab as market_reaction.direction.
   direction: ReactionDirection | null;
   market_reaction?: MarketReaction | null;
-  raw_move_pct: number;
-  sector_move_pct: number;
+  // Null on an honest-unavailable measurement (finding I5): the strict
+  // engine's _unavailable_measurement (backend feed_v2.py, spec §49)
+  // serves EVERY market field as null when the price feed failed, these
+  // two included. They were typed non-nullable, so the v4 hero called
+  // .toFixed() straight on null and the whole feed crashed on exactly the
+  // payload the backend built to stay honest. Render "—", never 0.
+  raw_move_pct: number | null;
+  sector_move_pct: number | null;
   volume_multiple: number | null;
   benchmark_ticker: string;
   is_fallback_benchmark: boolean;

@@ -253,6 +253,76 @@ def test_inv001_measurement_never_overwrites_the_fundamental_call(
     assert alert_company.rationale == "fundamental thesis"
 
 
+def test_inv001_gated_rows_survive_reconciliation_with_the_flag_OFF(
+        db_session, monkeypatch, legacy_mode):
+    """INV-001 is STRUCTURAL, not modal (final-review finding I1).
+
+    Both reconciliation sites used to guard only on
+    settings.impact_engine_v4_strict. The scheduler runs
+    remeasure_no_data_moves continuously, so on a deployment with the flag
+    OFF -- or after any flag flip -- it reached rows the publication gate
+    had already ruled on and overwrote `direction` from the measured move,
+    NULLing rationale and key_points_json with it. Gate output is
+    authoritative once persisted (the same rule
+    publication_gate.is_gated states), so the skip is now per row and
+    flag-independent.
+
+    Pinned on BOTH paths, and the legacy (ungated) row alongside it proves
+    the flag-off behavior for rows that never walked the gate is
+    byte-identical to before."""
+    import app.pipeline as pipeline_module
+    from app.pipeline import measure_and_reconcile_alert_companies, remeasure_no_data_moves
+
+    alert = _seed_alert(db_session)
+    # Gated: the gate ruled DISPLAY_ELIGIBLE / primary on a bullish call.
+    _, gated = _add_alert_company(
+        db_session, alert, "RELIANCE.NS", "Reliance Industries",
+        direction="bullish", economic_effect="positive", with_move=False)
+    # Legacy: no gate_state, no display_tier -- the pre-v4 shape.
+    _, ungated = _add_alert_company(
+        db_session, alert, "IOC.NS", "Indian Oil", direction="bullish",
+        display_tier=None, gate_state=None, with_move=False)
+
+    def _contradicting_move(session, company_row, **kwargs):
+        return MarketMove(
+            company_id=company_row.id, benchmark_ticker="^CNXENERGY",
+            raw_move_pct=-2.0, sector_move_pct=0.5, excess_move_pct=-2.5,
+            measured_at=utcnow(), measurement_status="ok")
+
+    monkeypatch.setattr(pipeline_module, "measure_company_move", _contradicting_move)
+
+    measure_and_reconcile_alert_companies(db_session, alert.id, [gated, ungated])
+
+    # Gated row: untouched, despite a measured move contradicting it.
+    assert gated.direction == "bullish"
+    assert gated.rationale == "fundamental thesis"
+    assert json.loads(gated.key_points_json) == ["point"]
+    # Ungated row: unchanged legacy behavior -- measurement still wins.
+    assert ungated.direction == "bearish"
+    assert ungated.rationale is None
+    assert json.loads(ungated.key_points_json) == []
+
+    # Same on the scheduler-driven remeasure path -- the one that actually
+    # destroyed gated rows in production.
+    gated.direction, gated.rationale = "bullish", "fundamental thesis"
+    gated.key_points_json = json.dumps(["point"])
+    ungated.direction, ungated.rationale = "bullish", "fundamental thesis"
+    ungated.key_points_json = json.dumps(["point"])
+    for move in db_session.query(MarketMove).filter_by(alert_id=alert.id).all():
+        move.measurement_status = "no_data"
+        move.excess_move_pct = None
+    db_session.commit()
+
+    assert remeasure_no_data_moves(db_session) == 2
+    db_session.refresh(gated)
+    db_session.refresh(ungated)
+    assert gated.direction == "bullish"
+    assert gated.rationale == "fundamental thesis"
+    assert json.loads(gated.key_points_json) == ["point"]
+    assert ungated.direction == "bearish"
+    assert ungated.rationale is None
+
+
 # ===========================================================================
 # INV-002: fundamental analysis is never derived from price
 # ===========================================================================

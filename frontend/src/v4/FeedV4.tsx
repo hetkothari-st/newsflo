@@ -77,13 +77,19 @@ async function findLatestEdition(
   return null;
 }
 
-function fmtPct(value: number): string {
+/* Null-tolerant (finding I5): an honest-unavailable measurement serves
+   raw_move_pct/sector_move_pct as null, and a dash is the only truthful
+   rendering -- 0.0% would state a measurement nobody made. */
+function fmtPct(value: number | null | undefined): string {
+  if (value == null) return '—';
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 }
 
-function moveClass(value: number): string {
+function moveClass(value: number | null | undefined): string {
   // 0.0 is flat, not up -- a zero excess move must never render as a
-  // green gain (one-source-of-truth spec §39).
+  // green gain (one-source-of-truth spec §39). null is flat too: no
+  // measurement is not a gain or a loss.
+  if (value == null) return 'flat';
   return value < 0 ? 'down' : value > 0 ? 'up' : 'flat';
 }
 

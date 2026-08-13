@@ -2,7 +2,11 @@
    fmt/capC/liqS/arr/col helpers plus label maps (spec v2 §7). */
 import type { CapTier, IntensityComponent, LiquidityTier, Verdict } from './api';
 
-export function fmtPct(n: number): string {
+/* Null-tolerant (finding I5): an honest-unavailable measurement serves
+   raw_move_pct/sector_move_pct as null. A dash is the only truthful
+   rendering -- "0.0%" would state a measurement nobody made. */
+export function fmtPct(n: number | null | undefined): string {
+  if (n == null) return '—';
   return (n > 0 ? '+' : '') + n.toFixed(1) + '%';
 }
 

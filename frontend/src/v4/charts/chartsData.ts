@@ -6,6 +6,11 @@
    deliberately not built at all: supplier/customer relations exist in
    no honest payload. */
 import type { AlertDetail, LayerRow, TimelineEntry } from '../../v3/api';
+// The ONE up/down/flat rule, shared with chartComponents.tsx's actual
+// bucketing (finding I9). Availability and bucketing used to run two
+// separate copies that disagreed, so the deck could offer a Winners /
+// Losers tile whose columns then both rendered empty.
+import { effectClass } from './effectRules';
 
 export interface ChartRow extends LayerRow {
   layerIndex: number;
@@ -65,29 +70,30 @@ export function intensityBand(row: ChartRow): 'High' | 'Moderate' | 'Low' | null
   return score >= 75 ? 'High' : score >= 50 ? 'Moderate' : 'Low';
 }
 
-/* Relationship -> level. DIRECT companies are level 1; every other
-   relationship is a step further out, in layer order. */
-export function levelOf(row: ChartRow): number {
-  if (row.relationship === 'DIRECT') return 1;
-  return Math.min(row.layerIndex + 1, 4) + (row.relationship === 'DIRECT' ? 0 : 1) - 1 || 2;
+/* Is this row on the innermost (direct) level?
+
+   Final-review finding I10: the deck tested `relationship === 'DIRECT'`
+   literally, but that vocabulary is the LEGACY 3-tier generator's alone.
+   A gated alert's sections emit `MECH:{label}` for its mechanism layers
+   and `SECONDARY` for the outer one (see app.market.ripple_layers'
+   strict path), so on every gated story -- the whole point of v4 -- NO
+   row ever matched and the "Direct impact" level was silently empty
+   while level-1 companies rendered a band out. `MECH:` layers ARE the
+   direct level; `SECONDARY` is deliberately excluded, mapping to the
+   indirect level like any other non-direct relationship.
+
+   RippleLayer.relationship stays a plain string on purpose: the label
+   half of `MECH:{label}` is server-authored free text, so the type can
+   never be a closed union. */
+export function isLevelOne(row: { relationship: string }): boolean {
+  return row.relationship === 'DIRECT' || row.relationship.startsWith('MECH:');
 }
 
-/* Same per-row up/down/neutral rule chartComponents.tsx's bucketByEffect
-   uses for the split chart's actual bucketing (kept duplicated here
-   rather than imported, to avoid a chartsData <-> chartComponents
-   import cycle): economic_effect wins when present, legacy
-   AlertCompany.direction is the fallback ONLY for rows with no
-   economic_effect at all. Used solely to decide whether the split chart
-   has both a winner and a loser to show -- not to color anything. */
-function rowEffectSign(row: ChartRow): 'up' | 'down' | 'neutral' {
-  if (row.economic_effect) {
-    if (row.economic_effect === 'positive') return 'up';
-    if (row.economic_effect === 'negative') return 'down';
-    return 'neutral';
-  }
-  if (row.direction === 'bullish') return 'up';
-  if (row.direction === 'bearish') return 'down';
-  return 'neutral';
+/* Relationship -> level. Direct companies are level 1; every other
+   relationship is a step further out, in layer order. */
+export function levelOf(row: ChartRow): number {
+  if (isLevelOne(row)) return 1;
+  return Math.min(row.layerIndex + 1, 4) || 2;
 }
 
 export function availableCharts(detail: AlertDetail): ChartMeta[] {
@@ -100,9 +106,13 @@ export function availableCharts(detail: AlertDetail): ChartMeta[] {
     ripple: measured.length >= 3,
     levels: rows.length > 0 && detail.layers.length >= 2,
     intensity: rows.some((row) => row.intensity?.score != null),
+    // Offered only when the SAME rule that buckets the chart actually
+    // lands a row in each column -- effectClass requires a measured move,
+    // so an exposure-only story no longer offers a tile that renders
+    // "Positive impact · 0 / Negative impact · 0".
     split:
-      rows.some((row) => rowEffectSign(row) === 'up') &&
-      rows.some((row) => rowEffectSign(row) === 'down'),
+      rows.some((row) => effectClass(row) === 'up') &&
+      rows.some((row) => effectClass(row) === 'down'),
     sectors: sectors.size >= 2,
     timeline: timeline.length > 0,
     economicChain: timeline.length >= 2,

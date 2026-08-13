@@ -11,7 +11,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../lib/auth';
 import FeedV4, { reactionArrow, reactionClass } from './FeedV4';
 import DeepDiveV4 from './DeepDiveV4';
-import { CSplit } from './charts/chartComponents';
+import { CLevels, CSplit } from './charts/chartComponents';
+import { availableCharts, isLevelOne } from './charts/chartsData';
 import * as api from '../v3/api';
 import type { AlertDetail, FeedAlert, LayerRow, RippleLayer, StockDeepDive } from '../v3/api';
 
@@ -240,5 +241,137 @@ describe('DeepDiveV4 excess chip', () => {
     const chip = await screen.findByText('0.0%');
     expect(chip.className.split(' ')).toContain('flat');
     expect(chip.className.split(' ')).not.toContain('up');
+  });
+});
+
+/* --- final-review findings I5 / I9 / I10 ------------------------------- */
+
+describe('honest-unavailable measurement (finding I5)', () => {
+  it('renders the ripple band without throwing and shows dashes for null moves', async () => {
+    // Exactly what backend feed_v2._unavailable_measurement serves when
+    // the price feed failed (spec §49): the fundamental analysis stays
+    // visible and EVERY market field is null. raw_move_pct /
+    // sector_move_pct were typed non-nullable, so fmtPct called .toFixed
+    // on null and the whole feed crashed on the payload the backend built
+    // to be honest.
+    const alert = makeAlert({
+      id: 42,
+      excess_move_pct: null,
+      direction: null,
+      raw_move_pct: null,
+      sector_move_pct: null,
+      volume_multiple: null,
+      market_reaction: {
+        status: 'unavailable',
+        direction: 'unknown',
+        bar_complete: null,
+        raw_move_pct: null,
+        excess_move_pct: null,
+        benchmark_ticker: null,
+        benchmark_is_fallback: false,
+        data_quality: null,
+        session_state: null,
+        reaction_significance: 'unknown',
+      },
+    });
+    const detail = makeDetail(alert, [makeLayer([makeRow({ excess_move_pct: null })])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    await waitFor(() => screen.getByTestId('v4row-BPCL.NS'));
+
+    // Raw / Sector / Volume all render an em dash, never "0.0%".
+    const sumline = document.querySelector('.sumline');
+    expect(sumline).not.toBeNull();
+    expect(sumline!.textContent).toContain('—');
+    expect(sumline!.textContent).not.toContain('0.0%');
+  });
+});
+
+describe('chart availability vs bucketing (finding I9)', () => {
+  it('does not offer the split tile when no row has a measured move', () => {
+    const alert = makeAlert({ id: 5 });
+    // Exposure-only rows: a real economic_effect on each side, but no
+    // measured move anywhere. Availability used to say "show it" (it
+    // ignored excess_move_pct) while the bucketing -- which requires a
+    // measured move -- put every row in neutral, rendering
+    // "Positive impact · 0 / Negative impact · 0".
+    const detail = makeDetail(alert, [
+      makeLayer([
+        makeRow({ ticker: 'X.NS', economic_effect: 'positive', excess_move_pct: null }),
+        makeRow({ ticker: 'Y.NS', economic_effect: 'negative', excess_move_pct: null }),
+      ]),
+    ]);
+    expect(availableCharts(detail).map((chart) => chart.kind)).not.toContain('split');
+  });
+
+  it('still offers the split tile once both sides carry a measured move', () => {
+    const alert = makeAlert({ id: 6 });
+    const detail = makeDetail(alert, [
+      makeLayer([
+        makeRow({ ticker: 'X.NS', economic_effect: 'positive', excess_move_pct: 2.0 }),
+        makeRow({ ticker: 'Y.NS', economic_effect: 'negative', excess_move_pct: -1.5 }),
+      ]),
+    ]);
+    expect(availableCharts(detail).map((chart) => chart.kind)).toContain('split');
+  });
+
+  it('availability and bucketing agree: an offered split tile is never empty', () => {
+    const alert = makeAlert({ id: 7 });
+    const detail = makeDetail(alert, [
+      makeLayer([
+        makeRow({ ticker: 'X.NS', economic_effect: 'positive', excess_move_pct: 2.0 }),
+        makeRow({ ticker: 'Y.NS', economic_effect: 'negative', excess_move_pct: -1.5 }),
+      ]),
+    ]);
+    render(<CSplit detail={detail} />);
+    expect(screen.getByText('Positive impact · 1')).toBeInTheDocument();
+    expect(screen.getByText('Negative impact · 1')).toBeInTheDocument();
+  });
+});
+
+describe('deck level detection on gated alerts (finding I10)', () => {
+  it('treats a MECH: layer as level 1, like DIRECT', () => {
+    // A gated alert's sections emit "MECH:{label}" / "SECONDARY" -- never
+    // the legacy "DIRECT" -- so the literal compare put every company on
+    // a gated story into level 2+ and left the "Direct impact" band empty.
+    const alert = makeAlert({ id: 8 });
+    const detail = makeDetail(alert, [
+      makeLayer([makeRow({ ticker: 'M.NS' })], {
+        title: 'Crude-linked input costs',
+        relationship: 'MECH:crude_input_cost',
+      }),
+    ]);
+    const { container } = render(<CLevels detail={detail} />);
+    const labels = [...container.querySelectorAll('.clevel-label')].map((el) => el.textContent);
+    expect(labels[0]).toContain('Level 1');
+    expect(labels[0]).toContain('Direct impact');
+    expect(container.querySelector('[data-ticker="M.NS"]')).not.toBeNull();
+  });
+
+  it('keeps SECONDARY on the indirect level, not the direct one', () => {
+    const alert = makeAlert({ id: 9 });
+    const detail = makeDetail(alert, [
+      makeLayer([makeRow({ ticker: 'M.NS' })], {
+        title: 'Crude-linked input costs',
+        relationship: 'MECH:crude_input_cost',
+      }),
+      makeLayer([makeRow({ ticker: 'S.NS' })], {
+        title: 'Wider ecosystem',
+        relationship: 'SECONDARY',
+      }),
+    ]);
+    expect(isLevelOne({ relationship: 'MECH:crude_input_cost' })).toBe(true);
+    expect(isLevelOne({ relationship: 'SECONDARY' })).toBe(false);
+    expect(isLevelOne({ relationship: 'DIRECT' })).toBe(true);
+
+    const { container } = render(<CLevels detail={detail} />);
+    const bands = [...container.querySelectorAll('.clevel')];
+    expect(bands).toHaveLength(2);
+    expect(bands[0].querySelector('[data-ticker="M.NS"]')).not.toBeNull();
+    expect(bands[1].querySelector('[data-ticker="S.NS"]')).not.toBeNull();
   });
 });

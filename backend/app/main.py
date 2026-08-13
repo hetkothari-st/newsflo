@@ -67,6 +67,51 @@ _hub_task: asyncio.Task | None = None
 init_db()
 
 
+def _warn_if_schema_not_at_head() -> None:
+    """Warn (never block) when the DB is not at Alembic head.
+
+    Migrations are executed by backend/tools/migrate_on_boot.py, which the
+    Dockerfile runs before uvicorn -- this is only the tripwire that says
+    so out loud if it did not happen (a dev running uvicorn by hand, or a
+    deploy whose CMD was overridden). It is deliberately a warning: local
+    development has always run on a bare `init_db()` DB and must keep
+    starting. Any failure to even determine the revision is itself only
+    logged -- a schema-version check must never be the reason the app
+    cannot boot."""
+    log = logging.getLogger(__name__)
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import inspect as sa_inspect
+
+        from app.db import engine
+
+        backend_dir = Path(__file__).resolve().parents[1]
+        script = ScriptDirectory.from_config(Config(str(backend_dir / "alembic.ini")))
+        heads = set(script.get_heads())
+        with engine.connect() as conn:
+            if "alembic_version" not in sa_inspect(conn).get_table_names():
+                log.warning(
+                    "[schema] database is not alembic-managed (no alembic_version "
+                    "table) -- run `python tools/migrate_on_boot.py`; columns added "
+                    "by migrations 0002+ may be missing")
+                return
+            current = {
+                row[0] for row in conn.exec_driver_sql("SELECT version_num FROM alembic_version")
+            }
+        if current != heads:
+            log.warning(
+                "[schema] database is at alembic revision %s, head is %s -- run "
+                "`python tools/migrate_on_boot.py`; columns added by newer "
+                "migrations may be missing",
+                sorted(current) or ["<none>"], sorted(heads))
+    except Exception:
+        log.warning("[schema] could not verify alembic revision", exc_info=True)
+
+
+_warn_if_schema_not_at_head()
+
+
 def _seed_exposure_registry() -> None:
     """Materialize archetype-implied exposures once per knowledge-registry
     version (2026-08-12 fix: seed_company_exposures had no production

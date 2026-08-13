@@ -394,12 +394,24 @@ def _seed_alert_with_company(db_session, index: int) -> None:
     )
     db_session.add_all([company, article])
     db_session.commit()
-    # Relative to now (not a fixed past date) -- the feed now only lists
-    # today's (IST) alerts, so a fixed historical anchor would make every
-    # seeded alert here invisible to GET /api/alerts.
+    # Anchored to IST MIDDAY today, not to `utcnow() + index minutes`.
+    # The feed only lists today's (IST) alerts, so a fixed historical
+    # anchor makes every seeded alert invisible -- but stepping forward in
+    # MINUTES from "now" pushed the later ones past IST midnight and out of
+    # the window whenever the suite ran after ~20:35 IST (observed: exactly
+    # `minutes remaining until IST midnight` alerts came back instead of
+    # ALERTS_LIMIT). Midday + `index` SECONDS keeps every seeded alert
+    # inside the same IST day at any wall-clock hour, while preserving the
+    # strictly-increasing order these tests assert on.
+    from datetime import datetime as _datetime
+
+    from app.ist_time import IST, today_ist
+
+    _day = today_ist()
+    _noon_ist = _datetime(_day.year, _day.month, _day.day, 12, 0, tzinfo=IST)
     alert = Alert(
         article_id=article.id, category="oil_energy",
-        created_at=utcnow() + timedelta(minutes=index),
+        created_at=_noon_ist.astimezone(timezone.utc) + timedelta(seconds=index),
     )
     db_session.add(alert)
     db_session.commit()

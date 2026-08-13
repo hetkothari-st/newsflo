@@ -8,39 +8,29 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import type { AlertDetail } from '../../v3/api';
 import LogoV4 from '../LogoV4';
 import { useLogo } from '../logoResolve';
-import { flattenRows, intensityBand, type ChartMeta, type ChartRow } from './chartsData';
+import { flattenRows, intensityBand, isLevelOne, type ChartMeta, type ChartRow } from './chartsData';
+/* The ONE per-row classification both the winners/losers/neutral bucket
+   AND every node's color derive from -- and, since finding I9, the SAME
+   function chartsData.availableCharts uses to decide whether the split
+   chart is offered at all. It lives in its own leaf module so both files
+   can share it without an import cycle; see effectRules.ts for the rule
+   itself (measured move required, then gate-authoritative
+   economic_effect, then the legacy direction as a pre-gate fallback).
+   Node color must NEVER be computed separately from bucket placement
+   (that let a +2.0% excess render green inside the "Negative impact"
+   column) -- every renderer below calls this same function for both. */
+import { effectClass } from './effectRules';
 
-function fmtPct(value: number): string {
+/* Null-tolerant (finding I5): an honest-unavailable measurement serves
+   raw_move_pct/sector_move_pct as null -- a dash, never "0.0%". */
+function fmtPct(value: number | null | undefined): string {
+  if (value == null) return '—';
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 }
 
 function moveClass(value: number | null | undefined): string {
   if (value == null) return 'flat';
   return value < 0 ? 'down' : 'up';
-}
-
-/* The ONE per-row classification both the winners/losers/neutral bucket
-   AND every node's color derive from -- keyed on the row's gate-
-   authoritative economic_effect when present (spec §38: a stock trading
-   green on news that hurts its actual business is not a "winner", and
-   must not render green either) -- falls back to the legacy
-   AlertCompany.direction ONLY for rows with no economic_effect at all
-   (pre-gate alerts). A row with no measured move is always neutral
-   regardless of effect; mixed/uncertain/no_material_impact effects are
-   neutral too, never dropped from the chart. Node color must NEVER be
-   computed separately from bucket placement (that let a +2.0% excess
-   render green inside the "Negative impact" column) -- every renderer
-   below calls this same function for both. */
-function effectClass(row: ChartRow): 'up' | 'down' | 'flat' {
-  if (row.excess_move_pct == null) return 'flat';
-  if (row.economic_effect) {
-    if (row.economic_effect === 'positive') return 'up';
-    if (row.economic_effect === 'negative') return 'down';
-    return 'flat';
-  }
-  if (row.direction === 'bullish') return 'up';
-  if (row.direction === 'bearish') return 'down';
-  return 'flat';
 }
 
 function bucketByEffect(rows: ChartRow[]): {
@@ -434,7 +424,11 @@ export function CLevels({ detail }: { detail: AlertDetail }) {
   const rows = flattenRows(detail);
   const levels = new Map<number, ChartRow[]>();
   for (const row of rows) {
-    const level = row.relationship === 'DIRECT' ? 1 : row.layerIndex + 2;
+    // isLevelOne, not a literal 'DIRECT' compare (finding I10): a gated
+    // alert's sections emit "MECH:{label}" / "SECONDARY", so this used to
+    // put every company on a gated story into level 2+ and leave the
+    // "Direct impact" band empty.
+    const level = isLevelOne(row) ? 1 : row.layerIndex + 2;
     if (!levels.has(level)) levels.set(level, []);
     levels.get(level)!.push(row);
   }

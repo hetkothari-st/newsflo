@@ -7,7 +7,10 @@ candidates that never became an AlertCompany row at all), that the new
 completeness columns (gate_inputs_json, evidence_ids_json,
 discovery_sources_json, provider, model, analysis_quality, correction_json)
 are populated honestly, and the internal read path (GET /api/internal/
-decisions/{alert_id}) is flag-gated."""
+decisions/{alert_id}) requires BOTH the debug flag and an authenticated
+user (final-review finding I11 -- the flag alone used to be the whole
+protection, leaving the full audit trail of every alert readable by
+anyone who knew the path)."""
 import json
 from datetime import date
 
@@ -19,7 +22,7 @@ from app.config import settings
 from app.main import app
 from app.models import (
     Alert, AlertCompany, Article, Company, CompanyDecisionRecord, CompanyNodeExposure,
-    EvidenceRecord, SupplyLink, utcnow,
+    EvidenceRecord, SupplyLink, User, utcnow,
 )
 from app.pipeline import _gate_candidates, _persist_alert, _v3_edges, _v3_entries
 from app.routers.articles import get_db
@@ -463,6 +466,24 @@ def test_subject_fallback_stamps_discovery_source(db_session):
 
 # --- internal read path ----------------------------------------------------
 
+_auth_seq = [0]
+
+
+def _auth_headers(db) -> dict:
+    """A real, persisted user + a real signed token -- the endpoint resolves
+    the token against the DB, so a hand-made JWT for a nonexistent user is
+    correctly rejected."""
+    from app.auth.security import hash_password
+    from app.auth.tokens import create_access_token
+
+    _auth_seq[0] += 1
+    user = User(email=f"auditor{_auth_seq[0]}@example.com",
+                hashed_password=hash_password("pw12345"))
+    db.add(user)
+    db.commit()
+    return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+
 def test_audit_endpoint_404_when_flag_off(db_session, monkeypatch, strict_mode):
     monkeypatch.setattr(settings, "debug_audit_api", False)
     _company_row(db_session)
@@ -485,7 +506,8 @@ def test_audit_endpoint_200_when_flag_on_with_parsed_json(db_session, monkeypatc
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)
     try:
-        response = client.get(f"/api/internal/decisions/{alert.id}")
+        response = client.get(f"/api/internal/decisions/{alert.id}",
+                              headers=_auth_headers(db_session))
         assert response.status_code == 200
         body = response.json()
         assert body["alert_id"] == alert.id
@@ -513,7 +535,8 @@ def test_audit_endpoint_ordered_by_final_state_then_ticker(db_session, monkeypat
     app.dependency_overrides[get_db] = lambda: db_session
     client = TestClient(app)
     try:
-        body = client.get(f"/api/internal/decisions/{alert.id}").json()
+        body = client.get(f"/api/internal/decisions/{alert.id}",
+                          headers=_auth_headers(db_session)).json()
         states = [d["final_state"] for d in body["decisions"]]
         assert states == sorted(states)
     finally:
@@ -597,3 +620,63 @@ def test_reuse_copies_gate_audit_trail_completeness_columns(db_session, strict_m
     # candidate_json's own evidence_ids must point at the SAME copied
     # row -- the two columns never drift apart from each other post-copy.
     assert json.loads(copied.candidate_json)["evidence_ids"] == new_evidence_ids
+
+
+# --- final-review finding I11: the flag is not authorization ---------------
+
+def test_audit_endpoint_401_when_flag_on_but_unauthenticated(db_session, monkeypatch, strict_mode):
+    """Flag ON is not authorization. These rows are full CandidateInput
+    dumps, rationale text and mechanism prose -- an anonymous caller who
+    knows the path must get 401, not the audit trail."""
+    monkeypatch.setattr(settings, "debug_audit_api", True)
+    _company_row(db_session, verified_node="crude_price")
+    alert = _persist(db_session, _result([_graph_company()]))
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+    try:
+        response = client.get(f"/api/internal/decisions/{alert.id}")
+        assert response.status_code == 401
+        assert "decisions" not in response.json()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_audit_endpoint_401_on_a_garbage_token(db_session, monkeypatch, strict_mode):
+    """An unparseable/expired bearer token is not authentication either --
+    get_current_user_optional resolves it to None and the endpoint refuses,
+    rather than treating "a header was present" as good enough."""
+    monkeypatch.setattr(settings, "debug_audit_api", True)
+    _company_row(db_session, verified_node="crude_price")
+    alert = _persist(db_session, _result([_graph_company()]))
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+    try:
+        response = client.get(f"/api/internal/decisions/{alert.id}",
+                              headers={"Authorization": "Bearer not-a-real-token"})
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_audit_endpoint_still_404s_for_an_authenticated_user_when_flag_off(
+        db_session, monkeypatch, strict_mode):
+    """ORDER PIN: the flag check runs FIRST, so a flag-off deployment reads
+    identically to "this route does not exist" -- for authenticated and
+    anonymous callers alike. If the auth check ever moves ahead of it (e.g.
+    by becoming a declared Depends), an anonymous 401 would tell the world
+    the endpoint exists; this test and the 404 test above fail together."""
+    monkeypatch.setattr(settings, "debug_audit_api", False)
+    _company_row(db_session, verified_node="crude_price")
+    alert = _persist(db_session, _result([_graph_company()]))
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+    try:
+        headers = _auth_headers(db_session)
+        assert client.get(f"/api/internal/decisions/{alert.id}",
+                          headers=headers).status_code == 404
+        assert client.get(f"/api/internal/decisions/{alert.id}").status_code == 404
+    finally:
+        app.dependency_overrides.clear()

@@ -359,3 +359,174 @@ def test_upgrade_on_legacy_created_db(tmp_path):
         cwd=BACKEND, env=env, capture_output=True, text=True)
     assert stamp.returncode == 0, stamp.stderr
     assert _run_alembic(url).returncode == 0
+
+
+def test_upgrade_head_adds_alert_company_materiality_grade(tmp_path):
+    """Final-review finding I3: 0007 adds alert_companies.materiality_grade
+    -- the COMPOSITE grade the publication gate evaluated. Without it,
+    app.market.ripple_layers re-derived a grade from the naked
+    `materiality` float and served HIGH for a candidate the gate had
+    capped to MEDIUM."""
+    import sqlite3
+
+    db = tmp_path / "materiality_grade.db"
+    url = f"sqlite:///{db}"
+    result = _run_alembic(url)
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(alert_companies)")}
+    finally:
+        conn.close()
+    assert "materiality_grade" in columns
+
+
+# ===========================================================================
+# migrate_on_boot: the ONE place migrations actually run in production
+# ===========================================================================
+# Final-review blocker C1: nothing in the deploy path ever ran
+# `alembic upgrade head` -- the Dockerfile started uvicorn directly and
+# init_db()'s _ADDED_COLUMNS is frozen, so every column added by 0002+ was
+# simply absent against a PRE-EXISTING database while the code wrote it
+# unconditionally. backend/tools/migrate_on_boot.py closes that, and the
+# Dockerfile now runs it before uvicorn.
+
+
+def _boot(db_url):
+    env = dict(os.environ, DATABASE_URL=db_url)
+    return subprocess.run(
+        [sys.executable, "tools/migrate_on_boot.py"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+
+
+def _current_revision(db_path):
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        return {row[0] for row in conn.execute("SELECT version_num FROM alembic_version")}
+    finally:
+        conn.close()
+
+
+def _head_revision():
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    return set(ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads())
+
+
+def test_migrate_on_boot_builds_an_empty_db_to_head(tmp_path):
+    """State 3 (empty DB): nothing exists at all -- build the whole schema
+    from the migrations."""
+    db = tmp_path / "boot_empty.db"
+    result = _boot(f"sqlite:///{db}")
+    assert result.returncode == 0, result.stderr
+    assert db.exists()
+    assert _current_revision(db) == _head_revision()
+
+
+def test_migrate_on_boot_adopts_a_legacy_init_db_database(tmp_path):
+    """State 2 (legacy DB): a database created by the pre-Alembic
+    create_all/_ADDED_COLUMNS path has core tables but no alembic_version.
+    Running the baseline's CREATE TABLEs against it would fail, so it must
+    be STAMPED at 0001 first and then upgraded -- and it must end up with
+    the columns 0002+ add, which is the whole production failure this
+    closes."""
+    import sqlite3
+
+    db = tmp_path / "boot_legacy.db"
+    url = f"sqlite:///{db}"
+    env = dict(os.environ, DATABASE_URL=url)
+    legacy = subprocess.run(
+        [sys.executable, "-c", "from app.db import init_db; init_db()"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert legacy.returncode == 0, legacy.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
+    assert "alerts" in tables, "fixture precondition: legacy DB has core tables"
+    assert "alembic_version" not in tables, "fixture precondition: not alembic-managed yet"
+
+    result = _boot(url)
+    assert result.returncode == 0, result.stderr
+    assert _current_revision(db) == _head_revision()
+
+    conn = sqlite3.connect(db)
+    try:
+        mm = {r[1] for r in conn.execute("PRAGMA table_info(market_moves)")}
+        ac = {r[1] for r in conn.execute("PRAGMA table_info(alert_companies)")}
+    finally:
+        conn.close()
+    # Columns the running code writes flag-independently -- the exact
+    # "no such column" crash C1 describes.
+    for column in ("data_quality", "session_state", "reaction_significance"):
+        assert column in mm, f"missing market_moves.{column} after boot migration"
+    assert "materiality_grade" in ac
+
+
+def test_migrate_on_boot_on_an_already_migrated_db_is_a_noop(tmp_path):
+    """State 1 (managed DB), already at head: exits 0, stays at head."""
+    db = tmp_path / "boot_managed.db"
+    url = f"sqlite:///{db}"
+    assert _run_alembic(url).returncode == 0
+    before = _current_revision(db)
+
+    result = _boot(url)
+    assert result.returncode == 0, result.stderr
+    assert _current_revision(db) == before == _head_revision()
+
+
+def test_migrate_on_boot_upgrades_a_partially_migrated_db(tmp_path):
+    """State 1 (managed DB), BEHIND head -- a real deploy of new code onto
+    a DB migrated by the previous release."""
+    db = tmp_path / "boot_partial.db"
+    url = f"sqlite:///{db}"
+    env = dict(os.environ, DATABASE_URL=url)
+    partial = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "0005"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert partial.returncode == 0, partial.stderr
+    assert _current_revision(db) == {"0005"}
+
+    result = _boot(url)
+    assert result.returncode == 0, result.stderr
+    assert _current_revision(db) == _head_revision()
+
+
+def test_migrate_on_boot_is_idempotent_across_all_three_states(tmp_path):
+    """Boot runs on EVERY container start, including restart loops. Each
+    entry state must survive being migrated repeatedly."""
+    empty = tmp_path / "idem_empty.db"
+    assert _boot(f"sqlite:///{empty}").returncode == 0
+    assert _boot(f"sqlite:///{empty}").returncode == 0
+    assert _current_revision(empty) == _head_revision()
+
+    legacy = tmp_path / "idem_legacy.db"
+    legacy_url = f"sqlite:///{legacy}"
+    env = dict(os.environ, DATABASE_URL=legacy_url)
+    assert subprocess.run(
+        [sys.executable, "-c", "from app.db import init_db; init_db()"],
+        cwd=BACKEND, env=env, capture_output=True, text=True).returncode == 0
+    assert _boot(legacy_url).returncode == 0
+    assert _boot(legacy_url).returncode == 0
+    assert _boot(legacy_url).returncode == 0
+    assert _current_revision(legacy) == _head_revision()
+
+
+def test_dockerfile_runs_migrations_before_uvicorn():
+    """The script only helps if the deploy path actually calls it. Pinned
+    against the Dockerfile itself: this is the regression that shipped
+    18 unreachable columns to production."""
+    dockerfile = (BACKEND.parent / "Dockerfile").read_text(encoding="utf-8")
+    cmd = [line for line in dockerfile.splitlines() if line.startswith("CMD")]
+    assert len(cmd) == 1, cmd
+    assert "tools/migrate_on_boot.py" in cmd[0]
+    assert cmd[0].index("migrate_on_boot.py") < cmd[0].index("uvicorn"), (
+        "migrations must run BEFORE the server starts")
+    assert "&&" in cmd[0], (
+        "a failed migration must abort the container, never fall through to uvicorn")
