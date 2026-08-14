@@ -327,7 +327,7 @@ class Settings(BaseSettings):
     impact_allow_fallback_primary: bool = os.environ.get(
         "IMPACT_ALLOW_FALLBACK_PRIMARY", "false").lower() == "true"
     # Hard cap on primary companies per alert; the overflow is demoted to
-    # secondary_deep_dive (never dropped), ranked deterministically.
+    # secondary_ripple (never dropped), ranked deterministically.
     impact_max_primary_companies: int = int(os.environ.get(
         "IMPACT_MAX_PRIMARY_COMPANIES", "10"))
     # Internal decision-record read path (corrective-v4 Task 18). The

@@ -113,7 +113,7 @@ def classify_evidence(
        never classify as ARTICLE_SUBJECT (SUBJECT, primary-capable) even
        when it plainly was the article's own subject: the narrow path
        could essentially never produce a primary claim this way, since
-       MODEL_VERIFIED_PRIOR is capped at secondary_deep_dive.
+       MODEL_VERIFIED_PRIOR is capped at secondary_ripple.
 
        Deliberately NOT `company.verified` (every GraphCompany.verified
        True ticker in the result) despite that being the plan-round
