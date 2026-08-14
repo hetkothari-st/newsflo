@@ -40,10 +40,8 @@ export default function ExpandableTitle({ title }: { title: string }) {
   };
 
   return (
-    <>
-      <h1 ref={ref} className={open ? 'unclamped' : ''}>
-        {title}
-      </h1>
+    <h1 ref={ref} className={open ? 'unclamped' : ''}>
+      {title}
       {(clamped || open) && (
         <button
           type="button"
@@ -67,6 +65,6 @@ export default function ExpandableTitle({ title }: { title: string }) {
           {open ? 'Less —' : 'More —'}
         </button>
       )}
-    </>
+    </h1>
   );
 }

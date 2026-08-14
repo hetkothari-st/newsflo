@@ -347,8 +347,12 @@ body:has(.nf4.dark) { background: #14120e; }
   overflow: visible;
 }
 .nf4 .storycard:has(h1.unclamped) { height: auto; min-height: 0; }
-/* Subtle expander -- wire-meta styling, not a chrome button. */
+/* Subtle expander -- wire-meta styling, not a chrome button. Lives
+   INSIDE the clamped element: inline after the final word when
+   expanded; while clamped it pins to the end of the last visible line
+   (paper ground over the cut so it reads "... MORE"). */
 .nf4 .morebtn {
+  display: inline;
   font-family: var(--grotesque);
   font-size: 10px;
   font-weight: 700;
@@ -358,10 +362,22 @@ body:has(.nf4.dark) { background: #14120e; }
   background: none;
   border: none;
   padding: 0;
-  margin: -8px 0 12px;
+  margin: 0 0 0 8px;
   cursor: pointer;
+  vertical-align: baseline;
 }
 .nf4 .morebtn:hover, .nf4 .morebtn:focus-visible { color: var(--ink); }
+.nf4 .storycard h1, .nf4 .storycard .lsum { position: relative; }
+.nf4 .storycard h1:not(.unclamped) .morebtn,
+.nf4 .storycard .lsum:not(.unclamped) .morebtn {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  background: var(--paper);
+  padding-left: 10px;
+  line-height: inherit;
+}
 /* Header line: move %% left, timestamp right -- flex keeps them apart at
    any width. */
 .nf4 .storycard .lmoverow {

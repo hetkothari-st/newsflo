@@ -177,10 +177,8 @@ function ExpandableSummary({ text }: { text: string }) {
 
   if (text.trim() === '') return null;
   return (
-    <>
-      <p ref={ref} className={`lsum ${open ? 'unclamped' : ''}`}>
-        {text}
-      </p>
+    <p ref={ref} className={`lsum ${open ? 'unclamped' : ''}`}>
+      {text}
       {(clamped || open) && (
         <button
           type="button"
@@ -204,7 +202,7 @@ function ExpandableSummary({ text }: { text: string }) {
           {open ? 'Less —' : 'More —'}
         </button>
       )}
-    </>
+    </p>
   );
 }
 
