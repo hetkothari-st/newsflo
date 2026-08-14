@@ -1,6 +1,7 @@
 import json
 import os
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,45 @@ class Settings(BaseSettings):
 
     database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./newsflo.db")
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    # ---- Claude provider (provider-migration spec section 4). Claude is the
+    # AUTHORITATIVE analysis provider; Gemini is disabled (see
+    # app/analysis/impact_graph/router.py). CLAUDE_API_KEY wins over
+    # ANTHROPIC_API_KEY so the analysis key can differ from any legacy use.
+    claude_api_key: str = Field(
+        default_factory=lambda: os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    )
+    # Stage-typed Claude models, mirroring the gemini_*_model trio the stage
+    # architecture already needs: reasoning stages ride the strongest model,
+    # fact extraction and reader summaries ride the cheap tier.
+    claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
+    claude_fact_model: str = os.environ.get("CLAUDE_FACT_MODEL", "claude-haiku-4-5")
+    claude_summary_model: str = os.environ.get("CLAUDE_SUMMARY_MODEL", "claude-haiku-4-5")
+    # Response ceiling: the adapter sends max(stage request, this floor) so a
+    # thinking-enabled model's reasoning share can never truncate the JSON.
+    claude_max_output_tokens: int = int(os.environ.get("CLAUDE_MAX_OUTPUT_TOKENS", "16000"))
+    claude_timeout: float = float(os.environ.get("CLAUDE_TIMEOUT", "180"))
+    # SDK-level transient retries (429/5xx/connect; honors Retry-After).
+    claude_max_retries: int = int(os.environ.get("CLAUDE_MAX_RETRIES", "2"))
+    # Router-level delay (seconds) before the single compact correction rung.
+    claude_retry_backoff: float = float(os.environ.get("CLAUDE_RETRY_BACKOFF", "2"))
+    # Provider policy: "claude" is the only live mode. Anything else makes the
+    # router fail closed at construction -- there is no silent substitute.
+    llm_provider_mode: str = os.environ.get("LLM_PROVIDER_MODE", "claude")
+    # Explicit fallback opt-in (spec section 20): False = Claude failure is a
+    # StageRouterError. True = Groq may serve, marked quality="fallback".
+    llm_fallback_allowed: bool = os.environ.get("LLM_FALLBACK_ALLOWED", "false").lower() == "true"
+    claude_stage_model_overrides: str = os.environ.get("CLAUDE_STAGE_MODEL_OVERRIDES", "")
+
+    @property
+    def claude_stage_model_override_map(self) -> dict[str, str]:
+        overrides = {}
+        for pair in self.claude_stage_model_overrides.split(","):
+            if "=" in pair:
+                stage, _, model = pair.partition("=")
+                if stage.strip() and model.strip():
+                    overrides[stage.strip()] = model.strip()
+        return overrides
+
     gemini_api_key: str = os.environ.get("GEMINI_API_KEY", "")
     # PAID Gemini key, spent ONLY on the protected calls (extract_facts,
     # identify_companies -- see LLM_PROTECTED_CALLS below and
@@ -395,10 +435,21 @@ LLM_MODEL_PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
     "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
     "gemini-3.5-flash-lite": {"input": 0.10, "output": 0.40},
     "gemini-3.6-flash": {"input": 0.30, "output": 2.50},
+    # Claude list prices (provider-migration): opus-5 $5/$25, haiku-4.5 $1/$5.
+    # cache_read is the ~0.1x prompt-cache read rate; cache writes bill 1.25x
+    # input and land in input_tokens accounting via cache_write handling.
+    "claude-opus-5": {"input": 5.0, "output": 25.0, "cache_read": 0.5},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_read": 0.1},
 }
 try:
     LLM_MODEL_PRICING_USD_PER_MTOK.update(
         {k: dict(v) for k, v in json.loads(os.environ.get("GEMINI_PRICING_JSON", "{}")).items()}
+    )
+except (ValueError, AttributeError, TypeError):
+    pass  # malformed override -> keep the seeded rates; ceilings still bound spend
+try:
+    LLM_MODEL_PRICING_USD_PER_MTOK.update(
+        {k: dict(v) for k, v in json.loads(os.environ.get("CLAUDE_PRICING_JSON", "{}")).items()}
     )
 except (ValueError, AttributeError, TypeError):
     pass  # malformed override -> keep the seeded rates; ceilings still bound spend
