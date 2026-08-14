@@ -327,6 +327,21 @@ _SUBJECT_TIER = "SUBJECT"
 # one row a specific sentence it may not have earned; a false negative
 # publishes an invented company fact, which is the failure this section
 # exists to prevent.
+# One spelled-out cardinal, possibly compound: "eleven", "eighty-nine",
+# "twelve thousand", "five hundred and twenty". Deliberately does NOT list
+# "crore"/"lakh"/"million" as numerals -- those are the SCALE words the
+# patterns below anchor on, so "twelve thousand crore" parses as
+# <numeral><numeral> + <scale>, and a bare "crore" with no numeral in front
+# of it is not treated as a quantity.
+_ONE_NUMBER_WORD = (
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)"
+)
+_SPELLED_NUMBER = (
+    rf"\b{_ONE_NUMBER_WORD}(?:[\s-]+(?:and\s+)?{_ONE_NUMBER_WORD})*"
+)
+
 _CLAIM_PATTERNS = (
     # Percentages, spelled out or not ("six and a half per cent" carries no
     # digit at all, which is exactly how the first real run smuggled figures
@@ -348,6 +363,24 @@ _CLAIM_PATTERNS = (
     # statement is never derivable from an article about a commodity price.
     re.compile(r"\b(?:debt|debts|indebted|leverage[d]?|liquidity|balance[-\s]sheet|gearing)\b", re.I),
     re.compile(r"\bcash\b", re.I),
+    # --- spelled-out register (review round 1, I2) ------------------------
+    # Financial prose -- and this repo's own regression corpus -- routinely
+    # writes quantities as WORDS: "an eleven dollar decline", "twelve
+    # thousand crore of borrowings", "rose to eighty-nine dollars a barrel".
+    # The digit-anchored patterns above see none of them, so §16's numbers
+    # ban had a wide-open register. These require a spelled numeral ADJACENT
+    # to a currency or scale word, so the bare noun stays clean: "revenue is
+    # billed in dollars and euros" is a business-model statement, not a
+    # quantity, and must keep passing.
+    re.compile(
+        rf"{_SPELLED_NUMBER}\s+(?:dollars?|rupees?|cents?|paise|euros?|pounds?)\b",
+        re.I),
+    re.compile(
+        rf"{_SPELLED_NUMBER}\s+(?:crores?|lakhs?|millions?|billions?|trillions?)\b",
+        re.I),
+    # Multiplier verbs -- "volumes doubled" is a quantitative claim with no
+    # numeral in it at all.
+    re.compile(r"\b(?:doubl|tripl|quadrupl|halv)(?:e[ds]?|ing)\b", re.I),
 )
 
 
@@ -540,7 +573,16 @@ def curated_registry_payload(entry: dict) -> dict | None:
         # Deduplication key alongside source_url (see persist_evidence), so
         # it must be stable AND distinct per mechanism.
         "fact_text": f"curated registry mechanism {mechanism_id}",
-        "evidence_class": entry.get("evidence_class") or "CURATED_ARCHETYPE",
+        # The RECORD's class describes THE RECORD, not the row (review round
+        # 1, M2). This artifact is a curated registry entry whatever the row
+        # classified as, so copying the row's class produced self-
+        # contradictory audit rows -- a `curated_registry` artifact stamped
+        # LEGACY_UNVERIFIED or MODEL_VERIFIED_PRIOR, neither of which
+        # describes what is actually being cited. The row keeps its own
+        # class on its AlertCompany/CompanyDecisionRecord; only the tier is
+        # shared, because §17 puts curated domain knowledge and the row that
+        # rests on it at the same tier D.
+        "evidence_class": "CURATED_ARCHETYPE",
         "evidence_tier": entry.get("evidence_tier") or "D",
         # Existing vocabulary (_PROVENANCED_EXPOSURE_TYPES above): a
         # maintainer-reviewed registry entry, not a model re-confirmation.

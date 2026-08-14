@@ -179,6 +179,16 @@ _REGISTRY_NOTE_BY_NORMALIZED_ID = {
     normalize_node_id(mechanism_id): spec["mechanism"]
     for mechanism_id, spec in MECHANISMS.items()
 }
+# Each mechanism's CANONICAL trigger effect, indexed the same way. The
+# registry writes every sentence for one direction of its trigger variable
+# (`crude_price_up`); `knowledge.oriented_mechanisms` flips the EFFECT for
+# an inverted event but never rewrites the prose. Serving the note without
+# checking this publishes "margins compress quickly" over a section of
+# POSITIVE-effect rows -- see _registry_note.
+_REGISTRY_EFFECT_BY_NORMALIZED_ID = {
+    normalize_node_id(mechanism_id): spec["effect"]
+    for mechanism_id, spec in MECHANISMS.items()
+}
 # Parent types ripple_layers resolves ITSELF (T1's ownership split): "sector"
 # through _SECTOR_LABELS, "company" through a "linked to <name>" rule. Every
 # other parent type is registry-owned.
@@ -199,14 +209,45 @@ def _registry_label(parent_type: str | None, parent_id: str) -> str | None:
     return _REGISTRY_LABEL_BY_NORMALIZED_ID.get(parent_id)
 
 
-def _registry_note(parent_type: str | None, parent_id: str) -> str | None:
-    """The registry's curated mechanism sentence for a causal parent (§14)."""
+def _registry_note(parent_type: str | None, parent_id: str,
+                   section_effect: str | None) -> str | None:
+    """The registry's curated mechanism sentence for a causal parent (§14),
+    or None.
+
+    DIRECTION GUARD (blueprint §24; review round 1, I1). The registry's
+    prose is written for each mechanism's CANONICAL trigger direction, so
+    it is only true of a section whose fundamental effect matches. On a
+    crude-DECLINE event the airline section's effect is `positive` while
+    `aviation_fuel_cost`'s sentence still reads "...so margins compress
+    quickly" -- serving it there contradicts every row underneath it.
+
+    Task 8 put exactly this check on the per-ROW display text
+    (`evidence._registry_text_for_entry`); without the same check here the
+    guard was defeated one level up, and the worst case was the sentence
+    blanked from the row and reprinted, unchanged, as the section note
+    directly above it.
+
+    A `mixed` canonical effect is compatible with anything: those sentences
+    explicitly take no side ("never automatically bullish or bearish").
+    `section_effect` is None when the section's members do not share one
+    effect (macro sections group on label alone, so they can be
+    heterogeneous) -- no single effect to check against means no borrow."""
     if parent_type in _LOCALLY_OWNED_PARENT_TYPES:
         return None
     spec = MECHANISMS.get(parent_id)          # raw, un-normalized id
     if spec is not None:
-        return spec["mechanism"]
-    return _REGISTRY_NOTE_BY_NORMALIZED_ID.get(parent_id)
+        note, canonical = spec["mechanism"], spec["effect"]
+    else:
+        note = _REGISTRY_NOTE_BY_NORMALIZED_ID.get(parent_id)
+        canonical = _REGISTRY_EFFECT_BY_NORMALIZED_ID.get(parent_id)
+    if note is None:
+        return None
+    if canonical == "mixed" or canonical == section_effect:
+        return note
+    logger.info(
+        "registry note for %s withheld: canonical effect %s contradicts "
+        "section effect %s", parent_id, canonical, section_effect)
+    return None
 
 _EFFECT_PREFIX = {
     "positive": "Positive", "negative": "Negative",
@@ -402,11 +443,20 @@ def _strict_sections(
         that company. Otherwise the pre-existing rule stands -- a note only
         when every member carries an IDENTICAL mechanism string (I6),
         computed on the FINAL post-merge member list so a merged section
-        (two distinct unknown parents) still gets no single-company note."""
+        (two distinct unknown parents) still gets no single-company note.
+
+        The registry sentence additionally has to AGREE with the section's
+        fundamental effect (review round 1, I1 -- see _registry_note): the
+        effect is read off the members here rather than off the section key
+        because macro sections are keyed on the label alone and may hold
+        rows with different effects."""
         parents = {(ac.causal_parent_type, ac.causal_parent_id) for ac, _ in members}
         if len(parents) == 1:
             parent_type, parent_id = next(iter(parents))
-            registry_note = _registry_note(parent_type, parent_id or "event")
+            effects = {_effect(ac) for ac, _ in members}
+            registry_note = _registry_note(
+                parent_type, parent_id or "event",
+                next(iter(effects)) if len(effects) == 1 else None)
             if registry_note is not None:
                 return registry_note
         mechanisms = {alert_company.mechanism for alert_company, _ in members}

@@ -143,7 +143,12 @@ def test_displayed_d_tier_row_persists_a_curated_registry_record(db_session, str
     assert record.source_name == "aviation_fuel_cost"
     assert record.mechanism_id == "aviation_fuel_cost"
     assert record.quoted_text == _registry_text("aviation_fuel_cost")
-    assert record.evidence_class == entry["evidence_class"]
+    # The RECORD's class describes THE RECORD (review round 1, M2): it is a
+    # curated registry citation whatever the ROW classified as, so a
+    # MODEL_VERIFIED_PRIOR / LEGACY_UNVERIFIED row never stamps its own
+    # class onto a curated_registry artifact.
+    assert entry["evidence_class"] == "LEGACY_UNVERIFIED"
+    assert record.evidence_class == "CURATED_ARCHETYPE"
     assert record.evidence_tier == "D"
     assert record.provenance_type == "CURATED"
     # The registry is code in this repo, not a fetched artifact.
@@ -272,10 +277,33 @@ def test_sanitize_detects_balance_sheet_claims(text):
 
 
 @pytest.mark.parametrize("text", [
+    # Review round 1, I2: financial prose -- and this repo's own regression
+    # corpus -- writes quantities as WORDS, which every digit-anchored
+    # pattern missed.
+    "an eleven dollar decline widens the spread",
+    "rose to eighty-nine dollars a barrel",
+    "twelve thousand crore of borrowings",
+    "revenue of five thousand crore",
+    "volumes doubled versus the prior year",
+])
+def test_sanitize_detects_spelled_out_quantities(text):
+    from app.analysis.impact_graph.evidence import contains_company_specific_claim
+    assert contains_company_specific_claim(text) is True
+
+
+@pytest.mark.parametrize("text", [
     "ATF tracks crude, so airline operating margin compresses",
     "base-oil input costs rise until price hikes catch up",
     "the duty restores realisation per tonne on unchanged volumes",
     "",
+    # Clean negatives in the SPELLED-OUT register: a bare currency or scale
+    # noun with no numeral in front of it is a business-model statement, not
+    # a quantity. The first is a real corpus mechanism (fx_depreciation /
+    # INFY) and must keep passing.
+    "revenue is billed in dollars and euros while the cost base is rupee",
+    "one of the domestic carriers competes on the same trunk routes",
+    "thousands of retail outlets sell the notified product",
+    "the crore-scale capex programme is unchanged",
 ])
 def test_sanitize_passes_clean_text(text):
     from app.analysis.impact_graph.evidence import contains_company_specific_claim

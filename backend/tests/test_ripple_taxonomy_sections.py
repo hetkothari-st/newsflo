@@ -405,6 +405,64 @@ def test_primary_section_title_uses_registry_label(db_session, strict_mode):
     assert layers[0]["note"] == MECHANISMS["upstream_realization"]["mechanism"]
 
 
+def test_inverted_effect_section_gets_no_registry_note(db_session, strict_mode):
+    """Direction guard (blueprint §24; Task 8 review round 1, I1). The
+    registry writes each mechanism's sentence for its CANONICAL trigger
+    direction, and an inverted event (crude DOWN) flips the section's effect
+    without rewriting that prose. `aviation_fuel_cost` reads "...so margins
+    compress quickly", which is flatly false of a POSITIVE-effect airline
+    section -- the note must be withheld rather than printed over rows that
+    contradict it.
+
+    This is the section-level twin of the per-row check in
+    app.analysis.impact_graph.evidence; without it the row text could be
+    blanked for exactly this reason and the same sentence reprinted,
+    unchanged, as the heading note directly above it. The label still
+    resolves through the registry -- only the NOTE is direction-sensitive.
+    """
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "INDIGO.NS", "InterGlobe Aviation",
+                 "railways_transport", economic_effect="positive",
+                 causal_parent_id="aviation_fuel_cost", mechanism=None,
+                 materiality=0.7, excess=0.5)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+
+    assert _titles(layers) == ["Positive — Aviation"]
+    assert layers[0]["note"] is None
+    assert MECHANISMS["aviation_fuel_cost"]["mechanism"] != layers[0]["note"]
+
+
+def test_matching_effect_section_still_gets_the_registry_note(db_session, strict_mode):
+    """The guard is a direction check, not a removal: the same mechanism on
+    a section whose effect MATCHES its canonical effect keeps the curated
+    note (companion to the inverted case above)."""
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "INDIGO.NS", "InterGlobe Aviation",
+                 "railways_transport", economic_effect="negative",
+                 causal_parent_id="aviation_fuel_cost", mechanism=None,
+                 materiality=0.7, excess=-0.5)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+
+    assert layers[0]["note"] == MECHANISMS["aviation_fuel_cost"]["mechanism"]
+
+
+def test_mixed_canonical_mechanism_note_survives_either_effect(db_session, strict_mode):
+    """A `mixed` canonical effect takes no side ("never automatically
+    bullish or bearish"), so it cannot contradict a directional section and
+    the guard lets it through."""
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "HINDPETRO.NS", "HPCL", "oil_gas",
+                 economic_effect="negative",
+                 causal_parent_id="refiner_marketing_margin", mechanism=None,
+                 materiality=0.7, excess=-0.5)
+
+    layers = compute_ripple_layers(db_session, alert, set())
+
+    assert layers[0]["note"] == MECHANISMS["refiner_marketing_margin"]["mechanism"]
+
+
 def test_renormalized_registry_id_still_resolves(db_session, strict_mode):
     """`causal_parent_id` is persisted as normalize_node_id(mechanism_id),
     and 9 of the 42 registry ids change under that rewrite ("paints_input_cost"
