@@ -5,10 +5,12 @@ import time
 from datetime import timedelta, timezone
 
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.alerting.matcher import match_alert_to_holdings
 from app.alerting.sender import send_pending_notifications
+from app.analysis.impact_graph.consistency import ConsistencyError, check_alert_consistency
 from app.analysis.impact_graph.engine import analyze_article_v3
 from app.analysis.refinement import REFINEMENT_PENDING, refine_alert
 from app.analysis.schemas import AnalysisOutput, CATEGORIES
@@ -220,6 +222,158 @@ def _persist_effect(value: str | None) -> str | None:
         return None
     from app.analysis.impact_graph.schemas import normalize_effect
     return normalize_effect(value)
+
+
+# --- blueprint §21/§22: the controlled vocabularies a persisted row carries -
+# `basis` used to answer three questions at once. Each of these maps ONE
+# upstream signal onto ONE closed vocabulary, and none is derivable from
+# another (§11: DIRECT/INDIRECT is not a synonym for d1/d2).
+
+_MECHANISM_PARENT_TYPES = ("", "economic_node", "commodity", "policy")
+
+# Evidence CLASS (app.analysis.impact_graph.evidence.classify_evidence) ->
+# §22 evidence_source. `evidence_class` keeps answering "which classifier
+# branch fired"; `evidence_source` answers the reader's question, "what KIND
+# of thing is this claim standing on". LEGACY_UNVERIFIED maps to MODEL, not
+# CURATED: an exposure-cache row with no provenance is the system's own
+# prior with nothing behind it, and calling that "curated" would launder it.
+_EVIDENCE_SOURCE_BY_CLASS = {
+    "ARTICLE_SUBJECT": "PRIMARY",
+    "VERIFIED_RELATIONSHIP": "VERIFIED",
+    "CURATED_ARCHETYPE": "CURATED",
+    "MODEL_VERIFIED_PRIOR": "CURATED",
+    "LEGACY_UNVERIFIED": "MODEL",
+    "MODEL_INFERENCE": "MODEL",
+    "ARTICLE_MARKET_OBSERVATION": "MARKET_OBSERVATION",
+}
+
+
+def _mechanism_alias_map() -> dict[str, str]:
+    """normalized node id -> registry mechanism id.
+
+    The archetype path persists `normalize_node_id(mechanism_id)` as the
+    company's `causal_parent_id` (app.analysis.impact_graph.engine), and
+    that normalization SINGULARIZES a handful of ids -- "paints_input_cost"
+    lands as "paint_input_cost", "nbfc_funding_cost" as
+    "nbfc_financing_cost". Looking the persisted id up in MECHANISMS
+    directly therefore misses exactly those mechanisms and silently drops
+    them to the distance fallback / "OTHER" relation. Built once, lazily
+    (importing the registry at module scope would pull SQLAlchemy models
+    into every importer of this module)."""
+    global _MECHANISM_ALIASES
+    if _MECHANISM_ALIASES is None:
+        from app.analysis.impact_graph.knowledge import MECHANISMS
+        from app.analysis.impact_graph.normalize import normalize_node_id
+
+        _MECHANISM_ALIASES = {normalize_node_id(mid): mid for mid in MECHANISMS}
+    return _MECHANISM_ALIASES
+
+
+_MECHANISM_ALIASES: dict[str, str] | None = None
+
+
+def _registry_meta(parent_type: str | None, parent_id: str | None) -> dict | None:
+    """The knowledge registry's entry for a candidate's causal parent, or
+    None. Sector/company parents are NOT mechanisms and are never looked up
+    as one (a sector named "cement" must not borrow the cement mechanism's
+    relation)."""
+    node_id = str(parent_id or "").strip()
+    if not node_id:
+        return None
+    if str(parent_type or "").strip().lower() not in _MECHANISM_PARENT_TYPES:
+        return None
+    from app.analysis.impact_graph.knowledge import mechanism_meta
+
+    meta = mechanism_meta(node_id)
+    if meta is not None:
+        return meta
+    aliased = _mechanism_alias_map().get(node_id)
+    return mechanism_meta(aliased) if aliased else None
+
+
+def _edge_relation(parent_type: str | None, parent_id: str | None) -> str:
+    """§21 controlled relation for an edge hanging off `parent_id`. The real
+    graph labelled upstream realization, aviation fuel cost and refining
+    margin all "demand"; an unresolvable parent gets the controlled
+    fallback, never a guessed specific label."""
+    meta = _registry_meta(parent_type, parent_id)
+    return meta["relation"] if meta else "OTHER"
+
+
+def _discovery_source(raw: str | None) -> str:
+    """Engine discovery tag -> §22 discovery_source. Discovery is not
+    causality and is not evidence: "the article named them" says how we
+    FOUND the company, nothing about the transmission chain."""
+    value = str(raw or "").strip().lower()
+    if value.startswith("archetype:"):
+        return "EXPOSURE_RULE"           # a curated exposure rule fired
+    if value.startswith("subject") or value.startswith("article"):
+        return "ARTICLE_MENTION"         # subject / subject_fallback
+    if value.startswith("mechanism"):
+        return "MECHANISM_MAPPING"
+    if value.startswith("escalation"):
+        return "ESCALATION"
+    # sector_pool / relationship_cache / frontier / "" -- all of them mean
+    # "the ripple walk proposed it", which is the honest generic answer.
+    return "RIPPLE_DISCOVERY"
+
+
+def _evidence_source(evidence_class: str | None, evidence_tier: str | None) -> str | None:
+    """§22 evidence_source from the evidence classifier's verdict. Structured
+    primary records (tier A/B) outrank whatever class label rode with them.
+    An unmappable class yields None rather than a guessed kind."""
+    tier = str(evidence_tier or "").strip().upper()
+    if tier in ("A", "B"):
+        return "STRUCTURED"
+    return _EVIDENCE_SOURCE_BY_CLASS.get(str(evidence_class or "").strip().upper())
+
+
+def _entry_channel_effects(entry: dict) -> list[str]:
+    """The channel EFFECTS behind one entry's net call, for §24's net-effect
+    validator. `channels_json` stores channel DESCRIPTIONS in two signed
+    buckets, so the effect of each is the bucket it sits in. An entry with
+    no channels_json contributes an empty list -- silence, which the gate
+    deliberately abstains on rather than reading as a contradiction."""
+    raw = entry.get("channels_json")
+    if not raw:
+        return []
+    try:
+        channels = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return (["positive"] * len(channels.get("positive_channels") or [])
+            + ["negative"] * len(channels.get("negative_channels") or []))
+
+
+def _consistency_shape(entries: list[dict]) -> dict:
+    """The §24 gate's input shape, built from the entries about to be
+    persisted. ONLY gate-evaluated, non-excluded entries are checked:
+
+    * a legacy (ungated) entry has no gate semantics to be inconsistent
+      with -- it carries no display_tier and no economic_effect at all, and
+      failing the whole pre-gate corpus would block exactly the alerts this
+      is meant to protect;
+    * an `excluded` entry never becomes an AlertCompany row, so it can
+      never be served inconsistently.
+
+    No `headline_ticker` is supplied here: the headline is chosen at SERVE
+    time (feed_v2), so the headline-subset rule is the serving boundary's
+    half of §24 -- claiming one at persist time would invent a decision
+    nothing has made yet.
+    """
+    companies = []
+    for entry in entries:
+        tier = entry.get("display_tier")
+        if not tier or tier == "excluded":
+            continue
+        companies.append({
+            "ticker": entry.get("ticker") or entry.get("company_id"),
+            "economic_effect": _persist_effect(entry.get("economic_effect")),
+            "direction": entry.get("direction"),
+            "display_tier": tier,
+            "channel_effects": _entry_channel_effects(entry),
+        })
+    return {"companies": companies, "headline_ticker": None, "headline_tier_source": None}
 
 
 def _alert_broadcast_payload(session: Session, alert: Alert) -> dict:
@@ -461,6 +615,14 @@ def _build_alert_company(
     level_multiplier = _confidence_multiplier(entry.get("causal_distance"), impact_level)
     confidence_score = round(result.score * level_multiplier)
     confidence_band = result.band if level_multiplier == 1.0 else band_for_score(confidence_score)
+    # Blueprint §18 (migration 0008 REUSES this column rather than adding a
+    # second one): on a gated row the band is the gate's deterministic
+    # verdict over evidence tier / materiality grade / counterfactual /
+    # quality -- HIGH is impossible on weak evidence no matter how the
+    # score-based band would have rounded. Legacy (ungated) rows keep the
+    # score-derived band above, unchanged.
+    if entry.get("confidence_band"):
+        confidence_band = entry["confidence_band"]
 
     alert_company = AlertCompany(
         alert_id=alert_id,
@@ -513,6 +675,13 @@ def _build_alert_company(
         # from GraphCompany.expected_market_sensitivity directly -- never
         # from price_at_analysis/return_1m/return_3m above.
         expected_market_sensitivity=entry.get("expected_market_sensitivity"),
+        # Blueprint §21/§22 field split (migration 0008) -- all None for a
+        # legacy (ungated) entry, which genuinely has none of these answers.
+        # `basis` above is untouched and stays the legacy overloaded value.
+        causal_directness=entry.get("causal_directness"),
+        discovery_source=entry.get("discovery_source_vocab"),
+        evidence_source=entry.get("evidence_source"),
+        edge_relation=entry.get("edge_relation"),
     )
     return alert_company, result.score
 
@@ -835,7 +1004,7 @@ def _persist_alert(
     gaps: list[dict] | None = None, edges: list[dict] | None = None, client=None, facts: str | None = None,
     analysis_provider: str | None = None, analysis_quality: str | None = None,
     event_cause: str | None = None, reused_from_alert_id: int | None = None,
-    ambiguous_entities: list[str] | None = None,
+    ambiguous_entities: list[str] | None = None, content_key: str | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -860,6 +1029,21 @@ def _persist_alert(
     analysis path; the dedup-reuse path leaves it None and relies on
     _copy_gate_audit_trail to carry over whatever ambiguous-entity records
     the prior alert already wrote.
+
+    `content_key`: the §26 idempotency key -- the fresh-analysis run's own
+    cache key (`_v3_cache_key`). Two processes analysing the SAME article
+    concurrently compute the same key, so the loser's INSERT collides on
+    `uq_alerts_article_content` and is treated as idempotent success (the
+    existing alert is returned) instead of doubling the alert. None on the
+    dedup-reuse path and on every direct/legacy caller: reuse is already
+    idempotent under its own policy, and a caller that claims no identity
+    must not be forced into one.
+
+    Raises `ConsistencyError` (§24) when the rows about to be persisted
+    contradict themselves. Nothing is written in that case -- the caller's
+    never-fail wrapper marks the article ANALYSIS_FAILED and logs the
+    violations, which is the blocked-publication + audit-decision outcome
+    §24 requires.
     """
     # The tool schema constrains `category` to CATEGORIES, but that's a
     # request-time hint, not a guarantee -- defend against a provider that
@@ -869,9 +1053,20 @@ def _persist_alert(
     # sentence through as a "category" and break the badge's layout.
     if category not in CATEGORIES:
         category = "other"
+
+    # §24 consistency gate: BEFORE any row exists, so a contradictory alert
+    # leaves no half-written trace to clean up.
+    violations = check_alert_consistency(_consistency_shape(entries))
+    if violations:
+        logger.error(
+            "consistency gate blocked alert for article_id=%s: %s",
+            article.id, "; ".join(violations),
+        )
+        raise ConsistencyError(violations)
+
     alert = Alert(
         article_id=article.id, category=category, event_type=event_type,
-        event_cause=event_cause,
+        event_cause=event_cause, content_key=content_key,
         prompt_version=PROMPT_VERSION, knowledge_version=KNOWLEDGE_VERSION,
         # Stored BEFORE refine_alert runs below -- that is the evidence base
         # it reasons from (see app.analysis.refinement.refine_alert). None
@@ -883,7 +1078,36 @@ def _persist_alert(
         analysis_quality=analysis_quality,
     )
     session.add(alert)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError:
+        # §26: two processes analysed the same article with the same
+        # content and raced to INSERT. The partial unique index
+        # (uq_alerts_article_content) is the serialisation point -- the
+        # loser treats the collision as SUCCESS and hands back the winner's
+        # alert rather than doubling it. Anything else that could raise
+        # IntegrityError here is re-raised untouched.
+        session.rollback()
+        existing = (
+            session.query(Alert)
+            .filter_by(article_id=article.id, content_key=content_key)
+            .order_by(Alert.id)
+            .first()
+            if content_key else None
+        )
+        if existing is None:
+            raise
+        logger.info(
+            "duplicate analysis for article_id=%s content_key=%s; reusing alert_id=%s",
+            article.id, content_key, existing.id,
+        )
+        # The winner already ANALYZED this article; converging on that here
+        # keeps the loser from re-queuing the same work forever (its own
+        # `article` object was rolled back to whatever it read).
+        if article.status != "ANALYZED":
+            article.status = "ANALYZED"
+            session.commit()
+        return existing
 
     if reused_from_alert_id is not None:
         # Dedup-reuse (Task 12 review round 2): copy the REAL prior gate
@@ -947,6 +1171,11 @@ def _persist_alert(
                         "evidence_ids": evidence_ids,
                     }),
                     analysis_version=analysis_version(),
+                    # Blueprint §11/§22 (migration 0008): the DIRECT/INDIRECT/
+                    # REMOTE judgment the gate actually evaluated. Its own
+                    # column because a postmortem cannot re-derive it --
+                    # directness is NOT readable off causal_distance.
+                    causal_directness=entry.get("causal_directness"),
                     # Decision-record completeness (spec sec54, corrective-v4
                     # Task 18).
                     gate_inputs_json=json.dumps(entry.get("gate_inputs") or {}),
@@ -1386,6 +1615,27 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             negative_channels=list(company.negative_channels or []),
             net_direction=company.net_direction or "",
             trigger_shock_present=_roots_in_event(result, company),
+            # --- blueprint §22: the five dimensions, kept apart ----------
+            # HOW the candidate was found, on the §22 vocabulary (the raw
+            # engine tag still rides on the decision record's
+            # discovery_sources_json, so nothing is lost by mapping here).
+            discovery_source=_discovery_source(company.discovery_source),
+            # The causal parent, verbatim in the PERSISTED vocabulary, so
+            # the gate's own snapshot names the same node the AlertCompany
+            # row does. Without these two the gate's derive_directness had
+            # nothing to ask the registry with and every production
+            # candidate fell through to the distance fallback §11 forbids.
+            causal_parent_type=company.parent_type or "",
+            causal_parent_id=company.parent_id or "",
+            # Registry directness, resolved through the normalized-node-id
+            # aliases the gate cannot see (see _mechanism_alias_map). Empty
+            # when the registry does not know this parent -- derive_directness
+            # then runs its own registry lookup and, failing that, the
+            # distance fallback.
+            causal_directness=(
+                (_registry_meta(company.parent_type, company.parent_id) or {}).get("directness")
+                or ""
+            ),
         ), context)))
     return decisions
 
@@ -1505,15 +1755,38 @@ def _v3_entries(session: Session, result) -> list[dict]:
         # fallback.
         magnitude_high = round(0.5 + 4.5 * company.impact_strength, 1)
         magnitude_low = round(max(0.1, magnitude_high / 3), 1)
-        # Legacy coercion: pre-strict consumers assume direction is binary,
-        # so neutral historically flattened to bullish at this boundary.
-        # Strict mode persists the truthful value (spec §19: mixed/uncertain
-        # must survive every stage; they render as direction "neutral").
-        if settings.impact_engine_v4_strict:
+        # Direction (blueprint §4): on a GATED row it is DERIVED from
+        # `economic_effect` and nothing else -- the model's own `direction`
+        # field is ignored, because two independent direction sources is
+        # exactly how a bearish Oil India card ended up sitting on a
+        # positive economic effect. The derived value is also what the
+        # 0008 DB trigger enforces, so a gated row is consistent by
+        # construction rather than by a later repair pass.
+        #
+        # Legacy coercion (ungated only): pre-strict consumers assume
+        # direction is binary, so neutral historically flattened to bullish
+        # at this boundary. Strict mode persists the truthful value (spec
+        # §19: mixed/uncertain must survive every stage; they render as
+        # direction "neutral").
+        entry_effect = _persist_effect(company.economic_effect)
+        if gated is not None:
+            from app.analysis.impact_graph.publication_gate import DIRECTION_FROM_EFFECT
+
+            # An effect outside the closed vocabulary (or absent) can only
+            # happen on an EXCLUDED row -- every displayable tier requires
+            # DISPLAYABLE_EFFECTS -- so falling back to the model's own
+            # direction here never reaches a reader.
+            persisted_direction = DIRECTION_FROM_EFFECT.get(
+                entry_effect or "", company.direction)
+        elif settings.impact_engine_v4_strict:
             persisted_direction = company.direction
         else:
             persisted_direction = company.direction if company.direction != "neutral" else "bullish"
         entries.append({
+            # Carried alongside company_id purely so audit paths (the §24
+            # violation strings, the decision record's ticker) can name the
+            # company without a second query.
+            "ticker": company.ticker,
             "company_id": row.id, "direction": persisted_direction,
             "magnitude_low": magnitude_low, "magnitude_high": magnitude_high,
             "rationale": company.rationale, "key_points": company.key_points,
@@ -1529,7 +1802,7 @@ def _v3_entries(session: Session, result) -> list[dict]:
             "confidence_f": company.confidence, "materiality": company.materiality,
             "causal_parent_type": company.parent_type, "causal_parent_id": company.parent_id,
             "mechanism": company.mechanism,
-            "economic_effect": _persist_effect(company.economic_effect),
+            "economic_effect": entry_effect,
             "channels_json": json.dumps({
                 "positive_channels": company.positive_channels,
                 "negative_channels": company.negative_channels,
@@ -1577,6 +1850,21 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 # Full CandidateInput the gate walked (Task 18) -- the
                 # decision record's gate_inputs_json.
                 "gate_inputs": decision.candidate_snapshot,
+                # --- blueprint §21/§22: four SEPARATE answers ------------
+                # The gate's own directness verdict (registry-resolved, NOT
+                # read off causal_distance -- §11).
+                "causal_directness": decision.causal_directness,
+                # HOW it was found / WHAT KIND of evidence backs it / WHICH
+                # controlled relationship its own edge is. The §22-vocabulary
+                # discovery value gets its OWN key: entry["discovery_source"]
+                # stays the RAW engine tag ("archetype:upstream_realization"),
+                # which the decision record's discovery_sources_json must
+                # keep verbatim for postmortems.
+                "discovery_source_vocab": _discovery_source(company.discovery_source),
+                "evidence_source": _evidence_source(evidence_class, evidence_tier),
+                "edge_relation": _edge_relation(company.parent_type, company.parent_id),
+                # §18: the ONLY confidence a reader may be shown.
+                "confidence_band": decision.confidence_band,
             })
     return entries
 
@@ -1605,7 +1893,14 @@ def _v3_edges(result) -> list[dict]:
         edges.append({
             "from": {"kind": _kind(edge.parent_type), "label": edge.parent_id},
             "to": {"kind": _kind(edge.child_type), "label": edge.child_id},
-            "relation": "demand" if edge.child_type == "company" else "correlation",
+            # §21: a company edge carries the controlled relation of the
+            # mechanism it hangs off ("OTHER" when the parent is not a known
+            # mechanism) -- NEVER the old blanket "demand", which labelled
+            # upstream realization and refining margin as demand shocks.
+            # Node -> node edges keep "correlation": they connect economic
+            # variables, not a company to its exposure.
+            "relation": (_edge_relation(edge.parent_type, edge.parent_id)
+                         if edge.child_type == "company" else "correlation"),
             "direction": _edge_direction(edge.direction),
             "note": edge.mechanism, "source": "llm_only",
             "parent_type": edge.parent_type, "child_type": edge.child_type,
@@ -1619,7 +1914,8 @@ def _v3_edges(result) -> list[dict]:
         edges.append({
             "from": {"kind": _kind(company.parent_type), "label": company.parent_id},
             "to": {"kind": "company", "label": company.ticker},
-            "relation": "demand",
+            # Same §21 rule for the company-attachment edge.
+            "relation": _edge_relation(company.parent_type, company.parent_id),
             "direction": _edge_direction(company.direction),
             "note": company.mechanism or company.rationale, "source": "llm_only",
             "parent_type": company.parent_type, "child_type": "company",
@@ -1735,6 +2031,16 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 "confidence_f": ac.confidence_f, "materiality": ac.materiality,
                 "causal_parent_type": ac.causal_parent_type, "causal_parent_id": ac.causal_parent_id,
                 "mechanism": ac.mechanism, "channels_json": ac.channels_json,
+                # Blueprint §21/§22: copied VERBATIM, like every other
+                # stored field on this path -- a reused row that silently
+                # lost its directness/discovery/evidence/relation answers
+                # would be indistinguishable from a legacy row that never
+                # had them.
+                "causal_directness": ac.causal_directness,
+                "discovery_source_vocab": ac.discovery_source,
+                "evidence_source": ac.evidence_source,
+                "edge_relation": ac.edge_relation,
+                "confidence_band": ac.confidence_band,
             } for ac in reusable_alert.companies]
             # The reused alert's own distilled facts carry over too: this
             # is the SAME underlying story, so its facts are exactly what a
@@ -1807,6 +2113,10 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
                 event_cause=result.event_cause,
                 ambiguous_entities=result.ambiguous_entities,
+                # §26 idempotency key -- THIS run's identity for THIS
+                # article's content. Only the fresh-analysis path claims
+                # one (the reuse path above deliberately does not).
+                content_key=_v3_cache_key(article),
             )
         except Exception:
             logger.exception("persist failed for article_id=%s; marked for retry", article.id)

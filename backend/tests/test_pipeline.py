@@ -1630,3 +1630,357 @@ def test_a_company_with_every_optional_field_omitted_still_persists(db_session):
     assert _json.loads(persisted.assumptions_json) == []
     assert _json.loads(persisted.rulebook_ids_json) == []
     assert persisted.alternative_hypothesis is None
+
+
+# ---------------------------------------------------------------------------
+# Final blueprint §4/§21/§22/§24/§26 -- derived direction, the field split,
+# registry edge relations, the consistency gate and idempotent persistence.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def strict_mode(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "impact_engine_v4_strict", True)
+
+
+def _blueprint_company_row(db, ticker="ONGC.NS", name="ONGC", sector="oil_gas",
+                           business_desc="Upstream oil and gas explorer",
+                           verified_node="crude_price"):
+    from app.models import CompanyNodeExposure, utcnow
+
+    row = Company(name=name, ticker=ticker, sector=sector, index_tier="NIFTY50",
+                  business_desc=business_desc)
+    db.add(row)
+    db.commit()
+    if verified_node is not None:
+        db.add(CompanyNodeExposure(
+            company_id=row.id, node_key=verified_node, exposure_exists=1,
+            strength=0.8, mechanism="verified exposure", verified_at=utcnow()))
+        db.commit()
+    return row
+
+
+def _blueprint_graph_company(**overrides):
+    payload = dict(
+        ticker="ONGC.NS", name="ONGC", direction="bullish",
+        impact_strength=0.7, confidence=0.8, materiality=0.7, causal_distance=1,
+        time_horizon="Short-Term", parent_type="economic_node", parent_id="crude_price",
+        mechanism="upstream crude realization: higher price lifts revenue per barrel",
+        rationale="unhedged upstream producer with crude-linked realization",
+        net_direction="bullish", economic_effect="positive", verified=True,
+        counterfactual="SUPPORTED", discovery_source="archetype:upstream_realization",
+    )
+    payload.update(overrides)
+    return GraphCompany(**payload)
+
+
+def _blueprint_result(companies, edges=None, quality="authoritative"):
+    if edges is None:
+        edges = [GraphEdge(
+            parent_type="event", parent_id="crude_supply_shock",
+            child_type="economic_node", child_id="crude_price",
+            direction="bullish", economic_effect="positive",
+            mechanism="supply disruption raises crude price", causal_distance=1,
+            impact_strength=0.8, confidence=0.9, materiality=0.7,
+            time_horizon="Short-Term")]
+        # Every candidate's parent must trace back to the event's own graph
+        # or EVENT_APPLICABILITY_VALID rejects it (_roots_in_event) -- so a
+        # company hanging off a mechanism node gets that node wired under
+        # crude_price, exactly as the archetype expansion does live.
+        for parent_id in dict.fromkeys(
+                c.parent_id for c in companies if c.parent_id != "crude_price"):
+            edges.append(GraphEdge(
+                parent_type="economic_node", parent_id="crude_price",
+                child_type="economic_node", child_id=parent_id,
+                direction="bullish", economic_effect="positive",
+                mechanism=f"crude price transmits into {parent_id}", causal_distance=1,
+                impact_strength=0.7, confidence=0.8, materiality=0.6,
+                time_horizon="Short-Term"))
+    return ImpactGraphResult(
+        category="commodity", event_type="crude_oil", facts="crude up 5%",
+        event_label="crude supply shock", named_entities=[],
+        companies=companies,
+        edges=edges,
+        gaps=[], ranking=[], analysis_provider="claude", analysis_quality=quality,
+        metrics={}, ambiguous_entities=[],
+    )
+
+
+def _blueprint_article(db, slug="blueprint"):
+    article = Article(source="s", provider="finnhub", url=f"https://ex.com/{slug}",
+                      title="crude spikes", content="c", status="CATEGORIZED")
+    db.add(article)
+    db.commit()
+    return article
+
+
+def _blueprint_persist(db, result, article=None, **kwargs):
+    from app.pipeline import _v3_edges, _v3_entries
+
+    article = article if article is not None else _blueprint_article(db)
+    entries = _v3_entries(db, result)
+    return _persist_alert(
+        db, article, "commodity", entries, event_type="crude_oil",
+        gaps=[], edges=_v3_edges(result), client=None, facts="crude up 5%",
+        analysis_provider="claude", analysis_quality=result.analysis_quality,
+        ambiguous_entities=[], **kwargs)
+
+
+# --- §4: direction is DERIVED from economic_effect on every gated row ------
+
+def test_gated_row_direction_is_always_derived_from_the_effect(db_session, strict_mode):
+    """The model's own `direction` field is IGNORED for a gated row: the
+    single authoritative field is `economic_effect`, and direction is read
+    off DIRECTION_FROM_EFFECT. This is the Oil India shape at its source --
+    a company whose effect says negative and whose direction claimed
+    bullish."""
+    _blueprint_company_row(db_session)
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        direction="bullish", economic_effect="negative", net_direction="bearish")]))
+
+    persisted = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    assert persisted.economic_effect == "negative"
+    assert persisted.direction == "bearish"
+
+
+def test_gated_mixed_effect_row_renders_neutral_not_the_llm_direction(db_session, strict_mode):
+    _blueprint_company_row(db_session)
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        direction="bullish", economic_effect="mixed", net_direction="mixed")]))
+
+    persisted = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    assert persisted.direction == "neutral"
+
+
+# --- §22: the four-way field split -----------------------------------------
+
+def test_gated_row_carries_the_blueprint_field_split(db_session, strict_mode):
+    _blueprint_company_row(db_session, verified_node="upstream_realization")
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        parent_id="upstream_realization")]))
+
+    persisted = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    # Discovery, causality and evidence are three DIFFERENT answers now.
+    assert persisted.discovery_source == "EXPOSURE_RULE"      # archetype:<id>
+    assert persisted.causal_directness == "DIRECT"            # registry, not distance
+    assert persisted.evidence_source in {
+        "PRIMARY", "STRUCTURED", "VERIFIED", "CURATED", "MODEL", "MARKET_OBSERVATION"}
+    assert persisted.edge_relation == "REVENUE_REALIZATION"
+    assert persisted.confidence_band in {"HIGH", "MEDIUM", "LOW", "UNKNOWN"}
+    # The legacy overloaded field survives untouched for old readers.
+    assert persisted.basis == "direct_mention"
+
+
+def test_discovery_source_maps_the_article_subject_path(db_session, strict_mode):
+    _blueprint_company_row(db_session)
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        discovery_source="subject")]))
+
+    persisted = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    assert persisted.discovery_source == "ARTICLE_MENTION"
+
+
+def test_discovery_source_maps_an_unknown_pool_to_ripple_discovery(db_session, strict_mode):
+    _blueprint_company_row(db_session)
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        discovery_source="sector_pool")]))
+
+    persisted = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    assert persisted.discovery_source == "RIPPLE_DISCOVERY"
+
+
+def test_an_unresolvable_parent_gets_the_controlled_other_relation(db_session, strict_mode):
+    _blueprint_company_row(db_session, verified_node="mystery_node")
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        parent_id="mystery_node")]))
+
+    persisted = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
+    assert persisted.edge_relation == "OTHER"
+
+
+# --- §11: directness comes from the REGISTRY, never from distance ----------
+
+def _directness_for(db, **overrides):
+    from app.pipeline import _gate_candidates
+
+    result = _blueprint_result([_blueprint_graph_company(**overrides)])
+    decisions = _gate_candidates(db, result)
+    return decisions[0][3].causal_directness
+
+
+def test_registry_directness_wins_over_the_distance_fallback(db_session, strict_mode):
+    """§11 is explicit: DIRECT/INDIRECT is NOT a synonym for d1/d2. The
+    pipeline must hand the gate the candidate's causal parent so
+    derive_directness can ask the knowledge registry -- without it every
+    production candidate silently fell through to the distance fallback."""
+    _blueprint_company_row(db_session, verified_node="paints_input_cost")
+    # Registry: paints_input_cost is INDIRECT (crude -> petchem -> paints).
+    assert _directness_for(db_session, parent_id="paints_input_cost", causal_distance=2) == "INDIRECT"
+    # ...and stays INDIRECT at d1, where the distance fallback would have
+    # said DIRECT. This is the assertion the fallback cannot pass.
+    assert _directness_for(db_session, parent_id="paints_input_cost", causal_distance=1) == "INDIRECT"
+
+
+def test_registry_directness_survives_a_long_causal_distance(db_session, strict_mode):
+    _blueprint_company_row(db_session, verified_node="upstream_realization")
+    assert _directness_for(db_session, parent_id="upstream_realization", causal_distance=1) == "DIRECT"
+    # The distance fallback would call d3 REMOTE; the registry says the
+    # relationship itself is DIRECT.
+    assert _directness_for(db_session, parent_id="upstream_realization", causal_distance=3) == "DIRECT"
+
+
+def test_registry_directness_resolves_the_normalized_node_id(db_session, strict_mode):
+    """The persisted parent id is `normalize_node_id(mechanism_id)`, which
+    singularizes some ids ("paints_input_cost" -> "paint_input_cost"). The
+    registry lookup must follow that mapping instead of silently falling
+    back to distance for those mechanisms."""
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    node_id = normalize_node_id("paints_input_cost")
+    assert node_id != "paints_input_cost"      # pins the aliasing itself
+    _blueprint_company_row(db_session, verified_node=node_id)
+    assert _directness_for(db_session, parent_id=node_id, causal_distance=1) == "INDIRECT"
+
+
+def test_directness_falls_back_to_distance_only_for_an_unknown_parent(db_session, strict_mode):
+    _blueprint_company_row(db_session, verified_node="mystery_node")
+    assert _directness_for(db_session, parent_id="mystery_node", causal_distance=1) == "DIRECT"
+    assert _directness_for(db_session, parent_id="mystery_node", causal_distance=3) == "REMOTE"
+
+
+# --- §21: edges carry the controlled relation ontology ---------------------
+
+def test_company_attachment_edges_carry_the_registry_relation(db_session, strict_mode):
+    _blueprint_company_row(db_session, verified_node="upstream_realization")
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        parent_id="upstream_realization")]))
+
+    relations = {e.relation for e in db_session.query(ImpactEdge).filter_by(alert_id=alert.id)}
+    assert "REVENUE_REALIZATION" in relations
+    # The whole point: "demand" was the hardcoded label on EVERY company
+    # edge, including upstream realization and refining margin.
+    assert "demand" not in relations
+
+
+def test_a_genuine_demand_mechanism_still_gets_the_demand_relation(db_session, strict_mode):
+    _blueprint_company_row(db_session, ticker="MARUTI.NS", name="Maruti", sector="auto",
+                           business_desc="Passenger vehicle manufacturer",
+                           verified_node="auto_fuel_demand")
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        ticker="MARUTI.NS", name="Maruti", parent_id="auto_fuel_demand",
+        direction="bearish", economic_effect="negative", net_direction="bearish",
+        mechanism="higher pump prices depress discretionary vehicle demand",
+        rationale="fuel-price-sensitive discretionary purchase cycle")]))
+
+    relations = {e.relation for e in db_session.query(ImpactEdge).filter_by(alert_id=alert.id)}
+    assert "DEMAND" in relations
+
+
+def test_an_unknown_parent_edge_gets_other_not_demand(db_session, strict_mode):
+    _blueprint_company_row(db_session, verified_node="mystery_node")
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        parent_id="mystery_node")]))
+
+    relations = {e.relation for e in db_session.query(ImpactEdge).filter_by(alert_id=alert.id)}
+    assert "OTHER" in relations
+    assert "demand" not in relations
+
+
+# --- §24: the consistency gate blocks publication --------------------------
+
+def test_a_net_effect_contradiction_blocks_persistence(db_session, strict_mode):
+    from app.analysis.impact_graph.consistency import ConsistencyError
+    from app.pipeline import _v3_edges, _v3_entries
+
+    _blueprint_company_row(db_session)
+    result = _blueprint_result([_blueprint_graph_company(
+        economic_effect="negative", net_direction="bearish",
+        positive_channels=["crude realization rises with the shock"])])
+    entries = _v3_entries(db_session, result)
+    article = _blueprint_article(db_session, "contradiction")
+
+    with pytest.raises(ConsistencyError) as excinfo:
+        _persist_alert(db_session, article, "commodity", entries, event_type="crude_oil",
+                       gaps=[], edges=_v3_edges(result), client=None, facts="f",
+                       analysis_provider="claude", analysis_quality="authoritative")
+
+    assert any("NET_EFFECT_CONTRADICTION" in v for v in excinfo.value.violations)
+
+
+def test_a_blocked_alert_marks_the_article_analysis_failed(db_session, strict_mode, monkeypatch):
+    """The never-fail wrapper in process_new_articles turns the raised
+    ConsistencyError into ANALYSIS_FAILED -- blocked publication, no
+    half-written alert."""
+    _blueprint_company_row(db_session)
+    article = _blueprint_article(db_session, "blocked-end-to-end")
+    result = _blueprint_result([_blueprint_graph_company(
+        economic_effect="negative", net_direction="bearish",
+        positive_channels=["crude realization rises with the shock"])])
+    monkeypatch.setattr(
+        pipeline_module, "analyze_article_v3",
+        lambda router, title, content, session=None, article_id=None: result)
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    assert created == 0
+    db_session.refresh(article)
+    assert article.status == "ANALYSIS_FAILED"
+    assert db_session.query(Alert).count() == 0
+
+
+def test_a_consistent_gated_alert_still_persists(db_session, strict_mode):
+    _blueprint_company_row(db_session)
+    alert = _blueprint_persist(db_session, _blueprint_result([_blueprint_graph_company(
+        positive_channels=["higher realization per barrel"])]))
+
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert.id).count() == 1
+
+
+# --- §26: identical concurrent processing is idempotent --------------------
+
+def test_a_second_persist_with_the_same_content_key_returns_the_existing_alert(db_session, strict_mode):
+    from app.pipeline import _v3_cache_key
+
+    _blueprint_company_row(db_session)
+    article = _blueprint_article(db_session, "idempotent")
+    result = _blueprint_result([_blueprint_graph_company()])
+    key = _v3_cache_key(article)
+
+    first = _blueprint_persist(db_session, result, article=article, content_key=key)
+    second = _blueprint_persist(db_session, result, article=article, content_key=key)
+
+    assert second.id == first.id
+    assert db_session.query(Alert).filter_by(article_id=article.id).count() == 1
+    assert db_session.query(AlertCompany).filter_by(alert_id=first.id).count() == 1
+
+
+def test_the_fresh_analysis_path_stamps_the_content_key(db_session, strict_mode, monkeypatch):
+    from app.pipeline import _v3_cache_key
+
+    _blueprint_company_row(db_session)
+    article = _blueprint_article(db_session, "content-key")
+    expected = _v3_cache_key(article)
+    result = _blueprint_result([_blueprint_graph_company()])
+    monkeypatch.setattr(
+        pipeline_module, "analyze_article_v3",
+        lambda router, title, content, session=None, article_id=None: result)
+
+    process_new_articles(db_session, claude_client=object())
+
+    alert = db_session.query(Alert).filter_by(article_id=article.id).one()
+    assert alert.content_key == expected
+
+
+def test_the_dedup_reuse_path_claims_no_content_key(db_session):
+    """Reuse is idempotent under its own policy (_find_reusable_alert) and
+    must not claim the fresh run's identity."""
+    article = _blueprint_article(db_session, "reuse-no-key")
+    company = _blueprint_company_row(db_session, ticker="REUSE.NS", name="Reuse Ltd")
+    alert = _persist_alert(db_session, article, "commodity", [{
+        "company_id": company.id, "direction": "bullish",
+        "magnitude_low": 1.0, "magnitude_high": 2.0, "rationale": "r",
+        "key_points": ["k"], "reasons": ["a", "b", "c"], "basis": "direct_mention",
+        "time_horizon": "Short-Term", "impact_level": "direct",
+    }], reused_from_alert_id=None)
+
+    assert alert.content_key is None
