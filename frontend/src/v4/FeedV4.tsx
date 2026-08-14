@@ -148,50 +148,40 @@ function fmtISTTime(iso: string): string {
   });
 }
 
-function MetaLine({ alert, onToggle }: { alert: FeedAlert; onToggle: () => void }) {
+/* ~50-word summary clamp (user spec 2026-08-14): a fixed-length gist
+   between title and plate, MORE expanding to the full summary in place.
+   Word-cut, not CSS clamp -- the spec asks for a specific length. */
+const SUMMARY_WORDS = 50;
+
+function ExpandableSummary({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const words = text.split(/\s+/).filter(Boolean);
+  const needsClamp = words.length > SUMMARY_WORDS;
+  const shown = open || !needsClamp ? text : `${words.slice(0, SUMMARY_WORDS).join(' ')}…`;
+  if (words.length === 0) return null;
   return (
-    <div className="metaline">
-      <span>{alert.article.source}</span>
-      <span>—</span>
-      <span>{fmtISTTime(alert.created_at)} IST</span>
-      <span>—</span>
-      <span>{alert.category_label ?? alert.category.replace(/_/g, ' ')}</span>
-      {alert.exposure === 'indirect_only' && (
-        /* Owner decision 2026-08-14: no-primary gated alerts appear in the
-           feed but must be unmistakably labeled -- every company on this
-           story is indirect (secondary/deep-dive) exposure, none is the
-           article's subject. Final-blueprint §15 (Task 9): when the
-           article's mechanisms span multiple sectors, labeling it as one
-           company's "indirect exposure" misstates it -- event_scope
-           carries a controlled event descriptor instead. */
-        <>
-          <span>—</span>
-          <span className="indirect4" title="No directly-affected company: every listed company has indirect exposure only">
-            {alert.event_scope === 'multi_sector' ? 'Multi-sector impact' : 'Indirect exposure'}
-          </span>
-        </>
+    <>
+      <p className="lsum">{shown}</p>
+      {needsClamp && (
+        <button
+          type="button"
+          className="morebtn"
+          aria-expanded={open}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen((prev) => !prev);
+          }}
+          onTouchStart={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          {open ? 'Less —' : 'More —'}
+        </button>
       )}
-      {alert.in_my_holdings && (
-        <>
-          <span>—</span>
-          <span>Held</span>
-        </>
-      )}
-      <span
-        className="aff"
-        role="button"
-        tabIndex={0}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') onToggle();
-        }}
-      >
-        See who's affected →
-      </span>
-    </div>
+    </>
   );
 }
 
@@ -610,22 +600,42 @@ export default function FeedV4({
             data-testid={`v4story-${alert.id}`}
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd(alert.id)}
+            onClick={() => toggle(alert.id)}
           >
             <div>
-              {alert.excess_move_pct == null ? (
-                /* Strict engine (spec §49): fundamental analysis stays
-                   visible when the price feed failed -- honest dash,
-                   never a fabricated number. */
-                <div className="lmove flat">—</div>
-              ) : (
-                <div className={`lmove ${reactionClass(alert.market_reaction)}`}>
-                  {reactionArrow(alert.market_reaction)}{' '}
-                  {Math.abs(alert.excess_move_pct).toFixed(1)}%
-                </div>
-              )}
+              {/* Move %% left, timestamp right -- one ruled header line,
+                  nothing overlapping (user spec 2026-08-14). */}
+              <div className="lmoverow">
+                {alert.excess_move_pct == null ? (
+                  /* Strict engine (spec §49): fundamental analysis stays
+                     visible when the price feed failed -- honest dash,
+                     never a fabricated number. */
+                  <div className="lmove flat">—</div>
+                ) : (
+                  <div className={`lmove ${reactionClass(alert.market_reaction)}`}>
+                    {reactionArrow(alert.market_reaction)}{' '}
+                    {Math.abs(alert.excess_move_pct).toFixed(1)}%
+                  </div>
+                )}
+                <span className="lmeta-right">
+                  {/* Owner ruling 2026-08-14: no-primary gated alerts must
+                      stay unmistakably labeled -- badge relocated here
+                      when the meta line was removed from the card. */}
+                  {alert.exposure === 'indirect_only' && (
+                    <span
+                      className="indirect4"
+                      title="No directly-affected company: every listed company has indirect exposure only"
+                    >
+                      {alert.event_scope === 'multi_sector' ? 'Multi-sector impact' : 'Indirect exposure'}
+                    </span>
+                  )}
+                  <span className="ltime">{fmtISTTime(alert.created_at)} IST</span>
+                </span>
+              </div>
               <ExpandableTitle title={alert.article.title} />
-              <p className="lgist">{alert.summary_short ?? alert.summary_long ?? ''}</p>
-              <MetaLine alert={alert} onToggle={() => toggle(alert.id)} />
+              <ExpandableSummary
+                text={alert.summary_long ?? alert.summary_short ?? ''}
+              />
             </div>
             <Plate src={alert.article.image_url} category={alert.category} className="lplate" />
           </div>

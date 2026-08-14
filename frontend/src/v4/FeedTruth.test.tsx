@@ -155,7 +155,7 @@ describe('FeedV4 company row', () => {
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     await waitFor(() => screen.getByTestId('v4row-IOC.NS'));
     expect(screen.getByText('NEGATIVE · HIGH')).toBeInTheDocument();
     expect(
@@ -280,7 +280,7 @@ describe('honest-unavailable measurement (finding I5)', () => {
 
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     await waitFor(() => screen.getByTestId('v4row-BPCL.NS'));
 
     // Raw / Sector / Volume all render an em dash, never "0.0%".
@@ -391,7 +391,7 @@ describe('directness + tier row line (spec §28, Task 9)', () => {
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     await waitFor(() => screen.getByTestId('v4row-ONGC.NS'));
     expect(screen.getByText('DIRECT EXPOSURE · PRIMARY')).toBeInTheDocument();
   });
@@ -405,7 +405,7 @@ describe('directness + tier row line (spec §28, Task 9)', () => {
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     await waitFor(() => screen.getByTestId('v4row-IOC.NS'));
     expect(screen.getByText('INDIRECT EXPOSURE · RIPPLE')).toBeInTheDocument();
     expect(screen.getByText('REMOTE · MACRO')).toBeInTheDocument();
@@ -420,7 +420,7 @@ describe('directness + tier row line (spec §28, Task 9)', () => {
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     await waitFor(() => screen.getByTestId('v4row-LEG1.NS'));
     expect(screen.getByText('INDIRECT EXPOSURE · RIPPLE')).toBeInTheDocument();
     expect(screen.getByText('DIRECT EXPOSURE · RIPPLE')).toBeInTheDocument();
@@ -434,7 +434,7 @@ describe('directness + tier row line (spec §28, Task 9)', () => {
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     const rowEl = await waitFor(() => screen.getByTestId('v4row-LEGACY.NS'));
     expect(rowEl.querySelector('.dtl4')).toBeNull();
   });
@@ -454,7 +454,7 @@ describe('macro-context layer styling (spec §29, Task 9)', () => {
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     const { container } = renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     await waitFor(() => screen.getByTestId('v4row-M1.NS'));
     const layers = [...container.querySelectorAll('.layer4')];
     expect(layers).toHaveLength(2);
@@ -491,7 +491,7 @@ describe('confidence band chip -- band only, never numeric (ruling R4, Task 9)',
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     const rowEl = await waitFor(() => screen.getByTestId('v4row-CB.NS'));
     const chip = rowEl.querySelector('.cband4');
     expect(chip).not.toBeNull();
@@ -510,7 +510,7 @@ describe('confidence band chip -- band only, never numeric (ruling R4, Task 9)',
     vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
     renderFeed();
     await waitFor(() => screen.getByText('Oil surges on supply shock'));
-    fireEvent.click(screen.getByText("See who's affected →"));
+    fireEvent.click(screen.getByText('Oil surges on supply shock'));
     const rowEl = await waitFor(() => screen.getByTestId('v4row-NB.NS'));
     expect(rowEl.querySelector('.cband4')).toBeNull();
   });
