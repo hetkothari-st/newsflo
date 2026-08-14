@@ -102,11 +102,14 @@ class StageRouter:
                 "no CLAUDE_API_KEY configured and fallback is disabled -- refusing to "
                 "run analysis (set CLAUDE_API_KEY, or opt into the weaker Groq path "
                 "explicitly with LLM_FALLBACK_ALLOWED=true)")
-        # The construction-time dispatch target. `self.provider` is the
-        # HONESTY field -- a mid-run fallback rewrites it to "groq" so the
-        # Alert is stamped truthfully -- but it must never rewrite which
-        # provider the NEXT stage tries first: one transient Claude failure
-        # may not silently demote the rest of the run.
+        # The construction-time dispatch target, and the ONLY provider
+        # identity the cache is keyed on (see _fingerprint). `self.provider`
+        # is the HONESTY field -- a mid-run fallback rewrites it to "groq"
+        # so the Alert is stamped truthfully -- but it must never rewrite
+        # which provider the NEXT stage tries first (one transient Claude
+        # failure may not silently demote the rest of the run) nor which
+        # key that stage looks up (that turned every later stage into a
+        # guaranteed cache miss).
         self._primary = self.provider
         # Provider-identity honesty (corrective-v4 Task 15, preserved):
         # quality is EARNED, never inherited. Only a Claude-served router
@@ -236,10 +239,21 @@ class StageRouter:
 
         Provider-migration §8 ("old Gemini cache entries must be isolated
         from Claude") is enforced by construction here, not by a migration:
-        `self.provider` and the model are BOTH hashed, so every row written
-        by the pre-migration Gemini router lives under a key no Claude run
-        can ever produce. No Gemini answer can be replayed as a Claude one,
-        and no cache purge is needed to guarantee it.
+        the provider and the model are BOTH hashed, so every row written by
+        the pre-migration Gemini router lives under a key no Claude run can
+        ever produce. No Gemini answer can be replayed as a Claude one, and
+        no cache purge is needed to guarantee it.
+
+        The provider component is `self._primary` -- the provider this
+        router will actually DISPATCH to -- not the mutable `self.provider`,
+        which is the Alert-stamping honesty field and flips to "groq" for
+        the rest of the run after a single mid-run fallback. Hashing the
+        mutable field made every later stage (still served by Claude) look
+        up a groq-keyed fingerprint: a guaranteed miss on every remaining
+        stage, and no replay at all when the article was retried. Keying on
+        the dispatch target keeps lookups stable for the whole run; the
+        absolute cache-PUT guard in call() is what stops a fallback-tainted
+        run from writing anything, and it is untouched by this.
 
         Corrective-v4 Task 15 adds three more explicit-invalidation
         components: the strict-mode flag (v4-strict and legacy runs must
@@ -256,7 +270,7 @@ class StageRouter:
         except ImportError:
             KNOWLEDGE_REGISTRY_VERSION = ""
         payload = "\x1f".join([
-            stage, self.provider, model, self._prompt_version(), self._schema_version(),
+            stage, self._primary, model, self._prompt_version(), self._schema_version(),
             KNOWLEDGE_REGISTRY_VERSION, static_prefix, seed,
             json.dumps(schema, sort_keys=True),
             str(int(settings.impact_engine_v4_strict)), POLICY_VERSION, variant,
@@ -317,7 +331,11 @@ class StageRouter:
             logger.warning("stage cache write failed", exc_info=True)
 
     def _fingerprint_model(self, stage: str) -> str:
-        if self.provider == "claude":
+        """The model that identifies a cache key -- keyed on the DISPATCH
+        target (`_primary`), for the same reason `_fingerprint` is: a
+        mid-run fallback must not silently repoint every later Claude-served
+        stage at a groq-model key."""
+        if self._primary == "claude":
             return self._model_for(stage)[0]
         return settings.groq_aux_model
 
