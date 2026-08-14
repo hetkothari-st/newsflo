@@ -31,7 +31,8 @@ def legacy_mode(monkeypatch):
     monkeypatch.setattr(settings, "impact_engine_v4_strict", False)
 
 
-def _seed(db, *, move_status="ok", excess=-2.5, display_tier="primary", gate_state="DISPLAY_ELIGIBLE"):
+def _seed(db, *, move_status="ok", excess=-2.5, display_tier="primary", gate_state="DISPLAY_ELIGIBLE",
+          confidence_band=None, edge_relation=None, causal_directness=None):
     article = Article(source="s", provider="finnhub", url="https://ex.com/a",
                       title="Crude oil spikes on supply shock", content="c",
                       status="ALERTED")
@@ -48,6 +49,8 @@ def _seed(db, *, move_status="ok", excess=-2.5, display_tier="primary", gate_sta
         display_tier=display_tier, gate_state=gate_state,
         causal_parent_type="economic_node", causal_parent_id="crude_price",
         causal_distance=1, materiality=0.7, mechanism="crude-linked input costs",
+        confidence_band=confidence_band, edge_relation=edge_relation,
+        causal_directness=causal_directness,
     ))
     db.add(MarketMove(
         alert_id=alert.id, company_id=company.id, benchmark_ticker="^NSEI",
@@ -176,3 +179,100 @@ def test_strict_rows_carry_fundamental_and_reaction_separately(client, db_sessio
     assert row["display_tier"] == "primary"
     assert row["reaction_direction"] == "positive"
     assert row["excess_move_pct"] == 2.1
+
+
+# ===========================================================================
+# Task 6 -- the five-dimension wire contract (§3/§22/§28, rulings R1/R4)
+# ===========================================================================
+
+def test_rows_serve_the_five_dimensions_in_the_new_vocabulary(client, db_session, strict_mode):
+    """Every gated ripple-layer row carries the five SEPARATE dimensions the
+    blueprint splits apart -- effect, materiality grade, causal directness,
+    publication tier and confidence band -- plus the §21 edge relation.
+    `causal_directness` is DERIVED by the gate's own resolver here (the row
+    carries none), which at d1 with a non-registry parent is DIRECT."""
+    alert = _seed(db_session, edge_relation="INPUT_COST", confidence_band="MODERATE")
+
+    row = client.get(f"/api/feed-v2/{alert.id}").json()["layers"][0]["rows"][0]
+
+    assert row["publication_tier"] == "primary"
+    assert row["causal_directness"] == "DIRECT"
+    assert row["edge_relation"] == "INPUT_COST"
+    # Legacy Confidence-Engine vocabulary (LOW|MODERATE|HIGH|VERY_HIGH) is
+    # normalized on the way out -- the wire only ever speaks §18's bands.
+    assert row["confidence_band"] == "MEDIUM"
+    assert row["materiality_grade"] == "HIGH"
+
+
+def test_explicit_causal_directness_column_wins_over_distance(client, db_session, strict_mode):
+    """§11: DIRECT/INDIRECT/REMOTE is NOT a synonym for d1/d2. A row that
+    classified its own directness is served verbatim, distance be damned."""
+    alert = _seed(db_session, causal_directness="REMOTE")
+
+    row = client.get(f"/api/feed-v2/{alert.id}").json()["layers"][0]["rows"][0]
+
+    assert row["causal_directness"] == "REMOTE"
+    assert row["impact_type"] == "direct"          # causal_distance == 1, unchanged
+
+
+@pytest.mark.parametrize("band,expected", [
+    ("VERY_HIGH", "HIGH"), ("HIGH", "HIGH"), ("MODERATE", "MEDIUM"),
+    ("MEDIUM", "MEDIUM"), ("LOW", "LOW"), ("UNKNOWN", "UNKNOWN"),
+    (None, "UNKNOWN"),
+])
+def test_confidence_band_vocabulary_is_normalized_on_the_wire(
+        client, db_session, strict_mode, band, expected):
+    """Ruling R4 + §18: gated rows written by the V4 gate already speak
+    HIGH/MEDIUM/LOW/UNKNOWN; rows written before it carry the old engine's
+    band. Both leave through one vocabulary, and an absent band is the
+    honest UNKNOWN rather than a guess at LOW."""
+    alert = _seed(db_session, confidence_band=band)
+
+    row = client.get(f"/api/feed-v2/{alert.id}").json()["layers"][0]["rows"][0]
+
+    assert row["confidence_band"] == expected
+
+
+@pytest.mark.parametrize("tier", ["secondary_ripple", "secondary_deep_dive", "secondary"])
+def test_publication_tier_normalizes_legacy_ripple_spellings(
+        client, db_session, strict_mode, tier):
+    """T9's binding wire contract: the frontend reads ONE ripple spelling.
+    A row persisted under either dead name still serves display_tier
+    verbatim (raw truth) but publication_tier canonical."""
+    alert = _seed(db_session, display_tier=tier)
+
+    row = client.get(f"/api/feed-v2/{alert.id}").json()["layers"][0]["rows"][0]
+
+    assert row["display_tier"] == tier
+    assert row["publication_tier"] == "secondary_ripple"
+
+
+def test_no_numeric_confidence_score_on_any_feed_v2_payload(client, db_session, strict_mode):
+    """Ruling R4: the band is the ONLY confidence this surface shows -- no
+    49-for-everyone numeric score anywhere in the list row, the detail
+    payload or a deep-dive row (the legacy /api/alerts keeps it for the old
+    UI)."""
+    alert = _seed(db_session)
+
+    listed = client.get("/api/feed-v2").json()[0]
+    detail = client.get(f"/api/feed-v2/{alert.id}").json()
+    deep_dive = client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()
+
+    assert "confidence_score" not in listed
+    for payload in (detail, deep_dive):
+        for key in ("primary", "secondary", "macro", "layers"):
+            for layer in payload.get(key) or []:
+                for row in layer["rows"]:
+                    assert "confidence_score" not in row
+
+
+def test_ungated_legacy_rows_gain_no_tier_fields(client, db_session, legacy_mode):
+    """A legacy row has no tier, no directness and no edge relation; the
+    serializer must not invent any of them (its dict stays byte-identical
+    to its pre-Task-6 shape)."""
+    alert = _seed(db_session, display_tier=None, gate_state=None)
+
+    row = client.get(f"/api/feed-v2/{alert.id}").json()["layers"][0]["rows"][0]
+
+    for key in ("publication_tier", "causal_directness", "edge_relation", "confidence_band"):
+        assert key not in row

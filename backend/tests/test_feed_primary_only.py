@@ -111,9 +111,15 @@ def test_secondary_only_alert_listed_as_indirect_only(client, db_session, strict
 
     assert response.status_code == 200
     body = response.json()
+    # Task 6: the deep-dive split keys on T5's section KIND prefix, so a
+    # RIPPLE: section lands in "secondary" -- it used to fall into
+    # "primary", because the old split tested `relationship != "SECONDARY"`
+    # against a bucket T5 deleted.
     assert body["primary"] == []
     assert len(body["secondary"]) == 1
+    assert body["secondary"][0]["relationship"].startswith("RIPPLE:")
     assert [r["ticker"] for r in body["secondary"][0]["rows"]] == ["BLUEDART.NS"]
+    assert body["macro"] == []
     assert body["rejected_summary"] == []
 
 
@@ -214,6 +220,212 @@ def test_rejected_summary_is_machine_readable(client, db_session, strict_mode):
     assert body["rejected_summary"] == [
         {"ticker": "NOISE.NS", "rejection_reason": "REJECT_GENERIC_EXPOSURE", "materiality_grade": "LOW"},
     ]
+
+
+# ===========================================================================
+# Task 6 -- three-way deep-dive split, macro-context routing, event_scope,
+# and the §24 pre-serve consistency gate
+# ===========================================================================
+
+def test_deep_dive_kinds_match_ripple_layers():
+    """app.routers.feed_v2 restates T5's section-kind prefixes as literals
+    (importing another module's privates into a request handler is worse).
+    This is the pin that keeps the two from drifting: rename a kind in the
+    producer and this fails immediately, instead of the deep dive silently
+    filing every section under the wrong key."""
+    from app.market import ripple_layers
+    from app.routers import feed_v2
+
+    assert feed_v2._KIND_PRIMARY == ripple_layers._KIND_PRIMARY
+    assert feed_v2._KIND_RIPPLE == ripple_layers._KIND_RIPPLE
+    assert feed_v2._KIND_MACRO == ripple_layers._KIND_MACRO
+
+
+def test_deep_dive_splits_primary_ripple_and_macro(client, db_session, strict_mode):
+    """Blueprint §7/§12: three tiers, three families, three keys. "primary"
+    is the MECH: sections, "secondary" the (plural) RIPPLE: ones, and the
+    new "macro" key the MACRO: family -- which exists precisely so broad
+    economic context is never presented as a company-specific claim."""
+    alert = _seed_alert(db_session, url="https://ex.com/three-way")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
+                 display_tier="secondary_ripple", causal_parent_id="road_freight_fuel_cost",
+                 causal_distance=2, materiality=0.5, excess=-1.5)
+    _add_company(db_session, alert, "HDFCBANK.NS", "HDFC Bank", "banking",
+                 display_tier="macro_context", causal_parent_id="crude_inflation_pressure",
+                 causal_distance=3, materiality=0.4, excess=-0.2)
+
+    body = client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()
+
+    assert [s["relationship"].split(":")[0] for s in body["primary"]] == ["MECH"]
+    assert [s["relationship"].split(":")[0] for s in body["secondary"]] == ["RIPPLE"]
+    assert [s["relationship"].split(":")[0] for s in body["macro"]] == ["MACRO"]
+    assert [r["ticker"] for r in body["primary"][0]["rows"]] == ["ONGC.NS"]
+    assert [r["ticker"] for r in body["secondary"][0]["rows"]] == ["BLUEDART.NS"]
+    assert [r["ticker"] for r in body["macro"][0]["rows"]] == ["HDFCBANK.NS"]
+    # Canonical tier spellings ride on every row of every family.
+    assert body["primary"][0]["rows"][0]["publication_tier"] == "primary"
+    assert body["secondary"][0]["rows"][0]["publication_tier"] == "secondary_ripple"
+    assert body["macro"][0]["rows"][0]["publication_tier"] == "macro_context"
+
+
+def test_macro_only_alert_absent_from_list_but_served_on_detail(client, db_session, strict_mode):
+    """Blueprint §7 / ruling R1: macro context "must not become a company
+    impact". An alert whose ONLY gate output is macro context has no
+    company-specific claim to headline, so it never enters the feed LIST
+    (and its macro row can never supply the peak ticker) -- but it is not
+    hidden: detail and deep-dive serve it as context, with an honestly
+    unavailable measurement."""
+    alert = _seed_alert(db_session, url="https://ex.com/macro-only")
+    _add_company(db_session, alert, "HDFCBANK.NS", "HDFC Bank", "banking",
+                 display_tier="macro_context", causal_parent_id="crude_inflation_pressure",
+                 causal_distance=3, materiality=0.4, excess=-6.0)
+
+    assert client.get("/api/feed-v2").json() == []
+
+    detail = client.get(f"/api/feed-v2/{alert.id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["exposure"] is None            # neither a primary nor an indirect claim
+    assert body["peak_ticker"] is None         # a macro row never headlines
+    assert body["market_reaction"]["status"] == "unavailable"
+    assert [r["ticker"] for layer in body["layers"] for r in layer["rows"]] == ["HDFCBANK.NS"]
+    assert body["layers"][0]["relationship"].startswith("MACRO:")
+
+    deep_dive = client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()
+    assert deep_dive["primary"] == [] and deep_dive["secondary"] == []
+    assert [r["ticker"] for r in deep_dive["macro"][0]["rows"]] == ["HDFCBANK.NS"]
+
+
+def test_event_scope_multi_sector_when_macro_context_present(client, db_session, strict_mode):
+    """§15's controlled descriptor: any macro-context row makes the story
+    multi-sector by definition, and the label is identical on the list row,
+    the detail payload and the deep dive."""
+    alert = _seed_alert(db_session, url="https://ex.com/scope-macro")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _add_company(db_session, alert, "HDFCBANK.NS", "HDFC Bank", "banking",
+                 display_tier="macro_context", causal_parent_id="crude_inflation_pressure",
+                 causal_distance=3, materiality=0.4, excess=-0.2)
+
+    assert client.get("/api/feed-v2").json()[0]["event_scope"] == "multi_sector"
+    assert client.get(f"/api/feed-v2/{alert.id}").json()["event_scope"] == "multi_sector"
+    assert client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()["event_scope"] == "multi_sector"
+
+
+def test_event_scope_multi_sector_across_two_taxonomies(client, db_session, strict_mode):
+    """Two distinct mechanism taxonomies (crude-linked primaries + freight
+    fuel costs) is the other half of §15's rule -- no macro row needed."""
+    alert = _seed_alert(db_session, url="https://ex.com/scope-two-labels")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
+                 display_tier="secondary_ripple", causal_parent_id="road_freight_fuel_cost",
+                 causal_distance=2, materiality=0.5, excess=-1.5)
+
+    assert client.get("/api/feed-v2").json()[0]["event_scope"] == "multi_sector"
+
+
+def test_event_scope_none_for_one_taxonomy(client, db_session, strict_mode):
+    """Two companies, ONE mechanism -- a focused story, not a multi-sector
+    one. None (not "single_sector"): the vocabulary has one member, and the
+    frontend chooses the copy."""
+    alert = _seed_alert(db_session, url="https://ex.com/scope-one-label")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _add_company(db_session, alert, "OIL.NS", "Oil India", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=0.8)
+
+    assert client.get("/api/feed-v2").json()[0]["event_scope"] is None
+
+
+def test_event_scope_labels_match_the_rendered_section_labels(client, db_session, strict_mode):
+    """`_event_scope` counts taxonomy labels WITHOUT assembling sections
+    (the list route must stay one measurement pass per alert), so it
+    resolves labels through ripple_layers' own tables. This pins that the
+    two really do agree: the labels it counts are exactly the ones the
+    rendered sections are titled with."""
+    from app.routers.feed_v2 import _taxonomy_label
+
+    alert = _seed_alert(db_session, url="https://ex.com/label-mirror")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
+                 display_tier="secondary_ripple", causal_parent_id="road_freight_fuel_cost",
+                 causal_distance=2, materiality=0.5, excess=-1.5)
+    _add_company(db_session, alert, "HDFCBANK.NS", "HDFC Bank", "banking",
+                 display_tier="macro_context", causal_parent_id="crude_inflation_pressure",
+                 causal_distance=3, materiality=0.4, excess=-0.2)
+
+    body = client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()
+    rendered = {
+        section["title"].split(" — ")[1]
+        for key in ("primary", "secondary", "macro") for section in body[key]
+    }
+
+    assert rendered == {_taxonomy_label(ac) for ac in alert.companies}
+    assert len(rendered) == 3
+
+
+def test_detail_drops_a_hand_corrupted_row_and_logs_loudly(
+        client, db_session, strict_mode, caplog):
+    """Blueprint §24, serving half: the consistency gate runs again over the
+    SERIALIZED rows, and a row whose served claim contradicts itself is
+    withheld -- loudly -- while the rest of the alert still serves.
+
+    DOCUMENTED BYPASS. Migration 0008's `alert_companies_gated_consistency*`
+    triggers make this row impossible to write through any normal path, so
+    the fixture drops them, INSERTs the corrupted row with raw SQL, then
+    re-installs them. That is the whole point of the test: the pre-serve
+    check exists for rows that arrive from OUTSIDE the guarded paths -- a
+    stale worker binary, a hand-edited row, a restore from a pre-0008
+    backup -- and it must hold even when the DB-level backstop did not.
+    """
+    from sqlalchemy import text
+
+    from app.models import emit_gated_row_triggers
+
+    alert = _seed_alert(db_session, url="https://ex.com/corrupted-row")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    corrupt = Company(name="Oil India", ticker="OIL.NS", sector="oil_gas", index_tier="NIFTY50")
+    db_session.add(corrupt)
+    db_session.commit()
+
+    db_session.execute(text("DROP TRIGGER IF EXISTS alert_companies_gated_consistency_insert"))
+    db_session.execute(text("DROP TRIGGER IF EXISTS alert_companies_gated_consistency"))
+    db_session.execute(
+        text("""
+            INSERT INTO alert_companies (
+                alert_id, company_id, direction, magnitude_low, magnitude_high,
+                rationale, confidence_score, time_horizon, basis, confidence,
+                impact_level, economic_effect, display_tier, gate_state,
+                causal_parent_type, causal_parent_id, causal_distance,
+                materiality, mechanism
+            ) VALUES (
+                :alert_id, :company_id, 'bearish', 1.0, 3.0,
+                'thesis', 50, 'Short-Term', 'direct_mention', 'llm_estimate',
+                'direct', 'positive', 'primary', 'DISPLAY_ELIGIBLE',
+                'economic_node', 'crude_price', 1,
+                0.7, 'crude-linked upstream realization'
+            )
+        """),
+        {"alert_id": alert.id, "company_id": corrupt.id},
+    )
+    db_session.commit()
+    emit_gated_row_triggers(db_session.connection())   # backstop restored
+    db_session.expire_all()
+
+    with caplog.at_level("ERROR"):
+        body = client.get(f"/api/feed-v2/{alert.id}").json()
+
+    served = [r["ticker"] for layer in body["layers"] for r in layer["rows"]]
+    assert served == ["ONGC.NS"]                       # the rest still serves
+    assert "OIL.NS" not in served
+    assert "PRE-SERVE CONSISTENCY VIOLATION" in caplog.text
+    assert "DIRECTION_NOT_DERIVED" in caplog.text
+    assert "OIL.NS" in caplog.text
 
 
 def test_deep_dive_404s_on_ungated_alert(client, db_session):

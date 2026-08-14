@@ -6,12 +6,23 @@ company (excess_move_pct computed, measurement_status == "ok") -- an
 alert with nothing measured has no headline number and is omitted
 entirely (Ground Rules: never fabricate, omit rather than invent).
 """
+import json
+import logging
 from datetime import date as date_cls
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
-from app.analysis.impact_graph.publication_gate import is_gated
+from app.analysis.impact_graph.consistency import check_alert_consistency
+from app.analysis.impact_graph.publication_gate import (
+    TIER_MACRO_CONTEXT,
+    TIER_PRIMARY,
+    TIER_SECONDARY_RIPPLE,
+    derive_directness,
+    is_displayable_tier,
+    is_gated,
+    is_secondary_tier,
+)
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.config import settings
 from app.companies.branding import logo_url
@@ -32,7 +43,13 @@ from app.market.discovery import (
     compute_unusual_activity,
 )
 from app.market.cap_tier import cap_tier_map
-from app.market.ripple_layers import compute_ripple_layers
+from app.market.ripple_layers import (
+    OTHER_LABEL,
+    _SECTOR_LABELS,
+    _TAXONOMY_LABELS,
+    _registry_label,
+    compute_ripple_layers,
+)
 from app.market.timeline_entries import get_timeline_entries
 from app.models import Alert, AlertCompany, Article, Company, CompanyDecisionRecord, Holding, User
 from app.routers.articles import get_db
@@ -42,6 +59,8 @@ from app.routers.articles import get_db
 # split is the old, pre-swipe-card UI's shape):
 # from app.market.alert_measurement import compute_impact_companies
 # from app.market.ripple import compute_ripple_companies
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/feed-v2", tags=["feed-v2"])
 
@@ -116,36 +135,141 @@ def _unavailable_measurement() -> dict:
     }
 
 
-# Current spellings (final blueprint §3) + the legacy ones still on
-# persisted rows. Task 6 swaps this for the gate's `is_secondary_tier`.
-_SECONDARY_TIERS = ("secondary_ripple", "macro_context",
-                    "secondary_deep_dive", "secondary")
+# --- tier vocabulary (final blueprint §3/§7, Task 6) ----------------------
+# This module used to keep its own `_SECONDARY_TIERS` literal tuple, which
+# (a) had to be edited by hand every time a spelling was added or retired
+# and (b) lumped `macro_context` in with the ripple tiers, which is exactly
+# the conflation §7 forbids ("macro context must not become a company
+# impact"). Membership is now read ONLY through the publication gate's own
+# helpers -- `is_secondary_tier` (current + legacy ripple spellings) and
+# `is_displayable_tier` -- the single place read-compat for the dead
+# spellings lives.
+#
+# Section-kind prefixes T5 writes onto `relationship` (MECH:/RIPPLE:/MACRO:
+# -- see app.market.ripple_layers._KIND_*). Restated here as literals rather
+# than imported privates, and pinned against the producer by
+# test_deep_dive_kinds_match_ripple_layers so a rename cannot drift.
+_KIND_PRIMARY = "MECH"
+_KIND_RIPPLE = "RIPPLE"
+_KIND_MACRO = "MACRO"
+
+# Confidence-band read-compat (blueprint §18, ruling R4). Gated rows written
+# by the V4 gate already speak the new four-value vocabulary; LEGACY rows
+# carry the old Confidence-Engine vocabulary (LOW | MODERATE | HIGH |
+# VERY_HIGH). The WIRE only ever speaks the new one, so the old values are
+# mapped on the way out -- never rewritten in the database (the legacy
+# /api/alerts surface still serves the raw legacy band next to its numeric
+# confidence_score, which ruling R4 keeps for the old UI).
+_BAND_ON_THE_WIRE = {
+    "HIGH": "HIGH", "VERY_HIGH": "HIGH",
+    "MEDIUM": "MEDIUM", "MODERATE": "MEDIUM",
+    "LOW": "LOW", "UNKNOWN": "UNKNOWN",
+}
+
+
+def _wire_band(value: str | None) -> str:
+    """The row's confidence band in the ONE vocabulary the API speaks.
+    Anything absent or unrecognized is UNKNOWN -- "no band to display" is a
+    real, honest state (§18), never a guess at LOW."""
+    return _BAND_ON_THE_WIRE.get((value or "").strip().upper(), "UNKNOWN")
+
+
+def _publication_tier(display_tier: str | None) -> str | None:
+    """The row's tier in the canonical §3 spelling (T9's binding wire
+    contract: primary | secondary_ripple | macro_context). A legacy
+    ripple spelling ("secondary_deep_dive", "secondary") is normalized to
+    `secondary_ripple` HERE so the frontend never has to know the dead
+    names; None for an ungated/excluded row, which has no tier to claim."""
+    if display_tier == TIER_PRIMARY:
+        return TIER_PRIMARY
+    if is_secondary_tier(display_tier):
+        return TIER_SECONDARY_RIPPLE
+    if display_tier == TIER_MACRO_CONTEXT:
+        return TIER_MACRO_CONTEXT
+    return None
+
+
+def _taxonomy_label(alert_company) -> str:
+    """The controlled section label this row would be grouped under --
+    the SAME resolution `app.market.ripple_layers._strict_sections._label_for`
+    performs, reusing that module's own tables (imported, never restated, so
+    the two can never disagree about what counts as one taxonomy label; a
+    rename there fails loudly at import here instead of drifting silently).
+
+    Used only to COUNT distinct labels for `event_scope`, so the one
+    deliberate difference is harmless: a "company" parent resolves to the
+    parent's id rather than its display name (identity is preserved 1:1,
+    and this path must stay free of the extra name lookup because the list
+    route never assembles sections at all).
+    """
+    parent_type = alert_company.causal_parent_type
+    parent_id = alert_company.causal_parent_id or "event"
+    if parent_type == "sector":
+        return _SECTOR_LABELS.get(parent_id, OTHER_LABEL)
+    if parent_type == "company":
+        return f"linked to {alert_company.parent_company_id or parent_id}"
+    registry_label = _registry_label(parent_type, parent_id)
+    if registry_label is not None:
+        return registry_label
+    return _TAXONOMY_LABELS.get(parent_id, OTHER_LABEL)
+
+
+def _event_scope(alert: Alert) -> str | None:
+    """Blueprint §15's controlled article-level descriptor: "multi_sector"
+    when this alert's analysis spans more than one mechanism taxonomy, or
+    carries ANY macro-context row (broad economic context is multi-sector by
+    definition, §7); None otherwise. The frontend chooses the copy -- this
+    is a label, not a sentence.
+
+    Computed over every DISPLAYABLE row (the deep-dive-complete view), not
+    over whichever sections a given surface happens to render, so the list
+    card, the detail card back and the deep dive all agree on one value for
+    one alert. Ungated (legacy) alerts have no displayable tiers at all and
+    always read None.
+    """
+    displayable = [ac for ac in alert.companies if is_displayable_tier(ac.display_tier)]
+    if not displayable:
+        return None
+    if any(ac.display_tier == TIER_MACRO_CONTEXT for ac in displayable):
+        return "multi_sector"
+    return "multi_sector" if len({_taxonomy_label(ac) for ac in displayable}) >= 2 else None
 
 
 def _primary_company_ids(alert: Alert) -> set[int]:
     """The gate-authorized PRIMARY company ids on this alert (corrective-v4
     Task 16, spec §52). Empty for an alert with no primary company at all
-    (secondary/deep-dive-only or excluded-only)."""
-    return {ac.company_id for ac in alert.companies if ac.display_tier == "primary"}
+    (ripple-only, macro-only or excluded-only)."""
+    return {ac.company_id for ac in alert.companies if ac.display_tier == TIER_PRIMARY}
 
 
-def _headline_company_ids(alert: Alert) -> tuple[set[int], str]:
+def _headline_company_ids(alert: Alert) -> tuple[set[int], str | None]:
     """(company ids the headline/peak calc may use, exposure label).
 
     Owner decision 2026-08-14 (supersedes the Task 16 "PRIMARY only, hide
     the rest" feed rule for the no-primary case): a gated alert whose gate
-    produced ZERO primary companies but >=1 secondary/deep-dive company IS
-    shown in the feed, headlined from its secondary movers, and explicitly
+    produced ZERO primary companies but >=1 SECONDARY_RIPPLE company IS
+    shown in the feed, headlined from its ripple movers, and explicitly
     labeled exposure="indirect_only" so the UI can badge it. The original
-    discipline is fully preserved wherever a primary exists: secondary
+    discipline is fully preserved wherever a primary exists: ripple
     companies still never outrank or headline over a primary row
     (test_peak_ticker_ignores_bigger_secondary_mover pins that), and
-    excluded-tier rows never surface anywhere."""
+    excluded-tier rows never surface anywhere.
+
+    MACRO_CONTEXT rows are NEVER headline-eligible (blueprint §7, ruling
+    R1): letting broad economic context supply the peak ticker/verdict IS
+    "macro context becoming a company impact". A macro-only alert therefore
+    yields an EMPTY id set (no measurement, so no headline number) and no
+    exposure label at all -- it is not a company-exposure claim of either
+    kind. It stays out of the feed list (`_strict_displayable` below) and
+    remains reachable through detail / deep-dive.
+    """
     primary = _primary_company_ids(alert)
     if primary:
         return primary, "primary"
-    secondary = {ac.company_id for ac in alert.companies if ac.display_tier in _SECONDARY_TIERS}
-    return secondary, "indirect_only"
+    ripple = {ac.company_id for ac in alert.companies if is_secondary_tier(ac.display_tier)}
+    if ripple:
+        return ripple, "indirect_only"
+    return set(), None
 
 
 def _strict_displayable(alert: Alert) -> bool:
@@ -157,13 +281,146 @@ def _strict_displayable(alert: Alert) -> bool:
     section rendering. Tier values only exist on rows the gate itself set,
     so this check is gate-scoped by construction; an ungated (legacy,
     all-NULL display_tier) alert always reads False, unchanged. Owner
-    decision 2026-08-14: secondary/deep-dive rows count as displayable too
-    (the feed labels those alerts exposure="indirect_only"); excluded-only
-    alerts still never surface."""
+    decision 2026-08-14: ripple rows count as displayable too (the feed
+    labels those alerts exposure="indirect_only").
+
+    MACRO_CONTEXT is deliberately NOT counted (blueprint §7, ruling R1): an
+    alert whose ONLY gate output is macro context has no company-specific
+    claim to headline, so it never enters the FEED LIST. It is not hidden --
+    `_detail_servable` below keeps it reachable on the detail and deep-dive
+    surfaces, where macro sections render as context and nothing else."""
     return any(
-        ac.display_tier == "primary" or ac.display_tier in _SECONDARY_TIERS
+        ac.display_tier == TIER_PRIMARY or is_secondary_tier(ac.display_tier)
         for ac in alert.companies
     )
+
+
+def _detail_servable(alert: Alert) -> bool:
+    """Anything the gate authorized for display, macro context INCLUDED --
+    the detail route's wider door (see `_strict_displayable`)."""
+    return any(is_displayable_tier(ac.display_tier) for ac in alert.companies)
+
+
+# --- ripple-layer row payloads (blueprint §22/§28, rulings R1/R4) ---------
+
+def _row_channel_effects(alert_company) -> list[str]:
+    """The EFFECTS behind one row's net call, for §24's net-effect validator
+    (the serving-boundary twin of `app.pipeline._entry_channel_effects` --
+    same rule, read off the persisted row instead of a pre-persist entry
+    dict; deliberately not imported, because a request handler must not pull
+    in the whole analysis pipeline module to read one JSON column).
+    `channels_json` stores channel DESCRIPTIONS in two signed buckets, so
+    each channel's effect is the bucket it sits in; no channels at all is
+    silence, which §24 abstains on rather than reading as a contradiction."""
+    raw = getattr(alert_company, "channels_json", None)
+    if not raw:
+        return []
+    try:
+        channels = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(channels, dict):
+        return []
+    return (["positive"] * len(channels.get("positive_channels") or [])
+            + ["negative"] * len(channels.get("negative_channels") or []))
+
+
+def _decorate_rows(alert: Alert, layers: list[dict]) -> list[dict]:
+    """Add the five-dimension display fields (§3/§22/§28) to every GATED
+    ripple-layer row, in place, and return `layers`.
+
+    Rows on an UNGATED (legacy) alert are left byte-identical: they carry no
+    tier, no directness and no edge relation, and inventing "INDIRECT" for
+    them would be fabricating the very dimension §11 exists to keep honest.
+    """
+    alert_company_by_id = {ac.id: ac for ac in alert.companies}
+    for layer in layers:
+        for row in layer.get("rows") or []:
+            alert_company = alert_company_by_id.get(row.get("alert_company_id"))
+            if alert_company is None or alert_company.display_tier is None:
+                continue
+            # §11: directness is a SEPARATE dimension from causal distance.
+            # `derive_directness` is the gate's own resolution order
+            # (explicit column -> mechanism registry -> distance), so the
+            # served value can never disagree with the graded one.
+            row["causal_directness"] = derive_directness(alert_company)
+            row["publication_tier"] = _publication_tier(alert_company.display_tier)
+            row["edge_relation"] = alert_company.edge_relation
+            row["confidence_band"] = _wire_band(alert_company.confidence_band)
+            # Ruling R4: the band IS the confidence on this surface. A
+            # numeric score (the 49-for-everyone fake precision) must never
+            # ride along on a feed-v2 row; the legacy /api/alerts payload
+            # keeps it for the old UI. Defensive: no producer sets it today,
+            # and this is what stops one from quietly starting to.
+            row.pop("confidence_score", None)
+    return layers
+
+
+def _consistency_shape(alert: Alert, layers: list[dict], headline_ticker: str | None) -> dict:
+    """§24's alert-shaped input, built from the rows ABOUT TO BE SERVED (not
+    from the DB rows in the abstract) -- the serving half of "before
+    persistence and before serving". Only gate-evaluated rows are described:
+    a legacy row has no tier and no economic effect to be inconsistent
+    with, and reporting the whole pre-gate corpus as violations would block
+    exactly the alerts the check protects."""
+    alert_company_by_id = {ac.id: ac for ac in alert.companies}
+    companies = []
+    for layer in layers:
+        for row in layer.get("rows") or []:
+            alert_company = alert_company_by_id.get(row.get("alert_company_id"))
+            if alert_company is None or not alert_company.display_tier:
+                continue
+            companies.append({
+                "ticker": row.get("ticker"),
+                "economic_effect": row.get("economic_effect"),
+                "direction": row.get("direction"),
+                "display_tier": alert_company.display_tier,
+                "channel_effects": _row_channel_effects(alert_company),
+            })
+    return {"companies": companies, "headline_ticker": headline_ticker,
+            "headline_tier_source": None}
+
+
+def _validated_layers(alert: Alert, layers: list[dict],
+                      headline_ticker: str | None = None) -> list[dict]:
+    """Pre-serve consistency enforcement (blueprint §24): run the SAME
+    deterministic gate the pipeline runs before persistence, now over the
+    serialized rows, and refuse to serve any COMPANY row it finds
+    contradictory -- the Oil India shape (company bearish, every validated
+    channel bullish) never reaches a reader even if it somehow reached the
+    database (a stale worker, a hand-edited row, a restore from a pre-0008
+    backup whose triggers were dropped).
+
+    Dropped, not repaired and not fatal: a contradiction means the system
+    does not know which of two claims is true, so the wrong claim is
+    withheld and everything else on the alert still serves. Every violation
+    is logged at ERROR verbatim -- silence here would turn a data-integrity
+    incident into a mysteriously short card.
+
+    A HEADLINE violation is logged but drops nothing: the headline is
+    chosen from the tier sets by `_headline_company_ids`, so a violation
+    there is a bug in THIS module, and blanking the card would hide it.
+    """
+    if not is_gated(alert.companies):
+        return layers
+    violations = check_alert_consistency(_consistency_shape(alert, layers, headline_ticker))
+    if not violations:
+        return layers
+    bad_tickers = {v.split(":", 1)[0].strip() for v in violations} - {"HEADLINE"}
+    logger.error(
+        "PRE-SERVE CONSISTENCY VIOLATION alert_id=%s dropped_rows=%s violations=%s",
+        alert.id, sorted(bad_tickers), "; ".join(violations),
+    )
+    if not bad_tickers:
+        return layers
+    kept = []
+    for layer in layers:
+        rows = [row for row in (layer.get("rows") or []) if row.get("ticker") not in bad_tickers]
+        if not rows:
+            continue                       # a section emptied by the drop
+        layer["rows"] = rows
+        kept.append(layer)
+    return kept
 
 
 def _query_with_relations(db: Session):
@@ -247,6 +504,10 @@ def list_feed_v2_alerts(
         if measurement is not None:
             row = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
             row["exposure"] = exposure
+            # §15's controlled breadth descriptor -- computed from the rows
+            # already loaded on the alert, never by assembling sections (the
+            # list route must stay one measurement pass per alert).
+            row["event_scope"] = _event_scope(alert)
             row["peak_cap_tier"] = cap_tiers.get(measurement["peak_ticker"])
             # Distinct tiers across ALL tagged companies -- the top-bar cap
             # filter shows a story when any affected company sits in the
@@ -348,14 +609,22 @@ def get_feed_v2_deep_dive(
     A gated-analysis-only surface: an ungated (legacy, pre-gate) alert has
     no gate/tier/rejection data to show here at all, so it 404s rather than
     silently returning an empty shell -- the normal feed-v2 detail route
-    stays the place a legacy alert is served from. {primary, secondary}
-    reuse compute_ripple_layers' section shape (same "title"/"relationship"
-    /"icon"/"note"/"rows" dicts the card back already renders); "secondary"
-    is the ONE trailing SECONDARY-relationship section split back out, not
-    re-fetched, so both halves are guaranteed consistent with a single
-    ripple-layers computation. rejected_summary is the machine-readable
-    audit trail (why a candidate never reached ANY display tier) from
-    CompanyDecisionRecord -- REJECT_* rows for this alert only."""
+    stays the place a legacy alert is served from. {primary, secondary,
+    macro} reuse compute_ripple_layers' section shape (same "title"/
+    "relationship"/"icon"/"note"/"rows" dicts the card back already
+    renders), split out of ONE ripple-layers computation rather than
+    re-fetched, so the three families are guaranteed mutually consistent.
+    rejected_summary is the machine-readable audit trail (why a candidate
+    never reached ANY display tier) from CompanyDecisionRecord -- REJECT_*
+    rows for this alert only.
+
+    Task 6: the split now keys on T5's section KIND prefix. It used to test
+    `relationship != "SECONDARY"` against the single anonymous bucket T5
+    deleted -- with that bucket gone, every RIPPLE: and MACRO: section fell
+    into "primary", i.e. the deep dive presented indirect and macro-context
+    rows as the alert's primary claim. "secondary" is now the (plural)
+    RIPPLE: sections and "macro" is the new MACRO: family, which §7 keeps
+    separate precisely so it is never read as a company-specific claim."""
     alert = _query_with_relations(db).filter(Alert.id == alert_id).first()
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -363,9 +632,19 @@ def get_feed_v2_deep_dive(
         raise HTTPException(status_code=404, detail="Deep dive is only available for gate-analyzed alerts")
 
     held_company_ids = _held_company_ids(db, current_user)
-    sections = compute_ripple_layers(db, alert, held_company_ids, include_secondary=True)
-    primary_sections = [s for s in sections if s["relationship"] != "SECONDARY"]
-    secondary_sections = [s for s in sections if s["relationship"] == "SECONDARY"]
+    sections = _validated_layers(
+        alert,
+        _decorate_rows(
+            alert, compute_ripple_layers(db, alert, held_company_ids, include_secondary=True),
+        ),
+    )
+
+    def _kind(section: dict) -> str:
+        return (section.get("relationship") or "").split(":")[0]
+
+    primary_sections = [s for s in sections if _kind(s) == _KIND_PRIMARY]
+    secondary_sections = [s for s in sections if _kind(s) == _KIND_RIPPLE]
+    macro_sections = [s for s in sections if _kind(s) == _KIND_MACRO]
 
     rejected = (
         db.query(CompanyDecisionRecord)
@@ -379,6 +658,8 @@ def get_feed_v2_deep_dive(
     return {
         "primary": primary_sections,
         "secondary": secondary_sections,
+        "macro": macro_sections,
+        "event_scope": _event_scope(alert),
         "rejected_summary": [
             {
                 "ticker": r.ticker,
@@ -417,7 +698,12 @@ def get_feed_v2_alert(
         company_ids, exposure = _headline_company_ids(alert)
     measurement = compute_alert_measurement(db, alert, company_ids=company_ids)
     if measurement is None:
-        if _strict_displayable(alert):
+        # Wider than the list route's `_strict_displayable` on purpose
+        # (§7/ruling R1): a MACRO-CONTEXT-only alert never enters the feed
+        # list -- it has no company-specific claim to headline -- but it is
+        # not hidden either. It serves here, and on the deep dive, as
+        # context with an honestly unavailable measurement.
+        if _detail_servable(alert):
             measurement = _unavailable_measurement()
         else:
             raise HTTPException(status_code=404, detail="Alert has no measured companies")
@@ -429,6 +715,7 @@ def get_feed_v2_alert(
     translations = _bulk_translations(db, [alert], lang)
     result = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
     result["exposure"] = exposure
+    result["event_scope"] = _event_scope(alert)
     # Alert-level quality ladder (corrective-v4 Task 15): authoritative |
     # fallback | degraded | failed | budget_exhausted, or None on a
     # pre-v3 alert. Frontend consumption is a later task; this is the
@@ -439,11 +726,25 @@ def get_feed_v2_alert(
     # WITH a primary the card back stays PRIMARY-only (corrective-v4 Task
     # 16, spec §52) -- secondary companies live on GET
     # /api/feed-v2/{id}/deep-dive. For a no-primary gated alert (owner
-    # decision 2026-08-14) the card back IS the secondary section --
-    # without include_secondary the card would be an empty shell. No effect
-    # on an ungated (legacy) alert's 3-tier rendering.
-    result["layers"] = compute_ripple_layers(
-        db, alert, held_company_ids, include_secondary=(exposure == "indirect_only"),
+    # decision 2026-08-14) the card back IS the ripple/macro sections --
+    # without include_secondary the card would be an empty shell. Keyed on
+    # "this alert has no primary row" rather than on exposure ==
+    # "indirect_only", so a MACRO-CONTEXT-only alert (which carries no
+    # exposure label at all, §7) still renders its context sections instead
+    # of an empty card back. No effect on an ungated (legacy) alert's
+    # 3-tier rendering, which ignores the flag entirely.
+    #
+    # Then, in order: the five-dimension row fields (§22/§28) and the §24
+    # pre-serve consistency gate, which withholds any row whose served
+    # claim contradicts itself. The list route deliberately runs neither --
+    # it serves no rows, and row consistency is already enforced at
+    # persistence (pipeline) and at the DB (0008's gated-row triggers).
+    result["layers"] = _validated_layers(
+        alert,
+        _decorate_rows(alert, compute_ripple_layers(
+            db, alert, held_company_ids, include_secondary=(exposure != "primary"),
+        )),
+        headline_ticker=measurement.get("peak_ticker"),
     )
     # Translated per-company `why` overlay (silent English fallback).
     whys = bulk_alert_company_whys(

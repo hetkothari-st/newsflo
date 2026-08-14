@@ -542,6 +542,15 @@ def test_bypass_headline_ignores_tier(db_session, strict_mode):
         deep_dive = client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()
         secondary = [r["ticker"] for layer in deep_dive["secondary"] for r in layer["rows"]]
         assert secondary == ["BLUEDART.NS"]         # visible, but only here
+        # Task 6: the ripple row lands in "secondary" because the split now
+        # reads T5's section KIND prefix. The old split (`relationship !=
+        # "SECONDARY"`, against a bucket T5 deleted) filed it under
+        # "primary" -- the deep dive presenting the very row the gate
+        # refused to make a primary claim about AS the primary claim, i.e.
+        # this bypass reopening one layer down.
+        assert [r["ticker"] for layer in deep_dive["primary"] for r in layer["rows"]] == ["ONGC.NS"]
+        assert deep_dive["secondary"][0]["relationship"].startswith("RIPPLE:")
+        assert deep_dive["macro"] == []
     finally:
         app.dependency_overrides.clear()
 
