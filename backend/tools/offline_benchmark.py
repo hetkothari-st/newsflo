@@ -878,6 +878,25 @@ def main() -> int:
         print(f"\nresults: {results_path}")
         print(f"reviews: {reviews_dir}")
 
+    # --- exit gate -------------------------------------------------------
+    # Every labeled expectation is encoded as a per-event failure line by
+    # score() -- expected_secondary_ripple, expected_macro_context,
+    # expected_directness, expected_rejection_reason, expected_evidence_tier,
+    # sections, engine errors, and the primary-company set. Before this,
+    # ONLY primary_feed_precision could fail the run: every other miss
+    # printed a FAIL line and then exited 0, so CI (and anyone reading the
+    # exit status rather than the text) saw green on a regressed corpus.
+    # Any non-empty failures list is now a non-zero exit; the precision gate
+    # below is kept because it also catches the "published nothing at all"
+    # shape, which produces no per-event failure line of its own.
+    failing_events = [e for e in scored["per_event"] if e["failures"]]
+    if failing_events:
+        total_failures = sum(len(e["failures"]) for e in failing_events)
+        print(f"\nFAIL: {total_failures} labeled expectation(s) missed across "
+              f"{len(failing_events)} event(s): "
+              + ", ".join(e["id"] for e in failing_events), file=sys.stderr)
+        return 1
+
     precision = scored["metrics"]["primary_feed_precision"]["value"]
     expected_primaries = sum(
         len((obs.get("ground_truth") or {}).get("expected_primary") or {})

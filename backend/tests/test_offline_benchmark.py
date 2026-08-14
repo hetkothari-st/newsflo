@@ -505,3 +505,85 @@ def test_smallest_fixture_runs_end_to_end_and_emits_artifacts(
     assert "Reviewer label" in review.read_text(encoding="utf-8")
     # The real output directory must be untouched by a tmp_path run.
     assert results_path != DEFAULT_OUT_DIR / "offline_results.json"
+
+
+# --- the exit gate --------------------------------------------------------
+# Until the final review wave, main() exited 0 unless primary_feed_precision
+# regressed. Every OTHER labeled expectation -- secondary_ripple,
+# macro_context, directness, rejection_reason, evidence tier, sections,
+# even an engine error -- printed a FAIL line to stdout and then exited 0,
+# so anything reading the exit status (CI, a shell `&&`, a human running it
+# quietly) saw green on a regressed corpus. These pin the gate on the
+# per-event failures list, which encodes all of them.
+
+def _drive_main(monkeypatch, tmp_path, observation):
+    """Run main() over ONE synthetic observation: no engine, no fixtures,
+    no network -- only the scoring + exit-gate path under test."""
+    from tools import offline_benchmark
+
+    monkeypatch.setattr(offline_benchmark, "load_fixtures",
+                        lambda only=None: [{"id": observation["id"]}])
+    monkeypatch.setattr(offline_benchmark, "run_fixture", lambda fixture: observation)
+    monkeypatch.setattr(offline_benchmark, "stub_network", lambda: None)
+    monkeypatch.setattr(sys, "argv", [
+        "offline_benchmark.py", "--out-dir", str(tmp_path / "out"), "--quiet",
+    ])
+    return offline_benchmark.main()
+
+
+def test_a_non_primary_miss_exits_non_zero(monkeypatch, tmp_path):
+    """A directness miss on an otherwise perfect corpus: every primary
+    company is right (primary_feed_precision == 1.0, so the OLD gate is
+    satisfied) and the run must still fail."""
+    observation = _observation(
+        entries=[_entry("GOOD.NS", "primary", causal_directness="DIRECT")],
+        ground_truth={
+            "expected_primary": {"GOOD.NS": "negative"},
+            "expected_directness": {"GOOD.NS": "INDIRECT"},
+        },
+    )
+    scored = score([observation])
+    assert scored["metrics"]["primary_feed_precision"]["value"] == 1.0
+    assert scored["per_event"][0]["failures"]
+
+    assert _drive_main(monkeypatch, tmp_path, observation) == 1
+
+
+@pytest.mark.parametrize("truth_key,expected", [
+    ("expected_secondary_ripple", {"GOOD.NS": "negative"}),
+    ("expected_macro_context", {"GOOD.NS": "negative"}),
+    ("expected_rejection_reason", {"GOOD.NS": "REJECT_LOW_MATERIALITY"}),
+])
+def test_every_labeled_dimension_can_fail_the_run(monkeypatch, tmp_path,
+                                                  truth_key, expected):
+    """The gate is on the failures list, not on any one dimension -- each of
+    the tiers/dimensions that used to print-and-pass now exits non-zero.
+    GOOD.NS publishes as primary, so each label above is a miss."""
+    observation = _observation(
+        entries=[_entry("GOOD.NS", "primary")],
+        ground_truth={"expected_primary": {"GOOD.NS": "negative"}, truth_key: expected},
+    )
+    assert _drive_main(monkeypatch, tmp_path, observation) == 1
+
+
+def test_a_fully_labeled_green_run_still_exits_zero(monkeypatch, tmp_path):
+    """The gate must not fire on a clean corpus -- an over-eager exit gate
+    is just as useless as an absent one."""
+    observation = _observation(
+        entries=[_entry("GOOD.NS", "primary", causal_directness="DIRECT")],
+        ground_truth={
+            "expected_primary": {"GOOD.NS": "negative"},
+            "expected_directness": {"GOOD.NS": "DIRECT"},
+        },
+    )
+    assert not score([observation])["per_event"][0]["failures"]
+
+    assert _drive_main(monkeypatch, tmp_path, observation) == 0
+
+
+def test_an_engine_error_exits_non_zero(monkeypatch, tmp_path):
+    """An engine crash is recorded as a per-event failure; before the gate
+    it could still exit 0 as long as the surviving events' primaries were
+    right."""
+    observation = _observation([], {}, error="boom")
+    assert _drive_main(monkeypatch, tmp_path, observation) == 1

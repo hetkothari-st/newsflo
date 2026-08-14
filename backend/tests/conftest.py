@@ -1,3 +1,29 @@
+import os
+
+# ---------------------------------------------------------------------------
+# HERMETIC TEST SESSION -- this MUST stay the first executable statement in
+# this file, above every import of app code.
+#
+# app/main.py calls `_maybe_start_scheduler()` AT IMPORT TIME (module level),
+# and 20+ test modules import app.main at module level themselves. A started
+# scheduler is a live BackgroundScheduler polling real RSS feeds and running
+# the analysis loop *while the suite runs* -- real network, real DB writes,
+# nondeterministic timing.
+#
+# backend/.env carries ENABLE_SCHEDULER=true (that is the local runtime's
+# setting and must stay true there), and app/config.py resolves the flag
+# through pydantic-settings, which ranks a REAL process environment variable
+# ABOVE the dotenv file. So setting it here makes the whole session resolve
+# `settings.enable_scheduler` False without touching .env -- provided this
+# runs before `Settings()` is constructed, i.e. before app.config is first
+# imported. It does: pytest imports conftest.py before it imports ANY test
+# module, so nothing in the suite can win that race.
+#
+# The `_scheduler_never_starts` session fixture below turns this from a
+# convention into a checked fact.
+# ---------------------------------------------------------------------------
+os.environ["ENABLE_SCHEDULER"] = "false"
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -5,6 +31,34 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base
 from app import models  # noqa: F401  ensures models are registered on Base
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _scheduler_never_starts():
+    """Prove the guard at the top of this file actually held.
+
+    Imports app.main lazily (here, not at conftest import time) so the
+    import-time `_maybe_start_scheduler()` gate is forced to run under the
+    env we set, then asserts that nothing started: app.scheduler._scheduler
+    is the module-global the started BackgroundScheduler is parked on, and
+    it stays None while the flag is off.
+    """
+    from app.config import settings
+
+    assert settings.enable_scheduler is False, (
+        "ENABLE_SCHEDULER resolved TRUE inside the test session -- the "
+        "suite would run against a live scheduler (real feed polling, real "
+        "analysis writes). Something imported app.config before this "
+        "conftest's os.environ line ran."
+    )
+
+    import app.main  # noqa: F401 -- runs the import-time scheduler gate
+    import app.scheduler
+
+    assert app.scheduler._scheduler is None, (
+        "a background scheduler is running during the test session"
+    )
+    yield
 
 
 @pytest.fixture()

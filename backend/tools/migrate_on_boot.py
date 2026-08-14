@@ -33,6 +33,11 @@ inspector before adding a column/index/constraint, and 0008's triggers and
 partial index are CREATE ... IF NOT EXISTS), so re-running this script
 against any of the three states is safe.
 
+After the upgrade it also ASSERTS the §26 gated-row trigger backstop is
+still installed on SQLite (see `check_gated_row_triggers`) -- the one thing
+a future migration can silently destroy without any test or runtime path
+noticing.
+
 Exits non-zero and logs loudly on any failure -- a container that cannot
 migrate must NOT come up serving a half-migrated schema. Run it before
 uvicorn (see the repo Dockerfile's CMD).
@@ -59,6 +64,96 @@ logger = logging.getLogger("migrate_on_boot")
 # has existed since the first release; the others are belt-and-braces for
 # a DB that somehow lost it.
 _CORE_TABLES = ("alerts", "articles", "companies")
+
+# The §26 gated-row backstop installed by 0008 (and by app/models.py's
+# `after_create` hook / `emit_gated_row_triggers`). SQLite drops every
+# trigger attached to a table it drops, and Alembic's `batch_alter_table`
+# rebuilds a SQLite table by DROP + RENAME without copying triggers -- so
+# ANY future migration that batch-alters `alert_companies` silently removes
+# both of these unless it re-emits them (see the warning block in
+# app/models.py). Nothing detected that; this does.
+GATED_ROW_TRIGGERS = (
+    "alert_companies_gated_consistency",
+    "alert_companies_gated_consistency_insert",
+)
+
+
+class GatedRowTriggersMissing(RuntimeError):
+    """The gated-row consistency triggers are absent after migration."""
+
+
+def check_gated_row_triggers(url: str) -> tuple[str, tuple[str, ...]]:
+    """Post-migration presence check for the §26 trigger backstop.
+
+    Returns `(status, missing)` where status is one of:
+      "ok"                -- both triggers present
+      "missing"           -- `missing` names the absent trigger(s)
+      "skipped_dialect"   -- not SQLite; the triggers are SQLite-only by
+                             design (the Postgres port is a ledgered,
+                             deliberate absence -- see the 0008 docstring
+                             and app/models.py's emit_gated_row_triggers,
+                             which no-ops off SQLite). Never a failure.
+      "skipped_no_table"  -- no `alert_companies` table to protect yet.
+
+    Factored out of `migrate_on_boot` so it is directly testable without
+    spawning a boot process.
+    """
+    from sqlalchemy import create_engine, inspect, text
+
+    if not url.startswith("sqlite"):
+        return "skipped_dialect", ()
+
+    engine = create_engine(url, connect_args={"check_same_thread": False})
+    try:
+        if "alert_companies" not in set(inspect(engine).get_table_names()):
+            return "skipped_no_table", ()
+        with engine.connect() as connection:
+            present = {
+                row[0] for row in connection.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'"))
+            }
+    finally:
+        engine.dispose()
+
+    missing = tuple(name for name in GATED_ROW_TRIGGERS if name not in present)
+    return ("missing" if missing else "ok"), missing
+
+
+def _assert_gated_row_triggers(url: str, scheme: str) -> None:
+    """Fail the boot when the backstop is gone. Loud on purpose: a
+    half-enforced schema serving gated rows with no database-level guard is
+    exactly the silent loss this check exists to prevent, and a container
+    that cannot prove the guard is installed must NOT come up."""
+    status, missing = check_gated_row_triggers(url)
+    if status == "ok":
+        logger.info("[migrate] gated-row trigger backstop present (%s)",
+                    ", ".join(GATED_ROW_TRIGGERS))
+        return
+    if status == "skipped_dialect":
+        logger.info(
+            "[migrate] %s dialect: gated-row triggers are SQLite-only by "
+            "design; presence check skipped", scheme)
+        return
+    if status == "skipped_no_table":
+        logger.info(
+            "[migrate] no alert_companies table; gated-row trigger check "
+            "skipped")
+        return
+
+    message = (
+        "[migrate] FATAL: the alert_companies gated-row trigger backstop is "
+        "MISSING after migration -- absent trigger(s): "
+        + ", ".join(missing)
+        + ". SQLite drops triggers with the table, and Alembic's "
+        "batch_alter_table rebuilds a table without copying them, so a "
+        "recent migration that batch-altered alert_companies almost "
+        "certainly removed them. That migration must re-emit the CREATE "
+        "TRIGGER statements verbatim (see app/models.py's warning block); "
+        "refusing to start with an unguarded gated-row table."
+    )
+    logger.error(message)
+    print(message, file=sys.stderr)
+    raise GatedRowTriggersMissing(message)
 
 
 def _database_url() -> str:
@@ -159,6 +254,11 @@ def migrate_on_boot(url: str | None = None) -> str:
         state = "empty"
         logger.info("[migrate] %s DB is empty; building schema from head", scheme)
         _alembic(url, "upgrade", "head")
+
+    # Post-upgrade §26 DB backstop assertion. Runs on every path, after the
+    # schema is at head -- raises (and so fails the boot) when a trigger is
+    # gone.
+    _assert_gated_row_triggers(url, scheme)
 
     logger.info("[migrate] done (%s DB) -- schema at alembic head", state)
     return state
