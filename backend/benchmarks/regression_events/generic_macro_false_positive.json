@@ -69,7 +69,7 @@
       "reject": [],
       "counterfactual": {
         "HINDUNILVR.NS": "NOT_SUPPORTED",
-        "DABUR.NS": "NOT_SUPPORTED"
+        "DABUR.NS": "SUPPORTED"
       }
     }
   },
@@ -80,7 +80,8 @@
     "expected_sections": [],
     "expect_abstention": true,
     "expected_evidence_tier": {"HINDUNILVR.NS": "SUBJECT", "DABUR.NS": "E"},
+    "expected_rejection_reason": {"HINDUNILVR.NS": "REJECT_NOT_EVENT_SPECIFIC", "DABUR.NS": "REJECT_GENERIC_EXPOSURE"},
     "expected_materiality_grade": {"HINDUNILVR.NS": "HIGH"},
-    "rationale": "ABSTENTION FIXTURE, and the important half is HINDUNILVR: it is the article's own named subject (tier SUBJECT, primary-capable at d1), it carries a HIGH composite materiality grade, its mechanism is articulate and its direction is internally consistent -- it clears every gate the strong-evidence path exists to open. It is still rejected, because the counterfactual verifier answers NOT_SUPPORTED: the 'real income restores mass-pack volumes' thesis was equally true the day before the print and survives the event's removal, which is the definition of a generic macro story wearing a company's name. DABUR fails earlier and more cheaply -- its rationale is interchangeable with a sector sentence and its evidence is the model's own inference (tier E), so COMPANY_SPECIFIC_EXPOSURE_VALID rejects it at gate five without the run ever having to reason about materiality. Two different false-positive shapes, one correct output: nothing published."
+    "rationale": "ABSTENTION FIXTURE with two INDEPENDENTLY LOAD-BEARING arms -- each rejection is produced by exactly one gate, so removing that gate breaks this fixture instead of being covered for by a second one. HINDUNILVR is the article's own named subject (tier SUBJECT, primary-capable at d1) with a HIGH composite materiality grade, an articulate mechanism and an internally consistent direction: it clears every gate the strong-evidence path exists to open, and is rejected solely because the counterfactual verifier answers NOT_SUPPORTED -- the 'real income restores mass-pack volumes' thesis was equally true the day before the print and survives the event's removal, which is the definition of a generic macro story wearing a company's name. DABUR carries a SUPPORTED counterfactual on purpose (review fix round 1, I1): it must NOT be double-protected, because then COMPANY_SPECIFIC_EXPOSURE_VALID could be deleted outright and this fixture would still pass. With the counterfactual clean, gate five is the only thing standing between DABUR and display -- its rationale is interchangeable with a sector sentence and its evidence is the model's own inference (tier E), so REJECT_GENERIC_EXPOSURE fires at gate five, before the run ever reasons about materiality or evidence. Two different false-positive shapes, two different single points of rejection, one correct output: nothing published."
   }
 }

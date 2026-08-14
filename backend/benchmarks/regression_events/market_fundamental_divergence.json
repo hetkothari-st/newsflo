@@ -77,6 +77,7 @@
     "expect_abstention": false,
     "expected_directness": {"APOLLOTYRE.NS": "DIRECT"},
     "expected_evidence_tier": {"APOLLOTYRE.NS": "SUBJECT", "CEATLTD.NS": "MARKET_OBS"},
+    "expected_rejection_reason": {"CEATLTD.NS": "REJECT_INSUFFICIENT_EVIDENCE"},
     "expected_causal_distance": {"APOLLOTYRE.NS": 1},
     "expected_sections": [
       {"effect": "negative", "label_contains": "other verified mechanisms"}

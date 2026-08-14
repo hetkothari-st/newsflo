@@ -97,6 +97,8 @@
     "expected_secondary_ripple": {"ASIANPAINT.NS": "negative"},
     "expected_directness": {"ASIANPAINT.NS": "INDIRECT", "BLUEDART.NS": "DIRECT"},
     "expected_evidence_tier": {"BLUEDART.NS": "SUBJECT", "ASIANPAINT.NS": "D"},
+    "expected_rejection_reason": {"BLUEDART.NS": "REJECT_LOW_MATERIALITY"},
+    "expected_rejection_reason_note": "BERGEPAINT is deliberately absent: the engine's distance-2 final prune removes it before the gate runs, so it has no gate decision and no REJECT_* state to assert. Labelling one here would claim a gate rejection that never happened.",
     "expected_materiality_grade": {"BLUEDART.NS": "LOW", "ASIANPAINT.NS": "HIGH"},
     "expected_causal_distance": {"ASIANPAINT.NS": 2},
     "rationale": "Two rejections with two different mechanics, and one control that separates them from mere pessimism. BLUEDART reaches the gate with the article's own name behind it (tier SUBJECT at d1, DIRECT, verified, SUPPORTED counterfactual) and is rejected at MATERIALITY_VALID with grade LOW: a contractual surcharge that resets with the index leaves a residual too small to be a claim, and no amount of evidence strength converts a small effect into a publishable one (§19). BERGEPAINT never reaches the gate at all -- its 0.28 materiality is below the distance-2 final-prune floor, so the engine's own deterministic pruning removes it, which is why this label pins it only through expected_rejected (a pruned candidate has no gate decision, no tier and no evidence class to assert). ASIANPAINT is the control: identical archetype, identical tier D, identical distance 2, materiality above the bar -- published as secondary_ripple. Without it this fixture would prove only that the system can say no."

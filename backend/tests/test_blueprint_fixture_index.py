@@ -94,12 +94,23 @@ BLUEPRINT_32_INDEX: dict[int, dict] = {
     },
     11: {
         "title": "INR/IT multi-hop ripple -> macro_context, not company rows",
-        "fixtures": ["inr_it_multihop_macro_context"],
+        "fixtures": [
+            "inr_it_multihop_macro_context",
+            "coking_coal_infra_cost_macro_context",
+        ],
         "tests": [],
         "note": "Trade deficit -> rupee -> IT export realisation is three hops. "
                 "The tier-C candidate publishes as macro_context (§7); the "
                 "tier-E candidate at the same node produces no row at all "
-                "(REJECT_LOW_PRIORITY at the d3 causal-path bar).",
+                "(REJECT_LOW_PRIORITY at the d3 causal-path bar). TWO fixtures "
+                "on purpose (Task 11 review): macro_context is the newest tier "
+                "and the only end-to-end proof it works, so it must not ride on "
+                "a single observation that one edit could swing 100% -> 0%. The "
+                "second runs an unrelated chain (coking coal -> steel price -> "
+                "infrastructure project cost) on the other archetype-free broad "
+                "event type, with the opposite effect sign and the opposite "
+                "directness verdict (REMOTE vs DIRECT) -- so §11's "
+                "directness-is-not-distance rule is pinned from both sides.",
     },
     12: {
         "title": "generic macro false positive rejection",

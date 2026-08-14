@@ -61,6 +61,7 @@
     "expected_rejected": ["HINDOILEXP.NS"],
     "expect_abstention": true,
     "expected_evidence_tier": {"HINDOILEXP.NS": "D"},
+    "expected_rejection_reason": {"HINDOILEXP.NS": "REJECT_NOT_EVENT_SPECIFIC"},
     "rationale": "HINDOILEXP genuinely operates in the same sub-sector as the real upstream beneficiaries and the mapping stage's rationale reads plausibly on its face -- this is exactly what makes it a semantic-similarity false positive rather than an obviously bad candidate. The verifier ACCEPTS it (a real company, a real if thin mechanism) but answers NOT_SUPPORTED on the semantic counterfactual: this company's own commercial output is too small for a benchmark crude move to be a material, event-specific story about IT specifically, so the claim would survive the event's removal -- the definition of a generic sector/name-pattern match. That verdict reaches the deterministic gate (COUNTERFACTUAL_VALID -> REJECT_NOT_EVENT_SPECIFIC) rather than being popped pre-gate by a verifier-reject, so this fixture pins a REAL excluded decision record (tier D, evidence-tier assertable) -- distinguishing 'the safeguard caught it' from 'it was never proposed at all', which the archetype-eligibility machinery breaking or the mapping stage returning nothing would both also produce."
   }
 }

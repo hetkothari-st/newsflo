@@ -112,6 +112,7 @@
     "expected_macro_context": {"TCS.NS": "positive"},
     "expected_directness": {"TCS.NS": "DIRECT", "WIPRO.NS": "DIRECT"},
     "expected_evidence_tier": {"TCS.NS": "C", "WIPRO.NS": "E"},
+    "expected_rejection_reason": {"WIPRO.NS": "REJECT_LOW_PRIORITY"},
     "expected_causal_distance": {"TCS.NS": 3},
     "expected_causal_distance_note": "WIPRO is deliberately absent from this map: expected_causal_distance is scored against DISPLAYED rows only (a rejected candidate has no displayed distance), and WIPRO's rejection is pinned by expected_rejected plus expected_evidence_tier/expected_directness, both of which scan every candidate.",
     "expected_sections": [

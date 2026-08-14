@@ -471,6 +471,16 @@ def score(observations: list[dict]) -> dict:
     secondary_ripple = Counter()
     macro_context = Counter()
     directness = Counter()
+    # §32 batch-B addition (Task 11 review, I1 general form): `expected_
+    # rejected` only asks that a ticker STAYED OUT of the feed, which any
+    # gate can satisfy -- so a fixture built to pin one specific gate can be
+    # silently propped up by a second, unrelated rejection and keep passing
+    # after the gate it was written for is deleted. `expected_rejection_
+    # reason` names the EXACT machine-readable REJECT_* state, so the gate a
+    # fixture claims to exercise is the gate it actually exercises. Label it
+    # ONLY where the fixture's own prose asserts the reason -- an invented
+    # reason is a worse defect than an unlabeled one.
+    rejection_reason = Counter()
     explanation_checked = explanation_faithful = 0
     per_event = []
 
@@ -569,6 +579,22 @@ def score(observations: list[dict]) -> dict:
                 observed = entry["evidence_tier"] if entry is not None else "<absent>"
                 event["failures"].append(
                     f"expected evidence_tier {ticker}={expected} observed={observed}")
+
+        # rejection REASON: scored over EVERY candidate (a rejected one is
+        # excluded by definition, so `displayed` would always miss it), and
+        # a hit needs the ticker to be genuinely rejected AND rejected for
+        # the named reason -- a published row, or a row rejected by some
+        # other gate, are both misses. This is what makes an
+        # `expected_rejected` label load-bearing for a SPECIFIC gate.
+        for ticker, expected in (truth.get("expected_rejection_reason") or {}).items():
+            entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
+            hit = entry is not None and entry["rejection_reason"] == expected
+            rejection_reason.add(hit)
+            if not hit:
+                observed = (entry["rejection_reason"] or "<published>"
+                            if entry is not None else "<absent>")
+                event["failures"].append(
+                    f"expected rejection_reason {ticker}={expected} observed={observed}")
 
         # secondary_ripple / macro_context: asserted EXACTLY like
         # primary_feed_precision above -- presence at the SPECIFIC tier the
@@ -675,6 +701,7 @@ def score(observations: list[dict]) -> dict:
         "entity_accuracy": entity.as_dict(),
         "evidence_accuracy": evidence.as_dict(),
         "rejection_recall": rejection.as_dict(),
+        "rejection_reason_accuracy": rejection_reason.as_dict(),
         "secondary_ripple_accuracy": secondary_ripple.as_dict(),
         "macro_context_accuracy": macro_context.as_dict(),
         "directness_accuracy": directness.as_dict(),

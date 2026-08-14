@@ -99,6 +99,7 @@
     "expected_rejected": ["TITAN.NS", "BAJFINANCE.NS"],
     "expect_abstention": true,
     "expected_evidence_tier": {"TITAN.NS": "MARKET_OBS", "BAJFINANCE.NS": "MARKET_OBS"},
+    "expected_rejection_reason": {"TITAN.NS": "REJECT_INSUFFICIENT_EVIDENCE", "BAJFINANCE.NS": "REJECT_INSUFFICIENT_EVIDENCE"},
     "rationale": "Titan and Bajaj Finance are named ONLY as index laggards -- their own stock move is the article's sole claim about them. Both survive verification (the verifier is not the safeguard being tested here), but the mapping stage's rationale for both candidates does nothing but restate that price move ('shares fell', 'stock declined') instead of arguing a real discretionary-demand or funding-cost mechanism, so classify_evidence taints both as ARTICLE_MARKET_OBSERVATION/MARKET_OBS (INV-003) BEFORE the deterministic gate even reaches counterfactual/verification checks -- EVIDENCE_VALID rejects MARKET_OBS outright (REJECT_INSUFFICIENT_EVIDENCE) since it never authorizes display at any tier. A company that fell in the same session as a crude-price headline is not, by that fact alone, a fundamental casualty of the event -- neither ticker may appear as a candidate row of any tier."
   }
 }

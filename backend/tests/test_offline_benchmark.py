@@ -247,6 +247,77 @@ def test_expected_directness_fails_on_mismatch():
     assert metrics["directness_accuracy"]["value"] == 0.0
 
 
+# --- §32 batch B: expected_rejection_reason -------------------------------
+# `expected_rejected` only asks that a ticker stayed out of the feed, which
+# ANY gate satisfies. These pin the general form of the Task-11 review's I1:
+# a fixture written to exercise one specific gate must fail when a different
+# gate does the rejecting, otherwise deleting the gate under test leaves the
+# fixture green.
+
+def test_expected_rejection_reason_passes_on_the_exact_state():
+    observation = _observation(
+        entries=[_entry("BLOCKED.NS", "excluded",
+                        rejection_reason="REJECT_GENERIC_EXPOSURE")],
+        ground_truth={"expected_rejection_reason": {
+            "BLOCKED.NS": "REJECT_GENERIC_EXPOSURE"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["rejection_reason_accuracy"] == {"value": 1.0, "hits": 1, "total": 1}
+
+
+def test_expected_rejection_reason_miss_produces_a_failure_line():
+    """THE point of the key: the ticker IS rejected -- `expected_rejected`
+    would be perfectly happy -- but a DIFFERENT gate did it. That must read
+    as a failure with a printed line, not as a silent pass, or the gate the
+    fixture was written for could be deleted with the corpus still green."""
+    observation = _observation(
+        entries=[_entry("BLOCKED.NS", "excluded",
+                        rejection_reason="REJECT_LOW_MATERIALITY")],
+        ground_truth={
+            "expected_rejected": ["BLOCKED.NS"],
+            "expected_rejection_reason": {"BLOCKED.NS": "REJECT_GENERIC_EXPOSURE"},
+        },
+    )
+    scored = score([observation])
+
+    # The weaker key is satisfied...
+    assert scored["metrics"]["rejection_recall"] == {"value": 1.0, "hits": 1, "total": 1}
+    # ...and the stronger one is not, loudly.
+    assert scored["metrics"]["rejection_reason_accuracy"] == {
+        "value": 0.0, "hits": 0, "total": 1}
+    failures = scored["per_event"][0]["failures"]
+    assert any("rejection_reason" in f and "BLOCKED.NS" in f
+               and "REJECT_LOW_MATERIALITY" in f for f in failures), failures
+
+
+def test_expected_rejection_reason_fails_when_the_ticker_was_published():
+    """A published row has no rejection reason at all; the failure line must
+    say so rather than printing a bare None."""
+    observation = _observation(
+        entries=[_entry("SHIPPED.NS", "primary")],
+        ground_truth={"expected_rejection_reason": {
+            "SHIPPED.NS": "REJECT_GENERIC_EXPOSURE"}},
+    )
+    scored = score([observation])
+
+    assert scored["metrics"]["rejection_reason_accuracy"]["value"] == 0.0
+    assert any("<published>" in f for f in scored["per_event"][0]["failures"])
+
+
+def test_expected_rejection_reason_fails_when_the_candidate_never_appeared():
+    """A candidate the engine pruned before the gate has no decision to
+    assert -- a fixture must not be able to claim a gate rejection for a row
+    that was never gated."""
+    observation = _observation(entries=[], ground_truth={
+        "expected_rejection_reason": {"GHOST.NS": "REJECT_LOW_MATERIALITY"}})
+    scored = score([observation])
+
+    assert scored["metrics"]["rejection_reason_accuracy"] == {
+        "value": 0.0, "hits": 0, "total": 1}
+    assert any("<absent>" in f for f in scored["per_event"][0]["failures"])
+
+
 def test_new_keys_absent_report_na_not_a_pass_or_fail():
     """Backward compat with the 23 pre-existing fixtures (spec §32): a
     fixture that never declares these keys must be UNMEASURED on them, not
@@ -261,6 +332,7 @@ def test_new_keys_absent_report_na_not_a_pass_or_fail():
     assert metrics["secondary_ripple_accuracy"] == {"value": None, "hits": 0, "total": 0}
     assert metrics["macro_context_accuracy"] == {"value": None, "hits": 0, "total": 0}
     assert metrics["directness_accuracy"] == {"value": None, "hits": 0, "total": 0}
+    assert metrics["rejection_reason_accuracy"] == {"value": None, "hits": 0, "total": 0}
 
 
 # --- mixed_accuracy: the auto-pass bug, pinned dead ------------------------
