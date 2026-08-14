@@ -240,7 +240,10 @@ def test_v3_result_cache_invalidates_on_policy_bump(db_session, monkeypatch):
     db_session.commit()
     assert pipeline.get_cached_v3(db_session, article) is not None
 
-    monkeypatch.setattr(publication_gate, "POLICY_VERSION", "pol-2")
+    # A sentinel, not the next real version: pinning "pol-2" here made the
+    # test silently stop testing anything the day POLICY_VERSION actually
+    # became pol-2.
+    monkeypatch.setattr(publication_gate, "POLICY_VERSION", "pol-test-bump")
     assert pipeline.get_cached_v3(db_session, article) is None
 
 

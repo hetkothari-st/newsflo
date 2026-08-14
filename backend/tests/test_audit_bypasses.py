@@ -357,7 +357,7 @@ def test_bypass_self_certifying_cache(db_session, strict_mode):
     # ...and Tier D can never authorize a primary claim, however high the
     # model's own materiality float.
     entries = _v3_entries(db_session, _result([_graph_company(materiality=0.95)]))
-    assert entries[0]["display_tier"] == "secondary_deep_dive"
+    assert entries[0]["display_tier"] == "secondary_ripple"
 
     # A candidate this event's verifier did NOT accept stays rejected --
     # the cached row cannot stand in for the missing verdict.
@@ -559,7 +559,8 @@ def test_bypass_llm_writes_display_tier(db_session, strict_mode):
     1. no prompt or response schema mentions display_tier / primary tiers,
        so a model cannot even propose one;
     2. no module outside publication_gate.py assigns a DISPLAYABLE tier
-       literal ("primary" / "secondary_deep_dive") to display_tier --
+       literal ("primary" / "secondary_ripple" / "macro_context", plus the
+       legacy "secondary_deep_dive" spelling) to display_tier --
        everything else COPIES a decision (the one allowed literal is
        "excluded" on an explicit rejection record, which is a refusal to
        display, not a claim);
@@ -583,7 +584,8 @@ def test_bypass_llm_writes_display_tier(db_session, strict_mode):
                 continue
             if any(f'display_tier{sep}"{tier}"' in stripped.replace(" ", "")
                    for sep in ("=", "==")
-                   for tier in ("primary", "secondary_deep_dive")):
+                   for tier in ("primary", "secondary_ripple", "macro_context",
+                                "secondary_deep_dive")):
                 # `== "primary"` is a READ (routers filtering the feed);
                 # only an assignment claims authorship.
                 if "==" in stripped.replace(" ", "").split("display_tier")[1][:2]:

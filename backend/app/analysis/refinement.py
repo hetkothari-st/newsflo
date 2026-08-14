@@ -15,7 +15,7 @@ import time
 from openai import RateLimitError
 
 from app.analysis.claude_client import FALLBACK_MODEL, MODEL, SYSTEM_PROMPT, tier_kwargs
-from app.analysis.impact_graph.publication_gate import is_gated
+from app.analysis.impact_graph.publication_gate import is_displayable_tier, is_gated
 from app.companies.matching.normalize import normalize_name
 from app.config import settings
 from app.models import AlertRippleLayer, Company, CompanyAlias, TimelineEffect
@@ -800,7 +800,7 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     strict_gated = is_gated(alert_companies)
     if strict_gated:
         for ac in alert_companies:
-            if ac.display_tier in ("primary", "secondary_deep_dive", "secondary") and ac.mechanism:
+            if is_displayable_tier(ac.display_tier) and ac.mechanism:
                 ac.why = validate_or_none(ac.mechanism) or _sanitize_mechanism(ac.mechanism)
     else:
         moves_by_company_id = {m.company_id: m for m in market_moves}

@@ -221,7 +221,7 @@ def test_counterfactual_uncertain_blocks_primary():
     decision = evaluate_candidate(_candidate(counterfactual="UNCERTAIN"), _ctx())
     assert decision.final_state == "DISPLAY_ELIGIBLE"
     assert decision.display_tier != "primary"
-    assert decision.display_tier == "secondary_deep_dive"
+    assert decision.display_tier == "secondary_ripple"
 
 
 # --- causal distance ------------------------------------------------------
@@ -234,18 +234,21 @@ def test_distance_two_primary_requires_strong_evidence_and_materiality():
     weak_evidence = evaluate_candidate(_candidate(
         causal_distance=2, materiality=0.7,
         evidence_class="CURATED_ARCHETYPE", evidence_tier="D"), _ctx())
-    assert weak_evidence.display_tier == "secondary_deep_dive"
+    assert weak_evidence.display_tier == "secondary_ripple"
 
     weak_materiality = evaluate_candidate(_candidate(
         causal_distance=2, materiality=0.4, evidence_tier="C"), _ctx())
-    assert weak_materiality.display_tier == "secondary_deep_dive"
+    assert weak_materiality.display_tier == "secondary_ripple"
 
 
-def test_distance_three_with_strong_evidence_is_deep_dive():
+def test_distance_three_with_strong_evidence_is_macro_context():
+    """Blueprint §6/§7: d3 survives, but as MACRO_CONTEXT -- a validated
+    broad economic chain, not a company-specific ripple claim. (Before the
+    three-tier pass this landed in the single secondary bucket.)"""
     decision = evaluate_candidate(_candidate(
         causal_distance=3, materiality=0.9, evidence_tier="C"), _ctx())
     assert decision.final_state == "DISPLAY_ELIGIBLE"
-    assert decision.display_tier == "secondary_deep_dive"
+    assert decision.display_tier == "macro_context"
 
 
 def test_d3_without_strong_evidence_is_low_priority_reject():
@@ -288,7 +291,7 @@ def test_low_materiality_deep_dive_only_with_explicit_policy(monkeypatch):
     monkeypatch.setattr(settings, "impact_allow_low_materiality_deep_dive", True)
     decision = evaluate_candidate(_candidate(materiality=0.2), _ctx())
     assert decision.final_state == "DISPLAY_ELIGIBLE"
-    assert decision.display_tier == "secondary_deep_dive"
+    assert decision.display_tier == "secondary_ripple"
 
 
 def test_no_material_impact_never_displayed():
@@ -344,7 +347,7 @@ def test_curated_archetype_is_deep_dive_never_primary():
         evidence_class="CURATED_ARCHETYPE", evidence_tier="D",
         materiality=0.7), _ctx())
     assert high.final_state == "DISPLAY_ELIGIBLE"
-    assert high.display_tier == "secondary_deep_dive"
+    assert high.display_tier == "secondary_ripple"
 
 
 def test_article_subject_with_direct_facts_is_primary_capable():
@@ -361,7 +364,7 @@ def test_article_subject_is_d1_evidence_only_at_d2(monkeypatch):
         causal_distance=2, materiality=0.9,
         evidence_class="ARTICLE_SUBJECT", evidence_tier="SUBJECT"), _ctx())
     assert decision.final_state == "DISPLAY_ELIGIBLE"
-    assert decision.display_tier == "secondary_deep_dive"
+    assert decision.display_tier == "secondary_ripple"
 
 
 def test_article_subject_is_d1_evidence_only_at_d3():
@@ -380,11 +383,17 @@ def test_evidence_tier_derived_from_class_when_not_supplied():
 # --- uncertain effect ------------------------------------------------------
 
 def test_uncertain_effect_never_primary():
-    """Spec §19 + INV-012: UNCERTAIN cannot appear as a primary result."""
+    """Spec §19 + INV-012: UNCERTAIN cannot appear as a primary result --
+    and under the final blueprint (§4: "unresolved evidence/contradiction ->
+    UNCERTAIN / reject from display") it cannot appear as a ripple or macro
+    row either. It walks every gate and terminates in the policy state, so
+    the audit record shows exactly why."""
     decision = evaluate_candidate(_candidate(
         economic_effect="uncertain", net_direction="uncertain"), _ctx())
-    assert decision.final_state == "DISPLAY_ELIGIBLE"
-    assert decision.display_tier == "secondary_deep_dive"
+    assert decision.display_tier != "primary"
+    assert decision.final_state == "REJECT_BELOW_SECONDARY_POLICY"
+    assert decision.display_tier == "excluded"
+    assert decision.gates_passed == [name for name, _ in GATE_SEQUENCE]
 
 
 def test_uncertain_effect_with_weak_evidence_is_rejected():
@@ -515,7 +524,7 @@ def test_primary_cap_overflow_demotes_deterministically():
     decisions = finalize_alert_decisions(
         [_ok_decision(f"T{i:02d}.NS", mat=0.9 - i * 0.01) for i in range(12)])
     assert sum(d.display_tier == "primary" for d in decisions) == 10
-    assert all(d.display_tier == "secondary_deep_dive"
+    assert all(d.display_tier == "secondary_ripple"
                for d in decisions if d.notes == "primary_cap_overflow")
     # The two weakest lost primary, nothing was deleted (INV-015).
     demoted = [d.ticker for d in decisions if d.notes == "primary_cap_overflow"]
@@ -533,8 +542,8 @@ def test_primary_cap_respects_config(monkeypatch):
 def test_primary_cap_does_not_promote_deep_dives():
     decisions = finalize_alert_decisions([
         _ok_decision("A.NS", mat=0.9),
-        _ok_decision("B.NS", mat=0.8, tier="secondary_deep_dive")])
-    assert [d.display_tier for d in decisions] == ["primary", "secondary_deep_dive"]
+        _ok_decision("B.NS", mat=0.8, tier="secondary_ripple")])
+    assert [d.display_tier for d in decisions] == ["primary", "secondary_ripple"]
     assert decisions[1].notes is None
 
 
@@ -564,6 +573,10 @@ _REACHABILITY_CASES = {
     "REJECT_CONTRADICTORY": dict(economic_effect="positive", net_direction="bearish"),
     "REJECT_UNVERIFIED": dict(independently_verified=False),
     "REJECT_VALIDATOR_UNAVAILABLE": dict(analysis_quality="failed"),
+    # Gates all green, no tier policy accepts it (blueprint §6, symmetric
+    # honesty): an `uncertain` net effect has nothing displayable to say.
+    "REJECT_BELOW_SECONDARY_POLICY": dict(
+        economic_effect="uncertain", net_direction="uncertain"),
     "REJECT_DUPLICATE": None,   # context-driven, not candidate-driven
 }
 

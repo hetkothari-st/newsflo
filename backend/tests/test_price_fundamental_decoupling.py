@@ -159,11 +159,11 @@ def test_gate_output_is_sole_persistence_authority(db_session, strict_mode, monk
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
     assert len(rows) == 1
     # A bare CompanyNodeExposure row is a Tier-D prior (corrective-v4 Task
-    # 5), not primary-authorizing evidence -- secondary_deep_dive is the
+    # 5), not primary-authorizing evidence -- secondary_ripple is the
     # gate's honest tier here. The point of this test is that it persisted
     # AT ALL (rows[0].confidence_score below) despite a zero score, not
     # which tier it landed on.
-    assert rows[0].display_tier == "secondary_deep_dive"
+    assert rows[0].display_tier == "secondary_ripple"
     assert rows[0].gate_state == "DISPLAY_ELIGIBLE"
     # confidence_score is 0 -- well under CONFIDENCE_FLOOR -- and the row
     # still persisted: proof the gate, not the floor, decided this.

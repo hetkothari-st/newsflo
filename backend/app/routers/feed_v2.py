@@ -116,7 +116,10 @@ def _unavailable_measurement() -> dict:
     }
 
 
-_SECONDARY_TIERS = ("secondary_deep_dive", "secondary")  # current + legacy spelling
+# Current spellings (final blueprint §3) + the legacy ones still on
+# persisted rows. Task 6 swaps this for the gate's `is_secondary_tier`.
+_SECONDARY_TIERS = ("secondary_ripple", "macro_context",
+                    "secondary_deep_dive", "secondary")
 
 
 def _primary_company_ids(alert: Alert) -> set[int]:

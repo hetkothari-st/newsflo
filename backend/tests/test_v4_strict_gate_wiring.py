@@ -92,7 +92,7 @@ def test_strict_entries_carry_gate_decision(db_session, strict_mode):
     assert len(entries) == 1
     # A bare CompanyNodeExposure row is Tier-D evidence (MODEL_VERIFIED_PRIOR,
     # corrective-v4 Task 5) -- eligible, but not primary-authorizing.
-    assert entries[0]["display_tier"] == "secondary_deep_dive"
+    assert entries[0]["display_tier"] == "secondary_ripple"
     assert entries[0]["gate_state"] == "DISPLAY_ELIGIBLE"
 
 
@@ -298,8 +298,8 @@ def test_strict_primary_cap_demotes_overflow_to_deep_dive(db_session, strict_mod
     entries = _v3_entries(db_session, _result(companies, edges=edges))
 
     tiers = {e["display_tier"] for e in entries}
-    assert tiers == {"primary", "secondary_deep_dive"}
-    overflow = [e for e in entries if e["display_tier"] == "secondary_deep_dive"]
+    assert tiers == {"primary", "secondary_ripple"}
+    overflow = [e for e in entries if e["display_tier"] == "secondary_ripple"]
     assert overflow[0]["decision_notes"] == "primary_cap_overflow"
     assert len(entries) == 2
 
@@ -342,9 +342,9 @@ def test_strict_persist_skips_excluded_and_records_decisions(db_session, strict_
     from app.models import AlertCompany
     rows = db_session.query(AlertCompany).filter_by(alert_id=alert.id).all()
     # Bare CompanyNodeExposure evidence is Tier D (corrective-v4 Task 5),
-    # not primary-authorizing -- secondary_deep_dive is the honest tier
+    # not primary-authorizing -- secondary_ripple is the honest tier
     # here. The point under test is exclusion + decision-record bookkeeping.
-    assert [r.display_tier for r in rows] == ["secondary_deep_dive"]
+    assert [r.display_tier for r in rows] == ["secondary_ripple"]
 
     records = db_session.query(CompanyDecisionRecord).filter_by(alert_id=alert.id).all()
     assert len(records) == 2

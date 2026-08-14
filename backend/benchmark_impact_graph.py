@@ -110,7 +110,9 @@ def run_v3(event, session):
         payload["displayed"] = {
             t: result_dir for t, result_dir in payload["companies"].items()
             if by_ticker.get(t)
-            and by_ticker[t][1].display_tier in ("primary", "secondary_deep_dive", "secondary")
+            and by_ticker[t][1].display_tier in (
+                "primary", "secondary_ripple", "macro_context",
+                "secondary_deep_dive", "secondary")
         }
     return payload
 

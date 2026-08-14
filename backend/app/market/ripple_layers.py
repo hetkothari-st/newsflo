@@ -148,9 +148,15 @@ _EFFECT_PREFIX = {
     "mixed": "Mixed", "uncertain": "Uncertain",
     "no_material_impact": "No material impact",
 }
-# Gate display tiers. "secondary" is the legacy spelling of
-# "secondary_deep_dive" (pre-Task-4 rows): still read, never written.
-DEEP_DIVE_TIERS = ("secondary_deep_dive", "secondary")
+# Gate display tiers: every non-primary tier the reader can see.
+# "secondary_ripple" / "macro_context" are what the gate writes now (final
+# blueprint §3); "secondary_deep_dive" (corrective-v4) and "secondary"
+# (pre-Task-4) are legacy spellings on persisted rows -- still read, never
+# written. Task 5 replaces this tuple with the gate's own
+# `is_secondary_tier` helper and gives macro_context its own section; until
+# then it groups exactly where its rows grouped before the rename.
+DEEP_DIVE_TIERS = ("secondary_ripple", "macro_context",
+                   "secondary_deep_dive", "secondary")
 DISPLAYABLE_TIERS = ("primary",) + DEEP_DIVE_TIERS
 
 _EFFECT_ICON = {"positive": "win", "negative": "lose"}

@@ -422,14 +422,14 @@ def test_inv004_archetype_and_tier_d_evidence_never_reach_primary(db_session, st
             evidence_class=evidence_class, evidence_tier=tier, materiality=0.95),
             GateContext())
         assert decision.final_state == "DISPLAY_ELIGIBLE", evidence_class
-        assert decision.display_tier == "secondary_deep_dive", evidence_class
+        assert decision.display_tier == "secondary_ripple", evidence_class
 
     _company_row(db_session)
     archetype = _graph_company(discovery_source="archetype:crude_input_cost")
     entries = _v3_entries(db_session, _result([archetype]))
 
     assert entries[0]["evidence_class"] == "CURATED_ARCHETYPE"
-    assert entries[0]["display_tier"] == "secondary_deep_dive"
+    assert entries[0]["display_tier"] == "secondary_ripple"
 
 
 # ===========================================================================
@@ -672,28 +672,43 @@ def test_inv011_ghost_ticker_never_becomes_a_persisted_company(db_session, stric
 # ===========================================================================
 
 def test_inv012_uncertain_effect_is_never_upgraded(db_session, strict_mode):
-    """INV-012: "uncertain" survives every stage as itself. It can never
-    be graded primary, and it must not be laundered into a directional
-    effect by persistence or serialization."""
+    """INV-012: "uncertain" survives every stage as itself. It can never be
+    graded primary, and it must not be laundered into a directional effect
+    by persistence or serialization.
+
+    The final blueprint tightens where it lands, without touching that
+    invariant: §4 sends an unresolved effect to "reject from display", so an
+    uncertain candidate now walks all thirteen gates and terminates in
+    REJECT_BELOW_SECONDARY_POLICY instead of occupying a deep-dive slot. It
+    is still never upgraded, still persisted as itself, and now also never
+    laundered into a directional row by the section serializer -- because it
+    produces no row at all."""
     from app.market.ripple_layers import compute_ripple_layers
 
     decision = evaluate_candidate(_candidate(
         economic_effect="uncertain", net_direction="uncertain"), GateContext())
-    assert decision.final_state == "DISPLAY_ELIGIBLE"
-    assert decision.display_tier == "secondary_deep_dive"
+    assert decision.display_tier != "primary"                  # never upgraded
+    assert decision.final_state == "REJECT_BELOW_SECONDARY_POLICY"
+    assert decision.display_tier == "excluded"
+
+    from app.pipeline import _v3_entries
 
     _company_row(db_session, verified_node="crude_price", provenance_type="SUPPLY_LINK")
     uncertain = _graph_company(economic_effect="uncertain", net_direction="uncertain",
                                direction="neutral")
+    entries = _v3_entries(db_session, _result([uncertain]))
+
+    assert entries[0]["economic_effect"] == "uncertain"      # carried as itself
+    assert entries[0]["display_tier"] == "excluded"
+    assert entries[0]["gate_state"] == "REJECT_BELOW_SECONDARY_POLICY"
+
+    # ...and nothing directional was invented on the way to the reader: the
+    # excluded candidate never becomes a published row at all.
     alert = _persist(db_session, _result([uncertain]))
-
-    row = db_session.query(AlertCompany).filter_by(alert_id=alert.id).one()
-    assert row.economic_effect == "uncertain"      # persisted as itself
-    assert row.display_tier == "secondary_deep_dive"
-
+    assert db_session.query(AlertCompany).filter_by(alert_id=alert.id).count() == 0
     layers = compute_ripple_layers(db_session, alert, set(), include_secondary=True)
     serialized = [r for layer in layers for r in layer["rows"]]
-    assert [r["economic_effect"] for r in serialized] == ["uncertain"]
+    assert [r["economic_effect"] for r in serialized] == []
 
 
 # ===========================================================================
@@ -702,9 +717,11 @@ def test_inv012_uncertain_effect_is_never_upgraded(db_session, strict_mode):
 
 def test_inv013_causal_distance_policy_is_exact(monkeypatch):
     """INV-013: d4+ is excluded outright with NO policy override; d3
-    survives only as a deep dive and only with relationship-grade evidence
-    AND high materiality; d2 primary needs a relationship record, not
-    "the article was about them"."""
+    survives only as MACRO_CONTEXT (final blueprint §7 -- the tier it lands
+    in was renamed from the single "deep dive" bucket; the DISTANCE POLICY
+    itself is untouched) and only with relationship-grade evidence AND high
+    materiality; d2 primary needs a relationship record, not "the article
+    was about them"."""
     # d4: no evidence, materiality or owner policy rescues it.
     monkeypatch.setattr(settings, "impact_allow_low_materiality_deep_dive", True)
     monkeypatch.setattr(settings, "impact_allow_fallback_primary", True)
@@ -713,11 +730,13 @@ def test_inv013_causal_distance_policy_is_exact(monkeypatch):
             causal_distance=4, evidence_tier=tier, materiality=0.99), GateContext())
         assert far.final_state == "REJECT_TOO_DISTANT", tier
 
-    # d3: relationship evidence + HIGH materiality -> deep dive, never primary.
+    # d3: relationship evidence + HIGH materiality -> macro context, never
+    # primary.
     d3_ok = evaluate_candidate(_candidate(
         causal_distance=3, evidence_tier="C", materiality=0.9), GateContext())
     assert d3_ok.final_state == "DISPLAY_ELIGIBLE"
-    assert d3_ok.display_tier == "secondary_deep_dive"
+    assert d3_ok.display_tier == "macro_context"
+    assert d3_ok.display_tier != "primary"
 
     # d3 without one of the two -> machine-readable low-priority rejection.
     assert evaluate_candidate(_candidate(
@@ -730,7 +749,7 @@ def test_inv013_causal_distance_policy_is_exact(monkeypatch):
     # d2: SUBJECT is d1-only evidence; a relationship record unlocks primary.
     assert evaluate_candidate(_candidate(
         causal_distance=2, evidence_tier="SUBJECT", materiality=0.9),
-        GateContext()).display_tier == "secondary_deep_dive"
+        GateContext()).display_tier == "secondary_ripple"
     assert evaluate_candidate(_candidate(
         causal_distance=2, evidence_tier="C", materiality=0.9),
         GateContext()).display_tier == "primary"
@@ -831,7 +850,7 @@ def test_inv015_valid_analysis_is_never_silently_lost(db_session, strict_mode):
     demoted = [d for d in finalized if d.notes == "primary_cap_overflow"]
     assert len(demoted) == 2
     assert all(d.final_state == "DISPLAY_ELIGIBLE" for d in demoted)
-    assert all(d.display_tier == "secondary_deep_dive" for d in demoted)
+    assert all(d.display_tier == "secondary_ripple" for d in demoted)
 
 
 # ===========================================================================
@@ -897,8 +916,8 @@ def _supply_link_primary_result(db, quality):
 
 @pytest.mark.parametrize("quality,expected_tier,expected_state", [
     ("authoritative", "primary", "DISPLAY_ELIGIBLE"),          # the control
-    ("fallback", "secondary_deep_dive", "DISPLAY_ELIGIBLE"),
-    ("degraded", "secondary_deep_dive", "DISPLAY_ELIGIBLE"),
+    ("fallback", "secondary_ripple", "DISPLAY_ELIGIBLE"),
+    ("degraded", "secondary_ripple", "DISPLAY_ELIGIBLE"),
     ("budget_exhausted", "excluded", "REJECT_VALIDATOR_UNAVAILABLE"),
 ])
 def test_inv016_analysis_quality_decides_how_loudly_a_result_speaks(
@@ -1203,6 +1222,10 @@ _REACHABILITY_CASES = {
     "REJECT_CONTRADICTORY": dict(economic_effect="positive", net_direction="bearish"),
     "REJECT_UNVERIFIED": dict(independently_verified=False),
     "REJECT_VALIDATOR_UNAVAILABLE": dict(analysis_quality="failed"),
+    # Final blueprint §6, the symmetric half of "failing PRIMARY is not
+    # REJECTED": all thirteen gates green, no tier policy accepts it.
+    "REJECT_BELOW_SECONDARY_POLICY": dict(economic_effect="uncertain",
+                                          net_direction="uncertain"),
     "REJECT_DUPLICATE": None,   # context-driven, not candidate-driven
 }
 

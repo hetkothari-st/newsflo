@@ -79,7 +79,10 @@ REVIEWER_LABELS = (
 # economic_effect -> the icon _strict_sections renders for it.
 _EFFECT_ICON = {"positive": "win", "negative": "lose"}
 
-DEEP_DIVE_TIERS = ("secondary_deep_dive", "secondary")
+# Every non-primary DISPLAYED tier: the current spellings (final blueprint
+# §3) plus the legacy ones a replayed/persisted row may still carry.
+DEEP_DIVE_TIERS = ("secondary_ripple", "macro_context",
+                   "secondary_deep_dive", "secondary")
 
 
 # --- router ----------------------------------------------------------------
