@@ -213,7 +213,13 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "crude_price_up", "child_exposure": "nbfc",
         "effect": "negative", "distance": 3, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_VERIFIED,
-        "relation": "FINANCING", "directness": "REMOTE",
+        # Credit-quality contagion (borrower distress -> loan-book asset
+        # quality), not the financier's own funding-cost repricing -- no
+        # EDGE_RELATIONS member covers that specifically, so OTHER is the
+        # honest label (fix round 1, review round 3: was wrongly FINANCING,
+        # which is reserved for the company's own cost-of-capital/funding
+        # mechanics -- see bank_nim_repricing/nbfc_funding_cost).
+        "relation": "OTHER", "directness": "REMOTE",
         "section_label": "Vehicle financier asset quality",
         "mechanism": "Higher fuel costs squeeze commercial-vehicle operator cash flows, pressuring CV-loan asset quality at vehicle financiers.",
     },
@@ -328,7 +334,12 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "inr_depreciation", "child_exposure": "textile_manufacturer",
         "effect": "positive", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
-        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        # Relative price-competitiveness framing (weaker rupee makes exports
+        # cheaper vs. foreign competition), same shape as ev_relative_advantage
+        # -- not a revenue-translation mechanism like it_export_realization/
+        # pharma_export_realization (fix round 1, review round 3: was
+        # CURRENCY_TRANSLATION/DIRECT).
+        "relation": "COMPETITIVE", "directness": "INDIRECT",
         "section_label": "Textile exports",
         "mechanism": "A weaker rupee improves export price competitiveness for garment/yarn exporters.",
     },
@@ -336,7 +347,12 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "inr_depreciation", "child_exposure": "oil_refiner_marketer",
         "effect": "negative", "distance": 1, "time_horizon": "Immediate",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
-        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        # Imported-input repricing (structurally identical to
+        # oil_import_bill_currency), not translation of foreign-currency
+        # revenue -- CURRENCY_TRANSLATION is reserved for the IT/pharma
+        # export-earnings shape (fix round 1, review round 3: was
+        # CURRENCY_TRANSLATION).
+        "relation": "INPUT_COST", "directness": "DIRECT",
         "section_label": "Oil marketing & refining",
         "mechanism": "Dollar-priced crude imports cost more in rupees, raising working capital and under-recovery risk.",
     },
@@ -344,7 +360,9 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "inr_depreciation", "child_exposure": "appliance_maker",
         "effect": "negative", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
-        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        # Same imported-input repricing pattern as import_cost_inflation
+        # (fix round 1, review round 3: was CURRENCY_TRANSLATION).
+        "relation": "INPUT_COST", "directness": "DIRECT",
         "section_label": "Electronics & appliance imports",
         "mechanism": "Imported components (compressors, panels, semiconductors) reprice upward with the dollar.",
     },
@@ -453,7 +471,12 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "monsoon_above_normal", "child_exposure": "fertilizer_agrochemical",
         "effect": "positive", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
-        "relation": "DEMAND", "directness": "DIRECT",
+        # Behavior-mediated demand (monsoon -> farmer sowing/purchase
+        # decisions -> agrochemical volumes), same shape as
+        # auto_fuel_demand/housing_demand_rates -- not a direct physical
+        # effect like rural_income_agri's crop-yield relationship (fix
+        # round 1, review round 3: was DIRECT).
+        "relation": "DEMAND", "directness": "INDIRECT",
         "section_label": "Agrochemicals & fertilizers",
         "mechanism": "Sowing area and input intensity rise with a good monsoon.",
     },

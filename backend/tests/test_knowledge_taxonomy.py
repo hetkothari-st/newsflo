@@ -42,3 +42,35 @@ def test_mechanism_meta_and_section_label_helpers():
 
 def test_registry_version_bumped():
     assert knowledge.KNOWLEDGE_REGISTRY_VERSION == "kg-3"
+
+
+def test_fix_round_1_disputed_entries():
+    """Review round 3 audit (fix round 1): four entries were misclassified
+    on the first pass. Locked here so a future edit can't silently regress
+    them back to the wrong label.
+    """
+    # Credit-quality contagion (borrower distress -> lender asset quality)
+    # is not the financier's own funding-cost repricing -- no EDGE_RELATIONS
+    # member covers contagion specifically, so OTHER is the honest label,
+    # never a wrong specific one (e.g. FINANCING, which bank_nim_repricing/
+    # nbfc_funding_cost correctly reserve for the company's own cost of
+    # capital).
+    assert knowledge.MECHANISMS["vehicle_financier_stress"]["relation"] == "OTHER"
+
+    # Imported-input repricing is INPUT_COST, matching the structurally
+    # identical oil_import_bill_currency -- CURRENCY_TRANSLATION is reserved
+    # for translation of foreign-currency revenue/earnings (the IT/pharma
+    # export shape), not the cost side of an import.
+    assert knowledge.MECHANISMS["import_cost_inflation"]["relation"] == "INPUT_COST"
+    assert knowledge.MECHANISMS["electronics_import_cost"]["relation"] == "INPUT_COST"
+
+    # Relative price-competitiveness framing matches ev_relative_advantage's
+    # COMPETITIVE/INDIRECT shape, not a currency-translation mechanism.
+    assert knowledge.MECHANISMS["textile_export_competitiveness"]["relation"] == "COMPETITIVE"
+    assert knowledge.MECHANISMS["textile_export_competitiveness"]["directness"] == "INDIRECT"
+
+    # Monsoon -> farmer purchase-behavior -> agrochemical volume is
+    # behavior-mediated demand, same shape as auto_fuel_demand/
+    # housing_demand_rates -- not a direct physical effect.
+    assert knowledge.MECHANISMS["agrochemical_volume"]["directness"] == "INDIRECT"
+    assert knowledge.MECHANISMS["agrochemical_volume"]["relation"] == "DEMAND"
