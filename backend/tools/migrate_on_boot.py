@@ -28,9 +28,10 @@ WHAT IT DOES. Three states, one decision each, all idempotent:
   3. Neither -> a brand-new, empty database. `alembic upgrade head` builds
      it from nothing.
 
-Every migration 0002..0007 is itself write-guarded (each checks the
-inspector before adding a column/index/constraint), so re-running this
-script against any of the three states is safe.
+Every migration 0002..0008 is itself write-guarded (each checks the
+inspector before adding a column/index/constraint, and 0008's triggers and
+partial index are CREATE ... IF NOT EXISTS), so re-running this script
+against any of the three states is safe.
 
 Exits non-zero and logs loudly on any failure -- a container that cannot
 migrate must NOT come up serving a half-migrated schema. Run it before

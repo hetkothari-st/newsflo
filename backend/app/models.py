@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, text
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -347,6 +347,28 @@ class Alert(Base):
     # any company's economic_effect. NULL on pre-task-10 rows; "unknown" on
     # rows persisted after this shipped where the model could not classify.
     event_cause = Column(String, nullable=True)
+    # --- Idempotency key (final blueprint §26, migration 0008). The stable
+    # identity of ONE analysis of ONE article -- the run's own cache key
+    # (app.analysis.impact_graph.router's `_v3_cache_key`). Two processes
+    # analysing the same article concurrently (the scheduler is explicitly
+    # NOT to be relied on as the only serialisation) produce the same key,
+    # so the second INSERT collides on uq_alerts_article_content below and
+    # is caught by the caller as idempotent success instead of doubling the
+    # alert. NULL on the whole legacy corpus and on any path that does not
+    # claim an identity -- hence the PARTIAL index.
+    content_key = Column(String, nullable=True)
+
+    __table_args__ = (
+        # Partial on purpose: a plain unique index would forbid the legacy
+        # corpus's many NULL-key alerts per article, and re-analysis with a
+        # genuinely different key is not a duplicate.
+        Index(
+            "uq_alerts_article_content", "article_id", "content_key",
+            unique=True,
+            sqlite_where=text("content_key IS NOT NULL"),
+            postgresql_where=text("content_key IS NOT NULL"),
+        ),
+    )
 
     article = relationship("Article", back_populates="alerts")
     companies = relationship("AlertCompany", back_populates="alert")
@@ -439,8 +461,11 @@ class AlertCompany(Base):
     # derived from it. NULL on pre-upgrade rows.
     economic_effect = Column(String, nullable=True)
     # V4 strict publication gate (spec §5): the tier the gate authorized
-    # ("primary" | "secondary_deep_dive"; "secondary" on pre-Task-4 rows,
-    # still read, never written) and the terminal gate state. NULL on rows
+    # ("primary" | "secondary_ripple" | "macro_context"). Ruling R3 /
+    # migration 0008: "secondary_deep_dive" (V4) and "secondary"
+    # (pre-Task-4) were the SAME tier under two dead names and have been
+    # REWRITTEN to "secondary_ripple" in the data -- neither is read or
+    # written any more. Plus the terminal gate state. NULL on rows
     # persisted with the flag off -- legacy rows have no gate semantics,
     # and consumers must treat NULL as legacy, never as eligible.
     display_tier = Column(String, nullable=True)
@@ -462,6 +487,31 @@ class AlertCompany(Base):
     # price_at_analysis/return_1m/return_3m above, which belong to the
     # separately-measured market-reaction layer. NULL on pre-task-10 rows.
     expected_market_sensitivity = Column(String, nullable=True)
+    # --- Final blueprint §21/§22 (migration 0008). `basis` used to carry
+    # three different questions at once ("direct_mention" answered how the
+    # candidate was FOUND, how CAUSALLY CLOSE it is, and what kind of
+    # evidence backs it). Each now has its own column with its own closed
+    # vocabulary, and none is derivable from another -- §11 is explicit
+    # that DIRECT/INDIRECT cannot be read off causal_distance (crude ->
+    # IndiGo ATF is DIRECT at d1; crude -> INR -> IT exporter is INDIRECT
+    # at the same or greater distance). All NULL on pre-blueprint rows;
+    # `basis` stays for legacy compatibility and is never the current
+    # truth.
+    causal_directness = Column(String, nullable=True)   # DIRECT | INDIRECT | REMOTE
+    # ARTICLE_MENTION | MECHANISM_MAPPING | EXPOSURE_RULE | RIPPLE_DISCOVERY
+    # | ESCALATION | COMPLETENESS | CURATED
+    discovery_source = Column(String, nullable=True)
+    # PRIMARY | STRUCTURED | VERIFIED | CURATED | MODEL | MARKET_OBSERVATION
+    # -- the KIND of evidence, distinct from `evidence_class`'s A/B/C/D tier.
+    evidence_source = Column(String, nullable=True)
+    # The §21 controlled relationship type for THIS company's own edge
+    # (REVENUE_REALIZATION | INPUT_COST | OPERATING_MARGIN | REFINING_SPREAD
+    # | MARKETING_MARGIN | DEMAND | PRICING_POWER | CURRENCY_TRANSLATION |
+    # VALUATION_MULTIPLE | CAPEX | SUPPLY | COMPETITIVE | REGULATORY |
+    # FINANCING | OTHER). The real graph labelled upstream realization,
+    # aviation fuel cost and refining margin all as "demand"; the relation
+    # must match the actual economic mechanism.
+    edge_relation = Column(String, nullable=True)
 
     __table_args__ = (
         # Corrective-v4 Task 18 (plan-gap carry): a bug anywhere upstream
@@ -475,6 +525,89 @@ class AlertCompany(Base):
     alert = relationship("Alert", back_populates="companies")
     company = relationship("Company", foreign_keys=[company_id])
     parent_company = relationship("Company", foreign_keys=[parent_company_id])
+
+
+# ---------------------------------------------------------------------------
+# Gated-row consistency backstop (final blueprint §26, migration 0008)
+# ---------------------------------------------------------------------------
+# The real run exposed a STALE PRE-V4 WORKER mutating a gated row after the
+# publication gate had authorized it: `economic_effect` said positive, and
+# something outside the V4 code path wrote a bearish `direction` over the
+# top. Application-side guards (app/pipeline.py's `gate_state is not None`
+# skips in measure_and_reconcile_alert_companies and the remeasure pass)
+# only protect the binaries that carry them -- a stale container, an old
+# worker class, a one-off script all still hold a write handle to the same
+# database file. §26 therefore requires enforcement at the DB, so the guard
+# fires inside ANY binary that touches the row.
+#
+# NARROW ON PURPOSE. The triggers refuse exactly three end states, and only
+# on a GATED row (gate_state IS NOT NULL):
+#   * positive economic_effect left with a bearish direction,
+#   * negative economic_effect left with a bullish direction
+#     (§4: `economic_effect` is the ONE authoritative field and `direction`
+#     is derived from it -- mixed/uncertain/no_material_impact map to
+#     "neutral" and are deliberately NOT constrained here),
+#   * (UPDATE only) a rationale that HAD text being nulled -- the stale
+#     worker's other signature move, clearing the reasoning of a row whose
+#     direction it had just flipped.
+# Legacy rows (gate_state IS NULL) have no gate semantics to protect and
+# keep byte-identical pre-gate behaviour: the backstop must not
+# retroactively freeze the pre-V4 corpus.
+#
+# WHY A DDL HOOK AND NOT ONLY THE MIGRATION. Production DBs get these from
+# migration 0008; every create_all-built DB (the whole test suite's
+# in-memory fixture, tools/migrate_on_boot.py's _create_missing_tables, a
+# fresh dev DB) would otherwise carry the schema WITHOUT the backstop, so
+# the guarantee would hold in production and silently not hold anywhere it
+# is tested. The SQL below is duplicated verbatim in
+# alembic/versions/0008_three_tier_blueprint.py on purpose: a migration
+# must never import app code, which drifts underneath it. If you change one,
+# change both -- tests/test_gated_row_immutability.py pins the create_all
+# half and tests/test_migrations.py pins the migration half.
+#
+# SQLite only. Postgres has no `CREATE TRIGGER IF NOT EXISTS` and needs a
+# trigger FUNCTION plus a CHECK-style raise; that port is a documented
+# follow-up (see the 0008 docstring). Emitting nothing on other dialects is
+# correct rather than half-enforcing.
+_GATED_CONSISTENCY_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS alert_companies_gated_consistency
+BEFORE UPDATE ON alert_companies
+FOR EACH ROW
+WHEN NEW.gate_state IS NOT NULL
+ AND (
+   (NEW.economic_effect = 'positive' AND NEW.direction = 'bearish')
+   OR (NEW.economic_effect = 'negative' AND NEW.direction = 'bullish')
+   OR (NEW.rationale IS NULL AND OLD.rationale IS NOT NULL)
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'gated row consistency violation');
+END
+"""
+
+# Same shape on INSERT so a contradictory gated row can never LAND, only
+# never be updated into existence. OLD does not exist in a BEFORE INSERT
+# trigger, so the rationale clause is necessarily absent here.
+_GATED_CONSISTENCY_INSERT_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS alert_companies_gated_consistency_insert
+BEFORE INSERT ON alert_companies
+FOR EACH ROW
+WHEN NEW.gate_state IS NOT NULL
+ AND (
+   (NEW.economic_effect = 'positive' AND NEW.direction = 'bearish')
+   OR (NEW.economic_effect = 'negative' AND NEW.direction = 'bullish')
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'gated row consistency violation');
+END
+"""
+
+
+@event.listens_for(AlertCompany.__table__, "after_create")
+def _install_gated_consistency_triggers(target, connection, **kw):
+    if connection.dialect.name != "sqlite":
+        return
+    connection.execute(text(_GATED_CONSISTENCY_UPDATE_TRIGGER))
+    connection.execute(text(_GATED_CONSISTENCY_INSERT_TRIGGER))
 
 
 class CascadeGap(Base):
@@ -638,7 +771,10 @@ class CompanyDecisionRecord(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
     ticker = Column(String, nullable=False)
     final_state = Column(String, nullable=False)     # DISPLAY_ELIGIBLE | REJECT_*
-    # primary | secondary_deep_dive | excluded ("secondary" on legacy rows)
+    # primary | secondary_ripple | macro_context | excluded. Ruling R3 /
+    # migration 0008 rewrote every legacy "secondary_deep_dive" and
+    # "secondary" row to "secondary_ripple"; neither dead name is read or
+    # written any more.
     display_tier = Column(String, nullable=False)
     rejection_reason = Column(String, nullable=True)  # REJECT_* or NULL
     gates_passed_json = Column(Text, nullable=True)   # JSON list of gate names
@@ -661,13 +797,22 @@ class CompanyDecisionRecord(Base):
     # duplicated out of candidate_json.evidence_ids as its own column so a
     # query never has to parse JSON to join to evidence_records.
     evidence_ids_json = Column(Text, nullable=True)
-    provider = Column(String, nullable=True)          # gemini | groq
+    # Provider-migration 2026-08-14: analysis runs on Claude only (Groq is
+    # forbidden for impact analysis and the router fails closed without a
+    # Claude key) -- "gemini"/"groq" survive only as values already written
+    # on historical rows.
+    provider = Column(String, nullable=True)           # claude (legacy: gemini | groq)
     model = Column(String, nullable=True)              # best-effort model name for `provider`
     analysis_quality = Column(String, nullable=True)   # authoritative | fallback | degraded | failed
     # The verifier's raw per-company correction dict (app.analysis.
     # impact_graph.engine._apply_company_correction), NULL when the
     # verifier never corrected this candidate.
     correction_json = Column(Text, nullable=True)
+    # Final blueprint §11/§22 (migration 0008): the DIRECT/INDIRECT/REMOTE
+    # judgment the gate actually evaluated. Kept as its own column because
+    # a postmortem cannot re-derive it -- §11 forbids reading directness
+    # off causal_distance. NULL on pre-blueprint records.
+    causal_directness = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     __table_args__ = (

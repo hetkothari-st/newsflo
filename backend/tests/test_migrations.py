@@ -1,6 +1,8 @@
 import subprocess, sys, tempfile, os
 from pathlib import Path
 
+import pytest
+
 BACKEND = Path(__file__).resolve().parents[1]
 
 
@@ -380,6 +382,303 @@ def test_upgrade_head_adds_alert_company_materiality_grade(tmp_path):
     finally:
         conn.close()
     assert "materiality_grade" in columns
+
+
+# ===========================================================================
+# 0008 -- final blueprint: new columns, tier rewrite, contradiction repair,
+# gated-row trigger backstop, alert idempotency key
+# ===========================================================================
+
+
+def _seed_legacy_alert(conn, *, url, ticker):
+    """One article + alert + company on a DB stamped at 0007. Returns
+    (alert_id, company_id)."""
+    conn.execute(
+        "INSERT INTO articles (source, url, title, content, fetched_at, status) "
+        "VALUES ('t', ?, 'x', 'c', datetime('now'), 'ANALYZED')", (url,))
+    article_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO alerts (article_id, category, prompt_version, knowledge_version, "
+        "refinement_attempts, created_at) "
+        "VALUES (?, 'commodity', 'v1', 'v1', 0, datetime('now'))", (article_id,))
+    alert_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO companies (ticker, name, sector, index_tier, tradeability) "
+        "VALUES (?, 'Co', 'oil_gas', 'NIFTY500', 'NORMAL')", (ticker,))
+    company_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    return alert_id, company_id
+
+
+def _insert_alert_company(conn, alert_id, company_id, **overrides):
+    values = {
+        "direction": "bullish", "magnitude_low": 1.0, "magnitude_high": 2.0,
+        "rationale": "r", "confidence_score": 50, "time_horizon": "Short-Term",
+        "basis": "direct_mention", "confidence": "llm_estimate",
+        "impact_level": "direct", "economic_effect": None,
+        "display_tier": None, "gate_state": None,
+    }
+    values.update(overrides)
+    columns = ["alert_id", "company_id", *values]
+    placeholders = ", ".join("?" for _ in columns)
+    conn.execute(
+        f"INSERT INTO alert_companies ({', '.join(columns)}) VALUES ({placeholders})",
+        (alert_id, company_id, *values.values()))
+    return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _upgrade_to(url, revision):
+    env = dict(os.environ, DATABASE_URL=url)
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", revision],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_upgrade_head_adds_blueprint_columns(tmp_path):
+    """Blueprint §21/§22: discovery, causality and evidence stop being
+    overloaded onto `basis` -- each gets its own column, plus the edge's
+    own controlled relation type. All nullable: the legacy corpus has none
+    of them and must stay honestly NULL."""
+    import sqlite3
+
+    db = tmp_path / "blueprint_columns.db"
+    result = _run_alembic(f"sqlite:///{db}")
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        ac = {r[1] for r in conn.execute("PRAGMA table_info(alert_companies)")}
+        dr = {r[1] for r in conn.execute("PRAGMA table_info(company_decision_records)")}
+        alerts = {r[1] for r in conn.execute("PRAGMA table_info(alerts)")}
+    finally:
+        conn.close()
+
+    for column in ("causal_directness", "discovery_source", "evidence_source",
+                   "edge_relation", "confidence_band"):
+        assert column in ac, f"missing alert_companies.{column}"
+    assert "causal_directness" in dr, "missing company_decision_records.causal_directness"
+    assert "content_key" in alerts, "missing alerts.content_key"
+
+
+def test_0008_rewrites_legacy_secondary_tiers(tmp_path):
+    """Ruling R3: SECONDARY_RIPPLE is the one secondary tier name. Rows
+    written as 'secondary_deep_dive' (V4) or 'secondary' (pre-Task-4) are
+    the SAME tier under two dead names -- a reader-facing filter on the new
+    name would silently drop them, so the data is rewritten, not
+    dual-read."""
+    import sqlite3
+
+    db = tmp_path / "tier_rewrite.db"
+    url = f"sqlite:///{db}"
+    _upgrade_to(url, "0007")
+
+    conn = sqlite3.connect(db)
+    try:
+        alert_id, company_id = _seed_legacy_alert(
+            conn, url="https://example.test/tier", ticker="TIER1.NS")
+        deep_dive_id = _insert_alert_company(
+            conn, alert_id, company_id, display_tier="secondary_deep_dive",
+            gate_state="DISPLAY_ELIGIBLE")
+        _, company2_id = _seed_legacy_alert(
+            conn, url="https://example.test/tier2", ticker="TIER2.NS")
+        legacy_secondary_id = _insert_alert_company(
+            conn, alert_id, company2_id, display_tier="secondary",
+            gate_state="DISPLAY_ELIGIBLE")
+        primary_id = _insert_alert_company(
+            conn, alert_id, company_id + 1000, display_tier="primary",
+            gate_state="DISPLAY_ELIGIBLE")
+        for tier in ("secondary_deep_dive", "secondary", "primary"):
+            conn.execute(
+                "INSERT INTO company_decision_records "
+                "(alert_id, ticker, final_state, display_tier, created_at) "
+                "VALUES (?, ?, 'DISPLAY_ELIGIBLE', ?, datetime('now'))",
+                (alert_id, f"{tier}.NS", tier))
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _run_alembic(url).returncode == 0
+
+    conn = sqlite3.connect(db)
+    try:
+        tiers = dict(conn.execute(
+            "SELECT id, display_tier FROM alert_companies"))
+        assert tiers[deep_dive_id] == "secondary_ripple"
+        assert tiers[legacy_secondary_id] == "secondary_ripple"
+        assert tiers[primary_id] == "primary", "primary must be untouched"
+
+        dr_tiers = dict(conn.execute(
+            "SELECT ticker, display_tier FROM company_decision_records"))
+        assert dr_tiers["secondary_deep_dive.NS"] == "secondary_ripple"
+        assert dr_tiers["secondary.NS"] == "secondary_ripple"
+        assert dr_tiers["primary.NS"] == "primary"
+    finally:
+        conn.close()
+
+
+def test_0008_repairs_contradictory_gated_rows(tmp_path):
+    """Blueprint §4, the live OIL.NS row: a GATED row whose `direction`
+    contradicts its authoritative `economic_effect` is repaired in place
+    (direction derived from effect), because the trigger installed in the
+    same migration would otherwise make that row permanently unwritable."""
+    import sqlite3
+
+    db = tmp_path / "contradiction.db"
+    url = f"sqlite:///{db}"
+    _upgrade_to(url, "0007")
+
+    conn = sqlite3.connect(db)
+    try:
+        alert_id, company_id = _seed_legacy_alert(
+            conn, url="https://example.test/oil", ticker="OIL.NS")
+        # The real contradiction: positive fundamentals, bearish badge.
+        bad_positive = _insert_alert_company(
+            conn, alert_id, company_id, direction="bearish",
+            economic_effect="positive", gate_state="DISPLAY_ELIGIBLE",
+            display_tier="primary")
+        bad_negative = _insert_alert_company(
+            conn, alert_id, company_id + 1, direction="bullish",
+            economic_effect="negative", gate_state="DISPLAY_ELIGIBLE",
+            display_tier="primary")
+        # Ungated legacy row with the SAME contradiction -- untouched: it
+        # has no gate semantics and the trigger will never fire on it.
+        legacy = _insert_alert_company(
+            conn, alert_id, company_id + 2, direction="bearish",
+            economic_effect="positive", gate_state=None)
+        # A gated row whose effect is not directional -- never rewritten.
+        mixed = _insert_alert_company(
+            conn, alert_id, company_id + 3, direction="bearish",
+            economic_effect="mixed", gate_state="DISPLAY_ELIGIBLE",
+            display_tier="primary")
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _run_alembic(url).returncode == 0
+
+    conn = sqlite3.connect(db)
+    try:
+        rows = dict(conn.execute("SELECT id, direction FROM alert_companies"))
+    finally:
+        conn.close()
+    assert rows[bad_positive] == "bullish"
+    assert rows[bad_negative] == "bearish"
+    assert rows[legacy] == "bearish", "ungated legacy row must not be rewritten"
+    assert rows[mixed] == "bearish", "non-directional effect must not be rewritten"
+
+
+def test_0008_installs_gated_consistency_triggers(tmp_path):
+    """§26 backstop: the triggers must exist on a migrated DB (the
+    create_all half of the same guarantee is pinned in
+    tests/test_gated_row_immutability.py), and must actually refuse the
+    write that the stale pre-V4 worker performed."""
+    import sqlite3
+
+    db = tmp_path / "triggers.db"
+    url = f"sqlite:///{db}"
+    assert _run_alembic(url).returncode == 0
+
+    conn = sqlite3.connect(db)
+    try:
+        triggers = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'")}
+        assert "alert_companies_gated_consistency" in triggers
+        assert "alert_companies_gated_consistency_insert" in triggers
+
+        alert_id, company_id = _seed_legacy_alert(
+            conn, url="https://example.test/trig", ticker="TRIG.NS")
+        row_id = _insert_alert_company(
+            conn, alert_id, company_id, direction="bullish",
+            economic_effect="positive", gate_state="DISPLAY_ELIGIBLE",
+            display_tier="primary")
+        conn.commit()
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE alert_companies SET direction = 'bearish' WHERE id = ?",
+                (row_id,))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE alert_companies SET rationale = NULL WHERE id = ?",
+                (row_id,))
+        conn.rollback()
+        assert conn.execute(
+            "SELECT direction FROM alert_companies WHERE id = ?",
+            (row_id,)).fetchone()[0] == "bullish"
+    finally:
+        conn.close()
+
+
+def test_0008_adds_partial_unique_content_key_index(tmp_path):
+    """§26 idempotency: two processes persisting the identical analysis of
+    the identical article must collide. PARTIAL on purpose -- the legacy
+    corpus has NULL content_key and multiple alerts per article."""
+    import sqlite3
+
+    db = tmp_path / "content_key.db"
+    url = f"sqlite:///{db}"
+    assert _run_alembic(url).returncode == 0
+
+    conn = sqlite3.connect(db)
+    try:
+        indexes = {r[1]: r for r in conn.execute("PRAGMA index_list(alerts)")}
+        assert "uq_alerts_article_content" in indexes
+        # PRAGMA index_list columns: (seq, name, unique, origin, partial).
+        assert indexes["uq_alerts_article_content"][2] == 1, "index must be UNIQUE"
+        assert indexes["uq_alerts_article_content"][4] == 1, (
+            "index must be PARTIAL (WHERE content_key IS NOT NULL), not a "
+            "plain unique index over the whole table -- the legacy corpus "
+            "has many NULL-key alerts per article")
+
+        conn.execute(
+            "INSERT INTO articles (source, url, title, content, fetched_at, status) "
+            "VALUES ('t','https://example.test/ck','x','c', datetime('now'), 'ANALYZED')")
+        article_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+
+        def _insert(content_key):
+            conn.execute(
+                "INSERT INTO alerts (article_id, category, refinement_attempts, "
+                "created_at, content_key) VALUES (?, 'commodity', 0, datetime('now'), ?)",
+                (article_id, content_key))
+            conn.commit()
+
+        _insert("key-1")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert("key-1")
+        conn.rollback()
+
+        # A different key, and any number of NULL-key rows, coexist.
+        _insert("key-2")
+        _insert(None)
+        _insert(None)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM alerts WHERE article_id = ?",
+            (article_id,)).fetchone()[0] == 4
+    finally:
+        conn.close()
+
+
+def test_0008_is_rerunnable_over_its_own_output(tmp_path):
+    """Same guard discipline as 0002-0007: re-running the whole chain over
+    an already-migrated DB (the boot path does exactly this on every
+    container start) must not fail on an existing column, index or
+    trigger."""
+    import sqlite3
+
+    db = tmp_path / "rerun_0008.db"
+    url = f"sqlite:///{db}"
+    assert _run_alembic(url).returncode == 0
+    second = _run_alembic(url)
+    assert second.returncode == 0, second.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        triggers = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'")}
+    finally:
+        conn.close()
+    assert "alert_companies_gated_consistency" in triggers
 
 
 # ===========================================================================

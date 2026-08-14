@@ -41,13 +41,25 @@ def _seed_alert(db, url="https://ex.com/primary-only"):
     return alert
 
 
-def _add_company(db, alert, ticker, name, sector, *, direction="bearish",
+# Blueprint Sec4 / migration 0008: `economic_effect` is the ONE
+# authoritative field and `direction` is DERIVED from it. A GATED fixture
+# row whose direction contradicts its own effect is now refused outright by
+# the alert_companies_gated_consistency trigger (app/models.py + 0008) --
+# the same DB-level guard that would have caught the live OIL.NS row -- so
+# these fixtures derive the direction instead of hardcoding one that the
+# callers' `economic_effect="positive"` overrides then contradict.
+_DIRECTION_FROM_EFFECT = {"positive": "bullish", "negative": "bearish"}
+
+
+def _add_company(db, alert, ticker, name, sector, *, direction=None,
                  economic_effect="negative", display_tier="primary",
                  gate_state="DISPLAY_ELIGIBLE", causal_parent_id="crude_price",
                  causal_parent_type="economic_node", materiality=0.7,
                  excess=None, mechanism="crude-linked input costs",
                  causal_distance=1, confidence_band="MODERATE",
                  expected_market_sensitivity="HIGH"):
+    if direction is None:
+        direction = _DIRECTION_FROM_EFFECT.get(economic_effect, "bearish")
     company = Company(name=name, ticker=ticker, sector=sector, index_tier="NIFTY50")
     db.add(company)
     db.commit()
