@@ -229,10 +229,12 @@ def test_rejected_summary_is_machine_readable(client, db_session, strict_mode):
 
 def test_deep_dive_kinds_match_ripple_layers():
     """app.routers.feed_v2 restates T5's section-kind prefixes as literals
-    (importing another module's privates into a request handler is worse).
-    This is the pin that keeps the two from drifting: rename a kind in the
-    producer and this fails immediately, instead of the deep dive silently
-    filing every section under the wrong key."""
+    because they are a WIRE contract: MECH:/RIPPLE:/MACRO: is what the API
+    promises its clients, so the router must keep saying it even if the
+    producer renames its internal constants. This is the pin that keeps the
+    two from drifting apart silently -- rename a kind in the producer and
+    this fails immediately, instead of the deep dive filing every section
+    under the wrong key."""
     from app.market import ripple_layers
     from app.routers import feed_v2
 
@@ -314,10 +316,12 @@ def test_event_scope_multi_sector_when_macro_context_present(client, db_session,
     assert client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()["event_scope"] == "multi_sector"
 
 
-def test_event_scope_multi_sector_across_two_taxonomies(client, db_session, strict_mode):
-    """Two distinct mechanism taxonomies (crude-linked primaries + freight
-    fuel costs) is the other half of §15's rule -- no macro row needed."""
-    alert = _seed_alert(db_session, url="https://ex.com/scope-two-labels")
+def test_event_scope_multi_sector_across_two_sectors(client, db_session, strict_mode):
+    """Two distinct SECTORS among the displayable rows (oil & gas primary +
+    a transport ripple) is the other half of §15's rule -- no macro row
+    needed. Tier is irrelevant: a ripple row's sector counts, because the
+    story really did reach it."""
+    alert = _seed_alert(db_session, url="https://ex.com/scope-two-sectors")
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
                  display_tier="primary", economic_effect="positive", excess=1.0)
     _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
@@ -327,11 +331,11 @@ def test_event_scope_multi_sector_across_two_taxonomies(client, db_session, stri
     assert client.get("/api/feed-v2").json()[0]["event_scope"] == "multi_sector"
 
 
-def test_event_scope_none_for_one_taxonomy(client, db_session, strict_mode):
-    """Two companies, ONE mechanism -- a focused story, not a multi-sector
-    one. None (not "single_sector"): the vocabulary has one member, and the
+def test_event_scope_none_for_one_sector(client, db_session, strict_mode):
+    """Two companies, ONE sector -- a focused story, not a multi-sector one.
+    None (not "single_sector"): the vocabulary has one member, and the
     frontend chooses the copy."""
-    alert = _seed_alert(db_session, url="https://ex.com/scope-one-label")
+    alert = _seed_alert(db_session, url="https://ex.com/scope-one-sector")
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
                  display_tier="primary", economic_effect="positive", excess=1.0)
     _add_company(db_session, alert, "OIL.NS", "Oil India", "oil_gas",
@@ -340,62 +344,59 @@ def test_event_scope_none_for_one_taxonomy(client, db_session, strict_mode):
     assert client.get("/api/feed-v2").json()[0]["event_scope"] is None
 
 
-def test_event_scope_labels_match_the_rendered_section_labels(client, db_session, strict_mode):
-    """`_event_scope` counts taxonomy labels WITHOUT assembling sections
-    (the list route must stay one measurement pass per alert), so it
-    resolves labels through ripple_layers' own tables. This pins that the
-    two really do agree: the labels it counts are exactly the ones the
-    rendered sections are titled with."""
-    from app.routers.feed_v2 import _taxonomy_label
+def test_event_scope_none_for_two_mechanisms_inside_one_sector(client, db_session, strict_mode):
+    """Review round 1, I3 -- the case that forced the derivation to change.
+    `upstream_realization` and `refiner_marketing_margin` are TWO controlled
+    taxonomy labels (so the alert renders two sections) inside ONE sector,
+    and a pure oil story is not a multi-sector one. The badge claims
+    SECTORS, so the count is over `Company.sector`, not over section labels.
 
-    alert = _seed_alert(db_session, url="https://ex.com/label-mirror")
+    This replaces the old label-mirror test, which pinned
+    `_event_scope`'s label resolution against the rendered section titles.
+    That mirror -- and with it the "company parent resolves to an id, not a
+    display name" divergence it papered over (M2) -- is moot: the label
+    resolution is gone from this module entirely, along with the four
+    ripple_layers privates it had to import."""
+    alert = _seed_alert(db_session, url="https://ex.com/scope-two-mechanisms")
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
-                 display_tier="primary", economic_effect="positive", excess=1.0)
-    _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
-                 display_tier="secondary_ripple", causal_parent_id="road_freight_fuel_cost",
-                 causal_distance=2, materiality=0.5, excess=-1.5)
-    _add_company(db_session, alert, "HDFCBANK.NS", "HDFC Bank", "banking",
-                 display_tier="macro_context", causal_parent_id="crude_inflation_pressure",
-                 causal_distance=3, materiality=0.4, excess=-0.2)
+                 display_tier="primary", economic_effect="positive",
+                 causal_parent_id="upstream_realization", excess=1.0)
+    _add_company(db_session, alert, "BPCL.NS", "BPCL", "oil_gas",
+                 display_tier="primary", economic_effect="positive",
+                 causal_parent_id="refiner_marketing_margin", excess=0.8)
 
+    # Two sections rendered ...
     body = client.get(f"/api/feed-v2/{alert.id}/deep-dive").json()
-    rendered = {
-        section["title"].split(" — ")[1]
-        for key in ("primary", "secondary", "macro") for section in body[key]
-    }
-
-    assert rendered == {_taxonomy_label(ac) for ac in alert.companies}
-    assert len(rendered) == 3
+    assert len({section["relationship"] for section in body["primary"]}) == 2
+    # ... one sector claimed.
+    assert client.get("/api/feed-v2").json()[0]["event_scope"] is None
 
 
-def test_detail_drops_a_hand_corrupted_row_and_logs_loudly(
-        client, db_session, strict_mode, caplog):
-    """Blueprint §24, serving half: the consistency gate runs again over the
-    SERIALIZED rows, and a row whose served claim contradicts itself is
-    withheld -- loudly -- while the rest of the alert still serves.
+# --- §24 pre-serve gate -----------------------------------------------------
+# DOCUMENTED BYPASS, used by the three tests below. Migration 0008's
+# `alert_companies_gated_consistency{,_insert}` triggers make a
+# self-contradictory gated row impossible to write through any normal path,
+# so this helper DROPs them, INSERTs with raw SQL, then re-installs them.
+# That is the whole point: the pre-serve check exists for rows that arrive
+# from OUTSIDE the guarded paths -- a stale worker binary, a hand-edited
+# row, a restore from a pre-0008 backup -- and it must hold even where the
+# DB-level backstop did not run.
 
-    DOCUMENTED BYPASS. Migration 0008's `alert_companies_gated_consistency*`
-    triggers make this row impossible to write through any normal path, so
-    the fixture drops them, INSERTs the corrupted row with raw SQL, then
-    re-installs them. That is the whole point of the test: the pre-serve
-    check exists for rows that arrive from OUTSIDE the guarded paths -- a
-    stale worker binary, a hand-edited row, a restore from a pre-0008
-    backup -- and it must hold even when the DB-level backstop did not.
-    """
+def _insert_corrupted_row(db, alert, ticker, name, *, excess=None):
+    """A GATED row whose direction contradicts its own economic_effect
+    (economic_effect="positive" + direction="bearish" -- the Oil India
+    shape). Returns the Company."""
     from sqlalchemy import text
 
     from app.models import emit_gated_row_triggers
 
-    alert = _seed_alert(db_session, url="https://ex.com/corrupted-row")
-    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
-                 display_tier="primary", economic_effect="positive", excess=1.0)
-    corrupt = Company(name="Oil India", ticker="OIL.NS", sector="oil_gas", index_tier="NIFTY50")
-    db_session.add(corrupt)
-    db_session.commit()
+    company = Company(name=name, ticker=ticker, sector="oil_gas", index_tier="NIFTY50")
+    db.add(company)
+    db.commit()
 
-    db_session.execute(text("DROP TRIGGER IF EXISTS alert_companies_gated_consistency_insert"))
-    db_session.execute(text("DROP TRIGGER IF EXISTS alert_companies_gated_consistency"))
-    db_session.execute(
+    db.execute(text("DROP TRIGGER IF EXISTS alert_companies_gated_consistency_insert"))
+    db.execute(text("DROP TRIGGER IF EXISTS alert_companies_gated_consistency"))
+    db.execute(
         text("""
             INSERT INTO alert_companies (
                 alert_id, company_id, direction, magnitude_low, magnitude_high,
@@ -411,11 +412,29 @@ def test_detail_drops_a_hand_corrupted_row_and_logs_loudly(
                 0.7, 'crude-linked upstream realization'
             )
         """),
-        {"alert_id": alert.id, "company_id": corrupt.id},
+        {"alert_id": alert.id, "company_id": company.id},
     )
-    db_session.commit()
-    emit_gated_row_triggers(db_session.connection())   # backstop restored
-    db_session.expire_all()
+    db.add(MarketMove(
+        alert_id=alert.id, company_id=company.id, benchmark_ticker="^NSEI",
+        measurement_status="ok" if excess is not None else "no_data",
+        excess_move_pct=excess, raw_move_pct=excess, sector_move_pct=0.0,
+        measured_at=utcnow(), category="commodity",
+    ))
+    db.commit()
+    emit_gated_row_triggers(db.connection())           # backstop restored
+    db.expire_all()
+    return company
+
+
+def test_detail_drops_a_hand_corrupted_row_and_logs_loudly(
+        client, db_session, strict_mode, caplog):
+    """Blueprint §24, serving half: the consistency gate runs again over the
+    SERIALIZED rows, and a row whose served claim contradicts itself is
+    withheld -- loudly -- while the rest of the alert still serves."""
+    alert = _seed_alert(db_session, url="https://ex.com/corrupted-row")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _insert_corrupted_row(db_session, alert, "OIL.NS", "Oil India")
 
     with caplog.at_level("ERROR"):
         body = client.get(f"/api/feed-v2/{alert.id}").json()
@@ -426,6 +445,47 @@ def test_detail_drops_a_hand_corrupted_row_and_logs_loudly(
     assert "PRE-SERVE CONSISTENCY VIOLATION" in caplog.text
     assert "DIRECTION_NOT_DERIVED" in caplog.text
     assert "OIL.NS" in caplog.text
+
+
+def test_headline_is_re_derived_when_the_peak_row_is_withheld(
+        client, db_session, strict_mode):
+    """Review round 1, I1: the measurement is computed BEFORE the §24 gate
+    runs, so a withheld PEAK company used to leave the payload headlining
+    (peak_ticker / excess_move_pct / verdict) a company whose row it was
+    simultaneously refusing to serve -- the same claim suppressed in one
+    place and shouted in another. The headline is now re-derived over the
+    survivors."""
+    alert = _seed_alert(db_session, url="https://ex.com/withheld-peak")
+    _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
+                 display_tier="primary", economic_effect="positive", excess=1.0)
+    _insert_corrupted_row(db_session, alert, "OIL.NS", "Oil India", excess=-9.0)
+
+    body = client.get(f"/api/feed-v2/{alert.id}").json()
+
+    assert [r["ticker"] for layer in body["layers"] for r in layer["rows"]] == ["ONGC.NS"]
+    assert body["peak_ticker"] == "ONGC.NS"            # not the withheld -9.0% row
+    assert body["excess_move_pct"] == 1.0
+    assert body["market_reaction"]["status"] == "ok"
+
+
+def test_all_rows_withheld_serves_no_headline_number(client, db_session, strict_mode):
+    """M7, the degenerate half of I1: when EVERY row is withheld there is no
+    company left to headline, so the card serves the honest
+    unavailable-measurement placeholder rather than a peak ticker over an
+    empty card back. Still 200 -- the article, its summary and the audit
+    trail are real; only the company claims are withheld."""
+    alert = _seed_alert(db_session, url="https://ex.com/all-rows-withheld")
+    _insert_corrupted_row(db_session, alert, "OIL.NS", "Oil India", excess=-9.0)
+
+    response = client.get(f"/api/feed-v2/{alert.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["layers"] == []
+    assert body["peak_ticker"] is None
+    assert body["excess_move_pct"] is None
+    assert body["verdict"] is None
+    assert body["market_reaction"]["status"] == "unavailable"
 
 
 def test_deep_dive_404s_on_ungated_alert(client, db_session):

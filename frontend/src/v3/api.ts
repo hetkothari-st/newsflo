@@ -132,7 +132,11 @@ export interface FeedAlert {
   // Owner decision 2026-08-14: "primary" = headline comes from gate-proven
   // PRIMARY companies; "indirect_only" = a gated alert with zero PRIMARY,
   // headlined from its secondary/deep-dive movers (render an explicit
-  // indirect-exposure badge); null/undefined = ungated legacy alert.
+  // indirect-exposure badge). null/undefined = an ungated legacy alert OR a
+  // MACRO-CONTEXT-only gated alert (blueprint §7, Task 6): macro context is
+  // not a company-exposure claim of either kind, so it gets no exposure
+  // badge -- such an alert never appears in the feed LIST at all and is
+  // reachable only through detail / deep-dive.
   exposure?: 'primary' | 'indirect_only' | null;
   // Final-blueprint §15 (Task 9): set when the article's mechanisms span
   // more than one sector (direct + indirect + macro all present) -- the
@@ -229,11 +233,18 @@ export interface AlertDetail extends FeedAlert {
   edges?: Array<{ source: string | null; target: string; relation: string }>;
 }
 
-// GET /api/feed-v2/{id}/deep-dive (corrective-v4 Task 16, spec §52):
-// gated-analysis-only surface, PRIMARY + SECONDARY_DEEP_DIVE + the
-// machine-readable rejection audit trail. 404s for an ungated (legacy)
-// alert -- the normal feed-v2 detail route stays the place that one is
-// served from.
+// GET /api/feed-v2/{id}/deep-dive (corrective-v4 Task 16, spec §52; final
+// blueprint §7/§12, Task 6): gated-analysis-only surface, now a THREE-way
+// split -- primary (MECH: sections), secondary (RIPPLE: sections) and macro
+// (MACRO: sections) -- plus the machine-readable rejection audit trail.
+// 404s for an ungated (legacy) alert; the normal feed-v2 detail route stays
+// the place that one is served from.
+//
+// The three families are mutually exclusive and each carries the section
+// shape the card back already renders, so a consumer renders `macro` exactly
+// like `secondary` and adds the `macro4` styling FeedV4 applies to any
+// section whose `relationship` starts with "MACRO:" (§29: macro context must
+// never read as a directly-measured company layer).
 export interface RejectedCompany {
   ticker: string;
   rejection_reason: string | null;
@@ -243,6 +254,12 @@ export interface RejectedCompany {
 export interface DeepDiveResponse {
   primary: RippleLayer[];
   secondary: RippleLayer[];
+  // Blueprint §7: validated broad economic context, kept in its own family
+  // so it is never presented as a company-specific claim. Optional on the
+  // type only for wire-compat with a backend that predates Task 6.
+  macro?: RippleLayer[];
+  // Same §15 descriptor the feed card carries, for the same alert.
+  event_scope?: 'multi_sector' | null;
   rejected_summary: RejectedCompany[];
 }
 

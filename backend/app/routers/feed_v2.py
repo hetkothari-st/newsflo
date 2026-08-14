@@ -43,13 +43,7 @@ from app.market.discovery import (
     compute_unusual_activity,
 )
 from app.market.cap_tier import cap_tier_map
-from app.market.ripple_layers import (
-    OTHER_LABEL,
-    _SECTOR_LABELS,
-    _TAXONOMY_LABELS,
-    _registry_label,
-    compute_ripple_layers,
-)
+from app.market.ripple_layers import compute_ripple_layers
 from app.market.timeline_entries import get_timeline_entries
 from app.models import Alert, AlertCompany, Article, Company, CompanyDecisionRecord, Holding, User
 from app.routers.articles import get_db
@@ -146,9 +140,12 @@ def _unavailable_measurement() -> dict:
 # spellings lives.
 #
 # Section-kind prefixes T5 writes onto `relationship` (MECH:/RIPPLE:/MACRO:
-# -- see app.market.ripple_layers._KIND_*). Restated here as literals rather
-# than imported privates, and pinned against the producer by
-# test_deep_dive_kinds_match_ripple_layers so a rename cannot drift.
+# -- see app.market.ripple_layers._KIND_*). Restated here as literals
+# because they are a WIRE contract, not an implementation detail: these
+# three strings are what the API promises its clients, so this module must
+# keep saying them even if the producer renames its internal constants.
+# test_deep_dive_kinds_match_ripple_layers pins the two together, so such a
+# rename surfaces as a failing test instead of a silently mis-filed section.
 _KIND_PRIMARY = "MECH"
 _KIND_RIPPLE = "RIPPLE"
 _KIND_MACRO = "MACRO"
@@ -179,47 +176,36 @@ def _publication_tier(display_tier: str | None) -> str | None:
     contract: primary | secondary_ripple | macro_context). A legacy
     ripple spelling ("secondary_deep_dive", "secondary") is normalized to
     `secondary_ripple` HERE so the frontend never has to know the dead
-    names; None for an ungated/excluded row, which has no tier to claim."""
-    if display_tier == TIER_PRIMARY:
+    names; None for an ungated/excluded row, which has no tier to claim.
+
+    Case- and whitespace-insensitive, same as `_wire_band`: a persisted
+    " Primary" from some hand-repaired row must serve the canonical tier,
+    not silently degrade to None (which the frontend reads as "ungated")."""
+    tier = (display_tier or "").strip().lower()
+    if tier == TIER_PRIMARY:
         return TIER_PRIMARY
-    if is_secondary_tier(display_tier):
+    if is_secondary_tier(tier):
         return TIER_SECONDARY_RIPPLE
-    if display_tier == TIER_MACRO_CONTEXT:
+    if tier == TIER_MACRO_CONTEXT:
         return TIER_MACRO_CONTEXT
     return None
 
 
-def _taxonomy_label(alert_company) -> str:
-    """The controlled section label this row would be grouped under --
-    the SAME resolution `app.market.ripple_layers._strict_sections._label_for`
-    performs, reusing that module's own tables (imported, never restated, so
-    the two can never disagree about what counts as one taxonomy label; a
-    rename there fails loudly at import here instead of drifting silently).
-
-    Used only to COUNT distinct labels for `event_scope`, so the one
-    deliberate difference is harmless: a "company" parent resolves to the
-    parent's id rather than its display name (identity is preserved 1:1,
-    and this path must stay free of the extra name lookup because the list
-    route never assembles sections at all).
-    """
-    parent_type = alert_company.causal_parent_type
-    parent_id = alert_company.causal_parent_id or "event"
-    if parent_type == "sector":
-        return _SECTOR_LABELS.get(parent_id, OTHER_LABEL)
-    if parent_type == "company":
-        return f"linked to {alert_company.parent_company_id or parent_id}"
-    registry_label = _registry_label(parent_type, parent_id)
-    if registry_label is not None:
-        return registry_label
-    return _TAXONOMY_LABELS.get(parent_id, OTHER_LABEL)
-
-
 def _event_scope(alert: Alert) -> str | None:
     """Blueprint §15's controlled article-level descriptor: "multi_sector"
-    when this alert's analysis spans more than one mechanism taxonomy, or
-    carries ANY macro-context row (broad economic context is multi-sector by
+    when this alert's analysis reaches more than one SECTOR, or carries ANY
+    macro-context row (validated broad economic context is multi-sector by
     definition, §7); None otherwise. The frontend chooses the copy -- this
     is a label, not a sentence.
+
+    Sectors, NOT mechanism taxonomy labels (review round 1, I3). The first
+    implementation counted distinct section labels, and those are
+    mechanism-grained: `upstream_realization` and `refiner_marketing_margin`
+    are two labels inside ONE sector, so a pure oil story badged itself
+    "Multi-sector impact". `Company.sector` is the grain the badge actually
+    claims, and it is already loaded on every row -- this stays a
+    deterministic in-memory read with no extra query, which is what lets the
+    LIST route carry the label without assembling sections per alert.
 
     Computed over every DISPLAYABLE row (the deep-dive-complete view), not
     over whichever sections a given surface happens to render, so the list
@@ -232,7 +218,10 @@ def _event_scope(alert: Alert) -> str | None:
         return None
     if any(ac.display_tier == TIER_MACRO_CONTEXT for ac in displayable):
         return "multi_sector"
-    return "multi_sector" if len({_taxonomy_label(ac) for ac in displayable}) >= 2 else None
+    # A row whose company carries no sector at all contributes nothing --
+    # "unknown" is not a second sector (never fabricate breadth).
+    sectors = {ac.company.sector for ac in displayable if ac.company.sector}
+    return "multi_sector" if len(sectors) >= 2 else None
 
 
 def _primary_company_ids(alert: Alert) -> set[int]:
@@ -382,7 +371,7 @@ def _consistency_shape(alert: Alert, layers: list[dict], headline_ticker: str | 
 
 
 def _validated_layers(alert: Alert, layers: list[dict],
-                      headline_ticker: str | None = None) -> list[dict]:
+                      headline_ticker: str | None = None) -> tuple[list[dict], set[str]]:
     """Pre-serve consistency enforcement (blueprint §24): run the SAME
     deterministic gate the pipeline runs before persistence, now over the
     serialized rows, and refuse to serve any COMPANY row it finds
@@ -400,19 +389,26 @@ def _validated_layers(alert: Alert, layers: list[dict],
     A HEADLINE violation is logged but drops nothing: the headline is
     chosen from the tier sets by `_headline_company_ids`, so a violation
     there is a bug in THIS module, and blanking the card would hide it.
+
+    Returns (layers, dropped tickers). The caller MUST act on the second
+    element when it is non-empty (review round 1, I1): the alert-level
+    measurement was computed from a company set that still contained the
+    withheld row, so a dropped PEAK company would otherwise leave the
+    payload headlining a company whose row is not being served -- the same
+    claim, withheld in one place and shouted in another.
     """
     if not is_gated(alert.companies):
-        return layers
+        return layers, set()
     violations = check_alert_consistency(_consistency_shape(alert, layers, headline_ticker))
     if not violations:
-        return layers
+        return layers, set()
     bad_tickers = {v.split(":", 1)[0].strip() for v in violations} - {"HEADLINE"}
     logger.error(
         "PRE-SERVE CONSISTENCY VIOLATION alert_id=%s dropped_rows=%s violations=%s",
         alert.id, sorted(bad_tickers), "; ".join(violations),
     )
     if not bad_tickers:
-        return layers
+        return layers, set()
     kept = []
     for layer in layers:
         rows = [row for row in (layer.get("rows") or []) if row.get("ticker") not in bad_tickers]
@@ -420,7 +416,26 @@ def _validated_layers(alert: Alert, layers: list[dict],
             continue                       # a section emptied by the drop
         layer["rows"] = rows
         kept.append(layer)
-    return kept
+    return kept, bad_tickers
+
+
+def _measurement_without(db: Session, alert: Alert, company_ids: set[int] | None,
+                         dropped_tickers: set[str]) -> dict:
+    """The alert-level headline number RE-DERIVED over the rows that
+    survived §24's pre-serve gate (review round 1, I1/M7).
+
+    The headline is a claim about a company, so it may only ever come from
+    a company whose row is actually being served. When every survivor is
+    ineligible (or the whole alert was withheld) the honest answer is the
+    unavailable-measurement placeholder: a card with no rows must not carry
+    a peak ticker, an excess move or a verdict."""
+    dropped_ids = {ac.company_id for ac in alert.companies
+                   if ac.company.ticker in dropped_tickers}
+    eligible = ({ac.company_id for ac in alert.companies} if company_ids is None
+                else set(company_ids)) - dropped_ids
+    remeasured = (compute_alert_measurement(db, alert, company_ids=eligible)
+                  if eligible else None)
+    return remeasured if remeasured is not None else _unavailable_measurement()
 
 
 def _query_with_relations(db: Session):
@@ -632,7 +647,10 @@ def get_feed_v2_deep_dive(
         raise HTTPException(status_code=404, detail="Deep dive is only available for gate-analyzed alerts")
 
     held_company_ids = _held_company_ids(db, current_user)
-    sections = _validated_layers(
+    # No headline number on this surface, so nothing to re-derive when the
+    # §24 gate withholds a row -- the dropped-ticker set is deliberately
+    # unused here (the detail route below is where it matters).
+    sections, _dropped = _validated_layers(
         alert,
         _decorate_rows(
             alert, compute_ripple_layers(db, alert, held_company_ids, include_secondary=True),
@@ -709,18 +727,6 @@ def get_feed_v2_alert(
             raise HTTPException(status_code=404, detail="Alert has no measured companies")
 
     held_company_ids = _held_company_ids(db, current_user)
-    repeated_images = repeated_image_urls(
-        db, [alert.article.image_url] if alert.article.image_url else [],
-    )
-    translations = _bulk_translations(db, [alert], lang)
-    result = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
-    result["exposure"] = exposure
-    result["event_scope"] = _event_scope(alert)
-    # Alert-level quality ladder (corrective-v4 Task 15): authoritative |
-    # fallback | degraded | failed | budget_exhausted, or None on a
-    # pre-v3 alert. Frontend consumption is a later task; this is the
-    # minimal, honest wire-through.
-    result["analysis_quality"] = alert.analysis_quality
     # Layered card back (spec v2 §5/§7): every affected company, grouped by
     # relationship into ordered winners/losers layers. For a gated alert
     # WITH a primary the card back stays PRIMARY-only (corrective-v4 Task
@@ -739,13 +745,34 @@ def get_feed_v2_alert(
     # claim contradicts itself. The list route deliberately runs neither --
     # it serves no rows, and row consistency is already enforced at
     # persistence (pipeline) and at the DB (0008's gated-row triggers).
-    result["layers"] = _validated_layers(
+    layers, dropped_tickers = _validated_layers(
         alert,
         _decorate_rows(alert, compute_ripple_layers(
             db, alert, held_company_ids, include_secondary=(exposure != "primary"),
         )),
         headline_ticker=measurement.get("peak_ticker"),
     )
+    if dropped_tickers:
+        # I1: the headline was computed BEFORE the gate ran, from a company
+        # set that still contained the withheld row. Re-derive it over the
+        # survivors so the payload can never headline a company whose row it
+        # is refusing to serve (and so an all-rows-withheld alert carries no
+        # peak/verdict at all, M7).
+        measurement = _measurement_without(db, alert, company_ids, dropped_tickers)
+
+    repeated_images = repeated_image_urls(
+        db, [alert.article.image_url] if alert.article.image_url else [],
+    )
+    translations = _bulk_translations(db, [alert], lang)
+    result = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
+    result["exposure"] = exposure
+    result["event_scope"] = _event_scope(alert)
+    # Alert-level quality ladder (corrective-v4 Task 15): authoritative |
+    # fallback | degraded | failed | budget_exhausted, or None on a
+    # pre-v3 alert. Frontend consumption is a later task; this is the
+    # minimal, honest wire-through.
+    result["analysis_quality"] = alert.analysis_quality
+    result["layers"] = layers
     # Translated per-company `why` overlay (silent English fallback).
     whys = bulk_alert_company_whys(
         db, [row["alert_company_id"] for layer in result["layers"] for row in layer["rows"]], lang,
