@@ -67,18 +67,22 @@ _hub_task: asyncio.Task | None = None
 init_db()
 
 
-def _warn_if_schema_not_at_head() -> None:
-    """Warn (never block) when the DB is not at Alembic head.
+def _schema_version_status() -> bool | None:
+    """Compare the DB's alembic_version to the code's own alembic head(s).
+
+    Returns True (schema at head), False (schema is DEFINITELY behind --
+    a real revision mismatch), or None if it could not be determined at all
+    (no alembic_version table -- a bare dev DB predating Alembic -- or the
+    check itself failed, e.g. DB unreachable). None is deliberately treated
+    as "unknown", never as "behind": an undeterminable check must not by
+    itself block anything, only a confirmed mismatch is grounds for that
+    (see _maybe_start_scheduler below).
 
     Migrations are executed by backend/tools/migrate_on_boot.py, which the
-    Dockerfile runs before uvicorn -- this is only the tripwire that says
-    so out loud if it did not happen (a dev running uvicorn by hand, or a
-    deploy whose CMD was overridden). It is deliberately a warning: local
-    development has always run on a bare `init_db()` DB and must keep
-    starting. Any failure to even determine the revision is itself only
-    logged -- a schema-version check must never be the reason the app
-    cannot boot."""
-    log = logging.getLogger(__name__)
+    Dockerfile runs before uvicorn -- this function is the boot-time
+    tripwire that notices when that did not happen (a dev running uvicorn
+    by hand, a deploy whose CMD was overridden, or a stale container image
+    whose code is older than the DB it is pointed at)."""
     try:
         from alembic.config import Config
         from alembic.script import ScriptDirectory
@@ -91,22 +95,34 @@ def _warn_if_schema_not_at_head() -> None:
         heads = set(script.get_heads())
         with engine.connect() as conn:
             if "alembic_version" not in sa_inspect(conn).get_table_names():
-                log.warning(
-                    "[schema] database is not alembic-managed (no alembic_version "
-                    "table) -- run `python tools/migrate_on_boot.py`; columns added "
-                    "by migrations 0002+ may be missing")
-                return
+                return None
             current = {
                 row[0] for row in conn.exec_driver_sql("SELECT version_num FROM alembic_version")
             }
-        if current != heads:
-            log.warning(
-                "[schema] database is at alembic revision %s, head is %s -- run "
-                "`python tools/migrate_on_boot.py`; columns added by newer "
-                "migrations may be missing",
-                sorted(current) or ["<none>"], sorted(heads))
+        return current == heads
     except Exception:
-        log.warning("[schema] could not verify alembic revision", exc_info=True)
+        return None
+
+
+def _warn_if_schema_not_at_head() -> None:
+    """Warn (never block) when the DB is not at Alembic head. Deliberately
+    a warning at this call site: local development has always run on a bare
+    `init_db()` DB and must keep starting, and an undeterminable check must
+    never itself be the reason the app cannot boot. The scheduler gets a
+    stricter, blocking version of this same check -- see
+    _maybe_start_scheduler."""
+    log = logging.getLogger(__name__)
+    status = _schema_version_status()
+    if status is None:
+        log.warning(
+            "[schema] could not verify alembic revision (or database is not "
+            "alembic-managed) -- run `python tools/migrate_on_boot.py`; "
+            "columns added by migrations may be missing")
+    elif status is False:
+        log.warning(
+            "[schema] database is not at alembic head -- run "
+            "`python tools/migrate_on_boot.py`; columns added by newer "
+            "migrations may be missing")
 
 
 _warn_if_schema_not_at_head()
@@ -132,8 +148,46 @@ def _seed_exposure_registry() -> None:
 
 _seed_exposure_registry()
 
-if settings.enable_scheduler:
-    start_scheduler()
+
+def _maybe_start_scheduler() -> None:
+    """Gate for starting the scheduler (blueprint §26: "incompatible app/
+    schema versions should fail fast where practical" / "no legacy worker
+    may mutate current gated output").
+
+    Even with ENABLE_SCHEDULER on, a database that is CONFIRMED behind the
+    running code's alembic head must never run the scheduled analysis/
+    refinement loop: a stale binary is exactly the shape of the real
+    incident this guards against (alert 20, OIL.NS -- a stale pre-V4
+    worker's refinement sweep flipped `direction` and nulled `rationale` on
+    an already-gated AlertCompany row, because that worker's code predated
+    the gate_state/display_tier columns and their immunity checks in
+    app.pipeline and app.analysis.refinement). The API keeps serving on a
+    stale schema (read paths degrade gracefully on missing columns/rows
+    already), only the writer loop is refused.
+
+    Extracted to its own function (same pattern as
+    _start_hub_client_if_configured) so it is directly unit-testable via
+    monkeypatch + call, without reloading this whole module. The
+    `if settings.enable_scheduler:` test below must stay a bare attribute
+    access -- tests/test_no_real_anthropic_guard.py's AST-based guard test
+    requires every start_scheduler() call to be a syntactic descendant of
+    exactly that shape.
+    """
+    if settings.enable_scheduler:
+        log = logging.getLogger(__name__)
+        if _schema_version_status() is False:
+            log.critical(
+                "[schema] REFUSING to start scheduler: database schema is "
+                "behind this process's alembic head (stale binary or a "
+                "missed migration) -- a stale worker must never mutate "
+                "gated V4 rows (blueprint §26). The API will keep serving; "
+                "run `python tools/migrate_on_boot.py` and restart this "
+                "process to re-enable the scheduler.")
+        else:
+            start_scheduler()
+
+
+_maybe_start_scheduler()
 
 
 def _start_hub_client_if_configured() -> None:

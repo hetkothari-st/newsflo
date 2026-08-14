@@ -800,12 +800,31 @@ def refine_alert(client, session, alert, article, alert_companies: list, market_
     strict_gated = is_gated(alert_companies)
     if strict_gated:
         for ac in alert_companies:
-            if is_displayable_tier(ac.display_tier) and ac.mechanism:
+            # Row-level immunity, explicit and redundant with is_displayable_
+            # tier(None) already being False for an ungated row (blueprint
+            # §26 "gated V4 rows cannot be mutated by legacy refinement"; the
+            # real incident this defends -- alert 20, OIL.NS -- was a STALE
+            # worker running code that had neither this check nor the
+            # is_gated() one at all, so the row-level test is spelled out
+            # here on purpose rather than trusted to the tier check alone).
+            # This is the sole per-company write this branch makes, and it
+            # is the V4-NATIVE population of a gate-authorized field from an
+            # already-evidence-gated mechanism -- not the legacy market-move
+            # rationalization the guard exists to block.
+            if (ac.gate_state is not None or ac.display_tier is not None) and \
+                    is_displayable_tier(ac.display_tier) and ac.mechanism:
                 ac.why = validate_or_none(ac.mechanism) or _sanitize_mechanism(ac.mechanism)
     else:
         moves_by_company_id = {m.company_id: m for m in market_moves}
         measured = []
         for ac in alert_companies:
+            # Defense in depth (blueprint §26): even though `strict_gated`
+            # being False already means no row in this alert carries
+            # gate_state/display_tier (is_gated's own definition), skip any
+            # row that somehow does -- a legacy writer must never reach a
+            # gated row's `why`, whatever path led here.
+            if ac.gate_state is not None:
+                continue
             move = moves_by_company_id.get(ac.company_id)
             if move is not None and move.measurement_status == "ok" and move.excess_move_pct is not None:
                 company = session.get(Company, ac.company_id)
