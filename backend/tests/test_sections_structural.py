@@ -276,6 +276,56 @@ def test_note_pin_single_member_and_identical_multi_member(db_session, strict_mo
     assert {r["ticker"] for r in twin_layers[0]["rows"]} == {"TWIN1.NS", "TWIN2.NS"}
 
 
+def test_legacy_secondary_spellings_stay_isolated_from_the_renamed_tiers(
+        db_session, strict_mode):
+    """Blueprint §32 scenario 16 -- LEGACY SECTION ISOLATION, stated in the
+    RENAMED tier vocabulary (§3): `primary` / `secondary_ripple` /
+    `macro_context`. A persisted row may still carry either dead secondary
+    spelling ("secondary_deep_dive", "secondary"); those rows must keep
+    rendering, and they must render as RIPPLE sections beside the canonical
+    `secondary_ripple` -- never leaking into a MECH: section (which would
+    launder a weaker claim into the primary frame) and never into a MACRO:
+    one (which is reserved for `macro_context` alone).
+
+    The membership rule under test is `is_secondary_tier`, the single place
+    read-compat for the dead spellings lives; a consumer that regressed to a
+    literal `== "secondary_ripple"` compare would drop the two legacy rows
+    from the card back entirely, and this test would see a two-row ripple
+    section instead of a four-row one.
+    """
+    alert = _seed_alert(db_session)
+    _add_company(db_session, alert, "PRIM.NS", "Primary Co", "oil_gas",
+                 economic_effect="negative", display_tier="primary",
+                 causal_parent_id="crude_price", materiality=0.8)
+    _add_company(db_session, alert, "RIPPLE.NS", "Ripple Co", "oil_gas",
+                 economic_effect="negative", display_tier="secondary_ripple",
+                 causal_parent_id="crude_price", materiality=0.7)
+    _add_company(db_session, alert, "LEGACY1.NS", "Legacy Deep Dive Co", "oil_gas",
+                 economic_effect="negative", display_tier="secondary_deep_dive",
+                 causal_parent_id="crude_price", materiality=0.6)
+    _add_company(db_session, alert, "LEGACY2.NS", "Legacy Secondary Co", "oil_gas",
+                 economic_effect="negative", display_tier="secondary",
+                 causal_parent_id="crude_price", materiality=0.5)
+    _add_company(db_session, alert, "MACRO.NS", "Macro Context Co", "oil_gas",
+                 economic_effect="negative", display_tier="macro_context",
+                 causal_parent_id="crude_price", materiality=0.4)
+
+    layers = compute_ripple_layers(db_session, alert, set(), include_secondary=True)
+
+    by_kind = {}
+    for layer in layers:
+        kind = layer["relationship"].split(":")[0]
+        by_kind.setdefault(kind, set()).update(r["ticker"] for r in layer["rows"])
+
+    assert by_kind["MECH"] == {"PRIM.NS"}
+    assert by_kind["RIPPLE"] == {"RIPPLE.NS", "LEGACY1.NS", "LEGACY2.NS"}
+    assert by_kind["MACRO"] == {"MACRO.NS"}
+    # The dead "SECONDARY" single-bucket relationship is gone for good
+    # (§12): legacy-spelled rows render under the mechanism taxonomy like
+    # every other ripple row, not in an anonymous blob.
+    assert "SECONDARY" not in by_kind
+
+
 def test_dedup_reuse_cannot_bypass_gate(db_session, monkeypatch):
     """A prior LEGACY (gate_state NULL) alert must never be reused via the
     title-dedup shortcut -- that would silently copy field-less rows onto a

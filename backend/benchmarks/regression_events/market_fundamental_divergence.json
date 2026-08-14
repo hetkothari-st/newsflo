@@ -1,0 +1,86 @@
+{
+  "id": "market_fundamental_divergence",
+  "article": {
+    "title": "Natural rubber and synthetic rubber prices jump on supply disruption; tyre counters gain in trade",
+    "text": "Spot natural rubber prices jumped after unseasonal rain disrupted tapping across the main producing belts, while crude-linked synthetic rubber and carbon black also quoted higher. Tyre makers buy both. Apollo Tyres, whose replacement-market pricing typically follows an input move by a quarter, faces the full basket. Traders noted that tyre counters nevertheless gained in trade, with the Ceat scrip rallying hardest on the day as the market read the disruption as short-lived.",
+    "note": "Blueprint §32 scenario 20 -- MARKET/FUNDAMENTAL DIVERGENCE (the Apollo shape, spec §62). The fundamental thesis is NEGATIVE (a raw-material basket that reprices ahead of the replacement-market price increase) while the observed reaction on the day is POSITIVE. Two separate truths, and the engine must publish the first WITHOUT letting the second edit it: APOLLOTYRE publishes as a negative primary, and CEAT -- named in the very same sentence, and reachable as a subject exactly like Apollo -- is rejected outright because the only thing said about it is that its scrip rallied. INV-003: a price move is a market fact, never fundamental evidence, and it can neither create a row nor flip one. The MEASURED half of the divergence (excess move -> reaction_direction -> the divergence sentence on the card) is a separate truth this offline corpus deliberately carries no price bars for (INV-002); it is pinned by tests/test_feed_primary_only.py::test_new_fields_present_including_divergence_for_apollo_case."
+  },
+  "universe": [
+    {
+      "ticker": "APOLLOTYRE.NS", "name": "Apollo Tyres", "sector": "auto", "sub_sector": "tyres",
+      "index_tier": "NIFTY100", "market_cap": 320000000000.0,
+      "business_desc": "Tyre manufacturer supplying replacement and original-equipment markets in India and Europe, consuming natural rubber, crude-derived synthetic rubber and carbon black as its primary raw materials."
+    },
+    {
+      "ticker": "CEATLTD.NS", "name": "CEAT", "sector": "auto", "sub_sector": "tyres",
+      "index_tier": "NIFTY500", "market_cap": 130000000000.0,
+      "business_desc": "Tyre manufacturer with a replacement-market led sales mix across two-wheeler, passenger and commercial vehicle categories."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Natural and synthetic rubber prices jump on supply disruption",
+      "event_status": "confirmed",
+      "facts": "Spot natural rubber prices jumped after unseasonal rain disrupted tapping across the main producing belts, while crude-linked synthetic rubber and carbon black also quoted higher. Tyre makers buy both. Apollo Tyres, whose replacement-market pricing typically follows an input move by a quarter, faces the full basket. Tyre counters nevertheless gained in trade, with the Ceat scrip rallying hardest on the day.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Spot natural rubber prices jumped after unseasonal rain disrupted tapping."},
+        {"fact_id": "F2", "text": "Crude-linked synthetic rubber and carbon black also quoted higher."},
+        {"fact_id": "F3", "text": "Apollo Tyres' replacement-market pricing typically follows an input move by a quarter."},
+        {"fact_id": "F4", "text": "Tyre counters gained in trade, with the Ceat scrip rallying hardest on the day."}
+      ],
+      "quantities": [],
+      "named_entities": ["Apollo Tyres", "CEAT"],
+      "category": "auto",
+      "event_type": "commodity_price",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "rubber_input_cost",
+          "label": "Rubber and carbon black input cost",
+          "direction": "bearish",
+          "mechanism": "Natural rubber, crude-derived synthetic rubber and carbon black all reprice upward at once, lifting the whole tyre raw-material basket rather than a single line of it",
+          "confidence": 0.85, "materiality": 0.72, "impact_strength": 0.7, "time_horizon": "Short-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@rubber_input_cost": {
+      "companies": [
+        {
+          "ticker": "APOLLOTYRE.NS", "name": "Apollo Tyres", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.65, "confidence": 0.8, "materiality": 0.68, "time_horizon": "Short-Term",
+          "mechanism": "Natural rubber, synthetic rubber and carbon black together dominate the tyre raw-material basket, and replacement-market list increases typically follow an input move by about a quarter, so the cost lands before the recovery does",
+          "rationale": "Buys the entire affected basket and prices the replacement market with a documented lag",
+          "negative_channels": ["raw-material basket repricing ahead of list price action"]
+        },
+        {
+          "ticker": "CEATLTD.NS", "name": "CEAT", "direction": "bullish", "net_direction": "bullish",
+          "economic_effect": "positive", "impact_strength": 0.5, "confidence": 0.72, "materiality": 0.6, "time_horizon": "Immediate",
+          "mechanism": "The scrip rallied hardest among tyre counters on the day, which suggests the market is reading the tapping disruption as short-lived and already discounting a quick normalisation",
+          "rationale": "Ceat scrip rallied hardest on the day as tyre counters gained in trade",
+          "positive_channels": ["market reading the disruption as short-lived"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["APOLLOTYRE.NS", "CEATLTD.NS"],
+      "reject": [],
+      "counterfactual": {"APOLLOTYRE.NS": "SUPPORTED", "CEATLTD.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"APOLLOTYRE.NS": "negative"},
+    "allow_secondary": [],
+    "expected_rejected": ["CEATLTD.NS"],
+    "expect_abstention": false,
+    "expected_directness": {"APOLLOTYRE.NS": "DIRECT"},
+    "expected_evidence_tier": {"APOLLOTYRE.NS": "SUBJECT", "CEATLTD.NS": "MARKET_OBS"},
+    "expected_causal_distance": {"APOLLOTYRE.NS": 1},
+    "expected_sections": [
+      {"effect": "negative", "label_contains": "other verified mechanisms"}
+    ],
+    "rationale": "The divergence fixture pins the half the analysis engine owns: the FUNDAMENTAL claim must be published on its own evidence and must be unmoved by the day's price action. APOLLOTYRE is the article's subject at distance 1 with a real input-cost mechanism, so it publishes as a NEGATIVE primary even though the article's own text reports the tyre counters gaining -- that contradiction is the product's signal (§62's divergence line), not a defect to be smoothed away by softening the thesis. CEAT is the control on the other side: it is named in the same sentence and is equally reachable as an article subject, but the only thing the candidate says about it is that its scrip rallied, so classify_evidence taints it ARTICLE_MARKET_OBSERVATION before any tier logic runs and EVIDENCE_VALID rejects it (INV-003). A stock that went up is not thereby a beneficiary, and a stock that went up cannot flip the sign of a company whose costs just rose."
+  }
+}

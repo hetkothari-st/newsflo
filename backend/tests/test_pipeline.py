@@ -1986,6 +1986,84 @@ def test_the_dedup_reuse_path_claims_no_content_key(db_session):
     assert alert.content_key is None
 
 
+def test_two_sessions_racing_one_content_key_converge_on_one_alert(
+        tmp_path, strict_mode, caplog):
+    """Blueprint §32 scenario 17 -- CONCURRENCY/IDEMPOTENCY under a REAL
+    race, not a same-session replay.
+
+    Two Session objects on two DISTINCT DBAPI connections against one
+    file-backed SQLite database (the conftest `db_session` engine uses
+    StaticPool, i.e. ONE shared connection, so it cannot express this at
+    all). The loser builds its entries while the winner's alert does not
+    yet exist -- the lost-update window -- and only then attempts its own
+    INSERT. The partial unique index `uq_alerts_article_content` is the
+    arbiter: the loser's flush raises IntegrityError and _persist_alert's
+    recovery path returns the WINNER'S alert instead of doubling the row.
+
+    Scope, stated honestly: this is the two-session, same-process race the
+    task brief permits. A truly simultaneous two-PROCESS interleave is not
+    expressible on SQLite, whose single-writer lock serialises the two
+    INSERTs no matter how they are scheduled -- so what is pinned here is
+    the convergence CONTRACT (loser observes the collision, treats it as
+    success, hands back the winner's alert, marks the article ANALYZED),
+    which is the part that would actually regress.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db import Base
+    from app.pipeline import _v3_cache_key, _v3_edges, _v3_entries
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    winner, loser = Session(), Session()
+    try:
+        _blueprint_company_row(winner)
+        article = _blueprint_article(winner, "two-session-race")
+        article_id = article.id
+        content_key = _v3_cache_key(article)
+
+        # The loser analysed the same article independently and prepared its
+        # rows BEFORE the winner's alert existed.
+        loser_article = loser.get(Article, article_id)
+        loser_result = _blueprint_result([_blueprint_graph_company()])
+        loser_entries = _v3_entries(loser, loser_result)
+
+        winner_alert = _blueprint_persist(
+            winner, _blueprint_result([_blueprint_graph_company()]),
+            article=article, content_key=content_key)
+        winner.commit()
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="app.pipeline"):
+            loser_alert = _persist_alert(
+                loser, loser_article, "commodity", loser_entries, event_type="crude_oil",
+                gaps=[], edges=_v3_edges(loser_result), client=None, facts="crude up 5%",
+                analysis_provider="claude", analysis_quality="authoritative",
+                ambiguous_entities=[], content_key=content_key)
+        loser.commit()
+
+        # The convergence came from the INTEGRITY-ERROR recovery path (the
+        # unique index actually fired), not from some earlier short-circuit
+        # that happened to return the same row.
+        assert any(f"duplicate analysis for article_id={article_id}" in record.message
+                   for record in caplog.records)
+        assert loser_alert.id == winner_alert.id
+        # One alert, one set of company rows -- the loser's INSERT left no
+        # duplicate behind, and it did not double the winner's rows either.
+        assert loser.query(Alert).filter_by(article_id=article_id).count() == 1
+        assert loser.query(AlertCompany).filter_by(alert_id=winner_alert.id).count() == 1
+        # The loser converges on "already analysed" rather than re-queuing
+        # the same work forever.
+        assert loser.get(Article, article_id).status == "ANALYZED"
+    finally:
+        winner.close()
+        loser.close()
+        engine.dispose()
+
+
 def test_a_violating_stored_row_fails_only_its_own_article_on_the_reuse_path(
         db_session, monkeypatch, strict_mode):
     """Review round 1, IMPORTANT-1: the dedup-reuse `_persist_alert` call

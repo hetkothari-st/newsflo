@@ -1,0 +1,122 @@
+{
+  "id": "inr_it_multihop_macro_context",
+  "article": {
+    "title": "India's goods trade deficit widens to a record in July as gold and electronics imports surge",
+    "text": "India's merchandise trade deficit widened to a record in July as gold and electronics imports surged while engineering exports stayed flat. Economists said a structurally wider goods gap keeps the balance-of-payments arithmetic tilted against the rupee even with services receipts running at a record, and that a persistently weaker rupee in turn raises the rupee value of dollar-billed services exports. Currency desks expect the central bank to smooth volatility rather than defend a level.",
+    "note": "Blueprint §32 scenario 11 -- the INR/IT MULTI-HOP. The article is a trade-data print, not a currency story and not an IT story: the rupee is the second hop and IT export realisation is the third. The chain is genuine, and the blueprint's answer for a genuine third hop is MACRO_CONTEXT (§7) -- validated broad economic context, presented as context, never as a company-specific claim. Two IT exporters sit at that node with the same distance and the same direction; the one with an independently sourced exposure record (tier C) publishes as macro context, and the one whose only backing is the model's own inference (tier E) produces NO ROW AT ALL. Note also that the mechanism's registry directness is DIRECT (§11: directness is NOT a synonym for distance) -- a DIRECT mechanism three hops from THIS event is still macro context, because the two dimensions answer different questions."
+  },
+  "universe": [
+    {
+      "ticker": "TCS.NS", "name": "Tata Consultancy Services", "sector": "it", "sub_sector": "it_services",
+      "index_tier": "NIFTY50", "market_cap": 12500000000000.0,
+      "business_desc": "India's largest IT services exporter, billing predominantly in dollars, euros and pounds against an overwhelmingly rupee-denominated offshore delivery cost base.",
+      "exposures": [{"dimension": "fx", "level": "VERY_HIGH"}],
+      "node_exposures": [
+        {
+          "node_key": "it_export_realization", "exposure_exists": 1, "strength": 0.7,
+          "mechanism": "Dollar-billed services revenue against a rupee-denominated offshore delivery cost base",
+          "provenance_type": "CURATED",
+          "source_url": "https://research.example/tcs-currency-translation-exposure"
+        }
+      ]
+    },
+    {
+      "ticker": "WIPRO.NS", "name": "Wipro", "sector": "it", "sub_sector": "it_services",
+      "index_tier": "NIFTY50", "market_cap": 2600000000000.0,
+      "business_desc": "Global IT services and consulting company with a mixed onshore and offshore delivery footprint across banking, energy and consumer verticals.",
+      "exposures": [{"dimension": "fx", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "India's goods trade deficit widens to a record in July",
+      "event_status": "confirmed",
+      "facts": "India's merchandise trade deficit widened to a record in July as gold and electronics imports surged while engineering exports stayed flat. A structurally wider goods gap keeps the balance-of-payments arithmetic tilted against the rupee even with services receipts at a record, and a persistently weaker rupee raises the rupee value of dollar-billed services exports. The central bank is expected to smooth volatility rather than defend a level.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Merchandise trade deficit widened to a record in July."},
+        {"fact_id": "F2", "text": "Gold and electronics imports surged while engineering exports stayed flat."},
+        {"fact_id": "F3", "text": "A wider goods gap keeps the balance-of-payments arithmetic tilted against the rupee."},
+        {"fact_id": "F4", "text": "A persistently weaker rupee raises the rupee value of dollar-billed services exports."}
+      ],
+      "quantities": [],
+      "named_entities": [],
+      "category": "macro_policy",
+      "event_type": "macro_data",
+      "event_cause": "trade_balance"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "trade_deficit_widening",
+          "label": "Goods trade deficit widens",
+          "direction": "bearish",
+          "mechanism": "A record merchandise import bill against flat engineering exports widens the goods gap that the balance of payments has to fund",
+          "confidence": 0.85, "materiality": 0.7, "impact_strength": 0.65, "time_horizon": "Medium-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "ripple_discovery@trade_deficit_widening": {
+      "children": [
+        {
+          "parent_type": "economic_node", "parent_id": "trade_deficit_widening",
+          "child_type": "economic_node", "child_id": "inr_depreciation",
+          "child_label": "Rupee depreciation pressure", "direction": "bearish",
+          "mechanism": "A structurally wider goods gap has to be funded, which keeps the balance-of-payments arithmetic tilted against the currency even with record services receipts",
+          "impact_strength": 0.6, "confidence": 0.8, "materiality": 0.65, "time_horizon": "Medium-Term"
+        }
+      ]
+    },
+    "ripple_discovery@inr_depreciation": {
+      "children": [
+        {
+          "parent_type": "economic_node", "parent_id": "inr_depreciation",
+          "child_type": "economic_node", "child_id": "it_export_realization",
+          "child_label": "IT export realisation", "child_sector": "it",
+          "direction": "bullish",
+          "mechanism": "Dollar-billed services revenue translates into more rupees against a delivery cost base that is already denominated in rupees",
+          "impact_strength": 0.55, "confidence": 0.75, "materiality": 0.6, "time_horizon": "Medium-Term"
+        }
+      ]
+    },
+    "map_companies@inr_depreciation": {"companies": []},
+    "map_companies@it_export_realization": {
+      "companies": [
+        {
+          "ticker": "TCS.NS", "name": "Tata Consultancy Services", "direction": "bullish", "net_direction": "bullish",
+          "economic_effect": "positive", "impact_strength": 0.5, "confidence": 0.8, "materiality": 0.62, "time_horizon": "Medium-Term",
+          "mechanism": "Services revenue is billed in dollars, euros and pounds while the offshore delivery cost base is denominated in rupees, so a sustained depreciation translates into reported rupee revenue and operating margin",
+          "rationale": "Currency-translation exposure for this exporter is on file at the exact node the chain reaches",
+          "positive_channels": ["export realisation translation gain"]
+        },
+        {
+          "ticker": "WIPRO.NS", "name": "Wipro", "direction": "bullish", "net_direction": "bullish",
+          "economic_effect": "positive", "impact_strength": 0.45, "confidence": 0.7, "materiality": 0.5, "time_horizon": "Medium-Term",
+          "mechanism": "A weaker rupee should translate into a better reported realisation for any exporter that bills offshore work in foreign currency",
+          "rationale": "Mixed onshore and offshore delivery footprint with foreign-currency billing",
+          "positive_channels": ["export realisation translation gain"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["TCS.NS", "WIPRO.NS"],
+      "reject": [],
+      "counterfactual": {"TCS.NS": "SUPPORTED", "WIPRO.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": ["TCS.NS"],
+    "expected_rejected": ["WIPRO.NS"],
+    "expect_abstention": true,
+    "expected_macro_context": {"TCS.NS": "positive"},
+    "expected_directness": {"TCS.NS": "DIRECT", "WIPRO.NS": "DIRECT"},
+    "expected_evidence_tier": {"TCS.NS": "C", "WIPRO.NS": "E"},
+    "expected_causal_distance": {"TCS.NS": 3},
+    "expected_causal_distance_note": "WIPRO is deliberately absent from this map: expected_causal_distance is scored against DISPLAYED rows only (a rejected candidate has no displayed distance), and WIPRO's rejection is pinned by expected_rejected plus expected_evidence_tier/expected_directness, both of which scan every candidate.",
+    "expected_sections": [
+      {"effect": "macro_context", "label_contains": "macro context"}
+    ],
+    "rationale": "The whole point of the third tier (§7). Trade deficit -> rupee -> IT export realisation is a real chain, but it is three hops of macroeconomics rather than a company-specific thesis, and the engine must say so in the TIER instead of by softening the words. TCS survives to MACRO_CONTEXT because the causal-path gate's d3 bar is met: relationship-grade evidence (its CURATED, independently sourced exposure record classifies as VERIFIED_RELATIONSHIP / tier C) AND a HIGH composite materiality grade. It can never be primary or secondary_ripple -- both tiers are structurally closed above d2 -- no matter that the registry rates the mechanism itself DIRECT, which is exactly §11's separation of directness from distance. WIPRO sits at the SAME node, the same distance, with the same direction, a plausible mechanism and a verifier accept; its only backing is the model's own inference (tier E, which caps materiality at LOW), so the causal-path gate rejects it outright as REJECT_LOW_PRIORITY -- no row of any tier. That asymmetry IS the scenario: a multi-hop macro chain may earn CONTEXT, and it earns COMPANY ROWS only where an artifact exists."
+  }
+}

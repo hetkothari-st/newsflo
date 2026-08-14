@@ -1,0 +1,104 @@
+{
+  "id": "low_materiality_ripple_rejected",
+  "article": {
+    "title": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+    "text": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply as demand stayed resilient. Blue Dart Express, whose air express network runs on jet fuel, recovers most of the move through a published fuel surcharge that resets with the fuel index.",
+    "note": "Blueprint §32 scenario 13 -- LOW MATERIALITY NEVER DISPLAYS, at either hop and regardless of how strong the evidence is. Three candidates on one crude shock: BLUEDART is the article's OWN named subject at distance 1 (tier SUBJECT, the strongest evidence class the system can hold short of a structured record) and is still rejected, because a fuel surcharge that resets with the index leaves a residual effect too small to grade above LOW. BERGEPAINT is a genuine crude-input ripple whose materiality sits under the distance-2 threshold, so the engine's own deterministic prune removes it before the gate ever sees it. ASIANPAINT is the CONTROL: the same mechanism, the same tier, the same distance, materiality above the bar -- and it publishes as secondary_ripple. Materiality is a floor, not a tiebreak."
+  },
+  "universe": [
+    {
+      "ticker": "BLUEDART.NS", "name": "Blue Dart Express", "sector": "railways_transport", "sub_sector": "logistics",
+      "index_tier": "NIFTY500", "market_cap": 160000000000.0,
+      "business_desc": "Air and ground express logistics operator running a dedicated freighter fleet, billing customers a published fuel surcharge that resets with the fuel index."
+    },
+    {
+      "ticker": "ASIANPAINT.NS", "name": "Asian Paints", "sector": "chemicals", "sub_sector": "paints",
+      "index_tier": "NIFTY50", "market_cap": 2700000000000.0,
+      "business_desc": "India's largest decorative paints manufacturer, whose raw-material basket is dominated by crude-derived monomers, solvents and titanium dioxide.",
+      "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]
+    },
+    {
+      "ticker": "BERGEPAINT.NS", "name": "Berger Paints India", "sector": "chemicals", "sub_sector": "paints",
+      "index_tier": "NIFTY100", "market_cap": 620000000000.0,
+      "business_desc": "Decorative and industrial paints manufacturer with a crude-derived monomer and solvent raw-material basket.",
+      "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+      "event_status": "confirmed",
+      "facts": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply while demand stayed resilient. Blue Dart Express recovers most of the fuel move through a published fuel surcharge that resets with the fuel index.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent crude settled at a five-month high."},
+        {"fact_id": "F2", "text": "OPEC+ signalled it would hold production cuts through the next quarter."},
+        {"fact_id": "F3", "text": "Blue Dart Express recovers most of the fuel move through a published fuel surcharge that resets with the fuel index."}
+      ],
+      "quantities": ["five-month high"],
+      "named_entities": ["OPEC+", "Brent", "Blue Dart Express"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price", "label": "Crude price", "direction": "bullish",
+          "mechanism": "OPEC+ holding production cuts tightens physical supply and lifts the benchmark crude price",
+          "confidence": 0.9, "impact_strength": 0.8, "materiality": 0.8, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@crude_price": {
+      "companies": [
+        {
+          "ticker": "BLUEDART.NS", "name": "Blue Dart Express", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.3, "confidence": 0.7, "materiality": 0.32, "time_horizon": "Short-Term",
+          "mechanism": "Jet fuel is a real cost line for the freighter fleet, but a published fuel surcharge that resets with the fuel index recovers most of the move, leaving only a timing residual between reset dates",
+          "rationale": "Contractual fuel surcharge pass-through leaves a small, short-lived residual exposure rather than a margin event",
+          "negative_channels": ["timing residual between surcharge resets"]
+        }
+      ]
+    },
+    "map_companies@paint_input_cost": {
+      "companies": [
+        {
+          "ticker": "ASIANPAINT.NS", "name": "Asian Paints", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.6, "confidence": 0.75, "materiality": 0.62, "time_horizon": "Short-Term",
+          "mechanism": "Crude-derivative raw materials (monomers, solvents, titanium dioxide carriers) are a large share of paint input cost, so a sustained crude rise compresses gross margin until list prices catch up",
+          "rationale": "Sector-leading decorative paints maker with a crude-derived raw-material basket and typically lagged price pass-through",
+          "negative_channels": ["monomer, solvent and titanium dioxide input inflation"]
+        },
+        {
+          "ticker": "BERGEPAINT.NS", "name": "Berger Paints India", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.3, "confidence": 0.7, "materiality": 0.28, "time_horizon": "Short-Term",
+          "mechanism": "The crude-derived share of the raw-material basket is real but the current contract book is largely priced forward, so the margin effect within the horizon is small",
+          "rationale": "Decorative paints maker with forward-priced raw-material contracts covering most of the near-term basket",
+          "negative_channels": ["residual spot monomer purchases"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["BLUEDART.NS", "ASIANPAINT.NS", "BERGEPAINT.NS"],
+      "reject": [],
+      "counterfactual": {
+        "BLUEDART.NS": "SUPPORTED",
+        "ASIANPAINT.NS": "SUPPORTED",
+        "BERGEPAINT.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": ["ASIANPAINT.NS"],
+    "expected_rejected": ["BLUEDART.NS", "BERGEPAINT.NS"],
+    "expect_abstention": true,
+    "expected_secondary_ripple": {"ASIANPAINT.NS": "negative"},
+    "expected_directness": {"ASIANPAINT.NS": "INDIRECT", "BLUEDART.NS": "DIRECT"},
+    "expected_evidence_tier": {"BLUEDART.NS": "SUBJECT", "ASIANPAINT.NS": "D"},
+    "expected_materiality_grade": {"BLUEDART.NS": "LOW", "ASIANPAINT.NS": "HIGH"},
+    "expected_causal_distance": {"ASIANPAINT.NS": 2},
+    "rationale": "Two rejections with two different mechanics, and one control that separates them from mere pessimism. BLUEDART reaches the gate with the article's own name behind it (tier SUBJECT at d1, DIRECT, verified, SUPPORTED counterfactual) and is rejected at MATERIALITY_VALID with grade LOW: a contractual surcharge that resets with the index leaves a residual too small to be a claim, and no amount of evidence strength converts a small effect into a publishable one (§19). BERGEPAINT never reaches the gate at all -- its 0.28 materiality is below the distance-2 final-prune floor, so the engine's own deterministic pruning removes it, which is why this label pins it only through expected_rejected (a pruned candidate has no gate decision, no tier and no evidence class to assert). ASIANPAINT is the control: identical archetype, identical tier D, identical distance 2, materiality above the bar -- published as secondary_ripple. Without it this fixture would prove only that the system can say no."
+  }
+}

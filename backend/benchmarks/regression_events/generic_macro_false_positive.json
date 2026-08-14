@@ -1,0 +1,86 @@
+{
+  "id": "generic_macro_false_positive",
+  "article": {
+    "title": "Retail inflation eases to a four-year low in July on a favourable base and softer vegetable prices",
+    "text": "Retail inflation eased to a four-year low in July, helped by a favourable base and a sharp sequential fall in vegetable prices, while core inflation was broadly unchanged. Economists cautioned that the headline print says little about the volume trajectory of any individual consumer company, since the disinflation is concentrated in food articles that most packaged-goods makers neither sell nor buy at the margin. Hindustan Unilever was among the staples names analysts cited when discussing the print.",
+    "note": "Blueprint §32 scenario 12 -- the GENERIC MACRO FALSE POSITIVE, in its two distinct forms. A macro print invites a plausible-sounding company story that is not actually a claim about THIS event. Form one: a company the article itself names (tier SUBJECT, HIGH materiality, everything the gate normally wants) whose thesis the counterfactual verifier finds still true had the print never landed -- REJECT_NOT_EVENT_SPECIFIC. Form two: a sector peer reached by pool membership alone whose rationale is interchangeable with a sector sentence at tier E -- REJECT_GENERIC_EXPOSURE, caught five gates earlier. Neither may publish; an empty feed is the correct output for a print that says nothing company-specific."
+  },
+  "universe": [
+    {
+      "ticker": "HINDUNILVR.NS", "name": "Hindustan Unilever", "sector": "fmcg", "sub_sector": "home_personal_care",
+      "index_tier": "NIFTY50", "market_cap": 6200000000000.0,
+      "business_desc": "India's largest packaged consumer goods company across home care, beauty and personal care and foods, sold through a national general-trade and modern-trade distribution network."
+    },
+    {
+      "ticker": "DABUR.NS", "name": "Dabur India", "sector": "fmcg", "sub_sector": "home_personal_care",
+      "index_tier": "NIFTY100", "market_cap": 950000000000.0,
+      "business_desc": "Ayurvedic and natural consumer products company spanning health supplements, digestives, hair care and packaged juices."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Retail inflation eases to a four-year low in July",
+      "event_status": "confirmed",
+      "facts": "Retail inflation eased to a four-year low in July on a favourable base and a sharp sequential fall in vegetable prices, while core inflation was broadly unchanged. The disinflation is concentrated in food articles that most packaged-goods makers neither sell nor buy at the margin.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Retail inflation eased to a four-year low in July."},
+        {"fact_id": "F2", "text": "The move was driven by a favourable base and a sequential fall in vegetable prices."},
+        {"fact_id": "F3", "text": "Core inflation was broadly unchanged."},
+        {"fact_id": "F4", "text": "The disinflation is concentrated in food articles most packaged-goods makers neither sell nor buy at the margin."}
+      ],
+      "quantities": ["four-year low"],
+      "named_entities": ["Hindustan Unilever"],
+      "category": "macro_policy",
+      "event_type": "macro_data",
+      "event_cause": "price_data"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "headline_disinflation",
+          "label": "Headline retail disinflation",
+          "direction": "neutral",
+          "mechanism": "A softer headline print driven by food articles changes the measured price level without, on its own, changing the volume or realisation trajectory of any particular seller",
+          "confidence": 0.8, "materiality": 0.55, "impact_strength": 0.5, "time_horizon": "Medium-Term"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@headline_disinflation": {
+      "companies": [
+        {
+          "ticker": "HINDUNILVR.NS", "name": "Hindustan Unilever", "direction": "bullish", "net_direction": "bullish",
+          "economic_effect": "positive", "impact_strength": 0.55, "confidence": 0.8, "materiality": 0.65, "time_horizon": "Medium-Term",
+          "mechanism": "Cooling consumer price inflation gradually restores household real income, which over several quarters supports volume growth in mass home and personal care packs",
+          "rationale": "Mass-pack volume recovery has been the stated swing factor for this company's growth for several quarters",
+          "positive_channels": ["real income driven volume recovery"]
+        },
+        {
+          "ticker": "DABUR.NS", "name": "Dabur India", "direction": "bullish", "net_direction": "bullish",
+          "economic_effect": "positive", "impact_strength": 0.45, "confidence": 0.68, "materiality": 0.5, "time_horizon": "Medium-Term",
+          "mechanism": "Softer inflation is generally supportive of consumption demand across the packaged consumer goods space over time",
+          "rationale": "Large company in the same sector as the other staples names, participating in the broader consumption theme",
+          "positive_channels": ["consumption sentiment"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["HINDUNILVR.NS", "DABUR.NS"],
+      "reject": [],
+      "counterfactual": {
+        "HINDUNILVR.NS": "NOT_SUPPORTED",
+        "DABUR.NS": "NOT_SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": [],
+    "expected_rejected": ["HINDUNILVR.NS", "DABUR.NS"],
+    "expected_sections": [],
+    "expect_abstention": true,
+    "expected_evidence_tier": {"HINDUNILVR.NS": "SUBJECT", "DABUR.NS": "E"},
+    "expected_materiality_grade": {"HINDUNILVR.NS": "HIGH"},
+    "rationale": "ABSTENTION FIXTURE, and the important half is HINDUNILVR: it is the article's own named subject (tier SUBJECT, primary-capable at d1), it carries a HIGH composite materiality grade, its mechanism is articulate and its direction is internally consistent -- it clears every gate the strong-evidence path exists to open. It is still rejected, because the counterfactual verifier answers NOT_SUPPORTED: the 'real income restores mass-pack volumes' thesis was equally true the day before the print and survives the event's removal, which is the definition of a generic macro story wearing a company's name. DABUR fails earlier and more cheaply -- its rationale is interchangeable with a sector sentence and its evidence is the model's own inference (tier E), so COMPANY_SPECIFIC_EXPOSURE_VALID rejects it at gate five without the run ever having to reason about materiality. Two different false-positive shapes, one correct output: nothing published."
+  }
+}
