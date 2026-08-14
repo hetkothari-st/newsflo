@@ -1,17 +1,21 @@
 # Token-Efficiency & Budget Audit (spec §7 A-J, §13, §14)
 
 Task 5 of the Claude-provider migration (`.superpowers/sdd/2026-08-14-claude-provider-migration/task-5-brief.md`).
-Audit only — code changes are made ONLY where a genuine violation was found. None were found; every A-J
-item, §13 and §14 are already satisfied by the corrective-V4 architecture as built. No prompt text was
-touched, so `IMPACT_PROMPT_VERSION` was not bumped and the offline benchmark was not re-run (see Step 4).
+Audit only — code changes are made ONLY where a genuine violation was found. None were found for A-J or
+§13, which are already satisfied by the corrective-V4 architecture as built. §14 is PARTIAL: the
+sector-definition corpus rides every stage's static prefix; deferred as a future optimization rather than
+fixed this session — see the §14 section below for the full rationale. No prompt text was touched, so
+`IMPACT_PROMPT_VERSION` was not bumped and the offline benchmark was not re-run (see Step 4).
 
 ## A. Never send information a stage does not need
 
 **SATISFIED.**
 
 - `backend/app/analysis/impact_graph/engine.py:114-125` `_facts_suffix` — full event record (facts +
-  quantities + up to 12 evidence lines), used **only** by `initial_shocks`
-  (`engine.py:1628-1633`), the one stage that "genuinely needs the complete event record" (docstring).
+  quantities + up to 12 evidence lines), used by the graph-anchoring stages only:
+  `initial_shocks` (`engine.py:1628-1633`, the broad-path anchor) and `narrow_graph`
+  (`engine.py:1396-1402`, the narrow-path anchor) — the two stages that "genuinely need the complete
+  event record" (docstring). Every other stage builds its suffix from `_compact_suffix`.
 - `backend/app/analysis/impact_graph/engine.py:128-139` `_compact_suffix` — event line + numbered
   canonical facts only, "never the prose block, never article evidence, never the whole graph"; every
   downstream stage (company mapping, ripple discovery, verification) builds its suffix from this, not
