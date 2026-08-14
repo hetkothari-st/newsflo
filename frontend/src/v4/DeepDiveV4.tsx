@@ -232,6 +232,13 @@ export default function DeepDiveV4({
                         <div className="cmeta">
                           <span>{peer.ticker}</span>
                           {peer.cap_tier !== null && <span>{peer.cap_tier} cap</span>}
+                          {peer.confidence_band && (
+                            /* Band-only confidence (final-blueprint §18/§19,
+                               ruling R4, Task 9) -- never a numeric score. */
+                            <span className="cband4" title={`Confidence: ${peer.confidence_band}`}>
+                              {peer.confidence_band}
+                            </span>
+                          )}
                         </div>
                       </div>
                       {/* (i) = glance and stay; the row itself hops the

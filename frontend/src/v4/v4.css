@@ -556,6 +556,18 @@ body:has(.nf4.dark) { background: #14120e; }
 }
 .nf4 .lhead4 .li4 { font-size: 10px; }
 .nf4 .lbody4 { padding: 12px 16px 8px; }
+/* Macro-context sections (relationship "MACRO:<label>", spec §29) --
+   visually distinct from primary/ripple: muted and boxed instead of the
+   solid ink-fill header, so a reader never mistakes background context
+   for a directly-measured layer. Same border+opacity idiom as the
+   indirect4/cband4 chips elsewhere in v4. */
+.nf4 .layer4.macro4 .lhead4 {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  opacity: 0.7;
+}
+.nf4 .layer4.macro4 .lbody4 { opacity: 0.85; }
 /* On the ripple page, keep the rows (and their (i) buttons) clear of
    the floating cap-tier rail hugging the right edge. */
 .nf4 .band .lbody4 { padding-right: 60px; }
@@ -642,6 +654,10 @@ body:has(.nf4.dark) { background: #14120e; }
 }
 .nf4 .crow .fxl4.positive { color: var(--data-up); }
 .nf4 .crow .fxl4.negative { color: var(--data-down); }
+/* Directness + publication-tier line (spec §28, Task 9) -- a text
+   companion to fxl4 above, same quiet uppercase treatment as mch4/dvg4
+   since it is metadata about the row, not a fresh verdict. */
+.nf4 .crow .dtl4 { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ash); margin-top: 2px; }
 .nf4 .crow .mch4 { font-size: 12px; color: var(--sepia); margin-top: 2px; }
 .nf4 .crow .dvg4 { font-size: 12px; font-style: italic; color: var(--sepia); margin-top: 2px; }
 .nf4 .crow .cmeta {
@@ -652,6 +668,15 @@ body:has(.nf4.dark) { background: #14120e; }
   text-transform: uppercase;
   color: var(--ash);
   margin-top: 2px;
+}
+/* Confidence-band chip (ruling R4: band only, never a numeric score) --
+   same boxed-small-caps idiom as the indirect4 story badge. */
+.nf4 .crow .cmeta .cband4 {
+  font-weight: 700;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+  opacity: 0.75;
 }
 
 .nf4 .band .bandempty {

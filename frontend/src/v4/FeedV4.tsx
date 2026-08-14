@@ -123,6 +123,23 @@ function effectGlyph(effect: string): string {
   return '◆';
 }
 
+/* Row-level directness + tier line (spec §28, Task 9): a second compact
+   line under the existing "EFFECT · GRADE" line, e.g.
+   "DIRECT EXPOSURE · PRIMARY" / "INDIRECT EXPOSURE · RIPPLE" /
+   "REMOTE · MACRO". REMOTE drops the "EXPOSURE" suffix (per the brief's
+   worked examples); publication_tier's secondary_ripple spelling AND its
+   dead legacy names ('secondary_deep_dive'/'secondary') all display as
+   RIPPLE -- only 'primary' and 'macro_context' get their own word. */
+function directnessWord(directness: string): string {
+  return directness === 'REMOTE' ? 'REMOTE' : `${directness} EXPOSURE`;
+}
+
+function tierWord(tier: string): string {
+  if (tier === 'primary') return 'PRIMARY';
+  if (tier === 'macro_context') return 'MACRO';
+  return 'RIPPLE';
+}
+
 function fmtISTTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-IN', {
     hour: '2-digit',
@@ -143,11 +160,14 @@ function MetaLine({ alert, onToggle }: { alert: FeedAlert; onToggle: () => void 
         /* Owner decision 2026-08-14: no-primary gated alerts appear in the
            feed but must be unmistakably labeled -- every company on this
            story is indirect (secondary/deep-dive) exposure, none is the
-           article's subject. */
+           article's subject. Final-blueprint §15 (Task 9): when the
+           article's mechanisms span multiple sectors, labeling it as one
+           company's "indirect exposure" misstates it -- event_scope
+           carries a controlled event descriptor instead. */
         <>
           <span>—</span>
           <span className="indirect4" title="No directly-affected company: every listed company has indirect exposure only">
-            Indirect exposure
+            {alert.event_scope === 'multi_sector' ? 'Multi-sector impact' : 'Indirect exposure'}
           </span>
         </>
       )}
@@ -317,8 +337,12 @@ function RippleBand({
         detail?.layers.map((layer, layerIndex) => {
         const rows = visibleRows(layer);
         if (rows.length === 0) return null;
+        // Final-blueprint §29 (Task 9): macro-context sections must read as
+        // visually distinct from primary/ripple ones -- ripple_layers.py
+        // prefixes the relationship string "MACRO:<label>" for these.
+        const isMacro = layer.relationship.startsWith('MACRO:');
         return (
-          <div className="layer4" key={`${layer.title}-${layerIndex}`}>
+          <div className={`layer4${isMacro ? ' macro4' : ''}`} key={`${layer.title}-${layerIndex}`}>
             {/* Full-bleed ink strip -- the reference's own sectioning
                 device (paper/ink inversion), so each layer reads as an
                 unmistakable section, not a floating heading. */}
@@ -378,11 +402,30 @@ function RippleBand({
                       {row.economic_effect.toUpperCase()} · {row.materiality_grade}
                     </div>
                   )}
+                  {row.causal_directness && row.publication_tier && (
+                    /* Second five-dimension line (spec §28, Task 9):
+                       directness and publication tier are independent
+                       dimensions from the effect/grade line above -- a
+                       DIRECT exposure can still publish at RIPPLE tier.
+                       Absent on legacy rows (no field, no line, never a
+                       guess). */
+                    <div className="dtl4">
+                      {directnessWord(row.causal_directness)} · {tierWord(row.publication_tier)}
+                    </div>
+                  )}
                   {row.mechanism && <div className="mch4">{row.mechanism}</div>}
                   {row.divergence && <p className="dvg4">{row.divergence}</p>}
                   <div className="cmeta">
                     <span>{row.ticker}</span>
                     {row.cap_tier !== null && <span>{row.cap_tier} cap</span>}
+                    {row.confidence_band && (
+                      /* Band-only confidence display (ruling R4): never a
+                         numeric confidence_score, which no v4 row type
+                         even carries. */
+                      <span className="cband4" title={`Confidence: ${row.confidence_band}`}>
+                        {row.confidence_band}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {/* (i) = glance and stay; the row itself = go deep --

@@ -375,3 +375,143 @@ describe('deck level detection on gated alerts (finding I10)', () => {
     expect(bands[1].querySelector('[data-ticker="S.NS"]')).not.toBeNull();
   });
 });
+
+/* --- Task 9: five-dimension display, taxonomy/macro sections, band-only
+   confidence (final-blueprint §15/§28/§29, ruling R4). Backend Task 6
+   ships causal_directness/publication_tier/confidence_band/event_scope
+   later -- every field here is optional and these tests mock the payload
+   directly, nothing depends on a live backend. --------------------------- */
+
+describe('directness + tier row line (spec §28, Task 9)', () => {
+  it('renders "DIRECT EXPOSURE · PRIMARY" from causal_directness + publication_tier', async () => {
+    const alert = makeAlert({ id: 20 });
+    const row = makeRow({ ticker: 'ONGC.NS', causal_directness: 'DIRECT', publication_tier: 'primary' });
+    const detail = makeDetail(alert, [makeLayer([row])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    await waitFor(() => screen.getByTestId('v4row-ONGC.NS'));
+    expect(screen.getByText('DIRECT EXPOSURE · PRIMARY')).toBeInTheDocument();
+  });
+
+  it('maps secondary_ripple to RIPPLE and macro_context to MACRO, and REMOTE drops the EXPOSURE suffix', async () => {
+    const alert = makeAlert({ id: 21 });
+    const rowRipple = makeRow({ ticker: 'IOC.NS', causal_directness: 'INDIRECT', publication_tier: 'secondary_ripple' });
+    const rowMacro = makeRow({ ticker: 'INR.NS', causal_directness: 'REMOTE', publication_tier: 'macro_context' });
+    const detail = makeDetail(alert, [makeLayer([rowRipple, rowMacro])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    await waitFor(() => screen.getByTestId('v4row-IOC.NS'));
+    expect(screen.getByText('INDIRECT EXPOSURE · RIPPLE')).toBeInTheDocument();
+    expect(screen.getByText('REMOTE · MACRO')).toBeInTheDocument();
+  });
+
+  it('maps the dead legacy tier spellings (secondary_deep_dive / secondary) to RIPPLE too', async () => {
+    const alert = makeAlert({ id: 28 });
+    const rowA = makeRow({ ticker: 'LEG1.NS', causal_directness: 'INDIRECT', publication_tier: 'secondary_deep_dive' });
+    const rowB = makeRow({ ticker: 'LEG2.NS', causal_directness: 'DIRECT', publication_tier: 'secondary' });
+    const detail = makeDetail(alert, [makeLayer([rowA, rowB])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    await waitFor(() => screen.getByTestId('v4row-LEG1.NS'));
+    expect(screen.getByText('INDIRECT EXPOSURE · RIPPLE')).toBeInTheDocument();
+    expect(screen.getByText('DIRECT EXPOSURE · RIPPLE')).toBeInTheDocument();
+  });
+
+  it('renders nothing when causal_directness/publication_tier are absent -- legacy rows', async () => {
+    const alert = makeAlert({ id: 22 });
+    const row = makeRow({ ticker: 'LEGACY.NS' }); // no directness/tier fields at all
+    const detail = makeDetail(alert, [makeLayer([row])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    const rowEl = await waitFor(() => screen.getByTestId('v4row-LEGACY.NS'));
+    expect(rowEl.querySelector('.dtl4')).toBeNull();
+  });
+});
+
+describe('macro-context layer styling (spec §29, Task 9)', () => {
+  it('gets the macro4 class only on the layer whose relationship starts with MACRO:', async () => {
+    const alert = makeAlert({ id: 23 });
+    const detail = makeDetail(alert, [
+      makeLayer([makeRow({ ticker: 'M1.NS' })], {
+        title: 'Macro context — imported inflation',
+        relationship: 'MACRO:imported_inflation',
+      }),
+      makeLayer([makeRow({ ticker: 'M2.NS' })], { title: 'Directly hit', relationship: 'DIRECT' }),
+    ]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    const { container } = renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    await waitFor(() => screen.getByTestId('v4row-M1.NS'));
+    const layers = [...container.querySelectorAll('.layer4')];
+    expect(layers).toHaveLength(2);
+    expect(layers[0].className.split(' ')).toContain('macro4');
+    expect(layers[1].className.split(' ')).not.toContain('macro4');
+  });
+});
+
+describe('meta badge switches on event_scope (spec §15, Task 9)', () => {
+  it('shows "Multi-sector impact" when event_scope is multi_sector', async () => {
+    const alert = makeAlert({ id: 24, exposure: 'indirect_only', event_scope: 'multi_sector' });
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    expect(screen.getByText('Multi-sector impact')).toBeInTheDocument();
+    expect(screen.queryByText('Indirect exposure')).not.toBeInTheDocument();
+  });
+
+  it('falls back to "Indirect exposure" when event_scope is absent', async () => {
+    const alert = makeAlert({ id: 25, exposure: 'indirect_only' });
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    expect(screen.getByText('Indirect exposure')).toBeInTheDocument();
+  });
+});
+
+describe('confidence band chip -- band only, never numeric (ruling R4, Task 9)', () => {
+  it('renders the confidence_band chip verbatim, with no numeric confidence anywhere on the row', async () => {
+    const alert = makeAlert({ id: 26 });
+    const row = makeRow({ ticker: 'CB.NS', confidence_band: 'HIGH' });
+    const detail = makeDetail(alert, [makeLayer([row])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    const rowEl = await waitFor(() => screen.getByTestId('v4row-CB.NS'));
+    const chip = rowEl.querySelector('.cband4');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toBe('HIGH');
+    // Band-only display: no "confidence: <number>" text anywhere on the
+    // row. LayerRow carries no confidence_score field at all, so this
+    // also holds structurally, not just by this render's choices.
+    expect(rowEl.textContent).not.toMatch(/confidence[^a-z]*\d/i);
+  });
+
+  it('renders no confidence chip when confidence_band is absent', async () => {
+    const alert = makeAlert({ id: 27 });
+    const row = makeRow({ ticker: 'NB.NS' });
+    const detail = makeDetail(alert, [makeLayer([row])]);
+    vi.spyOn(api, 'getFeedAlerts').mockResolvedValue([alert]);
+    vi.spyOn(api, 'getAlertDetail').mockResolvedValue(detail);
+    renderFeed();
+    await waitFor(() => screen.getByText('Oil surges on supply shock'));
+    fireEvent.click(screen.getByText("See who's affected →"));
+    const rowEl = await waitFor(() => screen.getByTestId('v4row-NB.NS'));
+    expect(rowEl.querySelector('.cband4')).toBeNull();
+  });
+});

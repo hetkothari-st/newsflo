@@ -20,7 +20,30 @@ export type ReactionDirection = 'positive' | 'negative' | 'flat' | 'unknown';
 // reaction above (spec §37/§38).
 export type EconomicEffect = 'positive' | 'negative' | 'mixed' | 'uncertain' | 'no_material_impact';
 export type MaterialityGrade = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
-export type ConfidenceBand = 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH';
+// Final-blueprint §18/§19 (Task 9): app.analysis.impact_graph.
+// publication_gate.confidence_band's closed vocabulary
+// (CONFIDENCE_BANDS = HIGH | MEDIUM | LOW | UNKNOWN) -- the SAME closed
+// set materiality_grade uses, not the pre-blueprint pipeline.band_for_score
+// spelling (LOW/MODERATE/HIGH/VERY_HIGH) this type used to carry. Backend
+// Task 6 rewrites the wire value to this vocabulary; band-only display,
+// never a numeric confidence_score (ruling R4).
+export type ConfidenceBand = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+// Final-blueprint §3/§11 (Task 9): the gate's registry-level directness,
+// independent of causal_distance and independent of publication_tier below
+// -- a DIRECT exposure can still publish at a non-primary tier (§28
+// example: "DIRECT EXPOSURE · SECONDARY").
+export type CausalDirectness = 'DIRECT' | 'INDIRECT' | 'REMOTE';
+// Final-blueprint §3/§29 (Task 9): the tier the gate actually published
+// at. Mirrors LayerRow.display_tier's value set plus 'macro_context' --
+// backend Task 6 is expected to serve this key going forward; the dead
+// 'secondary_deep_dive'/'secondary' spellings are read-only legacy
+// compat (never written), same as display_tier's.
+export type PublicationTier =
+  | 'primary'
+  | 'secondary_ripple'
+  | 'macro_context'
+  | 'secondary_deep_dive'
+  | 'secondary';
 export type ImpactType = 'direct' | 'indirect';
 export type MarketSensitivity = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 export type ReactionSignificance = 'significant' | 'normal' | 'noise' | 'unknown';
@@ -111,6 +134,13 @@ export interface FeedAlert {
   // headlined from its secondary/deep-dive movers (render an explicit
   // indirect-exposure badge); null/undefined = ungated legacy alert.
   exposure?: 'primary' | 'indirect_only' | null;
+  // Final-blueprint §15 (Task 9): set when the article's mechanisms span
+  // more than one sector (direct + indirect + macro all present) -- the
+  // indirect_only badge then reads "Multi-sector impact" instead of
+  // "Indirect exposure", since labelling a multi-sector story as a single
+  // company's indirect exposure would misstate it. null/absent = no
+  // article-level descriptor available; falls back to "Indirect exposure".
+  event_scope?: 'multi_sector' | null;
 }
 
 export interface LayerRow {
@@ -153,6 +183,17 @@ export interface LayerRow {
   confidence_band?: ConfidenceBand | null;
   impact_type?: ImpactType | null;
   expected_market_sensitivity?: MarketSensitivity | null;
+  // Final-blueprint §3/§28 (Task 9), wire contract from backend Task 6 --
+  // both optional, coded defensively: a legacy row (or a row served before
+  // Task 6 ships) simply omits them, and the derived row-detail line
+  // (directness + tier) renders nothing rather than guessing.
+  causal_directness?: CausalDirectness | null;
+  publication_tier?: PublicationTier | null;
+  // Free-text edge description from the gate's edge ontology (§21) --
+  // e.g. "input_cost", "competitor", "supply_chain". Not yet rendered by
+  // any v4 surface; carried on the type so a consumer can opt in without
+  // another contract change.
+  edge_relation?: string | null;
   // Deterministic template (app.analysis.refinement.divergence_line):
   // non-null ONLY when economic_effect and reaction_direction point
   // opposite ways; never a prediction, only a stated fact.
