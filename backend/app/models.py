@@ -468,12 +468,19 @@ class AlertCompany(Base):
     # migration 0008: "secondary_deep_dive" (V4) and "secondary"
     # (pre-Task-4) were the SAME tier under two dead names and have been
     # REWRITTEN to "secondary_ripple" in the data. Both dead names are
-    # WRITTEN NOWHERE, but they are still READ as legacy-compat -- see
-    # publication_gate.LEGACY_SECONDARY_SPELLINGS / is_secondary_tier,
-    # market/ripple_layers.DEEP_DIVE_TIERS and routers/feed_v2's
-    # _SECONDARY_TIERS -- because a DB restored from a pre-0008 backup, or
-    # any row written by a binary that predates the rewrite, can still
-    # carry them. Plus the terminal gate state. NULL on rows
+    # WRITTEN NOWHERE, but they are still READ as legacy-compat -- a DB
+    # restored from a pre-0008 backup, or a row written by a binary that
+    # predates the rewrite, can still carry them. The readers:
+    #   * publication_gate.LEGACY_SECONDARY_SPELLINGS, consumed by
+    #     is_secondary_tier / is_displayable_tier -- THE canonical place
+    #     the legacy spellings are accepted; market/ripple_layers and
+    #     analysis/impact_graph/consistency read them only through it,
+    #     holding no tier tuple of their own,
+    #   * routers/feed_v2._SECONDARY_TIERS (a local tuple, pending its
+    #     swap to the gate helper),
+    #   * tools/offline_benchmark.DEEP_DIVE_TIERS (same, in the benchmark
+    #     harness).
+    # Plus the terminal gate state. NULL on rows
     # persisted with the flag off -- legacy rows have no gate semantics,
     # and consumers must treat NULL as legacy, never as eligible.
     display_tier = Column(String, nullable=True)
