@@ -337,8 +337,11 @@ class Alert(Base):
     # produced the AUTHORITATIVE graph and at what quality. A Groq (or
     # degraded-Gemini) result must never masquerade as the premium
     # analysis -- these are the visible marks the spec requires.
-    # provider: gemini | groq. quality: authoritative | degraded | fallback
-    # | budget_exhausted. NULL on pre-v3 alerts.
+    # provider: claude on every current run (provider-migration 2026-08-14 --
+    # analysis is Claude-only and the router fails closed without a key);
+    # gemini | groq survive only as values already written on historical
+    # rows. quality: authoritative | degraded | fallback | budget_exhausted.
+    # NULL on pre-v3 alerts.
     analysis_provider = Column(String, nullable=True)
     analysis_quality = Column(String, nullable=True)
     # Structured event causation (corrective-v4 task 10): the article's own
@@ -464,8 +467,13 @@ class AlertCompany(Base):
     # ("primary" | "secondary_ripple" | "macro_context"). Ruling R3 /
     # migration 0008: "secondary_deep_dive" (V4) and "secondary"
     # (pre-Task-4) were the SAME tier under two dead names and have been
-    # REWRITTEN to "secondary_ripple" in the data -- neither is read or
-    # written any more. Plus the terminal gate state. NULL on rows
+    # REWRITTEN to "secondary_ripple" in the data. Both dead names are
+    # WRITTEN NOWHERE, but they are still READ as legacy-compat -- see
+    # publication_gate.LEGACY_SECONDARY_SPELLINGS / is_secondary_tier,
+    # market/ripple_layers.DEEP_DIVE_TIERS and routers/feed_v2's
+    # _SECONDARY_TIERS -- because a DB restored from a pre-0008 backup, or
+    # any row written by a binary that predates the rewrite, can still
+    # carry them. Plus the terminal gate state. NULL on rows
     # persisted with the flag off -- legacy rows have no gate semantics,
     # and consumers must treat NULL as legacy, never as eligible.
     display_tier = Column(String, nullable=True)
@@ -562,8 +570,31 @@ class AlertCompany(Base):
 # is tested. The SQL below is duplicated verbatim in
 # alembic/versions/0008_three_tier_blueprint.py on purpose: a migration
 # must never import app code, which drifts underneath it. If you change one,
-# change both -- tests/test_gated_row_immutability.py pins the create_all
-# half and tests/test_migrations.py pins the migration half.
+# change both -- and tests/test_migrations.py's
+# test_models_and_0008_trigger_ddl_are_byte_identical reads 0008's SOURCE
+# and compares the normalized SQL, so drift fails the suite rather than
+# silently diverging migrated DBs from create_all-built ones.
+#
+# ###################################################################
+# ## WARNING TO ANY 0009+ MIGRATION AUTHOR                         ##
+# ##                                                               ##
+# ## Alembic's `op.batch_alter_table` on SQLite RECREATES the      ##
+# ## table (CREATE new -> copy rows -> DROP old -> RENAME), and    ##
+# ## SQLite DROPs every trigger attached to a dropped table.       ##
+# ## Alembic does NOT copy triggers, and this `after_create` hook  ##
+# ## does NOT fire on an Alembic batch rebuild -- so ANY future    ##
+# ## migration that batch-alters `alert_companies` (adding a       ##
+# ## column, altering a constraint, anything with                  ##
+# ## recreate="always" or a SQLite ALTER that Alembic implements   ##
+# ## by rebuild) SILENTLY DROPS THIS ENTIRE BACKSTOP.              ##
+# ##                                                               ##
+# ## Such a migration MUST re-emit the triggers at the END of the  ##
+# ## batch operation. Migrations must not import app code, so      ##
+# ## copy the two CREATE TRIGGER statements below verbatim into    ##
+# ## that migration (the byte-identity test above will keep them   ##
+# ## honest), or call `emit_gated_row_triggers(bind)` from any     ##
+# ## NON-migration code path that needs them.                      ##
+# ###################################################################
 #
 # SQLite only. Postgres has no `CREATE TRIGGER IF NOT EXISTS` and needs a
 # trigger FUNCTION plus a CHECK-style raise; that port is a documented
@@ -602,12 +633,33 @@ END
 """
 
 
+# The public, reusable form. Both statements in application order, exported
+# so any NON-migration code path that rebuilds or adopts an alert_companies
+# table can reinstall the backstop instead of re-typing the SQL. (Alembic
+# migrations must NOT import this -- see the warning block above; they copy
+# the literals and are held byte-identical by test_migrations.py.)
+GATED_ROW_TRIGGER_DDL = (
+    _GATED_CONSISTENCY_UPDATE_TRIGGER,
+    _GATED_CONSISTENCY_INSERT_TRIGGER,
+)
+
+
+def emit_gated_row_triggers(bind) -> bool:
+    """Install the §26 gated-row backstop on `bind` (a Connection or
+    Engine-like object exposing `.dialect` and `.execute`). Idempotent --
+    every statement is CREATE TRIGGER IF NOT EXISTS. Returns True if the
+    triggers were emitted, False on a non-SQLite dialect (where they are
+    deliberately a no-op pending the Postgres port)."""
+    if bind.dialect.name != "sqlite":
+        return False
+    for statement in GATED_ROW_TRIGGER_DDL:
+        bind.execute(text(statement))
+    return True
+
+
 @event.listens_for(AlertCompany.__table__, "after_create")
 def _install_gated_consistency_triggers(target, connection, **kw):
-    if connection.dialect.name != "sqlite":
-        return
-    connection.execute(text(_GATED_CONSISTENCY_UPDATE_TRIGGER))
-    connection.execute(text(_GATED_CONSISTENCY_INSERT_TRIGGER))
+    emit_gated_row_triggers(connection)
 
 
 class CascadeGap(Base):
@@ -773,8 +825,9 @@ class CompanyDecisionRecord(Base):
     final_state = Column(String, nullable=False)     # DISPLAY_ELIGIBLE | REJECT_*
     # primary | secondary_ripple | macro_context | excluded. Ruling R3 /
     # migration 0008 rewrote every legacy "secondary_deep_dive" and
-    # "secondary" row to "secondary_ripple"; neither dead name is read or
-    # written any more.
+    # "secondary" row to "secondary_ripple"; neither dead name is WRITTEN
+    # any more, but both are still READ as legacy-compat (see
+    # AlertCompany.display_tier above for the readers).
     display_tier = Column(String, nullable=False)
     rejection_reason = Column(String, nullable=True)  # REJECT_* or NULL
     gates_passed_json = Column(Text, nullable=True)   # JSON list of gate names

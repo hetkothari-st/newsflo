@@ -107,6 +107,11 @@ def test_trigger_blocks_negative_effect_turned_bullish(db_session):
         db_session.commit()
     db_session.rollback()
 
+    still = db_session.execute(
+        text("SELECT direction FROM alert_companies WHERE id = :id"),
+        {"id": ac.id}).scalar()
+    assert still == "bearish"
+
 
 def test_trigger_blocks_rationale_nulling_on_gated_row(db_session):
     """The stale worker's other signature move: clearing the rationale of a

@@ -660,25 +660,133 @@ def test_0008_adds_partial_unique_content_key_index(tmp_path):
 
 
 def test_0008_is_rerunnable_over_its_own_output(tmp_path):
-    """Same guard discipline as 0002-0007: re-running the whole chain over
-    an already-migrated DB (the boot path does exactly this on every
-    container start) must not fail on an existing column, index or
-    trigger."""
+    """Same guard discipline as 0002-0007: 0008's own statements must
+    survive being replayed over a database they have ALREADY been applied
+    to -- which is what the boot path effectively does whenever a DB is
+    re-stamped or restored behind head.
+
+    Note the `alembic stamp 0007` in the middle: without it the second
+    `upgrade head` is a no-op (the DB is already at 0008 and alembic simply
+    skips the revision), so it would prove nothing at all. Stamping back to
+    0007 makes alembic genuinely RE-EXECUTE 0008's body against a database
+    that already carries every column, index and trigger it creates."""
     import sqlite3
 
     db = tmp_path / "rerun_0008.db"
     url = f"sqlite:///{db}"
     assert _run_alembic(url).returncode == 0
+
+    env = dict(os.environ, DATABASE_URL=url)
+    stamp_back = subprocess.run(
+        [sys.executable, "-m", "alembic", "stamp", "0007"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert stamp_back.returncode == 0, stamp_back.stderr
+    assert _current_revision(db) == {"0007"}, "fixture precondition: 0008 will re-run"
+
     second = _run_alembic(url)
     assert second.returncode == 0, second.stderr
+    assert _current_revision(db) == _head_revision()
 
     conn = sqlite3.connect(db)
     try:
         triggers = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger'")}
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(alerts)")}
+        ac = {r[1] for r in conn.execute("PRAGMA table_info(alert_companies)")}
     finally:
         conn.close()
     assert "alert_companies_gated_consistency" in triggers
+    assert "alert_companies_gated_consistency_insert" in triggers
+    assert "uq_alerts_article_content" in indexes
+    assert "edge_relation" in ac
+
+
+def _normalized_sql(statement: str) -> str:
+    """Whitespace-insensitive comparison: the two copies live in files with
+    different indentation conventions, and only the SQL must match."""
+    return " ".join(statement.split())
+
+
+def test_models_and_0008_trigger_ddl_are_byte_identical():
+    """Fix-round finding 1: the §26 trigger SQL is DUPLICATED between
+    app/models.py (the create_all DDL hook) and 0008 (production DBs),
+    because a migration must never import app code that drifts underneath
+    it. Nothing but this test stops the two copies from silently diverging
+    -- which would leave migrated databases and create_all-built databases
+    (i.e. production and the entire test suite) enforcing different rules,
+    the exact class of gap where a §26 violation hides.
+
+    0008's source is read as TEXT rather than imported: importing a
+    migration module executes alembic's revision bookkeeping, and the point
+    is to compare the file as it will actually be replayed."""
+    import re
+
+    from app.models import GATED_ROW_TRIGGER_DDL
+
+    source = (BACKEND / "alembic" / "versions" /
+              "0008_three_tier_blueprint.py").read_text(encoding="utf-8")
+    found = re.findall(
+        r'^_(?:UPDATE|INSERT)_TRIGGER = """(.*?)"""', source,
+        flags=re.MULTILINE | re.DOTALL)
+    assert len(found) == 2, (
+        "0008 must define exactly _UPDATE_TRIGGER and _INSERT_TRIGGER as "
+        f"module-level triple-quoted literals; found {len(found)}")
+
+    assert [_normalized_sql(s) for s in found] == \
+           [_normalized_sql(s) for s in GATED_ROW_TRIGGER_DDL], (
+        "the trigger DDL in alembic/versions/0008_three_tier_blueprint.py "
+        "has drifted from app/models.py's GATED_ROW_TRIGGER_DDL -- change "
+        "BOTH or migrated and create_all-built DBs will enforce different "
+        "gated-row rules")
+
+
+def test_batch_recreating_alert_companies_drops_the_triggers(tmp_path):
+    """Fix-round finding 1, the latent hazard itself, pinned as executable
+    documentation: SQLite drops every trigger attached to a dropped table,
+    and Alembic's batch_alter_table implements a SQLite ALTER by rebuilding
+    the table -- so a future migration that batch-alters alert_companies
+    silently takes the whole §26 backstop with it, leaving a schema that
+    LOOKS correct.
+
+    This test asserts the failure mode is real (so nobody 'fixes' the
+    warning blocks in models.py / 0008 by deleting them), and that
+    re-emitting the exported DDL restores the guarantee -- the remedy those
+    warnings prescribe."""
+    from sqlalchemy import create_engine, text as sa_text
+
+    from app.models import emit_gated_row_triggers
+
+    db = tmp_path / "batch_rebuild.db"
+    url = f"sqlite:///{db}"
+    assert _run_alembic(url).returncode == 0
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            before = {r[0] for r in conn.execute(sa_text(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"))}
+            assert "alert_companies_gated_consistency" in before
+
+            # Exactly what a batch rebuild does to the table.
+            conn.execute(sa_text(
+                "CREATE TABLE ac_rebuilt AS SELECT * FROM alert_companies"))
+            conn.execute(sa_text("DROP TABLE alert_companies"))
+            conn.execute(sa_text(
+                "ALTER TABLE ac_rebuilt RENAME TO alert_companies"))
+
+            after = {r[0] for r in conn.execute(sa_text(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"))}
+            assert "alert_companies_gated_consistency" not in after, (
+                "if this ever stops being true the warning blocks can go")
+
+            # The prescribed remedy: re-emit at the end of the batch op.
+            assert emit_gated_row_triggers(conn) is True
+            restored = {r[0] for r in conn.execute(sa_text(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"))}
+        assert "alert_companies_gated_consistency" in restored
+        assert "alert_companies_gated_consistency_insert" in restored
+    finally:
+        engine.dispose()
 
 
 # ===========================================================================

@@ -48,6 +48,21 @@ modes follow from getting this backwards:
     the same failing condition against NEW.
 Repair the data, THEN install the guard that keeps it repaired.
 
+!!! WARNING TO ANY 0009+ MIGRATION AUTHOR !!!
+`op.batch_alter_table` on SQLite RECREATES the table (CREATE new -> copy
+rows -> DROP old -> RENAME), and SQLite DROPS every trigger attached to a
+dropped table. Alembic does NOT copy triggers across a batch rebuild, and
+app/models.py's `after_create` DDL hook does NOT fire on one either. So ANY
+future migration that batch-alters `alert_companies` -- adding a column,
+changing a constraint, anything Alembic implements by rebuild, and
+certainly anything with `recreate="always"` -- SILENTLY DROPS THIS ENTIRE
+BACKSTOP, leaving the schema looking correct and the §26 guarantee gone.
+
+Such a migration MUST re-emit both triggers at the END of its batch
+operation. Copy `_UPDATE_TRIGGER` / `_INSERT_TRIGGER` below verbatim
+(migrations must not import app code); the byte-identity test in
+tests/test_migrations.py keeps every copy honest.
+
 POSTGRES FOLLOW-UP. The triggers are emitted only when
 `bind.dialect.name == "sqlite"`. Postgres has no `CREATE TRIGGER IF NOT
 EXISTS` and no `RAISE(ABORT)` in trigger bodies -- it needs a
@@ -109,11 +124,14 @@ _DEAD_SECONDARY_TIERS = ("secondary_deep_dive", "secondary")
 _SECONDARY_RIPPLE = "secondary_ripple"
 
 # Duplicated verbatim from app/models.py's
-# _GATED_CONSISTENCY_{UPDATE,INSERT}_TRIGGER. Duplication over import on
-# purpose (see the docstring): a migration must not depend on app code that
-# drifts underneath it. If you change one, change both --
-# tests/test_migrations.py pins this half, and
-# tests/test_gated_row_immutability.py pins the create_all half.
+# _GATED_CONSISTENCY_{UPDATE,INSERT}_TRIGGER (also exported there as
+# models.GATED_ROW_TRIGGER_DDL / models.emit_gated_row_triggers, for
+# NON-migration callers). Duplication over import on purpose (see the
+# docstring): a migration must not depend on app code that drifts
+# underneath it. Drift is closed mechanically instead --
+# tests/test_migrations.py's test_models_and_0008_trigger_ddl_are_byte_
+# identical reads THIS FILE's source and compares the normalized SQL
+# against models.py's, so the two can never silently diverge.
 _UPDATE_TRIGGER = """
 CREATE TRIGGER IF NOT EXISTS alert_companies_gated_consistency
 BEFORE UPDATE ON alert_companies
