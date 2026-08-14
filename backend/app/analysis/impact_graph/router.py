@@ -1,20 +1,39 @@
-"""Stage router + quality-first degradation ladder (spec doc 1 §14,
-doc 2 §1-2).
+"""Stage router -- Claude-first, fail-closed (provider-migration spec
+2026-08-14 §5, §9, §19, §20; supersedes the old paid-Gemini ladder).
 
-For a PROTECTED article, Gemini owns every quality-critical stage:
-    facts            -> settings.gemini_fact_model      (low thinking)
-    everything else  -> settings.gemini_reasoning_model (high thinking)
+Claude owns EVERY stage of EVERY article. There is no protected/
+non-protected split any more: the per-article ArticleBudget is the cost
+bound, not a paid-grant gate.
 
-Failure ladder (never silent):
-    1. retry the same Gemini model once,
-    2. retry with the compact context (when the stage supplies one),
-    3. degrade to settings.gemini_fallback_model  -> quality="degraded",
-    4. last resort Groq                            -> provider="groq",
-                                                      quality="fallback".
+    facts            -> settings.claude_fact_model    (low thinking)
+    reader summary   -> settings.claude_summary_model (low thinking)
+    everything else  -> settings.claude_model         (high thinking)
+    (settings.claude_stage_model_override_map wins over all three)
 
-For a NON-protected article the same stage contracts are served by Groq
-directly (provider="groq") -- same schemas, same verification contract,
-explicitly configured, never pretending to be the premium path.
+Provider ladder (never silent, never longer than it has to be):
+    1. Claude, full dynamic_suffix           -> variant "full".
+       The SDK already retried transient failures (429/5xx/connection),
+       so the router does NOT add a plain retry rung.
+    2. Claude, compact context -- ONLY when rung 1 raised a
+       ClaudeJSONError whose .retryable_with_compact is True (schema /
+       truncated: the model produced a wrong-shaped or overlong answer, a
+       smaller prompt can plausibly fix it) AND the stage supplied a
+       compact_suffix. Sleeps settings.claude_retry_backoff first.
+       Variant "compact" -- never cache-eligible.
+    3. Ladder end: Groq ONLY under the explicit LLM_FALLBACK_ALLOWED
+       opt-in (provider="groq", quality="fallback", logged loudly).
+       Otherwise the stage FAILS CLOSED with StageRouterError -- a
+       missing/broken Claude key never silently downgrades financial
+       output to a weaker model.
+
+Auth circuit breaker: a `kind == "auth"` failure is terminal for the
+WHOLE run, not one stage -- once seen, every remaining call skips the
+Claude rungs entirely instead of burning calls on a dead key (mirrors the
+old spend-cap breaker, which measured minutes of pointless retries).
+
+Gemini is NOT importable here (spec §16): gemini_json.py is a disabled,
+isolated adapter. The provider component in the cache fingerprint makes
+pre-migration Gemini rows unmatchable by a Claude run.
 
 The router carries the worst quality seen across a run; the engine stamps
 it onto the Alert (analysis_provider / analysis_quality columns).
@@ -22,9 +41,10 @@ it onto the Alert (analysis_provider / analysis_quality columns).
 import hashlib
 import json
 import logging
+import time
 from datetime import timedelta
 
-from app.analysis.impact_graph.gemini_json import GeminiJSONClient, GeminiJSONError
+from app.analysis.impact_graph.claude_json import ClaudeJSONClient, ClaudeJSONError
 from app.analysis.impact_graph.publication_gate import POLICY_VERSION
 from app.config import settings
 
@@ -38,6 +58,10 @@ STAGE_CACHE_TTL_DAYS = 3
 FACT_STAGES = {"extract_facts"}
 SUMMARY_STAGES = {"reader_summary"}
 
+# "degraded" is unreachable through the Claude ladder (there is no
+# cheaper-model rung any more), but it stays in the order: cache envelopes
+# and Alert rows written before the migration carry it, and _cache_get
+# still has to rank it against the others.
 _QUALITY_ORDER = {"authoritative": 0, "degraded": 1, "fallback": 2, "budget_exhausted": 3}
 
 
@@ -46,22 +70,49 @@ class StageRouterError(Exception):
 
 
 class StageRouter:
-    def __init__(self, *, protected: bool, gemini_api_key: str | None,
-                 groq_client=None, article_id: int | None = None, budget=None,
-                 session=None):
-        self.protected = protected
+    def __init__(self, *, claude_api_key: str | None, groq_client=None,
+                 article_id: int | None = None, budget=None, session=None,
+                 claude_client=None):
+        # Fail closed BEFORE anything else: a deployment that points at a
+        # provider this router no longer speaks must not quietly serve
+        # whatever client happens to be lying around.
+        if settings.llm_provider_mode != "claude":
+            raise StageRouterError(
+                f"llm_provider_mode={settings.llm_provider_mode}: no live provider "
+                "configured -- refusing to run analysis")
         self.article_id = article_id
         self.budget = budget
-        self._gemini = GeminiJSONClient(gemini_api_key) if gemini_api_key else None
+        # `claude_client` is the injected adapter (tests always inject; no
+        # test in this repo may ever reach the network).
+        self._claude = claude_client if claude_client is not None else (
+            ClaudeJSONClient(claude_api_key) if claude_api_key else None)
         self._groq = groq_client
         self._session = session  # durable stage cache; None (tests) = no caching
-        self.provider = "gemini" if (protected and self._gemini) else "groq"
-        # Provider-identity honesty (corrective-v4 Task 15): a NON-protected
-        # article is served by Groq from the very first call, by explicit
-        # configuration -- never "authoritative" from construction onward.
-        # Only a protected article routed to Gemini starts authoritative;
-        # everything else earns a lower quality, it never inherits one.
-        self.quality = "authoritative" if self.provider == "gemini" else "fallback"
+        if self._claude is not None:
+            self.provider = "claude"
+        elif settings.llm_fallback_allowed and self._groq is not None:
+            # Explicit, opted-in, loudly-announced degradation -- the only
+            # way a run can start on Groq at all.
+            self.provider = "groq"
+            logger.warning("impact-graph router constructed on GROQ FALLBACK "
+                           "(no Claude key, LLM_FALLBACK_ALLOWED=true) -- output is "
+                           "quality=fallback, not authoritative, article=%s", article_id)
+        else:
+            raise StageRouterError(
+                "no CLAUDE_API_KEY configured and fallback is disabled -- refusing to "
+                "run analysis (set CLAUDE_API_KEY, or opt into the weaker Groq path "
+                "explicitly with LLM_FALLBACK_ALLOWED=true)")
+        # The construction-time dispatch target. `self.provider` is the
+        # HONESTY field -- a mid-run fallback rewrites it to "groq" so the
+        # Alert is stamped truthfully -- but it must never rewrite which
+        # provider the NEXT stage tries first: one transient Claude failure
+        # may not silently demote the rest of the run.
+        self._primary = self.provider
+        # Provider-identity honesty (corrective-v4 Task 15, preserved):
+        # quality is EARNED, never inherited. Only a Claude-served router
+        # starts authoritative; a Groq-by-configuration router is
+        # "fallback" from its very first call, not after something breaks.
+        self.quality = "authoritative" if self.provider == "claude" else "fallback"
         self.stage_cache_hits = 0
         # Which prompt variant actually served the current call: "full" is
         # the caller's real dynamic_suffix, "compact" is the trimmed
@@ -74,12 +125,12 @@ class StageRouter:
         # metric"), exposed on the instance for callers/tests that want it
         # without reaching into the private variant flag.
         self.context_compacted = False
-        # Spend-cap circuit breaker (2026-08-12): a monthly-cap 429 is
-        # terminal for the WHOLE run, not one stage -- once seen, every
-        # remaining call skips the Gemini rungs entirely instead of
-        # hammering a dead cap through the full ladder (measured: a capped
-        # broad article burned minutes of 4-rung retries across ~10 stages).
-        self.gemini_capped = False
+        # Auth circuit breaker (provider-migration §20, replaces the old
+        # gemini_capped spend-cap breaker): a dead/revoked key is terminal
+        # for the WHOLE run, not one stage -- once seen, every remaining
+        # call skips the Claude rungs entirely instead of burning a call
+        # per stage on a key that cannot possibly answer.
+        self.claude_auth_failed = False
 
     # -- public ----------------------------------------------------------
 
@@ -116,10 +167,12 @@ class StageRouter:
             self._record_cache_hit(stage, context)
             return cached
         # Reset per-call; only a rung that actually serves this call may
-        # set it back to "compact" (see _call_protected).
+        # set it back to "compact" (see _call_claude).
         self._served_variant = "full"
-        if self.protected and self._gemini is not None:
-            result = self._call_protected(
+        # Dispatch on the CONSTRUCTION-time provider, not self.provider --
+        # see `self._primary`.
+        if self._primary == "claude":
+            result = self._call_claude(
                 stage, schema=schema, static_prefix=static_prefix,
                 dynamic_suffix=dynamic_suffix, compact_suffix=compact_suffix,
                 thinking=thinking, max_output_tokens=max_output_tokens,
@@ -175,10 +228,18 @@ class StageRouter:
 
     def _fingerprint(self, stage: str, schema: dict, static_prefix: str,
                      seed: str, variant: str = "full") -> str:
-        """Semantic-cache key (cost-opt spec P12): stage + model + prompt/
-        schema/knowledge versions + static prefix + the caller's semantic
-        seed (or raw suffix when no seed was supplied). Version components
-        make every prompt/registry change an EXPLICIT invalidation.
+        """Semantic-cache key (cost-opt spec P12): stage + PROVIDER + model
+        + prompt/schema/knowledge versions + static prefix + the caller's
+        semantic seed (or raw suffix when no seed was supplied). Version
+        components make every prompt/registry change an EXPLICIT
+        invalidation.
+
+        Provider-migration §8 ("old Gemini cache entries must be isolated
+        from Claude") is enforced by construction here, not by a migration:
+        `self.provider` and the model are BOTH hashed, so every row written
+        by the pre-migration Gemini router lives under a key no Claude run
+        can ever produce. No Gemini answer can be replayed as a Claude one,
+        and no cache purge is needed to guarantee it.
 
         Corrective-v4 Task 15 adds three more explicit-invalidation
         components: the strict-mode flag (v4-strict and legacy runs must
@@ -189,14 +250,13 @@ class StageRouter:
         cache never stores a compact-context result under any key; see
         call()), but keeping the marker in the payload documents the
         contract in the hash itself rather than leaving it implicit."""
-        model, _ = self._model_for(stage) if (self.protected and self._gemini) \
-            else (settings.groq_aux_model, "")
+        model = self._fingerprint_model(stage)
         try:
             from app.analysis.impact_graph.knowledge import KNOWLEDGE_REGISTRY_VERSION
         except ImportError:
             KNOWLEDGE_REGISTRY_VERSION = ""
         payload = "\x1f".join([
-            stage, model, self._prompt_version(), self._schema_version(),
+            stage, self.provider, model, self._prompt_version(), self._schema_version(),
             KNOWLEDGE_REGISTRY_VERSION, static_prefix, seed,
             json.dumps(schema, sort_keys=True),
             str(int(settings.impact_engine_v4_strict)), POLICY_VERSION, variant,
@@ -257,7 +317,7 @@ class StageRouter:
             logger.warning("stage cache write failed", exc_info=True)
 
     def _fingerprint_model(self, stage: str) -> str:
-        if self.protected and self._gemini is not None:
+        if self.provider == "claude":
             return self._model_for(stage)[0]
         return settings.groq_aux_model
 
@@ -265,98 +325,122 @@ class StageRouter:
         if _QUALITY_ORDER[quality] > _QUALITY_ORDER[self.quality]:
             self.quality = quality
 
-    # -- protected ladder -------------------------------------------------
+    # -- claude ladder ----------------------------------------------------
 
     def _model_for(self, stage: str) -> tuple[str, str]:
-        override = settings.gemini_stage_model_override_map.get(stage)
+        """(model, default thinking level) for a stage. The thinking level
+        is contract parity only -- claude_json.py never sends a thinking
+        block -- but it still rides telemetry, so it stays honest about
+        which stages are the cheap ones."""
+        override = settings.claude_stage_model_override_map.get(stage)
         if override:
             return override, "high"
         if stage in FACT_STAGES:
-            return settings.gemini_fact_model, "low"
+            return settings.claude_fact_model, "low"
         if stage in SUMMARY_STAGES:
-            return settings.gemini_summary_model, "low"
-        return settings.gemini_reasoning_model, "high"
+            return settings.claude_summary_model, "low"
+        return settings.claude_model, "high"
 
-    @staticmethod
-    def _is_spend_cap_error(exc: GeminiJSONError) -> bool:
-        return exc.status_code == 429 and "spending cap" in str(exc).lower()
+    def _claude_attempt(self, stage, *, model, schema, static_prefix, suffix,
+                        thinking, max_output_tokens, variant, retries,
+                        context: dict | None) -> dict:
+        """One Claude rung. Sets the served variant on success -- call()
+        reads self._served_variant to decide cache eligibility (Task 15: a
+        compact-context answer must never be cached under the full-context
+        key)."""
+        result = self._claude.generate(
+            model=model, schema=schema, static_prefix=static_prefix,
+            dynamic_suffix=suffix, thinking=thinking,
+            max_output_tokens=max_output_tokens, stage=stage,
+            article_id=self.article_id, budget=self.budget,
+            # Telemetry (spec: retries/fallback populated from the ladder
+            # position, not left permanently None).
+            context={**(context or {}), "retries": retries, "fallback": False},
+        )
+        self._served_variant = variant
+        self.context_compacted = self.context_compacted or (variant == "compact")
+        return result
 
-    def _call_protected(self, stage, *, schema, static_prefix, dynamic_suffix,
-                        compact_suffix, thinking, max_output_tokens,
-                        context: dict | None = None) -> dict:
+    def _note_auth_failure(self, exc: ClaudeJSONError) -> None:
+        if exc.kind == "auth":
+            self.claude_auth_failed = True
+            logger.error("impact-graph Claude auth failure -- Claude disabled for the "
+                         "rest of this run (article=%s); no further calls will be made "
+                         "on this key", self.article_id)
+
+    def _call_claude(self, stage, *, schema, static_prefix, dynamic_suffix,
+                     compact_suffix, thinking, max_output_tokens,
+                     context: dict | None = None) -> dict:
         model, default_thinking = self._model_for(stage)
         thinking = thinking or default_thinking
-        # 5-tuples: (model, suffix, thinking_level, degrade_to, variant).
-        # `variant` tracks whether the rung's suffix is the caller's real
-        # dynamic_suffix ("full") or the trimmed compact_suffix ("compact")
-        # -- call() reads self._served_variant after this returns to decide
-        # cache eligibility (Task 15: a compact-context answer must never
-        # be cached under the full-context key).
-        attempts = [
-            (model, dynamic_suffix, thinking, None, "full"),
-            (model, dynamic_suffix, thinking, None, "full"),  # plain retry
-        ]
-        if compact_suffix:
-            attempts.append((model, compact_suffix, thinking, None, "compact"))
-        attempts.append((settings.gemini_fallback_model, compact_suffix or dynamic_suffix,
-                         "medium", "degraded", "compact" if compact_suffix else "full"))
 
         last_error: Exception | None = None
-        if self.gemini_capped:
-            attempts = []
-            last_error = GeminiJSONError("skipped: monthly spend cap already hit this run",
-                                         status_code=429)
-        for idx, (attempt_model, suffix, level, degrade_to, variant) in enumerate(attempts):
+        if self.claude_auth_failed:
+            # Breaker open: do not touch the API at all.
+            last_error = ClaudeJSONError(
+                "skipped: Claude auth already failed this run", kind="auth")
+        else:
             try:
-                result = self._gemini.generate(
-                    model=attempt_model, schema=schema, static_prefix=static_prefix,
-                    dynamic_suffix=suffix, thinking=level,
-                    max_output_tokens=max_output_tokens, stage=stage,
-                    article_id=self.article_id, budget=self.budget,
-                    # Telemetry (spec: retries/fallback populated from the
-                    # ladder position, not left permanently None): this
-                    # attempt's index IS the retry count that preceded it,
-                    # and any rung past the first is "not the primary rung".
-                    context={**(context or {}), "retries": idx, "fallback": idx > 0},
-                )
-                if degrade_to:
-                    self._degrade(degrade_to)
-                    logger.warning("impact-graph %s served DEGRADED by %s", stage, attempt_model)
-                self._served_variant = variant
-                self.context_compacted = self.context_compacted or (variant == "compact")
-                return result
-            except GeminiJSONError as exc:
+                return self._claude_attempt(
+                    stage, model=model, schema=schema, static_prefix=static_prefix,
+                    suffix=dynamic_suffix, thinking=thinking,
+                    max_output_tokens=max_output_tokens, variant="full",
+                    retries=0, context=context)
+            except ClaudeJSONError as exc:
                 last_error = exc
-                logger.warning("impact-graph %s failed on %s: %s", stage, attempt_model, exc)
-                if self._is_spend_cap_error(exc):
-                    self.gemini_capped = True
-                    logger.warning("impact-graph spend cap hit -- Gemini disabled for the "
-                                   "rest of article=%s", self.article_id)
-                    break
+                logger.warning("impact-graph %s failed on %s (kind=%s): %s",
+                               stage, model, exc.kind, exc)
+                self._note_auth_failure(exc)
+                # Rung 2 exists ONLY for failures a smaller prompt can fix
+                # (schema / truncated). Transport, rate-limit and auth
+                # failures are not the prompt's fault and the SDK already
+                # retried the transient ones -- retrying here would just
+                # burn a second call to fail identically.
+                if exc.retryable_with_compact and compact_suffix:
+                    time.sleep(settings.claude_retry_backoff)
+                    try:
+                        return self._claude_attempt(
+                            stage, model=model, schema=schema,
+                            static_prefix=static_prefix, suffix=compact_suffix,
+                            thinking=thinking, max_output_tokens=max_output_tokens,
+                            variant="compact", retries=1, context=context)
+                    except ClaudeJSONError as retry_exc:
+                        last_error = retry_exc
+                        logger.warning("impact-graph %s compact retry failed on %s "
+                                       "(kind=%s): %s", stage, model,
+                                       retry_exc.kind, retry_exc)
+                        self._note_auth_failure(retry_exc)
 
-        # Last resort: Groq, loudly marked. Never merged silently.
-        if self._groq is not None:
+        # Ladder end. Groq is reachable ONLY under the explicit opt-in --
+        # otherwise this stage fails closed. A weaker model must never
+        # silently produce financial truth (spec §47).
+        if settings.llm_fallback_allowed and self._groq is not None:
             try:
                 result = self._call_groq(stage, schema=schema, static_prefix=static_prefix,
                                          dynamic_suffix=dynamic_suffix)
-                self.provider = "groq"
-                self._degrade("fallback")
-                self._served_variant = "full"  # groq always sees the full dynamic_suffix
-                # Groq's own client path records its usage inside
-                # RotatingClient/GroqAdapter (app.analysis.claude_client),
-                # which has no `context`-style extension point for
-                # retries/fallback -- a structural gap this task does not
-                # widen. This summary line is the documented substitute
-                # (spec: "add a router-level summary log line instead").
-                logger.info("impact-graph call_summary stage=%s provider=groq fallback=True "
-                            "retries=%s article=%s", stage, len(attempts), self.article_id)
-                logger.warning("impact-graph %s served by GROQ FALLBACK (quality=fallback)", stage)
-                return result
-            except Exception as exc:  # noqa: BLE001 -- ladder end, report the Gemini error
+            except Exception as exc:  # noqa: BLE001 -- ladder end
                 logger.warning("impact-graph %s groq fallback also failed: %s", stage, exc)
-        raise StageRouterError(f"{stage}: every ladder rung failed: {last_error}")
+                raise StageRouterError(
+                    f"{stage}: claude failed ({last_error}) and the explicit groq "
+                    f"fallback also failed: {exc}") from exc
+            self.provider = "groq"
+            self._degrade("fallback")
+            self._served_variant = "full"  # groq always sees the full dynamic_suffix
+            # Groq's own client path records its usage inside
+            # RotatingClient/GroqAdapter (app.analysis.claude_client),
+            # which has no `context`-style extension point for
+            # retries/fallback -- a structural gap this task does not
+            # widen. This summary line is the documented substitute
+            # (spec: "add a router-level summary log line instead").
+            logger.info("impact-graph call_summary stage=%s provider=groq fallback=True "
+                        "article=%s", stage, self.article_id)
+            logger.warning("impact-graph %s served by GROQ FALLBACK (quality=fallback) "
+                           "after claude failed: %s", stage, last_error)
+            return result
+        raise StageRouterError(
+            f"{stage}: claude failed and fallback is disabled: {last_error}")
 
-    # -- groq (non-protected route AND marked last-resort fallback) --------
+    # -- groq (explicit-opt-in route AND marked last-resort fallback) ------
 
     def _call_groq(self, stage, *, schema, static_prefix, dynamic_suffix) -> dict:
         if self._groq is None:

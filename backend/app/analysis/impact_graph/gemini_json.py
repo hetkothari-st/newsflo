@@ -1,5 +1,9 @@
 """Gemini structured-output client for the impact-graph engine.
 
+DISABLED (provider-migration 2026-08-14): no longer imported by the default
+analysis path. Retained as an isolated adapter for optional future provider
+support only.
+
 Unlike the legacy forced-tool-call adapter (claude_client.GeminiAdapter),
 this speaks Gemini's native structured-output mode: responseMimeType=
 application/json + responseSchema, so the reply IS schema-conforming JSON

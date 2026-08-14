@@ -1619,27 +1619,20 @@ def _v3_edges(result) -> list[dict]:
 
 
 def _build_v3_router(session: Session, article: Article, groq_client):
-    """One StageRouter per article: protected (paid-Gemini-owned) when the
-    article holds a paid grant, Groq-served otherwise -- same stage
-    contracts either way (spec doc 2 §2)."""
+    """One StageRouter per article. Claude is the authoritative provider for
+    EVERY article (provider-migration 2026-08-14) -- the old paid-Gemini
+    grant gate no longer selects providers; the per-article ArticleBudget is
+    the cost bound. Groq is reachable only under the explicit
+    LLM_FALLBACK_ALLOWED opt-in."""
     from app.analysis.impact_graph.budget import ArticleBudget
     from app.analysis.impact_graph.router import StageRouter
 
-    protected = grant_paid_analysis(session, article) and bool(settings.gemini_paid_api_key)
-    # Free-Gemini wiring (corrective-v4 Task 15, benchmark parity with
-    # benchmark_impact_graph.py): a router is always CONSTRUCTED with
-    # whichever Gemini key is available, paid preferred -- but `protected`
-    # above stays gated on the PAID key alone, unchanged. A free-tier-only
-    # key never flips an article into the protected/paid-owned path; it
-    # only means a router built for a non-protected article carries a
-    # usable _gemini client that today's routing never reaches (self.call
-    # only dispatches to it when self.protected is True), so this is
-    # config wiring only -- no live call, no behavior change, until a
-    # future stage explicitly opts a non-protected route into it.
-    gemini_api_key = settings.gemini_paid_api_key or settings.gemini_api_key or None
     return StageRouter(
-        protected=protected, gemini_api_key=gemini_api_key,
-        groq_client=groq_client, article_id=article.id,
+        claude_api_key=settings.claude_api_key or None,
+        # Unreachable by construction unless the opt-in is set: the router
+        # cannot fall back to a client it was never handed.
+        groq_client=groq_client if settings.llm_fallback_allowed else None,
+        article_id=article.id,
         budget=ArticleBudget(article_id=article.id),
         # Durable stage cache: retries replay completed stages for free.
         session=session,

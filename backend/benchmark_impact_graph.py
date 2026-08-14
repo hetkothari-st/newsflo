@@ -65,16 +65,16 @@ def run_v3(event, session):
     from app.analysis.impact_graph.router import StageRouter
     from app.config import settings
 
-    # GEMINI ONLY -- no Groq client, ever (spec §47: a weaker fallback must
+    # CLAUDE ONLY -- no Groq client, ever (spec §47: a weaker fallback must
     # not produce financial truth; a benchmark scored on Groq output is
-    # evidence of nothing). Paid key when present, free Gemini key
-    # otherwise; if Gemini is unavailable the event FAILS instead of
-    # silently degrading (2026-08-13, user directive).
-    gemini_key = settings.gemini_paid_api_key or settings.gemini_api_key or None
-    if not gemini_key:
-        raise RuntimeError("no Gemini key configured; benchmark never runs on Groq")
+    # evidence of nothing). groq_client=None is passed unconditionally, so
+    # even LLM_FALLBACK_ALLOWED=true cannot route a benchmark run through
+    # Groq. Without a Claude key the event FAILS instead of silently
+    # degrading (2026-08-13/2026-08-14, user directive).
+    if not settings.claude_api_key:
+        raise RuntimeError("no Claude key configured; benchmark never runs on Groq")
     router = StageRouter(
-        protected=bool(settings.gemini_paid_api_key), gemini_api_key=gemini_key,
+        claude_api_key=settings.claude_api_key,
         groq_client=None, budget=ArticleBudget(),
     )
     started = time.monotonic()

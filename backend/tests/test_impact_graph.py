@@ -324,67 +324,69 @@ def test_ranking_order_is_deterministic_by_scores(db_session):
     assert [r["ticker"] for r in result.ranking] == ["BIG.NS", "SMALL.NS"]
 
 
-# 14/15/16: the degradation ladder (router-level, fake Gemini client)
-class _FlakyGemini:
-    def __init__(self, fail_times, status=500):
+# 14/15/16: the provider ladder (router-level, fake Claude client).
+# The old Gemini-ladder rung test (retry -> degraded flash model) is gone
+# with the rungs themselves; the Claude policy is asserted end-to-end in
+# tests/test_provider_policy.py.
+class _FlakyClaude:
+    def __init__(self, fail_times, kind="transport"):
         self.fail_times = fail_times
+        self.kind = kind
         self.calls = []
 
     def generate(self, *, model, **kwargs):
-        from app.analysis.impact_graph.gemini_json import GeminiJSONError
+        from app.analysis.impact_graph.claude_json import ClaudeJSONError
         self.calls.append(model)
         if len(self.calls) <= self.fail_times:
-            raise GeminiJSONError("boom", status_code=500)
+            raise ClaudeJSONError("boom", status_code=500, kind=self.kind)
         return {"ok": True}
 
 
-def test_router_retries_then_degrades_to_flash():
-    router = StageRouter(protected=True, gemini_api_key="k", groq_client=None)
-    fake = _FlakyGemini(fail_times=3)  # pro, pro retry, compact all fail
-    router._gemini = fake
-    result = router.call("initial_shocks", schema={}, static_prefix="s",
-                         dynamic_suffix="d", compact_suffix="compact")
-    assert result == {"ok": True}
-    assert fake.calls[-1] == settings.gemini_fallback_model
-    assert router.quality == "degraded"
+class _GroqOK:
+    class chat:
+        class completions:
+            @staticmethod
+            def create(**kwargs):
+                from types import SimpleNamespace
+                import json as _json
+                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+                    tool_calls=[SimpleNamespace(function=SimpleNamespace(
+                        name="emit", arguments=_json.dumps({"ok": True})))]
+                ))])
 
 
-def test_router_groq_fallback_is_loudly_marked():
-    class _GroqOK:
-        class chat:
-            class completions:
-                @staticmethod
-                def create(**kwargs):
-                    from types import SimpleNamespace
-                    import json as _json
-                    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
-                        tool_calls=[SimpleNamespace(function=SimpleNamespace(
-                            name="emit", arguments=_json.dumps({"ok": True})))]
-                    ))])
-
-    router = StageRouter(protected=True, gemini_api_key="k", groq_client=_GroqOK())
-    assert router.quality == "authoritative"  # protected + gemini starts authoritative
-    router._gemini = _FlakyGemini(fail_times=99)
+def test_router_groq_fallback_is_loudly_marked(monkeypatch):
+    monkeypatch.setattr(settings, "llm_fallback_allowed", True)
+    router = StageRouter(claude_api_key="k", claude_client=_FlakyClaude(fail_times=99),
+                         groq_client=_GroqOK())
+    assert router.quality == "authoritative"  # a Claude router starts authoritative
     result = router.call("initial_shocks", schema={}, static_prefix="s", dynamic_suffix="d")
     assert result == {"ok": True}
     assert router.provider == "groq"
     assert router.quality == "fallback"  # never silently authoritative
 
 
-def test_non_protected_articles_route_to_groq_as_configured():
-    class _Groq(_FlakyGemini):
-        pass
-    router = StageRouter(protected=False, gemini_api_key="k",
-                         groq_client=None)
+def test_groq_by_configuration_route_is_honest_from_construction(monkeypatch):
+    class _GroqNoResult:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    from types import SimpleNamespace
+                    return SimpleNamespace(choices=[SimpleNamespace(
+                        message=SimpleNamespace(tool_calls=[]))])
+
+    monkeypatch.setattr(settings, "llm_fallback_allowed", True)
+    router = StageRouter(claude_api_key=None, groq_client=_GroqNoResult())
     # Provider identity is honest from CONSTRUCTION, not just after a
-    # failed call: a non-protected router is Groq-served and never
-    # "authoritative" (corrective-v4 Task 15) -- Groq is never the premium
-    # path pretending otherwise.
+    # failed call: an explicitly-opted-in Groq router is Groq-served and
+    # never "authoritative" (corrective-v4 Task 15) -- Groq is never the
+    # premium path pretending otherwise.
     assert router.provider == "groq"
     assert router.quality == "fallback"
     with pytest.raises(StageRouterError):
         router.call("initial_shocks", schema={}, static_prefix="s", dynamic_suffix="d")
-    assert router.provider == "groq"  # non-protected never claims gemini
+    assert router.provider == "groq"  # never claims claude
     assert router.quality == "fallback"  # still fallback, never escalated by a failure
 
 

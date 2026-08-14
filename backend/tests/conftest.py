@@ -30,6 +30,22 @@ def db_session():
 
 
 @pytest.fixture(autouse=True)
+def _fake_claude_key(monkeypatch):
+    # Provider-migration 2026-08-14: StageRouter now FAILS CLOSED at
+    # construction when no Claude key is configured, so every pipeline test
+    # that merely builds a router (with analyze_article_v3 monkeypatched)
+    # would die on a StageRouterError. Hand the suite an obviously-fake key
+    # so construction succeeds; nothing can leak to the network from it,
+    # because every test either mocks the analysis call or injects a fake
+    # claude_client -- and forcing the value also guarantees a developer's
+    # REAL CLAUDE_API_KEY in the environment can never be used by a test.
+    # Tests that assert the fail-closed path monkeypatch it back to "".
+    from app.config import settings
+    monkeypatch.setattr(settings, "claude_api_key", "test-claude-key-not-real")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clear_facts_memo():
     # The paid-stage facts memo (app/analysis/cascade.py._FACTS_MEMO) is
     # keyed by article text, and cascade tests reuse the same fixture
