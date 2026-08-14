@@ -46,6 +46,30 @@ def _fake_claude_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_anthropic_client(monkeypatch):
+    # Provider-migration Task 7 (full-offline-verification): make "zero real
+    # API calls" structural instead of by-convention. ClaudeJSONClient builds
+    # the anthropic SDK client lazily, only inside _sdk(), only when
+    # generate() is called and no fake `client=` was injected at
+    # construction (see app/analysis/impact_graph/claude_json.py). Today
+    # every test either injects a fake client or never calls generate(), so
+    # this should never fire -- but a future test that forgets to inject one
+    # would otherwise attempt a real HTTPS connection to api.anthropic.com
+    # and fail late (or hang) instead of failing here, immediately and
+    # loudly, at the exact point of the mistake.
+    import anthropic
+
+    def _raise(*args, **kwargs):
+        raise AssertionError(
+            "a test tried to construct a real anthropic.Anthropic() client -- "
+            "inject a fake `client=` into ClaudeJSONClient instead"
+        )
+
+    monkeypatch.setattr(anthropic, "Anthropic", _raise)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clear_facts_memo():
     # The paid-stage facts memo (app/analysis/cascade.py._FACTS_MEMO) is
     # keyed by article text, and cascade tests reuse the same fixture
