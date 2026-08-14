@@ -1139,7 +1139,9 @@ def _persist_alert(
         # (no gate fields) skip both branches untouched.
         gated_entries = [e for e in entries if "gate_state" in e]
         if gated_entries or (settings.impact_engine_v4_strict and ambiguous_entities):
-            from app.analysis.impact_graph.evidence import persist_evidence
+            from app.analysis.impact_graph.evidence import (
+                evidence_payloads_for_persist, persist_evidence,
+            )
             from app.models import CompanyDecisionRecord
 
             for entry in gated_entries:
@@ -1156,8 +1158,18 @@ def _persist_alert(
                 # dicts, never ids. Stored on the entry too so a kept entry's
                 # ids survive past this loop (candidate_json below is the
                 # decision record's copy).
+                #
+                # `evidence_payloads_for_persist` (blueprint §16/§17, Task 8)
+                # is what makes "every DISPLAYED row cites something" true:
+                # a displayed row that classified with no artifact at all
+                # (tier D -- curated archetype / model-verified prior /
+                # legacy unverified) picks up a deterministic record citing
+                # the curated registry mechanism it rests on. Rows that
+                # already carry a real artifact are handed through
+                # untouched, and nothing excluded gains a citation.
                 evidence_ids = persist_evidence(
-                    session, alert.id, entry.get("company_id"), entry.get("evidence_payloads") or [])
+                    session, alert.id, entry.get("company_id"),
+                    evidence_payloads_for_persist(entry))
                 entry["evidence_ids"] = evidence_ids
                 session.add(CompanyDecisionRecord(
                     alert_id=alert.id, company_id=entry.get("company_id"),
@@ -1701,6 +1713,8 @@ def _v3_entries(session: Session, result) -> list[dict]:
     direct ticker lookup; a ticker that no longer resolves is skipped
     (omit rather than mismatch). In strict mode every entry additionally
     carries its publication-gate decision (spec §5)."""
+    from app.analysis.impact_graph.evidence import displayed_claim_for_entry
+
     gate_decisions = (
         _gate_candidates(session, result) if settings.impact_engine_v4_strict else []
     )
@@ -1879,6 +1893,20 @@ def _v3_entries(session: Session, result) -> list[dict]:
                 # §18: the ONLY confidence a reader may be shown.
                 "confidence_band": decision.confidence_band,
             })
+            # §16 claim hygiene, applied LAST so it can read the tier and
+            # evidence class the gate just decided. `mechanism` is the
+            # DISPLAYED explanation on a gated row -- ripple_layers serves
+            # it as row["mechanism"], and refinement copies it verbatim
+            # into AlertCompany.why for exactly the gated rows this branch
+            # produces -- so an unsupported company-specific claim is
+            # replaced here (with the curated registry string, or nothing)
+            # rather than being published as fact.
+            #
+            # The model's own wording is NOT lost: `decision.candidate_
+            # snapshot` (persisted as CompanyDecisionRecord.gate_inputs_
+            # json) holds the verbatim mechanism AND rationale the gate
+            # walked, and entry["rationale"] below is untouched.
+            entries[-1]["mechanism"] = displayed_claim_for_entry(entries[-1])
     return entries
 
 
