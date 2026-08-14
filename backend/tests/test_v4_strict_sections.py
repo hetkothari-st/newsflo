@@ -114,8 +114,17 @@ def test_strict_sections_group_by_effect_and_parent(db_session, strict_mode):
 @pytest.mark.parametrize("deep_dive_tier", ["secondary_deep_dive", "secondary"])
 def test_strict_secondary_companies_render_in_secondary_section_last(
         db_session, strict_mode, deep_dive_tier):
-    """"secondary_deep_dive" is the tier the gate writes now; "secondary" is
-    the legacy spelling on pre-Task-4 rows and must still render."""
+    """"secondary_ripple" is the tier the gate writes now; "secondary_deep_dive"
+    and "secondary" are the legacy spellings on pre-0008 rows and must still
+    render.
+
+    Final blueprint §12 (Task 5) changed the SHAPE of the trailing section,
+    not its position: the single generic "Secondary — indirect exposure"
+    bucket (relationship "SECONDARY") is deleted, and secondary rows now
+    group on the same mechanism-taxonomy grain as primaries -- here
+    "road_freight_fuel_cost" -> "RIPPLE:Logistics & freight". What this test
+    has always pinned holds unchanged: secondary rows render in their own
+    section(s), AFTER every primary one."""
     alert = _seed_alert(db_session)
     _add_company(db_session, alert, "ONGC.NS", "ONGC", "oil_gas",
                  economic_effect="positive", excess=1.0)
@@ -129,9 +138,12 @@ def test_strict_secondary_companies_render_in_secondary_section_last(
     # default (False) is covered by test_feed_primary_only.py.
     layers = compute_ripple_layers(db_session, alert, set(), include_secondary=True)
 
-    assert layers[-1]["relationship"] == "SECONDARY"
+    assert layers[-1]["relationship"] == "RIPPLE:Logistics & freight"
+    assert layers[-1]["title"] == "Secondary — Logistics & freight"
     assert [r["ticker"] for r in layers[-1]["rows"]] == ["BLUEDART.NS"]
-    assert all(layer["relationship"] != "SECONDARY" for layer in layers[:-1])
+    assert all(layer["relationship"].startswith("MECH:") for layer in layers[:-1])
+    # The deleted generic bucket never comes back.
+    assert all(layer["relationship"] != "SECONDARY" for layer in layers)
 
 
 def test_strict_mixed_effect_section_is_side(db_session, strict_mode):

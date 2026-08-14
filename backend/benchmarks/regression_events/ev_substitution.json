@@ -134,7 +134,7 @@
     "allow_secondary": ["BAJAJ-AUTO.NS"],
     "expected_rejected": [],
     "expected_sections": [
-      {"effect": "positive", "label_contains": "ev relative advantage"}
+      {"effect": "positive", "label_contains": "ev substitution"}
     ],
     "expected_causal_distance": {"OLAELEC.NS": 1, "TVSMOTOR.NS": 1},
     "expect_abstention": false,

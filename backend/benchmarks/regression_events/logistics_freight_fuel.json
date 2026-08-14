@@ -132,7 +132,7 @@
     "allow_secondary": [],
     "expected_rejected": ["BLUEDART.NS"],
     "expected_sections": [
-      {"effect": "negative", "label_contains": "freight fuel costs"}
+      {"effect": "negative", "label_contains": "logistics & freight"}
     ],
     "expected_evidence_tier": {"BLUEDART.NS": "MARKET_OBS"},
     "expect_abstention": false,

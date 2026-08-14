@@ -132,7 +132,7 @@
     "allow_secondary": [],
     "expected_rejected": ["IOC.NS"],
     "expected_sections": [
-      {"effect": "negative", "label_contains": "aviation fuel costs"}
+      {"effect": "negative", "label_contains": "aviation"}
     ],
     "expected_evidence_tier": {"INDIGO.NS": "SUBJECT", "SPICEJET.NS": "SUBJECT"},
     "expected_causal_distance": {"INDIGO.NS": 1, "SPICEJET.NS": 1},

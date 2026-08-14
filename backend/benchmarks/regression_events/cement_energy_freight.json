@@ -116,7 +116,7 @@
     "allow_secondary": [],
     "expected_rejected": ["DALBHARAT.NS"],
     "expected_sections": [
-      {"effect": "negative", "label_contains": "cement energy"}
+      {"effect": "negative", "label_contains": "cement & energy"}
     ],
     "expected_causal_distance": {"AMBUJACEM.NS": 1, "ULTRACEMCO.NS": 1},
     "expect_abstention": false,

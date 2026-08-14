@@ -134,8 +134,8 @@
     "allow_secondary": [],
     "expected_rejected": ["CEATLTD.NS"],
     "expected_sections": [
-      {"effect": "positive", "label_contains": "tyre input costs"},
-      {"effect": "mixed", "label_contains": "tyre input costs"}
+      {"effect": "positive", "label_contains": "tyres & rubber"},
+      {"effect": "mixed", "label_contains": "tyres & rubber"}
     ],
     "expected_causal_distance": {"MRF.NS": 1, "APOLLOTYRE.NS": 1},
     "expect_abstention": false,

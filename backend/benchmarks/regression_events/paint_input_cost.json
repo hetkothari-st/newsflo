@@ -134,7 +134,7 @@
     "allow_secondary": [],
     "expected_rejected": ["PIDILITIND.NS"],
     "expected_sections": [
-      {"effect": "negative", "label_contains": "paint input costs"}
+      {"effect": "negative", "label_contains": "paints & chemicals"}
     ],
     "expected_causal_distance": {"ASIANPAINT.NS": 1, "BERGEPAINT.NS": 1},
     "expect_abstention": false,
