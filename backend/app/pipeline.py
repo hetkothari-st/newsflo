@@ -805,10 +805,24 @@ def _analysis_model_for_provider(provider: str | None) -> str | None:
     sec54, corrective-v4 Task 18). The router records which PROVIDER served
     an alert (app.analysis.impact_graph.router.StageRouter.provider) but not
     which specific model -- stage overrides
-    (settings.gemini_stage_model_override_map) can diverge per call, so
+    (settings.claude_stage_model_override_map / the old
+    settings.gemini_stage_model_override_map) can diverge per call, so
     this names the common-case reasoning-stage model for that provider,
     not a per-call-exact audit. An unrecognized provider is returned as-is
-    (never invented into a guessed model name)."""
+    (never invented into a guessed model name).
+
+    Provider-migration follow-up (Task 6 review): "claude" was missing here
+    -- it fell through to the `return provider` default, so every
+    CompanyDecisionRecord/EvidenceRecord written under the Claude provider
+    persisted model="claude" (the literal provider string, not a model id).
+    settings.claude_model is the same "everything else -> high thinking"
+    default model StageRouter dispatches non-fact/non-summary stages to
+    (app.analysis.impact_graph.router); the per-call EXACT model (fact/
+    summary stage overrides included) is separately recorded per-row in
+    llm_call_usage.model (app.analysis.usage_log.CallUsage), which this
+    best-effort field has never tried to replace."""
+    if provider == "claude":
+        return settings.claude_model
     if provider == "gemini":
         return settings.gemini_reasoning_model
     if provider == "groq":
