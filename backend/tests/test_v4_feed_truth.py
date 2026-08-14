@@ -76,19 +76,20 @@ def test_strict_unmeasured_alert_still_served_in_list(client, db_session, strict
 
 
 @pytest.mark.parametrize("tier", ["secondary_deep_dive", "secondary"])
-def test_strict_deep_dive_only_alert_is_absent_from_list(client, db_session, strict_mode, tier):
-    """Corrective-v4 Task 16 (owner decision, verbatim): "/api/feed-v2 ->
-    PRIMARY only ... SECONDARY_DEEP_DIVE should be a separate explicit
-    retrieval path". This INVERTS the pre-Task-16 pin (a deep-dive-only
-    gate result used to keep the unmeasured alert servable in the main
-    list) -- a secondary/deep-dive-only alert has zero PRIMARY companies,
-    so it no longer headlines the normal feed at all. Its positive
-    counterpart ("present via GET /api/feed-v2/{id}/deep-dive") lives in
-    test_feed_primary_only.py. Both the current tier string and the legacy
-    "secondary" spelling are covered (Task 4)."""
-    _seed(db_session, move_status="no_data", display_tier=tier)
+def test_strict_deep_dive_only_alert_listed_as_indirect_only(client, db_session, strict_mode, tier):
+    """Owner decision 2026-08-14 (supersedes the Task 16 hide-the-rest rule
+    for the no-primary case): a secondary/deep-dive-only gated alert IS
+    served in the main list, labeled exposure="indirect_only" -- here with
+    the unavailable-measurement placeholder since nothing measured. Both
+    the current tier string and the legacy "secondary" spelling are
+    covered (Task 4)."""
+    alert = _seed(db_session, move_status="no_data", display_tier=tier)
 
-    assert client.get("/api/feed-v2").json() == []
+    rows = client.get("/api/feed-v2").json()
+
+    assert [r["id"] for r in rows] == [alert.id]
+    assert rows[0]["exposure"] == "indirect_only"
+    assert rows[0]["market_reaction"]["status"] == "unavailable"
 
 
 def test_strict_excluded_only_alert_is_not_served(client, db_session, strict_mode):

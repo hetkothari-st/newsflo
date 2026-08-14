@@ -116,32 +116,51 @@ def _unavailable_measurement() -> dict:
     }
 
 
+_SECONDARY_TIERS = ("secondary_deep_dive", "secondary")  # current + legacy spelling
+
+
 def _primary_company_ids(alert: Alert) -> set[int]:
     """The gate-authorized PRIMARY company ids on this alert (corrective-v4
     Task 16, spec §52). Empty for an alert with no primary company at all
-    (secondary/deep-dive-only or excluded-only) -- the main feed never
-    headlines on those."""
+    (secondary/deep-dive-only or excluded-only)."""
     return {ac.company_id for ac in alert.companies if ac.display_tier == "primary"}
+
+
+def _headline_company_ids(alert: Alert) -> tuple[set[int], str]:
+    """(company ids the headline/peak calc may use, exposure label).
+
+    Owner decision 2026-08-14 (supersedes the Task 16 "PRIMARY only, hide
+    the rest" feed rule for the no-primary case): a gated alert whose gate
+    produced ZERO primary companies but >=1 secondary/deep-dive company IS
+    shown in the feed, headlined from its secondary movers, and explicitly
+    labeled exposure="indirect_only" so the UI can badge it. The original
+    discipline is fully preserved wherever a primary exists: secondary
+    companies still never outrank or headline over a primary row
+    (test_peak_ticker_ignores_bigger_secondary_mover pins that), and
+    excluded-tier rows never surface anywhere."""
+    primary = _primary_company_ids(alert)
+    if primary:
+        return primary, "primary"
+    secondary = {ac.company_id for ac in alert.companies if ac.display_tier in _SECONDARY_TIERS}
+    return secondary, "indirect_only"
 
 
 def _strict_displayable(alert: Alert) -> bool:
     """Owner ruling (corrective-v4 Task 16, carrying forward Task 12's
-    structural discipline): a gate-authorized alert with >=1 PRIMARY
-    company stays servable via the unavailable-measurement placeholder
-    REGARDLESS of settings.impact_engine_v4_strict -- once the gate's tier
-    output is persisted on a row it is authoritative, the same "structural,
-    not modal" rule app.analysis.impact_graph.publication_gate.is_gated
-    already applies to section rendering. An alert carries display_tier ==
-    "primary" only on a row the gate itself set, so this check alone is
-    already gate-scoped -- no separate is_gated() call needed, and an
-    ungated (legacy, all-NULL display_tier) alert always reads False here,
-    same as before this task (the flag-gated legacy behavior for THOSE
-    alerts is unchanged). "secondary"/"secondary_deep_dive"-only or
-    excluded-only alerts no longer count -- PRIMARY only, spec §52: the
-    normal feed's headline/top-company calc considers only PRIMARY; a
-    secondary-only alert is reachable solely via GET
-    /api/feed-v2/{id}/deep-dive."""
-    return any(ac.display_tier == "primary" for ac in alert.companies)
+    structural discipline): once the gate's tier output is persisted on a
+    row it is authoritative REGARDLESS of settings.impact_engine_v4_strict
+    -- the same "structural, not modal" rule
+    app.analysis.impact_graph.publication_gate.is_gated already applies to
+    section rendering. Tier values only exist on rows the gate itself set,
+    so this check is gate-scoped by construction; an ungated (legacy,
+    all-NULL display_tier) alert always reads False, unchanged. Owner
+    decision 2026-08-14: secondary/deep-dive rows count as displayable too
+    (the feed labels those alerts exposure="indirect_only"); excluded-only
+    alerts still never surface."""
+    return any(
+        ac.display_tier == "primary" or ac.display_tier in _SECONDARY_TIERS
+        for ac in alert.companies
+    )
 
 
 def _query_with_relations(db: Session):
@@ -208,17 +227,23 @@ def list_feed_v2_alerts(
         # language wire mirrors ingested before the language gate shipped.
         if not is_english_text(alert.article.title):
             continue
-        # PRIMARY-only headline (spec §52, corrective-v4 Task 16): a gated
-        # alert's peak/verdict/intensity/breadth can only come from a
-        # PRIMARY company -- secondary/deep-dive/rejected movers, however
-        # large, never headline. Ungated (legacy) alerts pass None
-        # (unchanged: every measured company is still eligible).
-        company_ids = _primary_company_ids(alert) if is_gated(alert.companies) else None
+        # Headline scope (spec §52 as amended by the 2026-08-14 owner
+        # decision): a gated alert's peak/verdict/intensity/breadth comes
+        # from its PRIMARY companies when any exist; a no-primary gated
+        # alert headlines from its secondary/deep-dive movers and is
+        # labeled exposure="indirect_only". Excluded rows never headline.
+        # Ungated (legacy) alerts pass None (unchanged: every measured
+        # company is still eligible) and carry no exposure label.
+        exposure = None
+        company_ids = None
+        if is_gated(alert.companies):
+            company_ids, exposure = _headline_company_ids(alert)
         measurement = compute_alert_measurement(db, alert, company_ids=company_ids)
         if measurement is None and _strict_displayable(alert):
             measurement = _unavailable_measurement()
         if measurement is not None:
             row = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
+            row["exposure"] = exposure
             row["peak_cap_tier"] = cap_tiers.get(measurement["peak_ticker"])
             # Distinct tiers across ALL tagged companies -- the top-bar cap
             # filter shows a story when any affected company sits in the
@@ -380,9 +405,13 @@ def get_feed_v2_alert(
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    # PRIMARY-only headline (spec §52, corrective-v4 Task 16) -- same
-    # discipline as the list route above.
-    company_ids = _primary_company_ids(alert) if is_gated(alert.companies) else None
+    # Headline scope -- same discipline as the list route above (spec §52
+    # as amended by the 2026-08-14 owner decision: no-primary gated alerts
+    # headline from secondary movers, labeled exposure="indirect_only").
+    exposure = None
+    company_ids = None
+    if is_gated(alert.companies):
+        company_ids, exposure = _headline_company_ids(alert)
     measurement = compute_alert_measurement(db, alert, company_ids=company_ids)
     if measurement is None:
         if _strict_displayable(alert):
@@ -396,18 +425,23 @@ def get_feed_v2_alert(
     )
     translations = _bulk_translations(db, [alert], lang)
     result = _serialize(alert, measurement, held_company_ids, repeated_images, translations)
+    result["exposure"] = exposure
     # Alert-level quality ladder (corrective-v4 Task 15): authoritative |
     # fallback | degraded | failed | budget_exhausted, or None on a
     # pre-v3 alert. Frontend consumption is a later task; this is the
     # minimal, honest wire-through.
     result["analysis_quality"] = alert.analysis_quality
     # Layered card back (spec v2 §5/§7): every affected company, grouped by
-    # relationship into ordered winners/losers layers. include_secondary=
-    # False (corrective-v4 Task 16, spec §52): the normal feed's card back
-    # is PRIMARY only for a gated alert -- secondary/deep-dive companies
-    # are reachable only through GET /api/feed-v2/{id}/deep-dive. No effect
+    # relationship into ordered winners/losers layers. For a gated alert
+    # WITH a primary the card back stays PRIMARY-only (corrective-v4 Task
+    # 16, spec §52) -- secondary companies live on GET
+    # /api/feed-v2/{id}/deep-dive. For a no-primary gated alert (owner
+    # decision 2026-08-14) the card back IS the secondary section --
+    # without include_secondary the card would be an empty shell. No effect
     # on an ungated (legacy) alert's 3-tier rendering.
-    result["layers"] = compute_ripple_layers(db, alert, held_company_ids, include_secondary=False)
+    result["layers"] = compute_ripple_layers(
+        db, alert, held_company_ids, include_secondary=(exposure == "indirect_only"),
+    )
     # Translated per-company `why` overlay (silent English fallback).
     whys = bulk_alert_company_whys(
         db, [row["alert_company_id"] for layer in result["layers"] for row in layer["rows"]], lang,

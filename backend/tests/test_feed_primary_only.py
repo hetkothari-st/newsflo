@@ -72,13 +72,28 @@ def _add_company(db, alert, ticker, name, sector, *, direction="bearish",
     return company, ac
 
 
-def test_secondary_only_alert_absent_from_list_but_present_via_deep_dive(client, db_session, strict_mode):
+def test_secondary_only_alert_listed_as_indirect_only(client, db_session, strict_mode):
+    """Owner decision 2026-08-14 (supersedes the Task 16 hide-the-rest rule
+    for the no-primary case): a gated alert with zero PRIMARY but >=1
+    secondary/deep-dive company appears in the feed and detail, headlined
+    from its secondary movers and explicitly labeled
+    exposure="indirect_only". The deep-dive surface is unchanged."""
     alert = _seed_alert(db_session)
     _add_company(db_session, alert, "BLUEDART.NS", "Blue Dart", "railways_transport",
                  display_tier="secondary_deep_dive", materiality=0.3, excess=-0.5)
 
-    assert client.get("/api/feed-v2").json() == []
-    assert client.get(f"/api/feed-v2/{alert.id}").status_code == 404
+    rows = client.get("/api/feed-v2").json()
+    assert [r["id"] for r in rows] == [alert.id]
+    assert rows[0]["exposure"] == "indirect_only"
+    assert rows[0]["peak_ticker"] == "BLUEDART.NS"
+
+    detail = client.get(f"/api/feed-v2/{alert.id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["exposure"] == "indirect_only"
+    # The card back for a no-primary alert IS the secondary section.
+    tickers_on_card = [r["ticker"] for layer in body["layers"] for r in layer["rows"]]
+    assert tickers_on_card == ["BLUEDART.NS"]
 
     response = client.get(f"/api/feed-v2/{alert.id}/deep-dive")
 
@@ -88,6 +103,18 @@ def test_secondary_only_alert_absent_from_list_but_present_via_deep_dive(client,
     assert len(body["secondary"]) == 1
     assert [r["ticker"] for r in body["secondary"][0]["rows"]] == ["BLUEDART.NS"]
     assert body["rejected_summary"] == []
+
+
+def test_excluded_only_alert_still_absent_from_list(client, db_session, strict_mode):
+    """The 2026-08-14 decision widens the feed to secondary tiers ONLY --
+    excluded-tier rows still surface nowhere."""
+    alert = _seed_alert(db_session, url="https://ex.com/excluded-only")
+    _add_company(db_session, alert, "NOISE.NS", "Noise Co", "oil_gas",
+                 display_tier="excluded", gate_state="REJECT_GENERIC_EXPOSURE",
+                 materiality=0.2, excess=-4.0)
+
+    assert client.get("/api/feed-v2").json() == []
+    assert client.get(f"/api/feed-v2/{alert.id}").status_code == 404
 
 
 def test_peak_ticker_ignores_bigger_secondary_mover(client, db_session, strict_mode):
@@ -105,6 +132,7 @@ def test_peak_ticker_ignores_bigger_secondary_mover(client, db_session, strict_m
     row = client.get("/api/feed-v2").json()[0]
     assert row["peak_ticker"] == "ONGC.NS"
     assert row["excess_move_pct"] == 1.0
+    assert row["exposure"] == "primary"  # primary present -> never indirect_only
 
     detail = client.get(f"/api/feed-v2/{alert.id}").json()
     assert detail["peak_ticker"] == "ONGC.NS"

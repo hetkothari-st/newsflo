@@ -106,6 +106,11 @@ export interface FeedAlert {
   intensity: Intensity;
   breadth_score: number;
   in_my_holdings: boolean;
+  // Owner decision 2026-08-14: "primary" = headline comes from gate-proven
+  // PRIMARY companies; "indirect_only" = a gated alert with zero PRIMARY,
+  // headlined from its secondary/deep-dive movers (render an explicit
+  // indirect-exposure badge); null/undefined = ungated legacy alert.
+  exposure?: 'primary' | 'indirect_only' | null;
 }
 
 export interface LayerRow {

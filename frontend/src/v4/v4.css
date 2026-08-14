@@ -395,6 +395,15 @@ body:has(.nf4.dark) { background: #14120e; }
   margin-top: 20px;
 }
 .nf4 .metaline .aff { font-weight: 700; cursor: pointer; }
+/* Indirect-exposure story badge (owner decision 2026-08-14): understated
+   but unmistakable -- boxed small-caps, muted ink. */
+.nf4 .metaline .indirect4 {
+  font-weight: 700;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 5px;
+  opacity: 0.75;
+}
 
 /* ---------- SECTION RULE ---------- */
 .nf4 .rule { border: 0; border-top: 1px solid var(--ink); margin: 0; }

@@ -139,6 +139,18 @@ function MetaLine({ alert, onToggle }: { alert: FeedAlert; onToggle: () => void 
       <span>{fmtISTTime(alert.created_at)} IST</span>
       <span>—</span>
       <span>{alert.category_label ?? alert.category.replace(/_/g, ' ')}</span>
+      {alert.exposure === 'indirect_only' && (
+        /* Owner decision 2026-08-14: no-primary gated alerts appear in the
+           feed but must be unmistakably labeled -- every company on this
+           story is indirect (secondary/deep-dive) exposure, none is the
+           article's subject. */
+        <>
+          <span>—</span>
+          <span className="indirect4" title="No directly-affected company: every listed company has indirect exposure only">
+            Indirect exposure
+          </span>
+        </>
+      )}
       {alert.in_my_holdings && (
         <>
           <span>—</span>
