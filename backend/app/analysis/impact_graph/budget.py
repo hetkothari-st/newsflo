@@ -31,14 +31,43 @@ class ArticleBudget:
     max_output_override: int | None = None
 
     def record(self, stage: str, *, input_tokens=None, output_tokens=None,
-               thinking_tokens=None, cached_tokens=None, model: str | None = None) -> None:
+               thinking_tokens=None, cached_tokens=None, model: str | None = None,
+               cache_write_tokens=None, semantics: str = "gemini") -> None:
+        """Record one provider call.
+
+        `semantics` selects how the token counts relate to each other, which
+        differs by provider and is NOT a cosmetic detail (see
+        _estimate_cost / _estimate_cost_anthropic):
+
+        - "gemini" (default, every legacy caller): `input_tokens` is
+          promptTokenCount, which INCLUDES the cached slice.
+        - "anthropic": `input_tokens` is the API's `input_tokens`, which
+          EXCLUDES both `cache_read_input_tokens` and
+          `cache_creation_input_tokens`.
+
+        NOTE on the input ceiling (honest limitation, deliberately not
+        "fixed"): self.input_tokens is a plain sum of what each call
+        reported, so for Anthropic calls the cached slice never lands in it.
+        The 100k-per-article input ceiling was calibrated in the Gemini era
+        against cache-INCLUSIVE numbers, so under Claude the same ceiling
+        admits more real prompt tokens. Folding cache_read into the recorded
+        input would silently retune that ceiling for every article, so it is
+        left alone and documented instead; the cost ceiling below is exact
+        for both providers.
+        """
         self.calls += 1
         self.input_tokens += input_tokens or 0
         self.output_tokens += (output_tokens or 0) + (thinking_tokens or 0)
         self.thinking_tokens += thinking_tokens or 0
         self.cached_tokens += cached_tokens or 0
-        cost = _estimate_cost(model, input_tokens or 0, (output_tokens or 0) + (thinking_tokens or 0),
-                              cached_tokens or 0)
+        if semantics == "anthropic":
+            cost = _estimate_cost_anthropic(
+                model, input_tokens or 0, (output_tokens or 0) + (thinking_tokens or 0),
+                cached_tokens or 0, cache_write_tokens or 0)
+        else:
+            cost = _estimate_cost(model, input_tokens or 0,
+                                  (output_tokens or 0) + (thinking_tokens or 0),
+                                  cached_tokens or 0)
         self.estimated_cost_usd += cost
         stage_bucket = self.per_stage.setdefault(stage, {"input": 0, "output": 0, "cost": 0.0, "calls": 0})
         stage_bucket["input"] += input_tokens or 0
@@ -82,14 +111,52 @@ class ArticleBudget:
 
 
 def _estimate_cost(model: str | None, input_tokens: int, output_tokens: int, cached_tokens: int) -> float:
-    """Priced ONLY from config.LLM_MODEL_PRICING_USD_PER_MTOK -- an
-    unpriced model contributes 0 and the token ceilings still bound it
-    (same no-stale-confident-numbers stance as that constant's comment)."""
+    """GEMINI token semantics. Priced ONLY from
+    config.LLM_MODEL_PRICING_USD_PER_MTOK -- an unpriced model contributes 0
+    and the token ceilings still bound it (same no-stale-confident-numbers
+    stance as that constant's comment).
+
+    The subtraction below is correct for Gemini and ONLY for Gemini:
+    `promptTokenCount` INCLUDES `cachedContentTokenCount`, so the
+    full-priced slice is the difference. Do not call this for Anthropic
+    usage -- see _estimate_cost_anthropic."""
     pricing = LLM_MODEL_PRICING_USD_PER_MTOK.get(model or "")
     if not pricing:
         return 0.0
     uncached = max(0, input_tokens - cached_tokens)
     cost = uncached / 1e6 * pricing.get("input", 0.0)
     cost += cached_tokens / 1e6 * pricing.get("cache_read", pricing.get("input", 0.0))
+    cost += output_tokens / 1e6 * pricing.get("output", 0.0)
+    return cost
+
+
+# Anthropic bills a 5-minute-TTL prompt-cache WRITE at 1.25x the model's
+# base input rate (cache reads are the ~0.1x rate carried in the pricing
+# table as "cache_read"). A model may override the write rate explicitly
+# with a "cache_write" key; otherwise it is derived from "input".
+_ANTHROPIC_CACHE_WRITE_MULTIPLIER = 1.25
+
+
+def _estimate_cost_anthropic(model: str | None, input_tokens: int, output_tokens: int,
+                             cache_read_tokens: int, cache_write_tokens: int = 0) -> float:
+    """ANTHROPIC token semantics -- three DISJOINT input buckets.
+
+    The Messages API reports `usage.input_tokens` already EXCLUDING both
+    `cache_read_input_tokens` and `cache_creation_input_tokens`; the three
+    are billed separately and never overlap. Running these numbers through
+    _estimate_cost (which subtracts the cached slice) priced billed input at
+    $0 the moment the cache warmed, and never billed cache writes at all --
+    the bug this function exists to prevent. So: no subtraction anywhere.
+
+    Same pricing stance as _estimate_cost: an unpriced model contributes 0.
+    """
+    pricing = LLM_MODEL_PRICING_USD_PER_MTOK.get(model or "")
+    if not pricing:
+        return 0.0
+    input_rate = pricing.get("input", 0.0)
+    cost = input_tokens / 1e6 * input_rate
+    cost += cache_read_tokens / 1e6 * pricing.get("cache_read", input_rate)
+    cost += cache_write_tokens / 1e6 * pricing.get(
+        "cache_write", input_rate * _ANTHROPIC_CACHE_WRITE_MULTIPLIER)
     cost += output_tokens / 1e6 * pricing.get("output", 0.0)
     return cost

@@ -23,8 +23,16 @@ class Settings(BaseSettings):
     claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
     claude_fact_model: str = os.environ.get("CLAUDE_FACT_MODEL", "claude-haiku-4-5")
     claude_summary_model: str = os.environ.get("CLAUDE_SUMMARY_MODEL", "claude-haiku-4-5")
-    # Response ceiling: the adapter sends max(stage request, this floor) so a
-    # thinking-enabled model's reasoning share can never truncate the JSON.
+    # Response FLOOR, despite the env var's "MAX" name (kept for continuity
+    # with the deploy configs already using it). The adapter sends
+    # max(stage request, this value), so:
+    #   - RAISING it raises every stage's max_tokens to at least this value
+    #     -- its purpose: a thinking-enabled model's reasoning share can
+    #     never eat the budget and truncate the JSON;
+    #   - LOWERING it below a stage's own request does NOT cap that stage.
+    #     A stage asking for 32k still gets 32k at CLAUDE_MAX_OUTPUT_TOKENS=1.
+    # To actually cap output, lower the per-stage request (or the article
+    # output ceiling in ArticleBudget) -- this knob cannot do it.
     claude_max_output_tokens: int = int(os.environ.get("CLAUDE_MAX_OUTPUT_TOKENS", "16000"))
     claude_timeout: float = float(os.environ.get("CLAUDE_TIMEOUT", "180"))
     # SDK-level transient retries (429/5xx/connect; honors Retry-After).
@@ -436,8 +444,14 @@ LLM_MODEL_PRICING_USD_PER_MTOK: dict[str, dict[str, float]] = {
     "gemini-3.5-flash-lite": {"input": 0.10, "output": 0.40},
     "gemini-3.6-flash": {"input": 0.30, "output": 2.50},
     # Claude list prices (provider-migration): opus-5 $5/$25, haiku-4.5 $1/$5.
-    # cache_read is the ~0.1x prompt-cache read rate; cache writes bill 1.25x
-    # input and land in input_tokens accounting via cache_write handling.
+    # cache_read is the ~0.1x prompt-cache read rate. Anthropic reports three
+    # DISJOINT input buckets -- input_tokens EXCLUDES both
+    # cache_read_input_tokens and cache_creation_input_tokens -- so
+    # budget._estimate_cost_anthropic prices each separately and derives the
+    # cache-WRITE rate as 1.25x "input" unless a model overrides it with an
+    # explicit "cache_write" key. (An earlier version of this comment claimed
+    # cache writes "land in input_tokens accounting"; they do not, and they
+    # were billed nowhere until _estimate_cost_anthropic existed.)
     "claude-opus-5": {"input": 5.0, "output": 25.0, "cache_read": 0.5},
     "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_read": 0.1},
 }

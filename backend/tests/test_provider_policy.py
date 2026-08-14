@@ -124,6 +124,20 @@ def test_transport_failure_gets_no_compact_retry(monkeypatch):
     assert client.calls == 1  # SDK already retried transients; router does not
 
 
+def test_refusal_gets_no_compact_retry(monkeypatch):
+    """A refusal is a decision about the CONTENT, not a malformed answer:
+    re-asking with a shortened context is the same request minus facts, so
+    the router must spend exactly one call and fail closed. Contrast with
+    test_schema_failure_gets_one_compact_retry, where the compact rung is
+    the whole point."""
+    monkeypatch.setattr(settings, "llm_fallback_allowed", False)
+    client = _ClaudeFail(kind="refusal")
+    router = StageRouter(claude_api_key="k", claude_client=client)
+    with pytest.raises(StageRouterError):
+        _call(router, compact_suffix="COMPACT")
+    assert client.calls == 1
+
+
 def test_auth_failure_trips_circuit_breaker(monkeypatch):
     monkeypatch.setattr(settings, "llm_fallback_allowed", False)
     client = _ClaudeFail(kind="auth")

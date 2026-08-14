@@ -160,15 +160,82 @@ def test_max_tokens_floor_applied():
     assert fake.messages.calls[0]["max_tokens"] == 16000  # settings floor wins
 
 
+class _Budget:
+    def __init__(self):
+        self.recorded = []
+
+    def record(self, stage, **kw):
+        self.recorded.append((stage, kw))
+
+
 def test_budget_recorded():
-    class _Budget:
-        def __init__(self):
-            self.recorded = []
-        def record(self, stage, **kw):
-            self.recorded.append((stage, kw))
     budget = _Budget()
     client, _ = _client(result=_Response({}))
     client.generate(model="claude-opus-5", schema={}, static_prefix="R",
                     dynamic_suffix="F", stage="verify", budget=budget)
     stage, kw = budget.recorded[0]
     assert stage == "verify" and kw["input_tokens"] == 1200 and kw["model"] == "claude-opus-5"
+
+
+# --- cost accounting: Anthropic token semantics -------------------------
+
+class _WarmCacheUsage:
+    """A warm-cache Claude call. Anthropic reports these three as DISJOINT:
+    input_tokens EXCLUDES both cache_read_input_tokens and
+    cache_creation_input_tokens."""
+    input_tokens = 500
+    output_tokens = 340
+    cache_read_input_tokens = 3000
+    cache_creation_input_tokens = 200
+
+
+def _warm_cache_response(payload=None):
+    response = _Response(payload or {})
+    response.usage = _WarmCacheUsage()
+    return response
+
+
+# 500 billed input @ $5/Mtok + 3000 cache reads @ $0.5/Mtok
+# + 200 cache writes @ 1.25x input ($6.25/Mtok) + 340 output @ $25/Mtok
+_EXPECTED_WARM_CACHE_USD = (
+    500 / 1e6 * 5.0 + 3000 / 1e6 * 0.5 + 200 / 1e6 * 6.25 + 340 / 1e6 * 25.0
+)
+
+
+def test_warm_cache_call_cost_uses_anthropic_semantics():
+    """Hand-computed against Anthropic's published billing rules. Under the
+    old Gemini arithmetic (max(0, input - cached)) the 500 billed input
+    tokens priced at $0 and the 200 cache-creation tokens were billed
+    nowhere -- this asserts the exact, larger, correct number."""
+    usage_log.reset_usage()
+    client, _ = _client(result=_warm_cache_response())
+    client.generate(model="claude-opus-5", schema={}, static_prefix="R",
+                    dynamic_suffix="F", stage="verify")
+    row = usage_log.recent_usage()[-1]
+    assert row.cache_read_tokens == 3000
+    assert row.cache_write_tokens == 200
+    assert row.estimated_cost_usd == pytest.approx(_EXPECTED_WARM_CACHE_USD)
+    assert row.estimated_cost_usd == pytest.approx(0.01375)
+
+
+def test_budget_receives_cache_write_and_anthropic_semantics():
+    """The budget ledger must be priced the same way -- otherwise the
+    per-article cost ceiling under-counts every warm-cache call."""
+    budget = _Budget()
+    client, _ = _client(result=_warm_cache_response())
+    client.generate(model="claude-opus-5", schema={}, static_prefix="R",
+                    dynamic_suffix="F", stage="verify", budget=budget)
+    _, kw = budget.recorded[0]
+    assert kw["semantics"] == "anthropic"
+    assert kw["cached_tokens"] == 3000
+    assert kw["cache_write_tokens"] == 200
+
+
+def test_real_budget_cost_matches_the_hand_computed_number():
+    """End-to-end through the real ArticleBudget, not a stub."""
+    from app.analysis.impact_graph.budget import ArticleBudget
+    budget = ArticleBudget(article_id=7)
+    client, _ = _client(result=_warm_cache_response())
+    client.generate(model="claude-opus-5", schema={}, static_prefix="R",
+                    dynamic_suffix="F", stage="verify", budget=budget)
+    assert budget.estimated_cost_usd == pytest.approx(_EXPECTED_WARM_CACHE_USD)

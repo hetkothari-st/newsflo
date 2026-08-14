@@ -24,7 +24,7 @@ import time
 
 import anthropic
 
-from app.analysis.impact_graph.budget import _estimate_cost
+from app.analysis.impact_graph.budget import _estimate_cost_anthropic
 from app.analysis.usage_log import CallUsage, record_usage, usage_from_anthropic
 from app.config import settings
 
@@ -123,16 +123,31 @@ class ClaudeJSONClient:
             returned_count=_returned_count(parsed), cache_hit=False, **context,
         )
         usage.provider = "claude"
-        usage.estimated_cost_usd = _estimate_cost(
+        # ANTHROPIC semantics, not Gemini's: usage.input_tokens already
+        # EXCLUDES the cache-read and cache-write slices, so all three are
+        # billed as disjoint buckets (no subtraction) -- see
+        # budget._estimate_cost_anthropic.
+        usage.estimated_cost_usd = _estimate_cost_anthropic(
             model, usage.input_tokens or 0, usage.output_tokens or 0,
-            usage.cache_read_tokens or 0,
+            usage.cache_read_tokens or 0, usage.cache_write_tokens or 0,
         )
         record_usage(usage)
         if budget is not None:
+            # semantics="anthropic" makes the budget's COST ledger exact for
+            # this call. Its input-TOKEN ledger stays a plain sum of the
+            # numbers below, which for Claude exclude the cached slice: the
+            # per-article input ceiling was calibrated against Gemini's
+            # cache-inclusive counts, so under Claude it admits more real
+            # prompt tokens than it used to. Folding cache_read into the
+            # recorded input would silently retune that ceiling for every
+            # article, so it is documented here rather than changed (see
+            # ArticleBudget.record's docstring).
             budget.record(
                 stage or "unknown", input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens, thinking_tokens=None,
-                cached_tokens=usage.cache_read_tokens, model=model,
+                cached_tokens=usage.cache_read_tokens,
+                cache_write_tokens=usage.cache_write_tokens, model=model,
+                semantics="anthropic",
             )
         if parse_error is not None:
             raise parse_error
