@@ -1,0 +1,70 @@
+{
+  "id": "reliance_crude_mixed_effect",
+  "article": {
+    "title": "Reliance Industries' O2C segment faces a two-sided crude move as Brent climbs to a five-month high",
+    "text": "Reliance Industries' oil-to-chemicals segment faces a genuinely two-sided move as Brent crude climbed to a five-month high on tightening OPEC+ supply. Analysts said the export-oriented refiner would see stronger crude-linked product realisations and inventory gains, but the same move lifts naphtha feedstock costs for its petrochemicals business, with no administered retail-pricing drag either way since the segment sells at market-linked prices.",
+    "note": "The refiner_marketing_margin mechanism is DIRECT by registry construction (crude is simultaneously feedstock cost and realisation driver) yet its CANONICAL effect is 'mixed', never a signed direction -- this fixture pins that a genuinely two-sided company-specific story must publish as mixed (direction neutral, per DIRECTION_FROM_EFFECT) even when the mechanism is strong, direct, and the company is the article's own primary subject. A confident directional call on this exact shape is the regression this exists to catch."
+  },
+  "universe": [
+    {
+      "ticker": "RELIANCE.NS", "name": "Reliance Industries", "sector": "oil_gas", "sub_sector": "refining_marketing",
+      "index_tier": "NIFTY50", "market_cap": 19500000000000.0,
+      "business_desc": "Diversified export-oriented refining and petrochemicals conglomerate selling refined products at market-linked prices with no administered retail-pricing drag on its O2C segment."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Reliance Industries' O2C segment faces a two-sided crude move as Brent climbs to a five-month high",
+      "event_status": "confirmed",
+      "facts": "Brent crude climbed to a five-month high on tightening OPEC+ supply. Reliance Industries' oil-to-chemicals segment would see stronger crude-linked product realisations and inventory gains, offset by higher naphtha feedstock costs for its petrochemicals business. The segment sells at market-linked prices with no administered retail-pricing drag.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent crude climbed to a five-month high on tightening OPEC+ supply."},
+        {"fact_id": "F2", "text": "Reliance's O2C segment would see stronger crude-linked realisations and inventory gains."},
+        {"fact_id": "F3", "text": "The same move lifts naphtha feedstock costs for Reliance's petrochemicals business."},
+        {"fact_id": "F4", "text": "The segment sells at market-linked prices with no administered retail-pricing drag."}
+      ],
+      "quantities": ["five-month high"],
+      "named_entities": ["Reliance Industries"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price", "label": "Crude price", "direction": "bullish",
+          "mechanism": "OPEC+ holding production cuts tightens physical supply and lifts the benchmark crude price",
+          "confidence": 0.9, "impact_strength": 0.75, "materiality": 0.78, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@crude_price": {
+      "companies": [
+        {
+          "ticker": "RELIANCE.NS", "name": "Reliance Industries", "direction": "neutral", "net_direction": "mixed",
+          "economic_effect": "mixed", "impact_strength": 0.55, "confidence": 0.8, "materiality": 0.65, "time_horizon": "Short-Term",
+          "mechanism": "Export-oriented refining realizes market-linked product prices and books inventory gains as crude rises, while petrochemical naphtha feedstock cost rises at the same time -- the two channels are genuinely competing, not a hedge on one signed view",
+          "rationale": "Company-specific two-sided exposure: no administered-price drag to bias the refining side, and a real, material feedstock cost increase on the petrochemicals side",
+          "positive_channels": ["market-linked product realizations", "inventory gains", "upstream/O2C crude-linked revenue"],
+          "negative_channels": ["higher petrochemical naphtha feedstock cost"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["RELIANCE.NS"],
+      "reject": [],
+      "counterfactual": {"RELIANCE.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"RELIANCE.NS": "mixed"},
+    "allow_secondary": [],
+    "expected_rejected": [],
+    "expect_abstention": false,
+    "expected_evidence_tier": {"RELIANCE.NS": "SUBJECT"},
+    "expected_causal_distance": {"RELIANCE.NS": 1},
+    "expected_directness": {"RELIANCE.NS": "DIRECT"},
+    "rationale": "Reliance is the article's own subject at d1 with a company-specific, materially two-sided mechanism (real realisation/inventory gains competing against a real feedstock cost increase, no administered-price bias either way). The correct fundamental effect is mixed and the correct direction is neutral (DIRECTION_FROM_EFFECT['mixed'] == 'neutral') -- never a confident bullish or bearish call, even though the mechanism is DIRECT, HIGH materiality, and the company is the primary subject. Forcing a signed call on a genuinely two-sided company-specific story is the exact failure mode mixed_accuracy exists to catch."
+  }
+}

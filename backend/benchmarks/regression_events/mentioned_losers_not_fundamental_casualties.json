@@ -1,0 +1,104 @@
+{
+  "id": "mentioned_losers_not_fundamental_casualties",
+  "article": {
+    "title": "Stock markets decline in early trade amid rising crude oil prices",
+    "text": "Indian stock market indices declined in early trading as crude oil prices rose. From the Sensex pack, Titan and Bajaj Finance were among the major laggards.",
+    "note": "Article-4334 shape: the article names Titan and Bajaj Finance only as INDEX LAGGARDS (their stock fell in the session), never as subjects of any economic mechanism. A degraded or over-eager mapping stage can be tempted to 'explain' the headline by writing a rationale that just restates the price move ('shares fell amid...') -- INV-003 exists precisely so that narrating a stock's own move back to the reader, dressed as a mechanism, is never mistaken for fundamental evidence. Being named as a market loser is not the same claim as being a fundamental casualty."
+  },
+  "universe": [
+    {
+      "ticker": "TITAN.NS", "name": "Titan Company", "sector": "consumer_durables", "sub_sector": "appliances_electronics",
+      "index_tier": "NIFTY50", "market_cap": 2900000000000.0,
+      "business_desc": "Jewellery, watches and eyewear retailer with a large owned and franchised store network across India."
+    },
+    {
+      "ticker": "BAJFINANCE.NS", "name": "Bajaj Finance", "sector": "banking", "sub_sector": "nbfc",
+      "index_tier": "NIFTY50", "market_cap": 4400000000000.0,
+      "business_desc": "Diversified NBFC lending across consumer durables finance, personal loans, SME loans and wealth management."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Stock markets decline in early trade amid rising crude oil prices",
+      "event_status": "confirmed",
+      "facts": "Stock market indices declined in early trading session. Crude oil prices have risen. Titan and Bajaj Finance were among the major laggards. The article does not specify the magnitude of market decline, oil price increase, or individual stock declines.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Stock market indices declined in early trading session."},
+        {"fact_id": "F2", "text": "Crude oil prices have risen."},
+        {"fact_id": "F3", "text": "Titan declined significantly in early trade."},
+        {"fact_id": "F4", "text": "Bajaj Finance declined significantly in early trade."}
+      ],
+      "quantities": [],
+      "named_entities": ["Sensex", "Titan", "Bajaj Finance"],
+      "category": "macro_policy",
+      "event_type": "crude_oil",
+      "event_cause": "unknown",
+      "article_evidence": ["Titan and Bajaj Finance were among the major laggards"]
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "SHK_CRUDE_PRICE_UP", "label": "Crude oil price rises", "direction": "bullish",
+          "mechanism": "Crude oil benchmark prices move higher, raising the landed cost of the marginal barrel for a net crude-importing economy.",
+          "confidence": 0.9, "impact_strength": 0.55, "materiality": 0.75, "time_horizon": "Immediate"
+        },
+        {
+          "shock_id": "SHK_DISC_DEMAND", "label": "Household discretionary purchasing power squeezed", "direction": "bearish",
+          "mechanism": "Higher retail fuel and transport costs absorb a larger share of household budgets, leaving less for discretionary and big-ticket purchases.",
+          "confidence": 0.6, "impact_strength": 0.35, "materiality": 0.5, "time_horizon": "Medium-Term"
+        }
+      ],
+      "direct_nodes": [
+        {
+          "parent_type": "economic_node", "parent_id": "SHK_DISC_DEMAND", "child_type": "sector", "child_id": "consumer_durables",
+          "child_label": "Consumer discretionary / durables & jewellery retail", "child_sector": "consumer_durables",
+          "direction": "bearish", "economic_effect": "negative",
+          "mechanism": "Fuel-driven erosion of household disposable income postpones big-ticket discretionary purchases.",
+          "impact_strength": 0.4, "confidence": 0.6, "materiality": 0.5, "time_horizon": "Medium-Term"
+        },
+        {
+          "parent_type": "economic_node", "parent_id": "SHK_DISC_DEMAND", "child_type": "sector", "child_id": "banking",
+          "child_label": "Banks and NBFCs", "child_sector": "banking",
+          "direction": "bearish", "economic_effect": "negative",
+          "mechanism": "Imported fuel inflation narrows scope for rate cuts, raising marginal cost of borrowing for wholesale-funded NBFCs.",
+          "impact_strength": 0.4, "confidence": 0.65, "materiality": 0.58, "time_horizon": "Medium-Term"
+        }
+      ]
+    },
+    "map_companies@consumer_durables": {
+      "companies": [
+        {
+          "ticker": "TITAN.NS", "name": "Titan Company", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.55, "confidence": 0.72, "materiality": 0.55, "time_horizon": "Medium-Term",
+          "mechanism": "Titan shares fell in early trade alongside the broader market as crude-led inflation weighs on discretionary jewellery demand",
+          "rationale": "Named laggard in the session; the stock declined amid the broader crude-driven selloff",
+          "negative_channels": ["broader market selloff sentiment"]
+        }
+      ]
+    },
+    "map_companies@banking": {
+      "companies": [
+        {
+          "ticker": "BAJFINANCE.NS", "name": "Bajaj Finance", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.5, "confidence": 0.7, "materiality": 0.5, "time_horizon": "Medium-Term",
+          "mechanism": "Bajaj Finance shares declined in the session as rate-sensitive lenders sold off with the broader crude-led market weakness",
+          "rationale": "Named laggard; the stock dropped as part of the rate-sensitive-financials group that fell with the market",
+          "negative_channels": ["rate-sensitive sector selloff"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["TITAN.NS", "BAJFINANCE.NS"],
+      "reject": [],
+      "counterfactual": {"TITAN.NS": "SUPPORTED", "BAJFINANCE.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": [],
+    "expected_rejected": ["TITAN.NS", "BAJFINANCE.NS"],
+    "expect_abstention": true,
+    "expected_evidence_tier": {"TITAN.NS": "MARKET_OBS", "BAJFINANCE.NS": "MARKET_OBS"},
+    "rationale": "Titan and Bajaj Finance are named ONLY as index laggards -- their own stock move is the article's sole claim about them. Both survive verification (the verifier is not the safeguard being tested here), but the mapping stage's rationale for both candidates does nothing but restate that price move ('shares fell', 'stock declined') instead of arguing a real discretionary-demand or funding-cost mechanism, so classify_evidence taints both as ARTICLE_MARKET_OBSERVATION/MARKET_OBS (INV-003) BEFORE the deterministic gate even reaches counterfactual/verification checks -- EVIDENCE_VALID rejects MARKET_OBS outright (REJECT_INSUFFICIENT_EVIDENCE) since it never authorizes display at any tier. A company that fell in the same session as a crude-price headline is not, by that fact alone, a fundamental casualty of the event -- neither ticker may appear as a candidate row of any tier."
+  }
+}

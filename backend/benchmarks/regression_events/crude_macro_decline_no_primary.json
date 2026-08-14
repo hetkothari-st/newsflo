@@ -1,0 +1,161 @@
+{
+  "id": "crude_macro_decline_no_primary",
+  "article": {
+    "title": "Stock markets decline in early trade amid rising crude oil prices",
+    "text": "Indian stock market indices declined in early trading as crude oil prices rose. From the Sensex pack, Bharti Airtel, Mahindra & Mahindra, UltraTech Cement, Adani Ports, Titan and Bajaj Finance were among the major laggards.",
+    "note": "Recorded replay of the real article-4334 production run (newsflo-local llm_stage_cache, 2026-08-14) -- a headline about a broad market decline that names ONLY the article's own laggards (none of them crude-linked beneficiaries or crude-cost payers), while the extracted facts separately establish a crude-price-up event. Every crude-linked candidate below is discovered through the knowledge-registry archetype chain (broad path), never through the named laggards -- this is what makes the correct verdict 'governed secondary_ripple breadth, zero primary': no company is the article's own subject, so ARTICLE_SUBJECT/SUBJECT evidence never applies here."
+  },
+  "universe": [
+    {"ticker": "ONGC.NS", "name": "Oil and Natural Gas Corporation", "sector": "oil_gas", "sub_sector": "upstream_exploration", "index_tier": "NIFTY50", "market_cap": 3200000000000.0, "business_desc": "India's largest crude oil and natural gas exploration and production company, with unhedged upstream realisations linked to the international crude benchmark.", "exposures": [{"dimension": "commodity_revenue", "level": "VERY_HIGH"}]},
+    {"ticker": "OIL.NS", "name": "Oil India Limited", "sector": "oil_gas", "sub_sector": "upstream_exploration", "index_tier": "NIFTY100", "market_cap": 650000000000.0, "business_desc": "Pure-play upstream crude and natural gas producer with a captive refining subsidiary; realisations track the international crude benchmark directly.", "exposures": [{"dimension": "commodity_revenue", "level": "VERY_HIGH"}]},
+    {"ticker": "HINDOILEXP.NS", "name": "Hindustan Oil Exploration Company", "sector": "oil_gas", "sub_sector": "upstream_exploration", "index_tier": "NIFTY500", "market_cap": 28000000000.0, "business_desc": "Small onshore and offshore oil and gas exploration and production company with a gas-weighted production mix.", "exposures": [{"dimension": "commodity_revenue", "level": "VERY_HIGH"}]},
+    {"ticker": "INDIGO.NS", "name": "InterGlobe Aviation", "sector": "railways_transport", "sub_sector": "airlines", "index_tier": "NIFTY50", "market_cap": 1600000000000.0, "business_desc": "India's largest airline by market share, operating a single-fleet low-cost air transport network where aviation turbine fuel is the dominant operating cost.", "exposures": [{"dimension": "fuel_cost", "level": "VERY_HIGH"}]},
+    {"ticker": "SPICEJET.BO", "name": "SpiceJet", "sector": "railways_transport", "sub_sector": "airlines", "index_tier": "NIFTY500", "market_cap": 45000000000.0, "business_desc": "Low-cost Indian airline with a financially stretched balance sheet and limited fuel hedging capacity.", "exposures": [{"dimension": "fuel_cost", "level": "VERY_HIGH"}]},
+    {"ticker": "BLUEDART.NS", "name": "Blue Dart Express", "sector": "railways_transport", "sub_sector": "logistics", "index_tier": "NIFTY500", "market_cap": 190000000000.0, "business_desc": "Air transport and ground logistics operator running dedicated airline freighters alongside a road delivery fleet, with a contractual fuel surcharge pass-through mechanism to shippers.", "exposures": [{"dimension": "fuel_cost", "level": "VERY_HIGH"}]},
+    {"ticker": "IOC.NS", "name": "Indian Oil Corporation", "sector": "oil_gas", "sub_sector": "refining_marketing", "index_tier": "NIFTY50", "market_cap": 2100000000000.0, "business_desc": "India's largest downstream oil marketing company with the widest retail fuel network; administered pump pricing makes marketing margin the dominant earnings driver.", "exposures": [{"dimension": "crude_linked_inputs", "level": "VERY_HIGH"}]},
+    {"ticker": "BPCL.NS", "name": "Bharat Petroleum Corporation", "sector": "oil_gas", "sub_sector": "refining_marketing", "index_tier": "NIFTY50", "market_cap": 1050000000000.0, "business_desc": "Integrated refining and fuel marketing company with a large retail pump network subject to administered pricing lags.", "exposures": [{"dimension": "crude_linked_inputs", "level": "VERY_HIGH"}]},
+    {"ticker": "HINDPETRO.NS", "name": "Hindustan Petroleum Corporation", "sector": "oil_gas", "sub_sector": "refining_marketing", "index_tier": "NIFTY100", "market_cap": 720000000000.0, "business_desc": "Refining and marketing company with the highest marketing-to-refining ratio among the state oil marketing companies.", "exposures": [{"dimension": "crude_linked_inputs", "level": "VERY_HIGH"}]},
+    {"ticker": "RELIANCE.NS", "name": "Reliance Industries", "sector": "oil_gas", "sub_sector": "refining_marketing", "index_tier": "NIFTY50", "market_cap": 19500000000000.0, "business_desc": "Diversified export-oriented refining and petrochemicals conglomerate selling refined products at market-linked prices with no administered retail-pricing drag on its O2C segment.", "exposures": [{"dimension": "crude_linked_inputs", "level": "VERY_HIGH"}]},
+    {"ticker": "CASTROLIND.NS", "name": "Castrol India", "sector": "oil_gas", "sub_sector": "lubricants", "index_tier": "NIFTY500", "market_cap": 155000000000.0, "business_desc": "Branded automotive and industrial lubricant marketer whose principal raw material is crude-derived base oil, sold under a premium brand with real but lagged pricing power.", "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]},
+    {"ticker": "SOTL.NS", "name": "Southern Petrochemicals Lubricants", "sector": "oil_gas", "sub_sector": "lubricants", "index_tier": "NIFTY500", "market_cap": 9000000000.0, "business_desc": "Small petroleum-specialty and lubricant blender buying crude-derived base oil, with weaker brand pricing power than the premium lubricant marketers.", "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]},
+    {"ticker": "SPLPETRO.NS", "name": "Supreme Petrochem", "sector": "chemicals", "sub_sector": "commodity_chemicals", "index_tier": "NIFTY500", "market_cap": 65000000000.0, "business_desc": "Petrochemical polystyrene producer whose styrene and benzene feedstock costs are set by regional aromatics supply-demand and naphtha spreads.", "exposures": [{"dimension": "crude_linked_inputs", "level": "VERY_HIGH"}]},
+    {"ticker": "TNPETRO.NS", "name": "Tamilnadu Petroproducts", "sector": "chemicals", "sub_sector": "commodity_chemicals", "index_tier": "NIFTY500", "market_cap": 22000000000.0, "business_desc": "Small commodity petrochemical intermediates producer (LAB, epichlorohydrin) with crude/kerosene-derived feedstock and limited pricing power.", "exposures": [{"dimension": "crude_linked_inputs", "level": "VERY_HIGH"}]}
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Stock markets decline in early trade amid rising crude oil prices",
+      "event_status": "confirmed",
+      "facts": "Stock market indices declined in early trading session. Crude oil prices have risen. Multiple large-cap stocks from the Sensex pack fell significantly, including Bharti Airtel, Mahindra & Mahindra, UltraTech Cement, Adani Ports, Titan, and Bajaj Finance. The article does not specify the magnitude of market decline, oil price increase, or individual stock declines.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Stock market indices declined in early trading session."},
+        {"fact_id": "F2", "text": "Crude oil prices have risen."},
+        {"fact_id": "F3", "text": "Bharti Airtel declined significantly in early trade."},
+        {"fact_id": "F4", "text": "Mahindra & Mahindra declined significantly in early trade."},
+        {"fact_id": "F5", "text": "UltraTech Cement declined significantly in early trade."},
+        {"fact_id": "F6", "text": "Adani Ports declined significantly in early trade."},
+        {"fact_id": "F7", "text": "Titan declined significantly in early trade."},
+        {"fact_id": "F8", "text": "Bajaj Finance declined significantly in early trade."},
+        {"fact_id": "F9", "text": "No specific magnitude of market decline stated in article."},
+        {"fact_id": "F10", "text": "No specific magnitude of crude oil price increase stated in article."}
+      ],
+      "category": "macro_policy",
+      "event_type": "crude_oil",
+      "event_cause": "unknown",
+      "named_entities": ["Sensex", "Bharti Airtel", "Mahindra & Mahindra", "UltraTech Cement", "Adani Ports", "Titan", "Bajaj Finance"],
+      "quantities": [],
+      "magnitude_units": "not stated",
+      "stated_causes": ["Rising crude oil prices"],
+      "stated_consequences": ["Stock market decline in early trade", "Significant declines in multiple large-cap stocks"],
+      "article_evidence": [
+        "Stock markets decline in early trade amid rising crude oil prices",
+        "Bharti Airtel, Mahindra&amp;Mahindra, UltraTech Cement, Adani Ports, Titan and Bajaj Finance were among the major laggards"
+      ]
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "SHK_CRUDE_PRICE_UP",
+          "label": "Crude oil price rises",
+          "direction": "bullish",
+          "mechanism": "Crude oil benchmark prices move higher. Higher crude directly raises the landed cost of the marginal barrel for a net crude-importing economy like India, resetting the price of the single largest imported input in the economy.",
+          "evidence": ["Article states crude oil prices have risen", "Market decline explicitly attributed to rising crude in the headline"],
+          "confidence": 0.9, "impact_strength": 0.55, "materiality": 0.75, "time_horizon": "Immediate"
+        },
+        {
+          "shock_id": "SHK_EQUITY_RISK_PREMIUM",
+          "label": "Equity risk premium rises / broad-based index de-rating",
+          "direction": "bearish",
+          "mechanism": "Higher crude raises expected inflation and import-bill uncertainty for an oil-importing economy, so discount rates and required risk premia rise while earnings estimates are marked down -- multiple compression across index heavyweights irrespective of direct oil exposure, which is what an early-trade broad decline reflects.",
+          "evidence": ["Stock market indices declined in early trading", "Laggards span telecom, autos, cement, ports, discretionary retail and NBFC -- a broad de-rating rather than a single-sector move"],
+          "confidence": 0.78, "impact_strength": 0.45, "materiality": 0.65, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": [
+        {
+          "parent_type": "economic_node", "parent_id": "SHK_EQUITY_RISK_PREMIUM",
+          "child_type": "economic_node", "child_id": "EQUITY_VALUATION_MULTIPLES",
+          "child_label": "Broad equity valuation multiples / index level", "child_sector": "other",
+          "direction": "bearish", "economic_effect": "negative",
+          "mechanism": "Higher crude raises expected inflation and macro uncertainty, so the required equity risk premium rises and earnings estimates are trimmed, producing index-level multiple compression that hits large-cap heavyweights across unrelated sectors simultaneously -- what the broad early-trade decline expresses.",
+          "impact_strength": 0.45, "confidence": 0.75, "materiality": 0.65, "time_horizon": "Immediate"
+        }
+      ]
+    },
+    "map_companies@upstream_realization": {
+      "companies": [
+        {"ticker": "ONGC.NS", "direction": "bullish", "impact_strength": 0.6, "confidence": 0.85, "materiality": 0.75, "time_horizon": "Immediate", "mechanism": "Higher crude price lifts per-barrel realization on domestic nomination-block output, boosting revenue and margin.", "rationale": "India's largest crude producer; realization gains flow near fully to EBITDA, though subsidy/windfall-levy risk caps upside if prices spike further.", "net_direction": "bullish", "economic_effect": "positive", "positive_channels": ["crude realization uplift", "gas/value-added product pricing"], "negative_channels": ["windfall cess risk if prices rise sharply"]},
+        {"ticker": "OIL.NS", "direction": "bullish", "impact_strength": 0.6, "confidence": 0.83, "materiality": 0.7, "time_horizon": "Immediate", "mechanism": "Crude realization per barrel rises on domestic production, directly expanding upstream revenue and operating margin.", "rationale": "Pure-play upstream producer with high operating leverage to crude realizations; downstream refining subsidiary adds modest offsetting cost exposure.", "net_direction": "bullish", "economic_effect": "positive", "positive_channels": ["crude realization uplift"], "negative_channels": ["windfall levy risk", "refining subsidiary feedstock cost"]},
+        {"ticker": "HINDOILEXP.NS", "direction": "bullish", "impact_strength": 0.45, "confidence": 0.6, "materiality": 0.4, "time_horizon": "Immediate", "mechanism": "Small upstream producer's crude realizations rise with benchmark prices, improving revenue per barrel.", "rationale": "Genuine producing E&P with crude-linked realizations, but small output base and gas-weighted mix limit absolute earnings impact.", "net_direction": "bullish", "economic_effect": "positive", "positive_channels": ["higher crude realization"], "negative_channels": []}
+      ]
+    },
+    "map_companies@aviation_fuel_cost": {
+      "companies": [
+        {"ticker": "INDIGO.NS", "direction": "bearish", "impact_strength": 0.6, "confidence": 0.78, "materiality": 0.7, "time_horizon": "Immediate", "mechanism": "Higher crude lifts ATF prices; fuel is the largest single cost line for an airline, compressing operating margin.", "rationale": "Largest domestic carrier; fuel-cost pass-through lags fares in a competitive low-cost market, so near-term margin compression.", "net_direction": "bearish", "economic_effect": "negative", "positive_channels": ["strong domestic demand allows partial fare hikes"], "negative_channels": ["ATF price inflation", "margin compression"]},
+        {"ticker": "SPICEJET.BO", "direction": "bearish", "impact_strength": 0.65, "confidence": 0.7, "materiality": 0.6, "time_horizon": "Immediate", "mechanism": "ATF cost rises with crude; thin liquidity and a weak balance sheet magnify the margin and cash strain.", "rationale": "Financially stretched carrier with limited pricing power and cash buffers, so fuel inflation hits earnings and liquidity harder.", "net_direction": "bearish", "economic_effect": "negative", "positive_channels": ["industry-wide fare increases if capacity tightens"], "negative_channels": ["ATF cost inflation", "working-capital and liquidity stress"]},
+        {"ticker": "BLUEDART.NS", "direction": "bearish", "impact_strength": 0.3, "confidence": 0.6, "materiality": 0.4, "time_horizon": "Short-Term", "mechanism": "Higher ATF and diesel raise air-express and ground fleet costs ahead of fuel-surcharge resets.", "rationale": "Operates dedicated air-express freighters plus a road fleet; fuel surcharge mechanism recovers costs with a lag, so temporary margin drag.", "net_direction": "bearish", "economic_effect": "negative", "positive_channels": ["contractual fuel surcharge pass-through to shippers"], "negative_channels": ["ATF cost for freighter operations", "diesel cost for ground fleet"]}
+      ]
+    },
+    "map_companies@refiner_marketing_margin": {
+      "companies": [
+        {"ticker": "IOC.NS", "direction": "bearish", "impact_strength": 0.5, "confidence": 0.6, "materiality": 0.55, "time_horizon": "Short-Term", "mechanism": "Higher crude raises fuel-purchase cost; retail pump prices held flat, compressing auto-fuel marketing margins.", "rationale": "Largest domestic retail fuel network makes marketing margin dominant over GRM gains and inventory gains from rising crude.", "positive_channels": ["inventory revaluation gain", "possible GRM/cracks improvement"], "negative_channels": ["marketing margin squeeze on capped retail pricing", "higher working capital and interest cost"], "net_direction": "bearish", "economic_effect": "negative"},
+        {"ticker": "BPCL.NS", "direction": "bearish", "impact_strength": 0.5, "confidence": 0.6, "materiality": 0.55, "time_horizon": "Short-Term", "mechanism": "Crude cost up with administered retail prices sticky, narrowing petrol/diesel marketing margins.", "rationale": "Marketing-weighted earnings mean pass-through lag outweighs modest refining spread and inventory benefits.", "positive_channels": ["inventory revaluation gain", "refining spread support"], "negative_channels": ["marketing margin compression", "higher working capital funding"], "net_direction": "bearish", "economic_effect": "negative"},
+        {"ticker": "HINDPETRO.NS", "direction": "bearish", "impact_strength": 0.55, "confidence": 0.6, "materiality": 0.55, "time_horizon": "Short-Term", "mechanism": "Rising crude lifts input cost while capped pump prices squeeze marketing margins; refining capacity is the smallest of the OMCs.", "rationale": "Highest marketing-to-refining ratio among OMCs makes it most sensitive to pass-through lag on rising crude.", "positive_channels": ["inventory gains"], "negative_channels": ["marketing margin squeeze", "crude-linked working capital cost"], "net_direction": "bearish", "economic_effect": "negative"},
+        {"ticker": "RELIANCE.NS", "direction": "neutral", "impact_strength": 0.3, "confidence": 0.55, "materiality": 0.4, "time_horizon": "Short-Term", "mechanism": "Export-oriented refining realizes market-linked product prices; petrochemical naphtha feedstock cost rises at the same time.", "rationale": "No administered-price drag; gains from crude-linked realizations and inventory are offset by weaker petrochemical spreads.", "positive_channels": ["market-linked product realizations", "inventory gains", "upstream/O2C crude-linked revenue"], "negative_channels": ["higher petrochemical feedstock cost", "demand-side drag on downstream volumes"], "net_direction": "mixed", "economic_effect": "mixed"}
+      ]
+    },
+    "map_companies@lubricant_base_oil_cost": {
+      "companies": [
+        {"ticker": "CASTROLIND.NS", "direction": "bearish", "impact_strength": 0.4, "confidence": 0.72, "materiality": 0.55, "time_horizon": "Short-Term", "mechanism": "Crude-linked base oil is the dominant lubricant input; costs rise before retail price hikes land.", "rationale": "Branded lubricant pricing power softens the hit, but margin compression lags in the interim quarter.", "positive_channels": ["strong brand pricing power", "eventual price hikes restore margin"], "negative_channels": ["base-oil cost inflation", "gross margin lag", "higher inventory working capital"], "net_direction": "bearish", "economic_effect": "negative"},
+        {"ticker": "SOTL.NS", "direction": "bearish", "impact_strength": 0.5, "confidence": 0.65, "materiality": 0.5, "time_horizon": "Short-Term", "mechanism": "Petroleum-specialty and lubricant maker buys crude-derived base oil; input cost up, thinner pass-through ability.", "rationale": "Smaller, less brand-insulated player faces a sharper margin squeeze than premium lubricant marketers on base-oil inflation.", "positive_channels": ["inventory gains on held stock if prices spike"], "negative_channels": ["base-oil/feedstock cost inflation", "weaker pricing power", "working capital strain"], "net_direction": "bearish", "economic_effect": "negative"}
+      ]
+    },
+    "map_companies@petrochemical_feedstock": {
+      "companies": [
+        {"ticker": "SPLPETRO.NS", "direction": "bearish", "impact_strength": 0.55, "confidence": 0.7, "materiality": 0.6, "time_horizon": "Short-Term", "mechanism": "Crude-linked styrene/benzene feedstock costs rise; polystyrene spreads compress on lagged pass-through.", "rationale": "Pure crude-derived styrenics producer; margins track the styrene-minus-polystyrene delta, which narrows when feedstock rises faster than prices.", "positive_channels": ["inventory revaluation gains on existing stock", "higher realizations on price-linked contracts"], "negative_channels": ["styrene/benzene feedstock cost inflation", "spread compression from lagged pass-through"], "net_direction": "bearish", "economic_effect": "negative"},
+        {"ticker": "TNPETRO.NS", "direction": "bearish", "impact_strength": 0.45, "confidence": 0.6, "materiality": 0.5, "time_horizon": "Short-Term", "mechanism": "Petrochemical intermediates (LAB, epichlorohydrin) use crude/kerosene-derived inputs; input costs rise, spreads narrow.", "rationale": "Small commodity petrochemical producer with crude-derived feedstock and limited pricing power; margin compression likely if crude sustains higher.", "positive_channels": ["possible price increases on downstream products"], "negative_channels": ["crude-linked feedstock cost inflation", "weak pricing power compresses spreads"], "net_direction": "bearish", "economic_effect": "negative"}
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ONGC.NS", "OIL.NS", "INDIGO.NS", "SPICEJET.BO", "IOC.NS", "BPCL.NS", "HINDPETRO.NS", "RELIANCE.NS", "CASTROLIND.NS"],
+      "reject": [
+        {"ticker": "HINDOILEXP.NS", "reason": "Micro-cap explorer with negligible commercial crude output; realization-uplift mechanism is not material at the corporate level and inclusion rests mainly on sector/name similarity to upstream producers. Effect too immaterial for a professional impact graph on an unquantified crude move."},
+        {"ticker": "BLUEDART.NS", "reason": "Fuel is a modest, largely pass-through cost (fuel surcharge mechanism) for an express logistics operator; the incremental margin effect from an unquantified crude uptick is generic operating-cost noise rather than a material, event-specific impact."},
+        {"ticker": "SOTL.NS", "reason": "Base-oil cost link is plausible but the exposure claim is generic small-cap specialty-lubricant reasoning; magnitude/pass-through ability is unverified and the effect from an unquantified crude move is too small and speculative to display alongside the primary base-oil name."},
+        {"ticker": "SPLPETRO.NS", "reason": "Styrene/benzene pricing is driven primarily by regional aromatics supply-demand and naphtha spreads rather than mechanically by a crude benchmark uptick; the crude -> styrene -> polystyrene spread chain requires an unsupported intermediate assumption and the effect is a niche downstream branch of a generic crude move."},
+        {"ticker": "TNPETRO.NS", "reason": "Niche petrochemical intermediates producer; the crude -> kerosene/LAB feedstock -> spread compression chain depends on unsupported assumptions about contract pricing and is a tertiary input relationship that a generic crude move does not make central."}
+      ],
+      "counterfactual": {
+        "ONGC.NS": "SUPPORTED", "OIL.NS": "SUPPORTED", "INDIGO.NS": "SUPPORTED", "SPICEJET.BO": "SUPPORTED",
+        "IOC.NS": "SUPPORTED", "BPCL.NS": "SUPPORTED", "HINDPETRO.NS": "SUPPORTED", "RELIANCE.NS": "UNCERTAIN",
+        "CASTROLIND.NS": "SUPPORTED"
+      }
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": ["ONGC.NS", "OIL.NS", "INDIGO.NS", "SPICEJET.BO", "IOC.NS", "BPCL.NS", "HINDPETRO.NS", "RELIANCE.NS", "CASTROLIND.NS"],
+    "expected_rejected": ["HINDOILEXP.NS", "BLUEDART.NS", "SOTL.NS", "SPLPETRO.NS", "TNPETRO.NS"],
+    "expect_abstention": true,
+    "expected_secondary_ripple": {
+      "ONGC.NS": "positive", "OIL.NS": "positive",
+      "INDIGO.NS": "negative", "SPICEJET.BO": "negative",
+      "IOC.NS": "negative", "BPCL.NS": "negative", "HINDPETRO.NS": "negative",
+      "RELIANCE.NS": "mixed", "CASTROLIND.NS": "negative"
+    },
+    "expected_directness": {
+      "ONGC.NS": "DIRECT", "OIL.NS": "DIRECT",
+      "INDIGO.NS": "DIRECT", "SPICEJET.BO": "DIRECT",
+      "IOC.NS": "DIRECT", "BPCL.NS": "DIRECT", "HINDPETRO.NS": "DIRECT", "RELIANCE.NS": "DIRECT",
+      "CASTROLIND.NS": "INDIRECT"
+    },
+    "expected_evidence_tier": {
+      "ONGC.NS": "D", "OIL.NS": "D", "INDIGO.NS": "D", "SPICEJET.BO": "D",
+      "IOC.NS": "D", "BPCL.NS": "D", "HINDPETRO.NS": "D", "RELIANCE.NS": "D", "CASTROLIND.NS": "D"
+    },
+    "expected_causal_distance": {
+      "ONGC.NS": 2, "OIL.NS": 2, "INDIGO.NS": 2, "SPICEJET.BO": 2,
+      "IOC.NS": 2, "BPCL.NS": 2, "HINDPETRO.NS": 2, "RELIANCE.NS": 2, "CASTROLIND.NS": 2
+    },
+    "rationale": "Recorded replay of the real article-4334 production run. The headline names ONLY the article's own laggards (Bharti Airtel, M&M, UltraTech, Adani Ports, Titan, Bajaj Finance) -- none of the nine crude-linked companies below is the article's own subject, so ARTICLE_SUBJECT/SUBJECT evidence never applies to any of them. Every one of them is discovered through the crude-price-shock knowledge-registry archetype chain at causal distance 2 with CURATED_ARCHETYPE/tier-D evidence, which caps them at secondary_ripple regardless of materiality grade -- tier D can never authorize primary (blueprint §3's ONGC example). The correct verdict is governed analytical breadth with ZERO primary claims: a real, valid, well-evidenced set of second-order companies that must never be mistaken for the article's own subjects. Five borderline/off-mechanism candidates (a micro-cap explorer, a logistics operator with a pass-through fuel surcharge, an under-brand-insulated lubricant blender and two niche petrochemical intermediates producers) are correctly rejected by the verifier for immateriality or an unsupported mechanism chain."
+  }
+}

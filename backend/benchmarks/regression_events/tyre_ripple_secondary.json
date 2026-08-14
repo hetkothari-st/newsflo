@@ -1,0 +1,69 @@
+{
+  "id": "tyre_ripple_secondary",
+  "article": {
+    "title": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+    "text": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply as demand stayed resilient.",
+    "note": "A crude-price headline that never mentions tyre makers. The tyre_input_cost archetype (crude-linked synthetic rubber and carbon black) correctly surfaces MRF as a real, governed second-order company -- distance 2, INDIRECT directness, tier D (curated registry) -- so it must publish as secondary_ripple, never primary."
+  },
+  "universe": [
+    {
+      "ticker": "MRF.NS", "name": "MRF", "sector": "auto", "sub_sector": "tyres",
+      "index_tier": "NIFTY100", "market_cap": 550000000000.0,
+      "business_desc": "India's largest tyre manufacturer, consuming crude-derived synthetic rubber and carbon black as primary raw materials.",
+      "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+      "event_status": "confirmed",
+      "facts": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply while demand stayed resilient.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent crude settled at a five-month high."},
+        {"fact_id": "F2", "text": "OPEC+ signalled it would hold production cuts through the next quarter."}
+      ],
+      "quantities": ["five-month high"],
+      "named_entities": ["OPEC+", "Brent"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price", "label": "Crude price", "direction": "bullish",
+          "mechanism": "OPEC+ holding production cuts tightens physical supply and lifts the benchmark crude price",
+          "confidence": 0.9, "impact_strength": 0.8, "materiality": 0.8, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@tyre_input_cost": {
+      "companies": [
+        {
+          "ticker": "MRF.NS", "name": "MRF", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.6, "confidence": 0.78, "materiality": 0.62, "time_horizon": "Short-Term",
+          "mechanism": "Crude-linked inputs (synthetic rubber, carbon black) raise tyre production costs, and replacement-market price hikes typically lag the input move by a quarter",
+          "rationale": "India's largest tyre maker with crude-derived inputs and a typical multi-month lag before pricing action recovers margin",
+          "negative_channels": ["synthetic rubber and carbon black cost inflation"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["MRF.NS"],
+      "reject": [],
+      "counterfactual": {"MRF.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": ["MRF.NS"],
+    "expected_rejected": [],
+    "expect_abstention": true,
+    "expected_secondary_ripple": {"MRF.NS": "negative"},
+    "expected_directness": {"MRF.NS": "INDIRECT"},
+    "expected_evidence_tier": {"MRF.NS": "D"},
+    "expected_causal_distance": {"MRF.NS": 2},
+    "rationale": "MRF is never named by the crude headline -- its only connection to this event is the curated tyre_input_cost archetype (tier D). The mechanism is real and INDIRECT by registry construction, at causal distance 2. Tier D caps this at secondary_ripple regardless of how material or confidently stated the mechanism is -- zero primary is the correct verdict."
+  }
+}

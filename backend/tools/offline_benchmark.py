@@ -334,6 +334,7 @@ def run_fixture(fixture: dict) -> dict:
                 "materiality": entry.get("materiality"),
                 "confidence": entry.get("confidence_f"),
                 "discovery_source": entry.get("discovery_source"),
+                "causal_directness": entry.get("causal_directness"),
                 "counterfactual": getattr(graph_company, "counterfactual", "") if graph_company else "",
                 "resolved": entry.get("company_id") is not None,
                 "decision_notes": entry.get("decision_notes"),
@@ -458,6 +459,18 @@ def score(observations: list[dict]) -> dict:
     abstention = Counter()
     entity = Counter()
     rejection = Counter()
+    # §32 batch-A additions: the three tiers/dimensions expected_primary
+    # never covered -- secondary_ripple and macro_context are DISPLAY TIERS
+    # of their own (blueprint §6/§7), not primary-adjacent noise, and
+    # directness (§3/§11) is a dimension independent of causal_distance.
+    # Each is asserted ONLY when a fixture declares the corresponding
+    # ground_truth key -- an absent key is unmeasured, not a free pass
+    # (Counter already reports N/A on an empty denominator), which is what
+    # keeps the 23 pre-existing fixtures (none of which carry these keys)
+    # passing unchanged.
+    secondary_ripple = Counter()
+    macro_context = Counter()
+    directness = Counter()
     explanation_checked = explanation_faithful = 0
     per_event = []
 
@@ -538,6 +551,46 @@ def score(observations: list[dict]) -> dict:
             entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
             evidence.add(entry is not None and entry["evidence_tier"] == expected)
 
+        # secondary_ripple / macro_context: asserted EXACTLY like
+        # primary_feed_precision above -- presence at the SPECIFIC tier the
+        # label names, plus the fundamental effect matching. A ticker the
+        # label expects at secondary_ripple that instead published as
+        # primary, macro_context, excluded or not at all is a miss: the
+        # tier IS the claim (blueprint §6/§7 -- these are governed display
+        # tiers, not "close enough to primary").
+        for ticker, effect in (truth.get("expected_secondary_ripple") or {}).items():
+            entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
+            hit = (entry is not None and entry["display_tier"] == "secondary_ripple"
+                   and entry["economic_effect"] == effect)
+            secondary_ripple.add(hit)
+            if not hit:
+                observed_tier = entry["display_tier"] if entry is not None else "<absent>"
+                event["failures"].append(
+                    f"expected secondary_ripple {ticker} effect={effect} "
+                    f"observed_tier={observed_tier}")
+        for ticker, effect in (truth.get("expected_macro_context") or {}).items():
+            entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
+            hit = (entry is not None and entry["display_tier"] == "macro_context"
+                   and entry["economic_effect"] == effect)
+            macro_context.add(hit)
+            if not hit:
+                observed_tier = entry["display_tier"] if entry is not None else "<absent>"
+                event["failures"].append(
+                    f"expected macro_context {ticker} effect={effect} "
+                    f"observed_tier={observed_tier}")
+
+        # directness (§3/§11): a SEPARATE dimension from causal_distance and
+        # from tier -- checked against whichever entry the ticker resolved
+        # to, regardless of its tier, since a gate decision carries a
+        # directness verdict even for a rejected candidate.
+        for ticker, expected in (truth.get("expected_directness") or {}).items():
+            entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
+            directness.add(entry is not None and entry["causal_directness"] == expected)
+            if entry is None or entry["causal_directness"] != expected:
+                observed = entry["causal_directness"] if entry is not None else "<absent>"
+                event["failures"].append(
+                    f"expected directness {ticker}={expected} observed={observed}")
+
         # sections: the expected section must exist AND every member must be
         # a company the label allows (a right-looking title full of wrong
         # companies is not a correct section).
@@ -603,6 +656,9 @@ def score(observations: list[dict]) -> dict:
         "entity_accuracy": entity.as_dict(),
         "evidence_accuracy": evidence.as_dict(),
         "rejection_recall": rejection.as_dict(),
+        "secondary_ripple_accuracy": secondary_ripple.as_dict(),
+        "macro_context_accuracy": macro_context.as_dict(),
+        "directness_accuracy": directness.as_dict(),
         "explanation_faithfulness": {
             "value": None if explanation_checked == 0 else explanation_faithful / explanation_checked,
             "hits": explanation_faithful, "total": explanation_checked},

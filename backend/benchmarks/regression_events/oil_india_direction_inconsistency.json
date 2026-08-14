@@ -1,0 +1,73 @@
+{
+  "id": "oil_india_direction_inconsistency",
+  "article": {
+    "title": "Oil India posts record quarterly realisation as Brent holds above eighty-five dollars",
+    "text": "Oil India Limited reported record quarterly crude realisations as Brent held above eighty-five dollars a barrel through the period, with the company's unhedged upstream output capturing the higher benchmark price in full. Management said the gains flowed almost entirely to operating margin, with no material offsetting cost pressure this quarter.",
+    "note": "Reproduces the exact malformed-candidate shape the blueprint names 'the Oil India shape' (publication_gate.py's own worked example): the model's own free-text `direction` field says 'bearish' while its authoritative `economic_effect` is 'positive' and every one of its own reported channels is positive too. `economic_effect` is the ONE authoritative field (blueprint §4); `direction` is DERIVED from it, never read independently. The correct outcome is a published PRIMARY with economic_effect=positive (derived direction=bullish per DIRECTION_FROM_EFFECT) -- the stale/wrong `direction` string must never leak into what gets persisted or trip the §24 consistency gate, since `net_direction` (the field the gate actually reads) and the channel list both agree with `economic_effect` throughout."
+  },
+  "universe": [
+    {
+      "ticker": "OIL.NS", "name": "Oil India Limited", "sector": "oil_gas", "sub_sector": "upstream_exploration",
+      "index_tier": "NIFTY100", "market_cap": 650000000000.0,
+      "business_desc": "Pure-play upstream crude and natural gas producer with a captive refining subsidiary; realisations track the international crude benchmark directly."
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Oil India posts record quarterly realisation as Brent holds above eighty-five dollars",
+      "event_status": "confirmed",
+      "facts": "Oil India Limited reported record quarterly crude realisations with Brent above eighty-five dollars a barrel, and its unhedged upstream output captured the higher benchmark price in full. Management said the gains flowed almost entirely to operating margin with no material offsetting cost pressure this quarter.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Oil India reported record quarterly crude realisations."},
+        {"fact_id": "F2", "text": "Brent held above eighty-five dollars a barrel through the period."},
+        {"fact_id": "F3", "text": "Unhedged upstream output captured the higher benchmark price in full."},
+        {"fact_id": "F4", "text": "Management said the gains flowed almost entirely to operating margin with no material offsetting cost pressure."}
+      ],
+      "quantities": ["eighty-five dollars a barrel"],
+      "named_entities": ["Oil India Limited"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "unknown"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_realisation", "label": "Crude realisation gain", "direction": "bullish",
+          "mechanism": "Oil India's unhedged upstream output captures the elevated Brent benchmark in full, lifting realisation per barrel with no offsetting cost this quarter",
+          "confidence": 0.9, "impact_strength": 0.75, "materiality": 0.78, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@crude_realisation": {
+      "companies": [
+        {
+          "ticker": "OIL.NS", "name": "Oil India Limited",
+          "direction": "bearish",
+          "net_direction": "bullish",
+          "economic_effect": "positive",
+          "impact_strength": 0.75, "confidence": 0.85, "materiality": 0.8, "time_horizon": "Immediate",
+          "mechanism": "Unhedged upstream output captures the elevated Brent benchmark in full; realisation per barrel rises directly and the company reported no offsetting cost pressure this quarter, so the gain flows almost entirely to operating margin",
+          "rationale": "Company-reported record realisation with management confirming no material offsetting cost -- an unambiguous margin gain",
+          "positive_channels": ["higher crude realisation per barrel", "gains flowing near-fully to operating margin"],
+          "negative_channels": []
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["OIL.NS"],
+      "reject": [],
+      "counterfactual": {"OIL.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {"OIL.NS": "positive"},
+    "allow_secondary": [],
+    "expected_rejected": [],
+    "expect_abstention": false,
+    "expected_evidence_tier": {"OIL.NS": "SUBJECT"},
+    "expected_causal_distance": {"OIL.NS": 1},
+    "expected_directness": {"OIL.NS": "DIRECT"},
+    "rationale": "The candidate's free-text `direction` field says 'bearish' -- a malformed/stale value that disagrees with everything else about the candidate: `economic_effect` is 'positive', `net_direction` is 'bullish', and every reported channel is positive with none negative. `economic_effect` is the ONE authoritative field (blueprint §4); the gate's CONTRADICTION_FREE check reads `net_direction`, which agrees with `economic_effect`, so this candidate is internally consistent and correctly publishes as PRIMARY with economic_effect=positive -- whose derived direction (DIRECTION_FROM_EFFECT) is bullish, never the stray 'bearish' string the model also happened to emit. A reader-facing direction that disagreed with economic_effect would itself be the bug this fixture pins against."
+  }
+}

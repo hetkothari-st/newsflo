@@ -1,0 +1,70 @@
+{
+  "id": "cement_ripple_secondary",
+  "article": {
+    "title": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+    "text": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply as demand stayed resilient.",
+    "note": "A crude-price headline that never mentions cement makers. The cement_energy_freight archetype (diesel-linked freight and pet-coke/energy costs) correctly surfaces UltraTech as a real, governed second-order company -- distance 2, INDIRECT directness, tier D (curated registry) -- so it must publish as secondary_ripple, never primary."
+  },
+  "universe": [
+    {
+      "ticker": "ULTRACEMCO.NS", "name": "UltraTech Cement", "sector": "infra", "sub_sector": "cement",
+      "index_tier": "NIFTY50", "market_cap": 3100000000000.0,
+      "business_desc": "India's largest cement manufacturer with the widest grinding and blending footprint and substantial captive power capacity.",
+      "exposures": [{"dimension": "fuel_cost", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+      "event_status": "confirmed",
+      "facts": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply while demand stayed resilient.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent crude settled at a five-month high."},
+        {"fact_id": "F2", "text": "OPEC+ signalled it would hold production cuts through the next quarter."}
+      ],
+      "quantities": ["five-month high"],
+      "named_entities": ["OPEC+", "Brent"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price", "label": "Crude price", "direction": "bullish",
+          "mechanism": "OPEC+ holding production cuts tightens physical supply and lifts the benchmark crude price",
+          "confidence": 0.9, "impact_strength": 0.8, "materiality": 0.8, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@cement_energy_freight": {
+      "companies": [
+        {
+          "ticker": "ULTRACEMCO.NS", "name": "UltraTech Cement", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.55, "confidence": 0.75, "materiality": 0.58, "time_horizon": "Short-Term",
+          "mechanism": "Diesel-linked outbound freight and crude-correlated imported energy benchmarks raise delivered cost per tonne, even though captive power partially dilutes the pet-coke step-up",
+          "rationale": "Largest cement producer with captive power partially insulating the energy line, but freight remains a real, uninsulated crude-linked cost",
+          "negative_channels": ["diesel-linked outbound freight cost"],
+          "offsetting_channels": ["captive power reduces purchased-energy exposure"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ULTRACEMCO.NS"],
+      "reject": [],
+      "counterfactual": {"ULTRACEMCO.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": ["ULTRACEMCO.NS"],
+    "expected_rejected": [],
+    "expect_abstention": true,
+    "expected_secondary_ripple": {"ULTRACEMCO.NS": "negative"},
+    "expected_directness": {"ULTRACEMCO.NS": "INDIRECT"},
+    "expected_evidence_tier": {"ULTRACEMCO.NS": "D"},
+    "expected_causal_distance": {"ULTRACEMCO.NS": 2},
+    "rationale": "UltraTech is never named by the crude headline -- its only connection to this event is the curated cement_energy_freight archetype (tier D). The mechanism is real and INDIRECT by registry construction (crude reaches cement margins through a freight/energy cost chain), at causal distance 2. Tier D caps this at secondary_ripple regardless of how material the mechanism is -- zero primary is the correct verdict."
+  }
+}

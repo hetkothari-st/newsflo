@@ -1,0 +1,67 @@
+{
+  "id": "semantic_similarity_false_positive",
+  "article": {
+    "title": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+    "text": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply as demand stayed resilient.",
+    "note": "HINDOILEXP shape, isolated: the mapping stage proposes a micro-cap explorer purely because its NAME and SECTOR resemble the real upstream-realization beneficiaries -- 'oil exploration' pattern-matches the mechanism prior even though the company's actual commercial output is negligible. The semantic counterfactual verifier is the safeguard that must catch this, not the gate: a plausible-sounding rationale and a real sector/name match are not evidence of a material, event-specific relationship."
+  },
+  "universe": [
+    {
+      "ticker": "HINDOILEXP.NS", "name": "Hindustan Oil Exploration Company", "sector": "oil_gas", "sub_sector": "upstream_exploration",
+      "index_tier": "NIFTY500", "market_cap": 28000000000.0,
+      "business_desc": "Small onshore and offshore oil and gas exploration and production company with a gas-weighted production mix and negligible commercial crude output relative to the sector's large-cap producers.",
+      "exposures": [{"dimension": "commodity_revenue", "level": "VERY_HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+      "event_status": "confirmed",
+      "facts": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply while demand stayed resilient.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent crude settled at a five-month high."},
+        {"fact_id": "F2", "text": "OPEC+ signalled it would hold production cuts through the next quarter."}
+      ],
+      "quantities": ["five-month high"],
+      "named_entities": ["OPEC+", "Brent"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price", "label": "Crude price", "direction": "bullish",
+          "mechanism": "OPEC+ holding production cuts tightens physical supply and lifts the benchmark crude price India imports against",
+          "confidence": 0.9, "impact_strength": 0.8, "materiality": 0.8, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@upstream_realization": {
+      "companies": [
+        {
+          "ticker": "HINDOILEXP.NS", "name": "Hindustan Oil Exploration Company", "direction": "bullish", "net_direction": "bullish",
+          "economic_effect": "positive", "impact_strength": 0.45, "confidence": 0.6, "materiality": 0.4, "time_horizon": "Immediate",
+          "mechanism": "Small upstream producer's crude realizations rise with benchmark prices, improving revenue per barrel.",
+          "rationale": "Genuine producing E&P with crude-linked realizations, but small output base and gas-weighted mix limit absolute earnings impact.",
+          "positive_channels": ["higher crude realization"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": [],
+      "reject": [
+        {"ticker": "HINDOILEXP.NS", "reason": "Micro-cap explorer with negligible commercial crude output; realization-uplift mechanism is not material at the corporate level and inclusion rests mainly on sector/name similarity to the real upstream producers (ONGC, Oil India) rather than on this company's own economics. Effect too immaterial for a professional impact graph on an unquantified crude move."}
+      ],
+      "counterfactual": {"HINDOILEXP.NS": "NOT_SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": [],
+    "expected_rejected": ["HINDOILEXP.NS"],
+    "expect_abstention": true,
+    "rationale": "HINDOILEXP genuinely operates in the same sub-sector as the real upstream beneficiaries and the mapping stage's rationale reads plausibly on its face -- this is exactly what makes it a semantic-similarity false positive rather than an obviously bad candidate. The verifier is the safeguard that must catch it: the company's own commercial output is too small for a benchmark crude move to be a material, event-specific story, and the verifier explicitly names sector/name-pattern-matching (not this company's own economics) as the actual basis for the proposal. A plausible mechanism sentence and a genuine sector match are not evidence -- the candidate must be absent from every tier."
+  }
+}

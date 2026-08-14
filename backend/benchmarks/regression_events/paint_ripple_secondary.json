@@ -1,0 +1,69 @@
+{
+  "id": "paint_ripple_secondary",
+  "article": {
+    "title": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+    "text": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply as demand stayed resilient.",
+    "note": "A crude-price headline that never mentions the paint sector at all. The paints_input_cost archetype (crude-derivative monomers, solvents and titanium dioxide carriers) correctly surfaces Asian Paints as a real, governed second-order company -- distance 2, INDIRECT directness (crude affects paint margins through an input-cost chain, not a direct product-price channel), tier D (curated registry, not a sourced artifact) -- so it must publish as secondary_ripple, never primary."
+  },
+  "universe": [
+    {
+      "ticker": "ASIANPAINT.NS", "name": "Asian Paints", "sector": "chemicals", "sub_sector": "paints",
+      "index_tier": "NIFTY50", "market_cap": 2700000000000.0,
+      "business_desc": "India's largest decorative paints manufacturer, whose raw-material basket is dominated by crude-derived monomers, solvents and titanium dioxide.",
+      "exposures": [{"dimension": "crude_linked_inputs", "level": "HIGH"}]
+    }
+  ],
+  "router_responses": {
+    "extract_facts": {
+      "event": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
+      "event_status": "confirmed",
+      "facts": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply while demand stayed resilient.",
+      "fact_items": [
+        {"fact_id": "F1", "text": "Brent crude settled at a five-month high."},
+        {"fact_id": "F2", "text": "OPEC+ signalled it would hold production cuts through the next quarter."}
+      ],
+      "quantities": ["five-month high"],
+      "named_entities": ["OPEC+", "Brent"],
+      "category": "oil_gas",
+      "event_type": "crude_oil",
+      "event_cause": "supply_disruption"
+    },
+    "initial_shocks": {
+      "shocks": [
+        {
+          "shock_id": "crude_price", "label": "Crude price", "direction": "bullish",
+          "mechanism": "OPEC+ holding production cuts tightens physical supply and lifts the benchmark crude price",
+          "confidence": 0.9, "impact_strength": 0.8, "materiality": 0.8, "time_horizon": "Immediate"
+        }
+      ],
+      "direct_nodes": []
+    },
+    "map_companies@paint_input_cost": {
+      "companies": [
+        {
+          "ticker": "ASIANPAINT.NS", "name": "Asian Paints", "direction": "bearish", "net_direction": "bearish",
+          "economic_effect": "negative", "impact_strength": 0.6, "confidence": 0.75, "materiality": 0.6, "time_horizon": "Short-Term",
+          "mechanism": "Crude-derivative raw materials (monomers, solvents, titanium dioxide carriers) are a large share of paint input cost, so a sustained crude rise compresses gross margin until list prices catch up",
+          "rationale": "Sector-leading decorative paints maker with a crude-derived raw-material basket and typically lagged price pass-through",
+          "negative_channels": ["monomer, solvent and titanium dioxide input inflation"]
+        }
+      ]
+    },
+    "verify_companies": {
+      "accept": ["ASIANPAINT.NS"],
+      "reject": [],
+      "counterfactual": {"ASIANPAINT.NS": "SUPPORTED"}
+    }
+  },
+  "ground_truth": {
+    "expected_primary": {},
+    "allow_secondary": ["ASIANPAINT.NS"],
+    "expected_rejected": [],
+    "expect_abstention": true,
+    "expected_secondary_ripple": {"ASIANPAINT.NS": "negative"},
+    "expected_directness": {"ASIANPAINT.NS": "INDIRECT"},
+    "expected_evidence_tier": {"ASIANPAINT.NS": "D"},
+    "expected_causal_distance": {"ASIANPAINT.NS": 2},
+    "rationale": "Asian Paints is never named by the crude headline -- its only connection to this event is the curated paints_input_cost archetype (tier D). The mechanism is real and INDIRECT by registry construction (crude reaches paint margins through an input-cost chain, not a direct product-price link), at causal distance 2. Tier D caps this at secondary_ripple regardless of the mechanism's materiality or how confidently the model states it -- zero primary is the correct verdict."
+  }
+}

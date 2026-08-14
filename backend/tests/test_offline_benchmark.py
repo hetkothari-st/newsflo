@@ -27,6 +27,7 @@ def _entry(ticker, tier, effect="negative", **overrides):
         "causal_parent_id": "some_node", "mechanism": "m", "rationale": "r",
         "materiality": 0.7, "confidence": 0.8, "discovery_source": "subject",
         "counterfactual": "SUPPORTED", "resolved": True, "decision_notes": None,
+        "causal_directness": "DIRECT",
     }
     payload.update(overrides)
     return payload
@@ -120,6 +121,109 @@ def test_legacy_secondary_spelling_counts_as_published():
     metrics = score([observation])["metrics"]
 
     assert metrics["company_precision"] == {"value": 0.0, "hits": 0, "total": 1}
+
+
+# --- §32 batch A: expected_secondary_ripple / expected_macro_context / -----
+# --- expected_directness -- new keys, asserted like expected_primary -------
+
+def test_expected_secondary_ripple_passes_on_tier_and_effect_match():
+    observation = _observation(
+        entries=[_entry("RIPPLE.NS", "secondary_ripple", effect="negative")],
+        ground_truth={"expected_secondary_ripple": {"RIPPLE.NS": "negative"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["secondary_ripple_accuracy"] == {"value": 1.0, "hits": 1, "total": 1}
+
+
+def test_expected_secondary_ripple_fails_when_published_as_primary_instead():
+    """The tier IS the claim (blueprint §6): a company the label expects at
+    secondary_ripple that instead leads the feed as primary is not "close
+    enough" -- it is a wrong publication of a stronger claim than earned."""
+    observation = _observation(
+        entries=[_entry("PROMOTED.NS", "primary", effect="negative")],
+        ground_truth={"expected_secondary_ripple": {"PROMOTED.NS": "negative"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["secondary_ripple_accuracy"] == {"value": 0.0, "hits": 0, "total": 1}
+
+
+def test_expected_secondary_ripple_fails_on_wrong_effect_at_the_right_tier():
+    observation = _observation(
+        entries=[_entry("RIPPLE.NS", "secondary_ripple", effect="positive")],
+        ground_truth={"expected_secondary_ripple": {"RIPPLE.NS": "negative"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["secondary_ripple_accuracy"]["value"] == 0.0
+
+
+def test_expected_secondary_ripple_fails_when_ticker_absent_entirely():
+    observation = _observation(entries=[], ground_truth={
+        "expected_secondary_ripple": {"MISSING.NS": "negative"}})
+    metrics = score([observation])["metrics"]
+
+    assert metrics["secondary_ripple_accuracy"] == {"value": 0.0, "hits": 0, "total": 1}
+
+
+def test_expected_macro_context_passes_on_tier_and_effect_match():
+    observation = _observation(
+        entries=[_entry("MACRO.NS", "macro_context", effect="negative")],
+        ground_truth={"expected_macro_context": {"MACRO.NS": "negative"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["macro_context_accuracy"] == {"value": 1.0, "hits": 1, "total": 1}
+
+
+def test_expected_macro_context_fails_when_tier_is_secondary_ripple_instead():
+    observation = _observation(
+        entries=[_entry("SHALLOW.NS", "secondary_ripple", effect="negative")],
+        ground_truth={"expected_macro_context": {"SHALLOW.NS": "negative"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["macro_context_accuracy"]["value"] == 0.0
+
+
+def test_expected_directness_passes_and_fails_independently_of_tier():
+    """Directness (§3/§11) is checked against whatever entry the ticker
+    resolves to, regardless of its display tier -- a gate decision carries
+    a directness verdict even for an excluded candidate."""
+    observation = _observation(
+        entries=[_entry("EXCL.NS", "excluded", causal_directness="INDIRECT")],
+        ground_truth={"expected_directness": {"EXCL.NS": "INDIRECT"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["directness_accuracy"] == {"value": 1.0, "hits": 1, "total": 1}
+
+
+def test_expected_directness_fails_on_mismatch():
+    observation = _observation(
+        entries=[_entry("WRONG.NS", "secondary_ripple", causal_directness="DIRECT")],
+        ground_truth={"expected_directness": {"WRONG.NS": "INDIRECT"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["directness_accuracy"]["value"] == 0.0
+
+
+def test_new_keys_absent_report_na_not_a_pass_or_fail():
+    """Backward compat with the 23 pre-existing fixtures (spec §32): a
+    fixture that never declares these keys must be UNMEASURED on them, not
+    silently scored 100% (the exact `mixed_accuracy` auto-pass bug these
+    metrics must not repeat)."""
+    observation = _observation(
+        entries=[_entry("PLAIN.NS", "primary")],
+        ground_truth={"expected_primary": {"PLAIN.NS": "negative"}},
+    )
+    metrics = score([observation])["metrics"]
+
+    assert metrics["secondary_ripple_accuracy"] == {"value": None, "hits": 0, "total": 0}
+    assert metrics["macro_context_accuracy"] == {"value": None, "hits": 0, "total": 0}
+    assert metrics["directness_accuracy"] == {"value": None, "hits": 0, "total": 0}
 
 
 # --- mixed_accuracy: the auto-pass bug, pinned dead ------------------------
