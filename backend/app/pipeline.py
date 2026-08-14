@@ -1085,8 +1085,21 @@ def _persist_alert(
         # content and raced to INSERT. The partial unique index
         # (uq_alerts_article_content) is the serialisation point -- the
         # loser treats the collision as SUCCESS and hands back the winner's
-        # alert rather than doubling it. Anything else that could raise
-        # IntegrityError here is re-raised untouched.
+        # alert rather than doubling it.
+        #
+        # PRECISELY what this handler does (review round 1, MINOR): the
+        # flush can carry OTHER pending inserts too (a v3 cache row, say),
+        # so the exception is not proof that THIS unique index is the one
+        # that fired. The discriminator is the recovery query below -- an
+        # alert already existing for (article_id, content_key) is the
+        # duplicate case and the error is swallowed whatever raised it;
+        # when no such alert resolves (including every call that claims no
+        # content_key at all) the original IntegrityError is re-raised
+        # untouched. So a same-flush integrity failure of a different kind
+        # IS absorbed when a duplicate alert genuinely exists -- the alert
+        # is real and already persisted by the winner, and the caller's
+        # never-fail wrapper would have discarded this session's other
+        # pending work either way.
         session.rollback()
         existing = (
             session.query(Alert)
@@ -2053,15 +2066,40 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
             # provenance/quality marks must be honest, not silently NULL'd
             # out, or _dedup_reuse_policy_allows' analysis_quality ==
             # "authoritative" check would wrongly refuse the next reuse.
-            _persist_alert(
-                session, article, reusable_alert.category, entries,
-                event_type=reusable_alert.event_type, client=claude_client,
-                facts=reusable_alert.facts,
-                event_cause=reusable_alert.event_cause,
-                analysis_provider=reusable_alert.analysis_provider,
-                analysis_quality=reusable_alert.analysis_quality,
-                reused_from_alert_id=reusable_alert.id,
-            )
+            # Same fail-CLOSED-per-article discipline the fresh path below
+            # carries (review round 1, IMPORTANT-1). Reuse entries are read
+            # back off STORED AlertCompany rows, so they meet the §24 gate
+            # like any other rows -- and a legitimately-stored pre-Task-4
+            # shape can violate it (a strict row may hold economic_effect
+            # "mixed"/"no_material_impact" alongside direction "bullish":
+            # GraphCompany.reconcile_effect only rewrites a direction that
+            # is not already in DIRECTIONS, and 0008's repair + trigger
+            # cover only positive+bearish / negative+bullish). Unwrapped,
+            # that ConsistencyError escaped process_new_articles entirely:
+            # the whole tick died, every remaining article was dropped, and
+            # this one kept its pre-analysis status so it poisoned the next
+            # tick too, forever. One article's bad stored data costs exactly
+            # that one article.
+            try:
+                _persist_alert(
+                    session, article, reusable_alert.category, entries,
+                    event_type=reusable_alert.event_type, client=claude_client,
+                    facts=reusable_alert.facts,
+                    event_cause=reusable_alert.event_cause,
+                    analysis_provider=reusable_alert.analysis_provider,
+                    analysis_quality=reusable_alert.analysis_quality,
+                    reused_from_alert_id=reusable_alert.id,
+                )
+            except ConsistencyError as exc:
+                logger.error(
+                    "consistency gate blocked dedup reuse of alert_id=%s for "
+                    "article_id=%s: %s",
+                    reusable_alert.id, article.id, "; ".join(exc.violations),
+                )
+                session.rollback()
+                article.status = "ANALYSIS_FAILED"
+                session.commit()
+                continue
             alerts_created += 1
             continue
 

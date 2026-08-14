@@ -1984,3 +1984,87 @@ def test_the_dedup_reuse_path_claims_no_content_key(db_session):
     }], reused_from_alert_id=None)
 
     assert alert.content_key is None
+
+
+def test_a_violating_stored_row_fails_only_its_own_article_on_the_reuse_path(
+        db_session, monkeypatch, strict_mode):
+    """Review round 1, IMPORTANT-1: the dedup-reuse `_persist_alert` call
+    sits OUTSIDE the fresh path's never-fail wrapper, so a §24 violation in
+    the rows it copies used to escape process_new_articles entirely -- the
+    whole tick died and the article kept its pre-analysis status, poisoning
+    every later tick.
+
+    The violating shape is reachable without any corruption: a pre-Task-4
+    strict row may store economic_effect "mixed" next to direction
+    "bullish" (reconcile_effect only rewrites a direction that is not
+    already a legal DIRECTION, and 0008's repair + trigger cover only
+    positive+bearish / negative+bullish). It is DIRECTION_NOT_DERIVED under
+    §4.
+    """
+    from app.analysis.impact_graph.publication_gate import GateDecision
+
+    company = Company(ticker="RELIANCE.NS", name="Reliance Industries",
+                      sector="oil_gas", index_tier="NIFTY50", market_cap=1.0)
+    db_session.add(company)
+    db_session.commit()
+
+    def fake_gate_candidates(session, result):
+        return [
+            ("ARTICLE_SUBJECT", "SUBJECT", [], GateDecision(
+                final_state="DISPLAY_ELIGIBLE", display_tier="primary",
+                gates_passed=["materiality", "evidence"], rejection_reason=None,
+                materiality_grade="HIGH", ticker=c.ticker, dedup_key=c.ticker,
+            ))
+            for c in result.companies
+        ]
+    monkeypatch.setattr(pipeline_module, "_gate_candidates", fake_gate_candidates)
+
+    fake_output = ImpactGraphResult(
+        category="oil_gas",
+        companies=[GraphCompany(
+            ticker="RELIANCE.NS", name="Reliance Industries", direction="neutral",
+            impact_strength=0.6, confidence=0.7, materiality=0.6, causal_distance=1,
+            time_horizon="Short-Term", mechanism="crude is both feedstock and realization",
+            rationale="integrated refiner cuts both ways", reasons=["r1"],
+            economic_effect="mixed", net_direction="mixed")],
+    )
+    monkeypatch.setattr(
+        pipeline_module, "analyze_article_v3",
+        lambda router, title, content, session=None, article_id=None: fake_output)
+
+    source = Article(source="a", url="https://example.com/reuse-source",
+                     title="Refining margins swing both ways")
+    db_session.add(source)
+    db_session.commit()
+    assert process_new_articles(db_session, claude_client=object()) == 1
+
+    # Rewrite the stored row into the pre-Task-4 shape. The 0008 UPDATE
+    # trigger permits it (mixed is not one of the two contradictions it
+    # refuses), which is exactly why the serving/persist gate has to.
+    stored = db_session.query(AlertCompany).filter_by(alert_id=source.alerts[0].id).one()
+    stored.direction = "bullish"
+    db_session.commit()
+    assert stored.economic_effect == "mixed"
+
+    # A healthy article FIRST in creation order, the poisoned republish
+    # second -- pending is ordered id-descending, so the failing article is
+    # processed BEFORE the healthy one and cannot be seen to "pass" merely
+    # by having run first.
+    healthy = Article(source="c", url="https://example.com/reuse-healthy",
+                      title="Crude supply shock lifts realisations")
+    republish = Article(source="b", url="https://example.com/reuse-republish",
+                        title="Refining margins swing both ways")
+    db_session.add_all([healthy, republish])
+    db_session.commit()
+
+    created = process_new_articles(db_session, claude_client=object())
+
+    db_session.refresh(republish)
+    db_session.refresh(healthy)
+    # The poisoned article fails CLOSED, alone...
+    assert republish.status == "ANALYSIS_FAILED"
+    assert db_session.query(Alert).filter_by(article_id=republish.id).count() == 0
+    # ...and the rest of the tick still runs.
+    assert created == 1
+    assert healthy.status == "ANALYZED"
+    assert db_session.query(Alert).filter_by(article_id=healthy.id).count() == 1
