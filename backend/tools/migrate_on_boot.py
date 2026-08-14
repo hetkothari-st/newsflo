@@ -79,6 +79,25 @@ def _table_names(url: str) -> set[str]:
         engine.dispose()
 
 
+def _create_missing_tables(url: str) -> None:
+    """create_all for TABLES a stamped/managed DB never got (tables are
+    only created by 0001 on empty DBs or by whichever code version first
+    ran against the file). Never touches existing tables; new tables are
+    built at current-model shape and the guarded column migrations then
+    no-op over them."""
+    from sqlalchemy import create_engine
+
+    import app.models  # noqa: F401 -- registers every table on Base.metadata
+    from app.db import Base
+
+    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+    engine = create_engine(url, connect_args=connect_args)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+
 def _alembic(url: str, *args: str) -> None:
     """Run one alembic command in a subprocess. Subprocess rather than the
     Python API on purpose: alembic/env.py configures logging from
@@ -118,6 +137,7 @@ def migrate_on_boot(url: str | None = None) -> str:
     if "alembic_version" in tables:
         state = "managed"
         logger.info("[migrate] %s DB is alembic-managed; upgrading to head", scheme)
+        _create_missing_tables(url)
         _alembic(url, "upgrade", "head")
     elif tables & set(_CORE_TABLES):
         state = "legacy"
@@ -126,6 +146,13 @@ def migrate_on_boot(url: str | None = None) -> str:
             "pre-alembic legacy DB; stamping 0001 then upgrading to head", scheme,
         )
         _alembic(url, "stamp", "0001")
+        # Stamping skips 0001's create_table calls, so a legacy DB that
+        # predates any table (first hit in the wild: an ingestion copy
+        # missing company_decision_records) would crash 0006's column
+        # reflection. create_all adds the missing TABLES only -- every
+        # later column migration is guarded add-if-missing, so building
+        # a new table at current-model shape and then upgrading is safe.
+        _create_missing_tables(url)
         _alembic(url, "upgrade", "head")
     else:
         state = "empty"

@@ -469,6 +469,49 @@ def test_migrate_on_boot_adopts_a_legacy_init_db_database(tmp_path):
     assert "materiality_grade" in ac
 
 
+def test_migrate_on_boot_adopts_a_table_incomplete_legacy_db(tmp_path):
+    """First real-world sync (newsflo-local, 2026-08-14): a legacy DB can
+    be missing whole TABLES too, not just columns -- this one predated
+    company_decision_records, and 0006's column reflection crashed with
+    NoSuchTableError because stamping skips 0001's CREATE TABLEs. The
+    boot path must create_all missing tables before upgrading."""
+    import sqlite3
+
+    db = tmp_path / "boot_legacy_incomplete.db"
+    url = f"sqlite:///{db}"
+    env = dict(os.environ, DATABASE_URL=url)
+    legacy = subprocess.run(
+        [sys.executable, "-c", "from app.db import init_db; init_db()"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert legacy.returncode == 0, legacy.stderr
+
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("DROP TABLE company_decision_records")
+        conn.execute("DROP TABLE evidence_records")
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = _boot(url)
+    assert result.returncode == 0, result.stderr
+    assert _current_revision(db) == _head_revision()
+
+    conn = sqlite3.connect(db)
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        dr = {r[1] for r in conn.execute(
+            "PRAGMA table_info(company_decision_records)")}
+    finally:
+        conn.close()
+    assert "company_decision_records" in tables
+    assert "evidence_records" in tables
+    # Recreated table carries the current-model shape including 0006's
+    # completeness columns; the guarded migrations no-op over it.
+    assert "gate_inputs_json" in dr
+
+
 def test_migrate_on_boot_on_an_already_migrated_db_is_a_noop(tmp_path):
     """State 1 (managed DB), already at head: exits 0, stays at head."""
     db = tmp_path / "boot_managed.db"
