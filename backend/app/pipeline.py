@@ -1005,6 +1005,8 @@ def _persist_alert(
     analysis_provider: str | None = None, analysis_quality: str | None = None,
     event_cause: str | None = None, reused_from_alert_id: int | None = None,
     ambiguous_entities: list[str] | None = None, content_key: str | None = None,
+    fact_items: list[dict] | None = None, geography_scope: str | None = None,
+    geography_regions: list[str] | None = None,
 ) -> Alert:
     """Create the Alert + AlertCompany rows for one article and fan out
     notifications/broadcast. Shared by both the fresh-analysis path and the
@@ -1074,6 +1076,14 @@ def _persist_alert(
         # _persist_alert call in a test or one-off script), which simply
         # falls refinement back to the article text.
         facts=facts,
+        # Structured twins of `facts` (2026-08-14): the classed fact store
+        # and the event's geography. Audit only -- nothing reads them back
+        # into reasoning. Empty stays NULL rather than becoming "[]"/
+        # "UNKNOWN", so "not recorded" never masquerades as "recorded as
+        # nothing"; see the Alert column comments.
+        fact_items_json=json.dumps(fact_items) if fact_items else None,
+        event_geography_scope=(geography_scope or None) if geography_scope != "UNKNOWN" else None,
+        event_geography_regions_json=json.dumps(geography_regions) if geography_regions else None,
         analysis_provider=analysis_provider,
         analysis_quality=analysis_quality,
     )
@@ -2179,6 +2189,13 @@ def process_new_articles(session: Session, claude_client, throttle_seconds: floa
                 analysis_provider=result.analysis_provider, analysis_quality=result.analysis_quality,
                 event_cause=result.event_cause,
                 ambiguous_entities=result.ambiguous_entities,
+                # Fact provenance + geography (2026-08-14). Only the fresh-
+                # analysis path has them: the reuse path above copies a
+                # PRIOR alert's row set and never re-runs stage 1, so it
+                # has no classed fact store of its own to claim.
+                fact_items=[f.model_dump() for f in result.fact_items],
+                geography_scope=result.geography_scope,
+                geography_regions=list(result.geography_regions or []),
                 # §26 idempotency key -- THIS run's identity for THIS
                 # article's content. Only the fresh-analysis path claims
                 # one (the reuse path above deliberately does not).

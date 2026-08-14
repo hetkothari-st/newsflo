@@ -18,7 +18,7 @@ from app.analysis.schemas import CATEGORIES, EVENT_TYPES
 
 # Version stamp for the structured-output schemas (cost-opt spec P1/P12):
 # telemetry + cache-fingerprint component. Bump on ANY schema change.
-IMPACT_SCHEMA_VERSION = "kg-1"
+IMPACT_SCHEMA_VERSION = "kg-2"
 
 TIME_HORIZONS = ["Immediate", "Short-Term", "Medium-Term", "Long-Term"]
 PARENT_TYPES = ["event", "economic_node", "sector", "commodity", "policy", "company"]
@@ -64,6 +64,24 @@ EVENT_CAUSES = [
 # price move. A model that has no basis to judge sensitivity omits the
 # field and gets the honest "UNKNOWN", never a guess.
 MARKET_SENSITIVITY_LEVELS = ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+# Per-fact epistemic class (2026-08-14). NOT an evidence tier: A..E grades
+# how well a COMPANY claim is supported, this grades how the FACT ITSELF
+# was arrived at, one stage earlier.
+#   FACT      -- the article states it
+#   DERIVED   -- arithmetic/unit conversion over figures the article states
+#   INFERENCE -- the model's own reasoning; the article does not say it
+#   UNKNOWN   -- cannot tell, or the model did not say
+# ADVISORY BY DESIGN: it rides into every downstream prompt (see
+# EventFacts.compact_lines) and is persisted for audit, but no gate check
+# reads it -- publication_gate.GATE_SEQUENCE is deliberately untouched.
+FACT_CLASSES = ["FACT", "DERIVED", "INFERENCE", "UNKNOWN"]
+# Event geography (2026-08-14). FACTS_PROMPT always asked for geography
+# (capture item 4) and the schema dropped it on the floor, so a US-only
+# event reached the company stages carrying no hint that it was US-only.
+# Scope is a controlled four-way; `geography_regions` stays free text
+# because it is the ARTICLE'S OWN wording ("Strait of Hormuz", "Gujarat"),
+# and normalizing it to a controlled vocabulary would be an invention.
+GEOGRAPHY_SCOPES = ["INDIA", "GLOBAL", "OTHER_COUNTRY", "UNKNOWN"]
 
 _EFFECT_TO_DIRECTION = {
     "positive": "bullish", "negative": "bearish",
@@ -106,6 +124,16 @@ def _clamp(value, low=0.0, high=1.0) -> float:
 class FactItem(BaseModel):
     fact_id: str  # F1, F2, ... -- stable within the article
     text: str
+    # How this fact was arrived at (FACT_CLASSES). Omitted or out-of-enum
+    # is honestly UNKNOWN, never an optimistic "FACT" -- the same discipline
+    # EventFacts._normalize_cause applies to event_cause.
+    fact_class: str = "UNKNOWN"
+
+    @field_validator("fact_class", mode="before")
+    @classmethod
+    def _normalize_class(cls, value):
+        normalized = str(value or "").strip().upper()
+        return normalized if normalized in FACT_CLASSES else "UNKNOWN"
 
 
 class EventFacts(BaseModel):
@@ -135,6 +163,18 @@ class EventFacts(BaseModel):
     # article gave no magnitude at all.
     magnitude: str | None = None
     magnitude_units: str | None = None
+    # Where the event happens (GEOGRAPHY_SCOPES) and the article's own
+    # wording for the affected places. Both default to the honest "nothing
+    # was stated" values; neither is ever derived from the other, and
+    # regions are never synthesized out of named_entities.
+    geography_scope: str = "UNKNOWN"
+    geography_regions: list[str] = Field(default_factory=list)
+
+    @field_validator("geography_scope", mode="before")
+    @classmethod
+    def _normalize_geography(cls, value):
+        normalized = str(value or "").strip().upper()
+        return normalized if normalized in GEOGRAPHY_SCOPES else "UNKNOWN"
 
     @field_validator("event_cause", mode="before")
     @classmethod
@@ -145,11 +185,31 @@ class EventFacts(BaseModel):
         return value if value in EVENT_CAUSES else "unknown"
 
     def compact_lines(self, limit: int = 14) -> str:
-        """The downstream-call fact block: numbered canonical facts, or a
-        clipped prose fallback for pre-optimization cached results."""
+        """The downstream-call fact block: numbered canonical facts TAGGED
+        with their epistemic class, or a clipped prose fallback for
+        pre-optimization cached results (which carry no fact_items at all,
+        so there is nothing to tag).
+
+        The tag is the whole delivery mechanism for fact_class: every
+        downstream stage reads its facts through this method, so a reasoning
+        stage can see that "refiners will hedge" is [INFERENCE] while
+        "Hormuz closed" is [FACT] without any new call or field plumbing."""
         if self.fact_items:
-            return "\n".join(f"{f.fact_id}: {f.text}" for f in self.fact_items[:limit])
+            return "\n".join(f"{f.fact_id} [{f.fact_class}]: {f.text}"
+                             for f in self.fact_items[:limit])
         return self.facts[:1200]
+
+    def geography_line(self) -> str:
+        """One prompt line, or "" when the article stated no geography at
+        all. An explicit "GEOGRAPHY: UNKNOWN" with nothing behind it is
+        noise the model would try to reason from, so a fully-empty
+        geography contributes nothing."""
+        if self.geography_scope == "UNKNOWN" and not self.geography_regions:
+            return ""
+        line = f"GEOGRAPHY: {self.geography_scope}"
+        if self.geography_regions:
+            line += " -- " + "; ".join(self.geography_regions[:8])
+        return line
 
 
 SCHEMA_FACTS = {
@@ -162,8 +222,17 @@ SCHEMA_FACTS = {
             "type": "array",
             "items": {
                 "type": "object",
-                "properties": {"fact_id": {"type": "string"}, "text": {"type": "string"}},
-                "required": ["fact_id", "text"],
+                "properties": {
+                    "fact_id": {"type": "string"},
+                    "text": {"type": "string"},
+                    # REQUIRED, unlike the optional event-level fields below:
+                    # an untagged fact is indistinguishable from a stated one
+                    # at the point downstream stages read it, so the model
+                    # must commit to a class (UNKNOWN is a legitimate answer,
+                    # and the validator supplies it for anything else).
+                    "fact_class": {"type": "string", "enum": FACT_CLASSES},
+                },
+                "required": ["fact_id", "text", "fact_class"],
             },
         },
         "quantities": {"type": "array", "items": {"type": "string"}},
@@ -178,6 +247,11 @@ SCHEMA_FACTS = {
         "event_cause": {"type": "string", "enum": EVENT_CAUSES},
         "magnitude": {"type": "string"},
         "magnitude_units": {"type": "string"},
+        # Optional, same reasoning as event_cause: an article that states no
+        # geography must be able to say so by omission rather than by
+        # picking the least-wrong enum value.
+        "geography_scope": {"type": "string", "enum": GEOGRAPHY_SCOPES},
+        "geography_regions": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["event", "event_status", "facts", "fact_items", "category", "event_type"],
 }
@@ -686,6 +760,16 @@ class ImpactGraphResult(BaseModel):
     # deserializing without it.
     event_cause: str = "unknown"
     facts: str = ""
+    # The classed fact store this run reasoned from, carried out for
+    # persistence + audit (app.pipeline._persist_alert writes it to
+    # alerts.fact_items_json). Empty for a result deserialized from a cache
+    # entry written before fact classes existed -- honestly "no classed
+    # facts recorded", never a reconstruction from the prose block.
+    fact_items: list[FactItem] = Field(default_factory=list)
+    # Event geography, carried out for the same reason. Defaults match
+    # EventFacts' own so an old cached blob deserializes unchanged.
+    geography_scope: str = "UNKNOWN"
+    geography_regions: list[str] = Field(default_factory=list)
     event_label: str = ""
     # Article-named entities carried through for the publication gate's
     # ARTICLE_SUBJECT evidence classification (spec §9). Default empty so

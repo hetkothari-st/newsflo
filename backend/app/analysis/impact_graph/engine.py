@@ -116,6 +116,11 @@ def _facts_suffix(facts: EventFacts, extra: str = "") -> str:
     (initial_shocks), which genuinely needs the complete event record."""
     evidence = "\n".join(facts.article_evidence[:12])
     parts = [f"EVENT: {facts.event} (status: {facts.event_status})", f"FACTS: {facts.facts}"]
+    # Geography (2026-08-14): "" when the article stated none, so an event
+    # with no stated location contributes no line rather than an empty
+    # "UNKNOWN" the model would try to reason from.
+    if geography := facts.geography_line():
+        parts.append(geography)
     if facts.quantities:
         parts.append("QUANTITIES: " + "; ".join(facts.quantities[:12]))
     if evidence:
@@ -134,6 +139,11 @@ def _compact_suffix(facts: EventFacts, extra: str = "") -> str:
         f"EVENT: {facts.event} (status: {facts.event_status})",
         f"FACTS:\n{facts.compact_lines()}",
     ]
+    # One line, and only when the article actually stated a geography --
+    # the whole point is that a US-only event stops arriving at the company
+    # stages looking location-free.
+    if geography := facts.geography_line():
+        parts.append(geography)
     if extra:
         parts.append(extra)
     return "\n\n".join(parts)
@@ -1302,7 +1312,10 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
     # can reason without the event record), same contract as the old cascade.
     raw_facts = router.call(
         "extract_facts", schema=SCHEMA_FACTS,
-        static_prefix=prompts.static_prefix(prompts.FACTS_PROMPT),
+        # This stage PRODUCES the fact classes and FACTS_PROMPT states their
+        # rules in full -- the downstream reader's legend would be duplicate
+        # tokens on every article.
+        static_prefix=prompts.static_prefix(prompts.FACTS_PROMPT, fact_class_legend=False),
         dynamic_suffix=f"Title: {title}\n\nArticle:\n{content or '(no content -- reason from the title)'}",
         thinking="low", max_output_tokens=4096,
     )
@@ -1364,6 +1377,12 @@ def analyze_article_v3(router: StageRouter, title: str, content: str,
     return ImpactGraphResult(
         category=facts.category, event_type=facts.event_type,
         event_cause=facts.event_cause, facts=facts.facts,
+        # Classed facts + geography carried out for persistence/audit
+        # (2026-08-14). Copies of the validated stage-1 objects, never
+        # re-derived downstream.
+        fact_items=list(facts.fact_items or []),
+        geography_scope=facts.geography_scope,
+        geography_regions=list(facts.geography_regions or []),
         event_label=facts.event, named_entities=list(facts.named_entities or []),
         companies=list(state.companies.values()),
         edges=state.edges, gaps=state.gaps, ranking=ranking,

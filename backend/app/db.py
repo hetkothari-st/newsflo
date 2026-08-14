@@ -168,6 +168,10 @@ _ADDED_COLUMNS = [
     ("company_node_exposures", "provenance_type", "VARCHAR"),
     ("market_moves", "last_bar_date", "VARCHAR"),
     ("market_moves", "bar_complete", "INTEGER"),
+    # -- Fact provenance + event geography (2026-08-14, migration 0009) --
+    ("alerts", "fact_items_json", "TEXT"),
+    ("alerts", "event_geography_scope", "VARCHAR"),
+    ("alerts", "event_geography_regions_json", "TEXT"),
 ]
 
 

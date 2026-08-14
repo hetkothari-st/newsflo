@@ -980,3 +980,88 @@ def test_dockerfile_runs_migrations_before_uvicorn():
         "migrations must run BEFORE the server starts")
     assert "&&" in cmd[0], (
         "a failed migration must abort the container, never fall through to uvicorn")
+
+
+# ===========================================================================
+# 0009 -- fact provenance + event geography
+# ===========================================================================
+
+
+_FACT_PROVENANCE_COLUMNS = {
+    "fact_items_json", "event_geography_scope", "event_geography_regions_json",
+}
+
+
+def _alerts_columns(db_path):
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        return {row[1]: row for row in conn.execute("PRAGMA table_info(alerts)")}
+    finally:
+        conn.close()
+
+
+def test_upgrade_head_adds_fact_provenance_columns(tmp_path):
+    """0009: the classed stage-1 fact store and the event's geography get
+    their own columns on `alerts`, beside the prose `facts` record."""
+    db = tmp_path / "fact_provenance.db"
+    result = _run_alembic(f"sqlite:///{db}")
+    assert result.returncode == 0, result.stderr
+
+    columns = _alerts_columns(db)
+    assert _FACT_PROVENANCE_COLUMNS <= set(columns)
+
+
+def test_0009_columns_are_nullable(tmp_path):
+    """The whole pre-0009 corpus has no classed facts and no geography.
+    NULL must stay a legal, meaningful value ("not recorded") -- a NOT NULL
+    column would force the writer to invent "[]"/"UNKNOWN" and destroy the
+    distinction."""
+    db = tmp_path / "fact_provenance_null.db"
+    assert _run_alembic(f"sqlite:///{db}").returncode == 0
+
+    columns = _alerts_columns(db)
+    for name in _FACT_PROVENANCE_COLUMNS:
+        notnull = columns[name][3]
+        assert notnull == 0, f"{name} must be nullable"
+
+
+def test_0009_preserves_the_0008_gated_row_triggers(tmp_path):
+    """0008's docstring warns that ANY migration batch-altering
+    alert_companies silently drops the §26 backstop. 0009 alters only
+    `alerts`, and this pins that it stays that way: both triggers must
+    still exist at head."""
+    import sqlite3
+
+    db = tmp_path / "fact_provenance_triggers.db"
+    assert _run_alembic(f"sqlite:///{db}").returncode == 0
+
+    conn = sqlite3.connect(db)
+    try:
+        triggers = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+    finally:
+        conn.close()
+    assert "alert_companies_gated_consistency" in triggers
+    assert "alert_companies_gated_consistency_insert" in triggers
+
+
+def test_0009_is_rerunnable_over_its_own_output(tmp_path):
+    """Same guard discipline as 0002-0008. Stamping back to 0008 makes
+    alembic genuinely RE-EXECUTE 0009's body against a database that
+    already has its columns; `upgrade head` alone would just skip it."""
+    db = tmp_path / "rerun_0009.db"
+    url = f"sqlite:///{db}"
+    assert _run_alembic(url).returncode == 0
+
+    env = dict(os.environ, DATABASE_URL=url)
+    stamp = subprocess.run(
+        [sys.executable, "-m", "alembic", "stamp", "0008"],
+        cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert stamp.returncode == 0, stamp.stderr
+    assert _current_revision(db) == {"0008"}, "fixture precondition: 0009 will re-run"
+
+    rerun = _run_alembic(url)
+    assert rerun.returncode == 0, rerun.stderr
+    assert _FACT_PROVENANCE_COLUMNS <= set(_alerts_columns(db))

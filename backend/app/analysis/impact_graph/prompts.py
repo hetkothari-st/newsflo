@@ -13,7 +13,7 @@ from app.analysis.schemas import SECTOR_DEFINITIONS
 # 2026-08-12 P1/P12): rides telemetry rows and the semantic-cache
 # fingerprint, so a prompt change is an explicit, visible cache
 # invalidation instead of a silent one. Bump on ANY prompt-text change.
-IMPACT_PROMPT_VERSION = "kg-6"
+IMPACT_PROMPT_VERSION = "kg-7"
 
 # Business-model validation (final spec §9/§13): shared by every company
 # stage. Sector labels, names and tickers are candidacy, never proof.
@@ -223,14 +223,56 @@ Also classify category and event_type using the provided enums.
 
 Also classify event_cause using the provided enum and preserve stated magnitude + units exactly as written; never estimate a magnitude the article does not state.
 
+Also emit geography_scope and geography_regions:
+- geography_scope: INDIA (the event happens in / is about India), GLOBAL
+  (worldwide or multi-region), OTHER_COUNTRY (a specific country that is
+  not India), UNKNOWN (the article does not say).
+- geography_regions: the places the article itself names, in the article's
+  own wording ("Strait of Hormuz", "Gujarat", "US Gulf Coast"). Copy them;
+  do not translate them into regions the article never mentions, and do not
+  infer a region from a company or person's name.
+Omit both rather than guess.
+
 Additionally emit fact_items: the canonical numbered fact store (F1, F2, ...).
 Each fact_item is ONE self-contained factual sentence carrying its concrete
 specifics (numbers, names, dates). Downstream reasoning stages read ONLY
 these numbered facts, so any specific you omit from them is lost.
 
+Every fact_item MUST carry a fact_class saying how you arrived at it:
+- FACT: the article states this. It could be quoted.
+- DERIVED: arithmetic or unit conversion over figures the article states
+  (a percentage of a stated total, a per-day figure from a stated monthly
+  one). The inputs are in the article; only the calculation is yours.
+- INFERENCE: your own reasoning. The article does not say this.
+- UNKNOWN: you cannot tell which of the above applies.
+
+Never label your own inference as FACT. A fact you cannot point to in the
+article is not a FACT, however confident you are in it. Downstream stages
+see this class on every line and weigh the fact accordingly, so a wrong
+class corrupts reasoning you will never see.
+
 The article itself defines the event.
 Verified company information supplied later defines company exposure."""
 
+
+# Fact-class legend (2026-08-14). Every downstream stage reads its facts as
+# "F1 [FACT]: ..." lines (EventFacts.compact_lines), so every downstream
+# stage has to be told what the tag means. Rides the STATIC prefix -- it is
+# byte-identical for every article, so it is cached, not re-billed per call.
+#
+# ADVISORY, and worded as such on purpose: the last line asks the model to
+# reason more carefully from an inferred fact, it does not forbid an
+# outcome. The deterministic gate (publication_gate.GATE_SEQUENCE) is what
+# forbids outcomes, and it does not read fact classes at all.
+FACT_CLASS_LEGEND = """FACT CLASSES -- every numbered fact you are given is tagged with how it was arrived at:
+[FACT] the source article states it.
+[DERIVED] arithmetic or unit conversion over figures the article states.
+[INFERENCE] an earlier reasoning step's own conclusion; the article does not say it.
+[UNKNOWN] provenance could not be determined.
+
+A company-specific claim built only on [INFERENCE] or [UNKNOWN] facts is
+weaker than one built on [FACT] lines. Say so in your reasoning, and lower
+your confidence accordingly, rather than presenting it at full strength."""
 
 # Economic-channel ontology (architecture upgrade 2026-08-12 §5): the
 # structured coverage checklist discovery and completeness stages must
@@ -696,11 +738,19 @@ Choose ONLY from the candidate list. Omission is a valid verdict.
 """ + OUTPUT_DISCIPLINE
 
 
-def static_prefix(extra: str = "") -> str:
+def static_prefix(extra: str = "", *, fact_class_legend: bool = True) -> str:
     """The cacheable request prefix: global system prompt + stable sector
-    definitions (+ an optional stage prompt). Byte-identical across calls of
-    the same stage, which is what makes Gemini implicit caching land."""
+    definitions + the fact-class legend (+ an optional stage prompt).
+    Byte-identical across calls of the same stage, which is what makes
+    Gemini implicit caching land.
+
+    `fact_class_legend=False` is for the fact-EXTRACTION stage alone: it
+    produces the classes and FACTS_PROMPT already states the rules in full,
+    so shipping the reader's legend there would be duplicated tokens on
+    every article."""
     base = f"{SYSTEM_PROMPT}\n\nSECTOR DEFINITIONS:\n{SECTOR_DEFINITIONS}"
+    if fact_class_legend:
+        base = f"{base}\n\n{FACT_CLASS_LEGEND}"
     if extra:
         return f"{base}\n\n{extra}"
     return base

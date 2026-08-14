@@ -322,6 +322,24 @@ class Alert(Base):
     # shipped; app.analysis.refinement.refine_alert falls back to the
     # article text in that case.
     facts = Column(Text, nullable=True)
+    # --- Fact provenance + event geography (2026-08-14, migration 0009).
+    # `facts` above is the PROSE record; these are the structured twins the
+    # stage-1 extractor now also produces.
+    #
+    # fact_items_json: JSON list of {fact_id, text, fact_class}, the classed
+    # fact store this alert's whole graph reasoned from (fact_class is one of
+    # app.analysis.impact_graph.schemas.FACT_CLASSES). Audit only -- nothing
+    # reads it back into reasoning, and the publication gate never sees it.
+    # NULL, never "[]", when the run produced no classed facts: an alert
+    # analysed before this shipped, or replayed from an older cache entry,
+    # genuinely has no record, and an empty array would claim otherwise.
+    fact_items_json = Column(Text, nullable=True)
+    # Where the event happened. Scope is a GEOGRAPHY_SCOPES value; regions
+    # are a JSON list of the article's OWN wording. Both NULL on legacy rows
+    # and whenever the article stated nothing -- "UNKNOWN" is never written
+    # as a substitute for "not recorded".
+    event_geography_scope = Column(String, nullable=True)
+    event_geography_regions_json = Column(Text, nullable=True)
     # Deferred-refinement bookkeeping (docs: cost-optimization phase 5).
     # NULL means this alert was refined inline as part of its own analysis
     # run -- the historical behavior and still the default. "pending" means
