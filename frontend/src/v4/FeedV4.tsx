@@ -6,7 +6,7 @@
    the timeline beneath. Data comes from the same feed-v2 endpoints as
    the v3 shell; filter semantics (cap_tiers story match + row-level
    narrowing) are identical. */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getAlertDetail,
@@ -18,6 +18,7 @@ import {
   type RippleLayer,
 } from '../v3/api';
 import { categoryArtUrl } from '../v3/categoryArt';
+import ClampedText from './ClampedText';
 import ExpandableTitle from './ExpandableTitle';
 import type { InfoV4Data } from './InfoV4';
 import LogoV4 from './LogoV4';
@@ -148,62 +149,10 @@ function fmtISTTime(iso: string): string {
   });
 }
 
-/* Three-line summary clamp (user spec 2026-08-14): the gist shows at
-   most 3 rendered lines; MORE appears only when a line is actually
-   hidden (same measured-overflow probe as ExpandableTitle) and expands
-   the full summary in place. */
+/* Three-line summary with inline MORE -- mechanics in ClampedText. */
 function ExpandableSummary({ text }: { text: string }) {
-  const ref = useRef<HTMLParagraphElement>(null);
-  const [clamped, setClamped] = useState(false);
-  const [open, setOpen] = useState(false);
-
-  useLayoutEffect(() => {
-    setOpen(false);
-  }, [text]);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el === null || open) return;
-    const check = () => {
-      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 0;
-      const hidden = el.scrollHeight - el.clientHeight;
-      setClamped(lineHeight > 0 ? hidden > lineHeight * 0.5 : hidden > 4);
-    };
-    check();
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [text, open]);
-
   if (text.trim() === '') return null;
-  return (
-    <p ref={ref} className={`lsum ${open ? 'unclamped' : ''}`}>
-      {text}
-      {(clamped || open) && (
-        <button
-          type="button"
-          className="morebtn"
-          aria-expanded={open}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setOpen((prev) => !prev);
-          }}
-          onTouchStart={(event) => event.stopPropagation()}
-          onTouchEnd={(event) => {
-            // preventDefault suppresses the synthetic click that would
-            // follow -- so the toggle must happen HERE on touch, or the
-            // button is dead on touch input.
-            event.preventDefault();
-            event.stopPropagation();
-            setOpen((prev) => !prev);
-          }}
-        >
-          {open ? 'Less —' : 'More —'}
-        </button>
-      )}
-    </p>
-  );
+  return <ClampedText text={text} lines={3} as="p" className="lsum" />;
 }
 
 const BAND_CAP_FILTERS: Array<{ cap: CapTier | 'ALL'; label: string; title: string }> = [

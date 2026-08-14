@@ -367,17 +367,6 @@ body:has(.nf4.dark) { background: #14120e; }
   vertical-align: baseline;
 }
 .nf4 .morebtn:hover, .nf4 .morebtn:focus-visible { color: var(--ink); }
-.nf4 .storycard h1, .nf4 .storycard .lsum { position: relative; }
-.nf4 .storycard h1:not(.unclamped) .morebtn,
-.nf4 .storycard .lsum:not(.unclamped) .morebtn {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  margin: 0;
-  background: var(--paper);
-  padding-left: 10px;
-  line-height: inherit;
-}
 /* Header line: move %% left, timestamp right -- flex keeps them apart at
    any width. */
 .nf4 .storycard .lmoverow {
