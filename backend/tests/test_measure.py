@@ -164,7 +164,11 @@ def test_measure_falls_back_to_nifty_when_sector_index_is_gappy(monkeypatch):
 
     monkeypatch.setattr(measure, "fetch_daily_bars", fake_fetch_daily_bars)
 
-    move = measure.measure_company_move(session=None, company=company)
+    # Freeze "now" beside the hardcoded bar dates: unfrozen, this test
+    # started failing the day the real calendar drifted 4+ trading days
+    # past 2026-08-12 and the stale guard (correctly) fired.
+    now = datetime(2026, 8, 12, 18, 0, tzinfo=measure.IST)
+    move = measure.measure_company_move(session=None, company=company, now=now)
 
     assert move.measurement_status == "ok"
     assert move.benchmark_ticker == "^NSEI"
