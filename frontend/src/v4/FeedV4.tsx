@@ -193,8 +193,12 @@ function ExpandableSummary({ text }: { text: string }) {
           }}
           onTouchStart={(event) => event.stopPropagation()}
           onTouchEnd={(event) => {
+            // preventDefault suppresses the synthetic click that would
+            // follow -- so the toggle must happen HERE on touch, or the
+            // button is dead on touch input.
             event.preventDefault();
             event.stopPropagation();
+            setOpen((prev) => !prev);
           }}
         >
           {open ? 'Less —' : 'More —'}
