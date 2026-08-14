@@ -6,7 +6,7 @@
    the timeline beneath. Data comes from the same feed-v2 endpoints as
    the v3 shell; filter semantics (cap_tiers story match + row-level
    narrowing) are identical. */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getAlertDetail,
@@ -148,21 +148,40 @@ function fmtISTTime(iso: string): string {
   });
 }
 
-/* ~50-word summary clamp (user spec 2026-08-14): a fixed-length gist
-   between title and plate, MORE expanding to the full summary in place.
-   Word-cut, not CSS clamp -- the spec asks for a specific length. */
-const SUMMARY_WORDS = 50;
-
+/* Three-line summary clamp (user spec 2026-08-14): the gist shows at
+   most 3 rendered lines; MORE appears only when a line is actually
+   hidden (same measured-overflow probe as ExpandableTitle) and expands
+   the full summary in place. */
 function ExpandableSummary({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [clamped, setClamped] = useState(false);
   const [open, setOpen] = useState(false);
-  const words = text.split(/\s+/).filter(Boolean);
-  const needsClamp = words.length > SUMMARY_WORDS;
-  const shown = open || !needsClamp ? text : `${words.slice(0, SUMMARY_WORDS).join(' ')}…`;
-  if (words.length === 0) return null;
+
+  useLayoutEffect(() => {
+    setOpen(false);
+  }, [text]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null || open) return;
+    const check = () => {
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 0;
+      const hidden = el.scrollHeight - el.clientHeight;
+      setClamped(lineHeight > 0 ? hidden > lineHeight * 0.5 : hidden > 4);
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, open]);
+
+  if (text.trim() === '') return null;
   return (
     <>
-      <p className="lsum">{shown}</p>
-      {needsClamp && (
+      <p ref={ref} className={`lsum ${open ? 'unclamped' : ''}`}>
+        {text}
+      </p>
+      {(clamped || open) && (
         <button
           type="button"
           className="morebtn"

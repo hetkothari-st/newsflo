@@ -379,7 +379,8 @@ body:has(.nf4.dark) { background: #14120e; }
   color: var(--ash);
   white-space: nowrap;
 }
-/* The ~50-word gist between title and plate. */
+/* The gist between title and plate: at most 3 rendered lines; MORE
+   lifts the clamp in place. */
 .nf4 .storycard .lsum {
   font-family: var(--serif);
   font-size: 19px;
@@ -387,6 +388,15 @@ body:has(.nf4.dark) { background: #14120e; }
   letter-spacing: -0.2px;
   max-width: 58ch;
   margin: 0 0 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.nf4 .storycard .lsum.unclamped {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
 }
 .nf4 .storycard .lgist {
   font-family: var(--serif);
