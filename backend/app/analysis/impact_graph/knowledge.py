@@ -33,7 +33,9 @@ from app.models import Company
 
 # Bump on ANY change to archetypes/mechanisms/event templates: rides the
 # semantic-cache fingerprint, so registry edits are explicit invalidations.
-KNOWLEDGE_REGISTRY_VERSION = "kg-2"
+# kg-3 (blueprint §11/§12/§21): every mechanism gained a controlled
+# relation/directness/section_label triple -- see MECHANISMS below.
+KNOWLEDGE_REGISTRY_VERSION = "kg-3"
 
 
 # --- P4: exposure archetypes ----------------------------------------------
@@ -115,90 +117,120 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "crude_price_up", "child_exposure": "upstream_oil_producer",
         "effect": "positive", "distance": 1, "time_horizon": "Immediate",
         "confidence_baseline": 0.9, "provenance": _PROV_VERIFIED,
+        "relation": "REVENUE_REALIZATION", "directness": "DIRECT",
+        "section_label": "Upstream oil producers",
         "mechanism": "Higher crude realization per barrel directly improves upstream producers' revenue economics.",
     },
     "refiner_marketing_margin": {
         "parent_variable": "crude_price_up", "child_exposure": "oil_refiner_marketer",
         "effect": "mixed", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_VERIFIED, "min_exposure": "HIGH",
+        "relation": "MARKETING_MARGIN", "directness": "DIRECT",
+        "section_label": "Oil marketing & refining",
         "mechanism": "Crude is BOTH feedstock cost and realization driver for refiners: net effect depends on refining spreads, marketing pass-through and inventory position -- never automatically bullish or bearish; judge the spread per event.",
     },
     "lubricant_base_oil_cost": {
         "parent_variable": "crude_price_up", "child_exposure": "lubricant_producer",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_VERIFIED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Lubricants",
         "mechanism": "Base-oil (crude derivative) input costs rise, compressing lubricant margins until price hikes catch up.",
     },
     "petrochemical_feedstock": {
         "parent_variable": "crude_price_up", "child_exposure": "petrochemical_producer",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_VERIFIED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Petrochemicals",
         "mechanism": "Hydrocarbon feedstock costs rise with crude, compressing petrochemical spreads and margins.",
     },
     "paints_input_cost": {
         "parent_variable": "crude_price_up", "child_exposure": "paint_producer",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_VERIFIED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Paints & chemicals",
         "mechanism": "Crude-derivative raw materials (monomers, solvents, titanium dioxide carriers) are a large share of paint input cost.",
     },
     "tyre_input_cost": {
         "parent_variable": "crude_price_up", "child_exposure": "tyre_producer",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Tyres & rubber",
         "mechanism": "Crude-linked inputs (synthetic rubber, carbon black) raise tyre production costs.",
     },
     "aviation_fuel_cost": {
         "parent_variable": "crude_price_up", "child_exposure": "airline",
         "effect": "negative", "distance": 2, "time_horizon": "Immediate",
         "confidence_baseline": 0.9, "provenance": _PROV_CURATED,
+        "relation": "INPUT_COST", "directness": "DIRECT",
+        "section_label": "Aviation",
         "mechanism": "ATF tracks crude; fuel is the largest airline operating cost, so margins compress quickly.",
     },
     "road_freight_fuel_cost": {
         "parent_variable": "crude_price_up", "child_exposure": "logistics_operator",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "INPUT_COST", "directness": "DIRECT",
+        "section_label": "Logistics & freight",
         "mechanism": "Diesel cost is the dominant variable cost in road freight; pass-through to customers lags.",
     },
     "cement_energy_freight": {
         "parent_variable": "crude_price_up", "child_exposure": "cement_producer",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_VERIFIED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Cement & energy-intensive",
         "mechanism": "Diesel-linked freight and pet-coke/energy costs rise with crude, pressuring cement margins.",
     },
     "auto_fuel_demand": {
         "parent_variable": "crude_price_up", "child_exposure": "auto_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_VERIFIED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Auto demand",
         "mechanism": "Higher retail fuel prices raise total cost of ownership for ICE vehicles, weighing on demand, sharpest in price-sensitive segments.",
     },
     "two_wheeler_fuel_demand": {
         "parent_variable": "crude_price_up", "child_exposure": "two_wheeler_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Two-wheeler demand",
         "mechanism": "Two-wheeler buyers are the most fuel-price-sensitive segment; running-cost inflation defers purchases.",
     },
     "ev_relative_advantage": {
         "parent_variable": "crude_price_up", "child_exposure": "ev_manufacturer",
         "effect": "positive", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_VERIFIED,
+        "relation": "COMPETITIVE", "directness": "INDIRECT",
+        "section_label": "EV substitution",
         "mechanism": "Higher ICE running costs improve the relative total-cost-of-ownership case for EVs -- a relative, not absolute, benefit.",
     },
     "vehicle_financier_stress": {
         "parent_variable": "crude_price_up", "child_exposure": "nbfc",
         "effect": "negative", "distance": 3, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_VERIFIED,
+        "relation": "FINANCING", "directness": "REMOTE",
+        "section_label": "Vehicle financier asset quality",
         "mechanism": "Higher fuel costs squeeze commercial-vehicle operator cash flows, pressuring CV-loan asset quality at vehicle financiers.",
     },
     "crude_inflation_pressure": {
         "parent_variable": "crude_price_up", "child_exposure": "fmcg_consumer_staples",
         "effect": "negative", "distance": 3, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.55, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "REMOTE",
+        "section_label": "Imported inflation & consumer demand",
         "mechanism": "Fuel-led inflation erodes household purchasing power and raises packaging/distribution costs for staples.",
     },
     "oil_import_bill_currency": {
         "parent_variable": "crude_price_up", "child_exposure": "gas_distributor",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.55, "provenance": _PROV_CURATED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Gas distributors",
         "mechanism": "Imported LNG and crude-linked gas contracts reprice upward, squeezing distributor spreads where tariffs lag.",
     },
     # -- rates family (canonical: repo_rate_up) --
@@ -206,36 +238,48 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "repo_rate_up", "child_exposure": "bank",
         "effect": "mixed", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "FINANCING", "directness": "DIRECT",
+        "section_label": "Banking & interest rates",
         "mechanism": "Loan books reprice faster than deposits, initially widening NIMs; deposit-cost catch-up and credit-demand drag arrive later -- net effect is bank-specific.",
     },
     "nbfc_funding_cost": {
         "parent_variable": "repo_rate_up", "child_exposure": "nbfc",
         "effect": "negative", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_CURATED,
+        "relation": "FINANCING", "directness": "DIRECT",
+        "section_label": "NBFC funding costs",
         "mechanism": "Wholesale-funded NBFCs face immediate borrowing-cost increases they cannot fully pass through.",
     },
     "housing_demand_rates": {
         "parent_variable": "repo_rate_up", "child_exposure": "real_estate_developer",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Real estate & housing demand",
         "mechanism": "Higher mortgage EMIs reduce housing affordability and defer purchases, slowing developer sales velocity.",
     },
     "durables_financing_demand": {
         "parent_variable": "repo_rate_up", "child_exposure": "consumer_discretionary",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Consumer durables demand",
         "mechanism": "Financed purchases (appliances, electronics, vehicles) become costlier as consumer-loan rates rise.",
     },
     "auto_financing_demand": {
         "parent_variable": "repo_rate_up", "child_exposure": "auto_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Auto financing demand",
         "mechanism": "Most vehicle purchases are financed; higher loan rates raise effective prices and defer demand.",
     },
     "corporate_capex_rates": {
         "parent_variable": "repo_rate_up", "child_exposure": "capital_goods_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Long-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_CURATED,
+        "relation": "CAPEX", "directness": "INDIRECT",
+        "section_label": "Capital goods & capex cycle",
         "mechanism": "Higher cost of capital raises project hurdle rates, deferring private capex and equipment orders.",
     },
     # -- inflation family (canonical: inflation_up) --
@@ -243,18 +287,24 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "inflation_up", "child_exposure": "fmcg_consumer_staples",
         "effect": "negative", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Consumer staples demand",
         "mechanism": "Household budgets compress; staples see downtrading and volume pressure even when value grows.",
     },
     "discretionary_demand_squeeze": {
         "parent_variable": "inflation_up", "child_exposure": "consumer_discretionary",
         "effect": "negative", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Discretionary consumer demand",
         "mechanism": "Discretionary purchases are deferred first when real incomes fall.",
     },
     "rate_expectation_shift": {
         "parent_variable": "inflation_up", "child_exposure": "bank",
         "effect": "mixed", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_CURATED,
+        "relation": "FINANCING", "directness": "REMOTE",
+        "section_label": "Banking & interest rates",
         "mechanism": "Persistent inflation shifts policy-rate expectations upward, moving bank funding economics and bond-book valuations.",
     },
     # -- currency family (canonical: inr_depreciation) --
@@ -262,30 +312,40 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "inr_depreciation", "child_exposure": "it_services",
         "effect": "positive", "distance": 1, "time_horizon": "Immediate",
         "confidence_baseline": 0.85, "provenance": _PROV_CURATED,
+        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        "section_label": "IT services exports",
         "mechanism": "USD-billed revenue converts to more rupees; margins expand as costs are largely INR.",
     },
     "pharma_export_realization": {
         "parent_variable": "inr_depreciation", "child_exposure": "pharma_manufacturer",
         "effect": "positive", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
+        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        "section_label": "Pharma exports",
         "mechanism": "Export-heavy formulations revenue benefits from conversion; partially offset by imported API costs.",
     },
     "textile_export_competitiveness": {
         "parent_variable": "inr_depreciation", "child_exposure": "textile_manufacturer",
         "effect": "positive", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        "section_label": "Textile exports",
         "mechanism": "A weaker rupee improves export price competitiveness for garment/yarn exporters.",
     },
     "import_cost_inflation": {
         "parent_variable": "inr_depreciation", "child_exposure": "oil_refiner_marketer",
         "effect": "negative", "distance": 1, "time_horizon": "Immediate",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        "section_label": "Oil marketing & refining",
         "mechanism": "Dollar-priced crude imports cost more in rupees, raising working capital and under-recovery risk.",
     },
     "electronics_import_cost": {
         "parent_variable": "inr_depreciation", "child_exposure": "appliance_maker",
         "effect": "negative", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "CURRENCY_TRANSLATION", "directness": "DIRECT",
+        "section_label": "Electronics & appliance imports",
         "mechanism": "Imported components (compressors, panels, semiconductors) reprice upward with the dollar.",
     },
     # -- government spending family (canonical: govt_infra_spending_up) --
@@ -293,30 +353,40 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "govt_infra_spending_up", "child_exposure": "cement_producer",
         "effect": "positive", "distance": 1, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Cement & energy-intensive",
         "mechanism": "Public infrastructure programs drive bulk cement demand.",
     },
     "epc_order_book": {
         "parent_variable": "govt_infra_spending_up", "child_exposure": "construction_epc",
         "effect": "positive", "distance": 1, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.8, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "DIRECT",
+        "section_label": "Construction & EPC",
         "mechanism": "Project awards flow directly into EPC/construction order books.",
     },
     "steel_demand_infra": {
         "parent_variable": "govt_infra_spending_up", "child_exposure": "steel_producer",
         "effect": "positive", "distance": 1, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.75, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Steel & metals",
         "mechanism": "Construction steel intensity rises with infrastructure execution.",
     },
     "capital_goods_orders": {
         "parent_variable": "govt_infra_spending_up", "child_exposure": "capital_goods_manufacturer",
         "effect": "positive", "distance": 1, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
+        "relation": "CAPEX", "directness": "DIRECT",
+        "section_label": "Capital goods & capex cycle",
         "mechanism": "Equipment and machinery orders track public capex cycles.",
     },
     "infra_logistics_volume": {
         "parent_variable": "govt_infra_spending_up", "child_exposure": "logistics_operator",
         "effect": "positive", "distance": 2, "time_horizon": "Long-Term",
         "confidence_baseline": 0.55, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Logistics & freight",
         "mechanism": "Completed corridors and freight infrastructure lift logistics volumes and efficiency.",
     },
     # -- trade/tariff family (canonical: import_tariff_up on the protected good) --
@@ -324,6 +394,8 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "import_tariff_up", "child_exposure": "steel_producer",
         "effect": "positive", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
+        "relation": "PRICING_POWER", "directness": "DIRECT",
+        "section_label": "Steel & metals",
         "mechanism": "Import duties raise landed cost of foreign supply, improving domestic producers' pricing power.",
         "exclusions": ["applies to the protected good's producers only -- verify the tariff's actual product scope"],
     },
@@ -331,6 +403,8 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "import_tariff_up", "child_exposure": "capital_goods_manufacturer",
         "effect": "negative", "distance": 2, "time_horizon": "Short-Term",
         "confidence_baseline": 0.6, "provenance": _PROV_CURATED,
+        "relation": "INPUT_COST", "directness": "INDIRECT",
+        "section_label": "Capital goods & capex cycle",
         "mechanism": "Users of the protected input face higher raw-material costs.",
     },
     # -- geopolitical supply disruption (canonical: supply_route_disruption) --
@@ -338,12 +412,16 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "supply_route_disruption", "child_exposure": "shipping_port_operator",
         "effect": "mixed", "distance": 1, "time_horizon": "Immediate",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "SUPPLY", "directness": "DIRECT",
+        "section_label": "Shipping & ports",
         "mechanism": "Route disruption spikes freight rates (positive for shippers with capacity) while volumes and insurance costs cut the other way.",
     },
     "defense_procurement_sentiment": {
         "parent_variable": "supply_route_disruption", "child_exposure": "defense_manufacturer",
         "effect": "positive", "distance": 2, "time_horizon": "Long-Term",
         "confidence_baseline": 0.5, "provenance": _PROV_CURATED,
+        "relation": "REGULATORY", "directness": "REMOTE",
+        "section_label": "Defense & procurement",
         "mechanism": "Sustained geopolitical escalation supports defense procurement pipelines; weak for one-off incidents.",
     },
     # -- monsoon/rural family (canonical: monsoon_above_normal) --
@@ -351,27 +429,77 @@ MECHANISMS: dict[str, dict] = {
         "parent_variable": "monsoon_above_normal", "child_exposure": "agri_producer",
         "effect": "positive", "distance": 1, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
+        "relation": "SUPPLY", "directness": "DIRECT",
+        "section_label": "Agriculture & rural incomes",
         "mechanism": "A good monsoon lifts crop output and farm incomes.",
     },
     "rural_fmcg_demand": {
         "parent_variable": "monsoon_above_normal", "child_exposure": "fmcg_consumer_staples",
         "effect": "positive", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Consumer staples & rural demand",
         "mechanism": "Higher farm incomes flow into rural staples consumption.",
     },
     "rural_two_wheeler_demand": {
         "parent_variable": "monsoon_above_normal", "child_exposure": "two_wheeler_manufacturer",
         "effect": "positive", "distance": 2, "time_horizon": "Medium-Term",
         "confidence_baseline": 0.65, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "INDIRECT",
+        "section_label": "Two-wheeler rural demand",
         "mechanism": "Rural discretionary purchases -- two-wheelers first -- track monsoon-driven incomes.",
     },
     "agrochemical_volume": {
         "parent_variable": "monsoon_above_normal", "child_exposure": "fertilizer_agrochemical",
         "effect": "positive", "distance": 1, "time_horizon": "Short-Term",
         "confidence_baseline": 0.7, "provenance": _PROV_CURATED,
+        "relation": "DEMAND", "directness": "DIRECT",
+        "section_label": "Agrochemicals & fertilizers",
         "mechanism": "Sowing area and input intensity rise with a good monsoon.",
     },
 }
+
+# Controlled edge-relation vocabulary (blueprint §21): every mechanism's
+# "relation" key above must be a member. Kept alongside MECHANISMS so T2/T4/
+# T5 consumers import one source of truth instead of re-declaring the set.
+EDGE_RELATIONS = frozenset({
+    "REVENUE_REALIZATION", "INPUT_COST", "OPERATING_MARGIN", "REFINING_SPREAD",
+    "MARKETING_MARGIN", "DEMAND", "PRICING_POWER", "CURRENCY_TRANSLATION",
+    "VALUATION_MULTIPLE", "CAPEX", "SUPPLY", "COMPETITIVE", "REGULATORY",
+    "FINANCING", "OTHER",
+})
+
+
+def mechanism_meta(mechanism_id: str) -> dict | None:
+    """Blueprint §11/§12/§21 lookup: the controlled relation/directness/
+    section-label triple plus the existing effect/distance/provenance for a
+    known mechanism id. None for anything not in MECHANISMS -- callers must
+    fall back to a controlled default (never the raw id)."""
+    spec = MECHANISMS.get(mechanism_id)
+    if spec is None:
+        return None
+    return {
+        "relation": spec["relation"],
+        "directness": spec["directness"],
+        "section_label": spec["section_label"],
+        "effect": spec["effect"],
+        "distance": spec["distance"],
+        "provenance": spec["provenance"],
+    }
+
+
+def section_label_for(parent_type: str, parent_id: str) -> str | None:
+    """Taxonomy lookup shared by section assembly (T5): resolves a causal
+    parent's controlled section label for the mechanism-backed parent types.
+    "sector" and "company" parents are NOT handled here -- they resolve
+    through ripple_layers' own _SECTOR_LABELS / "linked to <name>" tables,
+    per the brief's ownership split. Returns None for unknown ids (and for
+    parent types this registry doesn't own) so the caller can fall back to
+    its own controlled OTHER_LABEL -- never the raw node id."""
+    if parent_type not in ("economic_node", "commodity", "policy"):
+        return None
+    meta = mechanism_meta(parent_id)
+    return meta["section_label"] if meta is not None else None
 
 
 # --- P5: event archetypes --------------------------------------------------
