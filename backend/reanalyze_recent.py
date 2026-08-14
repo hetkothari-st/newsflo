@@ -38,6 +38,44 @@ from app.models import Alert
 from app.pipeline import article_text, clear_analysis_cache, get_cached_analysis, store_analysis_cache
 
 
+def _reconcile_alert_companies(alert, fresh_by_company_id: dict) -> None:
+    """Write the fresh rationale/key_points onto each matched AlertCompany
+    row on `alert.companies` (caller commits).
+
+    Blueprint §26 ("gated V4 rows cannot be mutated by legacy refinement" /
+    "no legacy worker may mutate current gated output"): a row that
+    already carries `gate_state` or `display_tier` is V4 gate output --
+    this legacy re-analysis script must never overwrite it, so it is
+    skipped with a loud console line instead. Behavior for every other row
+    is byte-identical to before this guard.
+
+    Extracted from main()'s alert loop (same shape unchanged) so it can be
+    imported and unit-tested directly, without argparse/DB/LLM setup --
+    this module has no import-time side effects (everything real happens
+    under `if __name__ == "__main__":`), so a plain `import
+    reanalyze_recent` in a test is safe.
+    """
+    for ac in alert.companies:
+        match = fresh_by_company_id.get(ac.company_id)
+        if match is None:
+            print(f"  {ac.company.name} ({ac.company.ticker}): no match in fresh analysis, left unchanged")
+            continue
+        if ac.gate_state is not None or ac.display_tier is not None:
+            print(f"  {ac.company.name} ({ac.company.ticker}): "
+                  f"SKIPPED (gated row -- V4 output is immutable to legacy scripts)")
+            continue
+
+        old_key_points = json.loads(ac.key_points_json or "[]")
+        print(f"  {ac.company.name} ({ac.company.ticker}):")
+        print(f"    OLD rationale: {ac.rationale}")
+        print(f"    OLD key_points: {old_key_points}")
+        print(f"    NEW rationale: {match.rationale}")
+        print(f"    NEW key_points: {match.key_points}")
+
+        ac.rationale = match.rationale
+        ac.key_points_json = json.dumps(match.key_points)
+
+
 def main(limit: int, force: bool) -> None:
     init_db()
     session = SessionLocal()
@@ -71,22 +109,7 @@ def main(limit: int, force: bool) -> None:
             if company is not None:
                 fresh_by_company_id[company.id] = mention
 
-        for ac in alert.companies:
-            match = fresh_by_company_id.get(ac.company_id)
-            if match is None:
-                print(f"  {ac.company.name} ({ac.company.ticker}): no match in fresh analysis, left unchanged")
-                continue
-
-            old_key_points = json.loads(ac.key_points_json or "[]")
-            print(f"  {ac.company.name} ({ac.company.ticker}):")
-            print(f"    OLD rationale: {ac.rationale}")
-            print(f"    OLD key_points: {old_key_points}")
-            print(f"    NEW rationale: {match.rationale}")
-            print(f"    NEW key_points: {match.key_points}")
-
-            ac.rationale = match.rationale
-            ac.key_points_json = json.dumps(match.key_points)
-
+        _reconcile_alert_companies(alert, fresh_by_company_id)
         session.commit()
 
     session.close()

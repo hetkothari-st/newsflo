@@ -285,3 +285,151 @@ def test_maybe_start_scheduler_noop_when_scheduler_disabled(monkeypatch):
     main_module._maybe_start_scheduler()
 
     assert calls == []
+
+
+# --- root-level maintenance scripts: reanalyze_recent.py, ------------------
+# --- fix_direction_contradiction.py -----------------------------------------
+#
+# Review round 1 finding: these two `backend/`-root one-off scripts (both
+# documented for production use against `railway run`) mutate AlertCompany
+# rows with NO gate check at all -- the exact legacy-worker shape blueprint
+# §26 forbids, and outside the T3 DB trigger's coverage (that trigger only
+# blocks sign-contradictions/rationale-nulling; a non-NULL overwrite of an
+# already-gated row's rationale/why/key_points sails straight through it).
+#
+# Both scripts have no import-time side effects (everything real happens
+# under `if __name__ == "__main__":`), so importing them directly and
+# calling their extracted per-row functions is safe and gives real
+# coverage -- chosen over an AST-based "does the guard exist" test because
+# a real import+call proves the guard actually fires and actually leaves
+# the row untouched, not merely that matching source text is present.
+
+def test_reanalyze_recent_skips_a_gated_row(db_session, capsys):
+    import reanalyze_recent
+    from types import SimpleNamespace
+
+    company = _company(ticker="OIL.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session, title="reanalyze gated fixture")
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bearish",
+        magnitude_low=1.0, magnitude_high=3.0, rationale="Gate-authored rationale",
+        key_points_json=json.dumps(["Gate point"]), basis="direct_mention",
+        gate_state="DISPLAY_ELIGIBLE",
+    )
+    db_session.add(ac)
+    db_session.commit()
+    db_session.refresh(alert)
+
+    fresh_by_company_id = {
+        company.id: SimpleNamespace(rationale="LEGACY overwrite", key_points=["legacy point"]),
+    }
+
+    reanalyze_recent._reconcile_alert_companies(alert, fresh_by_company_id)
+
+    db_session.refresh(ac)
+    assert ac.rationale == "Gate-authored rationale"
+    assert ac.key_points_json == json.dumps(["Gate point"])
+    assert "SKIPPED (gated row" in capsys.readouterr().out
+
+
+def test_reanalyze_recent_still_updates_an_ungated_row(db_session):
+    import reanalyze_recent
+    from types import SimpleNamespace
+
+    company = _company(ticker="TCS.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session, title="reanalyze ungated fixture")
+    alert = Alert(article_id=article.id, category="it")
+    db_session.add(alert)
+    db_session.flush()
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=3.0, rationale="Old rationale",
+        key_points_json=json.dumps(["old"]), basis="direct_mention",
+        gate_state=None, display_tier=None,
+    )
+    db_session.add(ac)
+    db_session.commit()
+    db_session.refresh(alert)
+
+    fresh_by_company_id = {
+        company.id: SimpleNamespace(rationale="Fresh rationale", key_points=["fresh point"]),
+    }
+
+    reanalyze_recent._reconcile_alert_companies(alert, fresh_by_company_id)
+    db_session.commit()
+
+    db_session.refresh(ac)
+    assert ac.rationale == "Fresh rationale"
+    assert json.loads(ac.key_points_json) == ["fresh point"]
+
+
+def test_fix_direction_contradiction_skips_a_gated_row(db_session, capsys):
+    import fix_direction_contradiction as fdc
+
+    company = _company(ticker="OIL.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session, title="fix_direction gated fixture")
+    alert = Alert(article_id=article.id, category="oil_gas")
+    db_session.add(alert)
+    db_session.flush()
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=3.0, rationale="r", basis="direct_mention",
+        why="Old gate-authored why", gate_state="DISPLAY_ELIGIBLE",
+    )
+    db_session.add(ac)
+    db_session.commit()
+
+    mismatches = [(ac, "bullish", "bearish")]
+    measured = [{
+        "ticker": company.ticker, "name": company.name, "direction": "bearish",
+        "excess_move_pct": -3.1, "_alert_company": ac,
+    }]
+    whys = {company.ticker: "Legacy market-move rationalization"}
+
+    fdc._apply_direction_fixes(mismatches)
+    fdc._apply_why_updates(measured, whys)
+
+    assert ac.direction == "bullish", "direction must stay gate-authored, not flipped"
+    assert ac.why == "Old gate-authored why", "why must stay gate-authored, not overwritten"
+    assert "SKIPPED (gated row" in capsys.readouterr().out
+
+
+def test_fix_direction_contradiction_still_fixes_an_ungated_row(db_session):
+    import fix_direction_contradiction as fdc
+
+    company = _company(ticker="TCS.NS")
+    db_session.add(company)
+    db_session.commit()
+    article = _article(db_session, title="fix_direction ungated fixture")
+    alert = Alert(article_id=article.id, category="it")
+    db_session.add(alert)
+    db_session.flush()
+    ac = AlertCompany(
+        alert_id=alert.id, company_id=company.id, direction="bullish",
+        magnitude_low=1.0, magnitude_high=3.0, rationale="r", basis="direct_mention",
+        why="Old why", gate_state=None, display_tier=None,
+    )
+    db_session.add(ac)
+    db_session.commit()
+
+    mismatches = [(ac, "bullish", "bearish")]
+    measured = [{
+        "ticker": company.ticker, "name": company.name, "direction": "bearish",
+        "excess_move_pct": -3.1, "_alert_company": ac,
+    }]
+    whys = {company.ticker: "Fresh corrected why"}
+
+    fdc._apply_direction_fixes(mismatches)
+    fdc._apply_why_updates(measured, whys)
+
+    assert ac.direction == "bearish"
+    assert ac.why == "Fresh corrected why"

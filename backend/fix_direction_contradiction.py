@@ -34,6 +34,52 @@ from app.db import SessionLocal, init_db
 from app.models import Alert, Company, MarketMove
 
 
+def _is_gated_row(ac) -> bool:
+    """Same discipline as app.analysis.impact_graph.publication_gate.
+    is_gated, applied per AlertCompany row rather than alert-wide: a row
+    carrying `gate_state` or `display_tier` is V4 gate output, immutable
+    to legacy scripts (blueprint §26)."""
+    return ac.gate_state is not None or ac.display_tier is not None
+
+
+def _apply_direction_fixes(mismatches: list) -> None:
+    """Write the corrected `direction` for every mismatch -- skipping,
+    loudly, any AlertCompany that carries gate_state/display_tier (V4 gate
+    output, immutable to legacy scripts -- blueprint §26). Extracted from
+    main()'s alert loop (same shape, same ordering relative to the
+    generate_impact_whys call, unchanged) so it can be imported and unit-
+    tested directly, without argparse/DB/LLM setup -- this module has no
+    import-time side effects (everything real happens under
+    `if __name__ == "__main__":`), so a plain `import
+    fix_direction_contradiction` in a test is safe."""
+    for ac, old_direction, correct_direction in mismatches:
+        if _is_gated_row(ac):
+            print(f"  {ac.company.name} ({ac.company.ticker}): "
+                  f"SKIPPED (gated row -- V4 output is immutable to legacy scripts)")
+            continue
+        print(f"  {ac.company.name} ({ac.company.ticker}): direction {old_direction} -> {correct_direction}")
+        print(f"    OLD why: {ac.why}")
+        ac.direction = correct_direction
+
+
+def _apply_why_updates(measured: list[dict], whys: dict) -> None:
+    """Write the fresh `why` for every measured company (main()'s original
+    "any mismatch on this alert regenerates why for ALL its measured
+    companies" behavior, unchanged) -- skipping, loudly, any AlertCompany
+    that carries gate_state/display_tier. See _apply_direction_fixes for
+    why this is a separate, directly-testable function."""
+    for m in measured:
+        ac = m["_alert_company"]
+        if _is_gated_row(ac):
+            print(f"  {ac.company.name} ({ac.company.ticker}): "
+                  f"SKIPPED (gated row -- V4 output is immutable to legacy scripts)")
+            continue
+        why = whys.get(m["ticker"])
+        if why:
+            ac.why = why
+            print(f"    NEW why ({m['ticker']}): {why}")
+
+
 def main(limit: int) -> None:
     init_db()
     session = SessionLocal()
@@ -68,20 +114,13 @@ def main(limit: int) -> None:
             continue
 
         print(f"\n=== Alert {alert.id}: {article.title} ===")
-        for ac, old_direction, correct_direction in mismatches:
-            print(f"  {ac.company.name} ({ac.company.ticker}): direction {old_direction} -> {correct_direction}")
-            print(f"    OLD why: {ac.why}")
-            ac.direction = correct_direction
+        _apply_direction_fixes(mismatches)
 
         text = article.full_content or article.content
         whys = generate_impact_whys(client, article.title, text, [
             {k: v for k, v in m.items() if k != "_alert_company"} for m in measured
         ])
-        for m in measured:
-            why = whys.get(m["ticker"])
-            if why:
-                m["_alert_company"].why = why
-                print(f"    NEW why ({m['ticker']}): {why}")
+        _apply_why_updates(measured, whys)
 
         session.commit()
 
