@@ -3,7 +3,7 @@
   "article": {
     "title": "Brent crude climbs to a five-month high on tightening OPEC+ supply",
     "text": "Brent crude settled at a five-month high after OPEC+ signalled it would hold production cuts through the next quarter, tightening global supply as demand stayed resilient.",
-    "note": "HINDOILEXP shape, isolated: the mapping stage proposes a micro-cap explorer purely because its NAME and SECTOR resemble the real upstream-realization beneficiaries -- 'oil exploration' pattern-matches the mechanism prior even though the company's actual commercial output is negligible. The semantic counterfactual verifier is the safeguard that must catch this, not the gate: a plausible-sounding rationale and a real sector/name match are not evidence of a material, event-specific relationship."
+    "note": "HINDOILEXP shape, isolated: the mapping stage proposes a micro-cap explorer purely because its NAME and SECTOR resemble the real upstream-realization beneficiaries -- 'oil exploration' pattern-matches the mechanism prior even though the company's actual commercial output is negligible. The verifier ACCEPTS the candidate (it is a real company with a real, if thin, mechanism -- inclusion itself is not the defect) but answers the SEMANTIC COUNTERFACTUAL question NOT_SUPPORTED: the claim would survive the event's removal, i.e. it is a generic sector/name-pattern match rather than something this specific crude move causes. That verdict reaches the deterministic gate as COUNTERFACTUAL_VALID -> REJECT_NOT_EVENT_SPECIFIC, so the candidate is a REAL excluded row (tier D, a genuine decision record), not a candidate that silently never existed -- distinguishing 'caught' from 'never proposed', which a verifier-reject (popped pre-gate) cannot."
   },
   "universe": [
     {
@@ -42,7 +42,7 @@
       "companies": [
         {
           "ticker": "HINDOILEXP.NS", "name": "Hindustan Oil Exploration Company", "direction": "bullish", "net_direction": "bullish",
-          "economic_effect": "positive", "impact_strength": 0.45, "confidence": 0.6, "materiality": 0.4, "time_horizon": "Immediate",
+          "economic_effect": "positive", "impact_strength": 0.45, "confidence": 0.65, "materiality": 0.45, "time_horizon": "Immediate",
           "mechanism": "Small upstream producer's crude realizations rise with benchmark prices, improving revenue per barrel.",
           "rationale": "Genuine producing E&P with crude-linked realizations, but small output base and gas-weighted mix limit absolute earnings impact.",
           "positive_channels": ["higher crude realization"]
@@ -50,10 +50,8 @@
       ]
     },
     "verify_companies": {
-      "accept": [],
-      "reject": [
-        {"ticker": "HINDOILEXP.NS", "reason": "Micro-cap explorer with negligible commercial crude output; realization-uplift mechanism is not material at the corporate level and inclusion rests mainly on sector/name similarity to the real upstream producers (ONGC, Oil India) rather than on this company's own economics. Effect too immaterial for a professional impact graph on an unquantified crude move."}
-      ],
+      "accept": ["HINDOILEXP.NS"],
+      "reject": [],
       "counterfactual": {"HINDOILEXP.NS": "NOT_SUPPORTED"}
     }
   },
@@ -62,6 +60,7 @@
     "allow_secondary": [],
     "expected_rejected": ["HINDOILEXP.NS"],
     "expect_abstention": true,
-    "rationale": "HINDOILEXP genuinely operates in the same sub-sector as the real upstream beneficiaries and the mapping stage's rationale reads plausibly on its face -- this is exactly what makes it a semantic-similarity false positive rather than an obviously bad candidate. The verifier is the safeguard that must catch it: the company's own commercial output is too small for a benchmark crude move to be a material, event-specific story, and the verifier explicitly names sector/name-pattern-matching (not this company's own economics) as the actual basis for the proposal. A plausible mechanism sentence and a genuine sector match are not evidence -- the candidate must be absent from every tier."
+    "expected_evidence_tier": {"HINDOILEXP.NS": "D"},
+    "rationale": "HINDOILEXP genuinely operates in the same sub-sector as the real upstream beneficiaries and the mapping stage's rationale reads plausibly on its face -- this is exactly what makes it a semantic-similarity false positive rather than an obviously bad candidate. The verifier ACCEPTS it (a real company, a real if thin mechanism) but answers NOT_SUPPORTED on the semantic counterfactual: this company's own commercial output is too small for a benchmark crude move to be a material, event-specific story about IT specifically, so the claim would survive the event's removal -- the definition of a generic sector/name-pattern match. That verdict reaches the deterministic gate (COUNTERFACTUAL_VALID -> REJECT_NOT_EVENT_SPECIFIC) rather than being popped pre-gate by a verifier-reject, so this fixture pins a REAL excluded decision record (tier D, evidence-tier assertable) -- distinguishing 'the safeguard caught it' from 'it was never proposed at all', which the archetype-eligibility machinery breaking or the mapping stage returning nothing would both also produce."
   }
 }

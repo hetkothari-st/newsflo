@@ -540,16 +540,35 @@ def score(observations: list[dict]) -> dict:
             entry = displayed.get(ticker)
             observed = "" if entry is None else " ".join(filter(None, [
                 entry.get("causal_parent_id"), entry.get("discovery_source")]))
-            mechanism.add(expected in observed)
+            hit = expected in observed
+            mechanism.add(hit)
+            if not hit:
+                event["failures"].append(
+                    f"expected mechanism {ticker} contains={expected!r} observed={observed!r}")
         for ticker, expected in (truth.get("expected_causal_distance") or {}).items():
             entry = displayed.get(ticker)
-            distance.add(entry is not None and entry["causal_distance"] == expected)
+            hit = entry is not None and entry["causal_distance"] == expected
+            distance.add(hit)
+            if not hit:
+                observed = entry["causal_distance"] if entry is not None else "<absent>"
+                event["failures"].append(
+                    f"expected causal_distance {ticker}={expected} observed={observed}")
         for ticker, expected in (truth.get("expected_materiality_grade") or {}).items():
             entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
-            materiality.add(entry is not None and entry["materiality_grade"] == expected)
+            hit = entry is not None and entry["materiality_grade"] == expected
+            materiality.add(hit)
+            if not hit:
+                observed = entry["materiality_grade"] if entry is not None else "<absent>"
+                event["failures"].append(
+                    f"expected materiality_grade {ticker}={expected} observed={observed}")
         for ticker, expected in (truth.get("expected_evidence_tier") or {}).items():
             entry = next((e for e in obs["entries"] if e["ticker"] == ticker), None)
-            evidence.add(entry is not None and entry["evidence_tier"] == expected)
+            hit = entry is not None and entry["evidence_tier"] == expected
+            evidence.add(hit)
+            if not hit:
+                observed = entry["evidence_tier"] if entry is not None else "<absent>"
+                event["failures"].append(
+                    f"expected evidence_tier {ticker}={expected} observed={observed}")
 
         # secondary_ripple / macro_context: asserted EXACTLY like
         # primary_feed_precision above -- presence at the SPECIFIC tier the

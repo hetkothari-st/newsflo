@@ -123,6 +123,25 @@ def test_legacy_secondary_spelling_counts_as_published():
     assert metrics["company_precision"] == {"value": 0.0, "hits": 0, "total": 1}
 
 
+# --- Fix round 1, I1: the four pre-existing per-ticker loops must fail -----
+# --- loudly, not just degrade a percentage nobody is required to read ------
+
+def test_expected_evidence_tier_miss_produces_a_failure_line():
+    """The regression a mutation test caught: emptying a fixture's recorded
+    observation (nothing published, evidence-tier expectation unmet) used to
+    produce ZERO lines in event['failures'] -- only evidence_accuracy's
+    percentage moved, which nothing gates on and nothing prints as FAIL. A
+    real regression must be visible in the failures list, not just a number
+    a reviewer has to remember to check."""
+    observation = _observation(
+        entries=[], ground_truth={"expected_evidence_tier": {"GHOST.NS": "SUBJECT"}})
+    scored = score([observation])
+
+    assert scored["metrics"]["evidence_accuracy"] == {"value": 0.0, "hits": 0, "total": 1}
+    failures = scored["per_event"][0]["failures"]
+    assert any("evidence_tier" in f and "GHOST.NS" in f for f in failures), failures
+
+
 # --- §32 batch A: expected_secondary_ripple / expected_macro_context / -----
 # --- expected_directness -- new keys, asserted like expected_primary -------
 
@@ -162,6 +181,24 @@ def test_expected_secondary_ripple_fails_on_wrong_effect_at_the_right_tier():
 def test_expected_secondary_ripple_fails_when_ticker_absent_entirely():
     observation = _observation(entries=[], ground_truth={
         "expected_secondary_ripple": {"MISSING.NS": "negative"}})
+    metrics = score([observation])["metrics"]
+
+    assert metrics["secondary_ripple_accuracy"] == {"value": 0.0, "hits": 0, "total": 1}
+
+
+def test_expected_secondary_ripple_scores_a_miss_on_a_legacy_tier_spelling():
+    """Controller-ratified intent, opposite direction of
+    test_legacy_secondary_spelling_counts_as_published: `_displayed()` /
+    `DEEP_DIVE_TIERS` read legacy spellings ('secondary_deep_dive',
+    'secondary') as published for company_precision/recall, but the new
+    §32 keys compare the CANONICAL spelling only -- the tier is the claim,
+    and a fixture asserting `expected_secondary_ripple` is asserting the
+    current vocabulary a row must actually carry, not "published under any
+    spelling this reader still tolerates"."""
+    observation = _observation(
+        entries=[_entry("OLD.NS", "secondary_deep_dive", effect="negative")],
+        ground_truth={"expected_secondary_ripple": {"OLD.NS": "negative"}},
+    )
     metrics = score([observation])["metrics"]
 
     assert metrics["secondary_ripple_accuracy"] == {"value": 0.0, "hits": 0, "total": 1}

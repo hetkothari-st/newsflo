@@ -20,3 +20,7 @@ models/
 # committed: it's regenerated daily/monthly and would flood git status with
 # thousands of entries per run.
 data/universe/
+
+# Regenerable offline-benchmark output (results JSON + per-fixture review
+# markdown) -- rewritten on every tools/offline_benchmark.py run, not source.
+benchmarks/out/
