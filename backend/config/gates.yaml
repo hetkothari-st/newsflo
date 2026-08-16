@@ -1,0 +1,67 @@
+# V5 publication gate policy (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §7.4,
+# docs/v5/01_PHASE_0_canonical_truth.md Task 0.4).
+#
+# THIS FILE IS POLICY, NOT DATA. It contains thresholds the owner chooses;
+# it contains no company facts, no exposures, no coefficients. Changing a
+# number here changes what publishes -- it never changes what is true.
+#
+# Read by app/core/config_loader.py into the frozen GateConfig that
+# app/core/gates.py evaluates. gates.py itself holds no thresholds, so the
+# policy cannot drift between the file and the code.
+#
+# PHASE 0 SCOPE. Several §7.4 inputs do not exist in this repo yet
+# (liquidity ADV, the independent verifier's verdict, the empirical
+# cross-check, exposure freshness). Each has an `unknown_*` policy below
+# saying what an ABSENT input means. They are set FAIL-CLOSED for PRIMARY
+# (an input we cannot evaluate cannot authorize the strongest claim) and
+# permissive for SECONDARY_RIPPLE, which is the honest reading of "we do not
+# know this yet". Phases 1-5 supply the real inputs; the gate's structure
+# does not change when they arrive.
+
+version: gate-v5.0.0
+
+hard_blocks:
+  # entity_status must be this to publish at all.
+  required_entity_status: ACTIVE
+  # A shock we cannot size confidently is a MACRO_CONTEXT statement at best
+  # -- and MACRO_CONTEXT may never carry a company (invariant 6), so a
+  # per-company draft in that state is REJECTED.
+  min_shock_magnitude_confidence: 0.5
+  # Materiality buckets that mean "there is nothing to say".
+  no_impact_buckets: [NO_MATERIAL_IMPACT, NONE]
+
+primary:
+  max_graph_distance: 2
+  # DIRECT at distance 1, or DIRECT|INDIRECT at distance 2 with HIGH
+  # materiality. REMOTE never publishes primary.
+  allowed_directness: [DIRECT, INDIRECT]
+  directness_at_d1: [DIRECT]
+  materiality_buckets: [HIGH]
+  # MEDIUM materiality is admissible only with strong evidence.
+  medium_materiality_evidence_grades: [A, B]
+  evidence_grades: [A, B, C]
+  forbidden_weakest_link_statuses: [SECTOR_PROXY, UNBOUND]
+  min_sign_consistency: 0.90
+  allowed_empirical_status: [AGREE, NO_DATA]
+  max_objection_severity_sustained: WARN
+  required_verifier_status: PASS
+  min_adv_inr: null           # no liquidity feed wired yet -> see unknown_*
+  allowed_event_status: [CONFIRMED, OFFICIAL]
+  unknown_verifier_status_passes: false
+  unknown_empirical_status_passes: false
+  unknown_liquidity_passes: true      # nothing to evaluate; not a silent pass
+  unknown_event_status_passes: false
+
+secondary:
+  max_graph_distance: 3
+  materiality_buckets: [HIGH, MEDIUM]
+  low_materiality_evidence_grades: [A, B]
+  evidence_grades: [A, B, C, D]
+  min_sign_consistency: 0.60
+  # Below the floor a company may still publish, but only as MIXED or
+  # UNCERTAIN (invariants 8 and 9) -- never as a direction.
+  below_floor_allowed_effects: [MIXED, UNCERTAIN]
+  # Invariant 7: SECONDARY_RIPPLE requires a non-null mechanism_id.
+  require_mechanism_id: true
+  unknown_verifier_status_passes: true
+  unknown_empirical_status_passes: true

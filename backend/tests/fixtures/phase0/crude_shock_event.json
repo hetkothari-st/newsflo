@@ -1,0 +1,290 @@
+{
+  "_fixture": true,
+  "_description": "Phase 0 fixture event: a crude-price shock reaching one refiner (FIXCO1.NS) and one remote candidate (FIXCO2.NS). Company names, tickers and every number here are INVENTED FOR TESTING and are marked `_fixture: true` on every object that carries a numeral, per docs/v5/00_MASTER_CONTEXT.md's fabrication guard. Nothing in this file describes a real company, and no production code path may read it.",
+  "event_id": "fixture:crude-shock-1",
+  "analysis_version": "v3:fixture:pol-x:prompt-x:schema-x:kr-x:1:deadbeef",
+  "event_context": {
+    "_fixture": true,
+    "event_status": "CONFIRMED",
+    "shock_magnitude_confidence": 0.8,
+    "exposure_stale": false
+  },
+  "signals": [
+    {
+      "_fixture": true,
+      "stage": "ENTITY",
+      "kind": "ENTITY_RESOLUTION",
+      "company_id": 9001,
+      "created_by": "fixture:entity_resolver",
+      "payload": {
+        "_fixture": true,
+        "ticker": "FIXCO1.NS",
+        "isin": "INFIXTURE0001",
+        "resolution": "RESOLVED",
+        "entity_status": "ACTIVE"
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "DISCOVERY",
+      "kind": "DISCOVERY",
+      "company_id": 9001,
+      "created_by": "fixture:engine",
+      "payload": {
+        "_fixture": true,
+        "discovery_source": "MENTION",
+        "directness": "DIRECT",
+        "graph_distance": 1
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "SENSITIVITY",
+      "kind": "CHANNEL",
+      "company_id": 9001,
+      "created_by": "fixture:sensitivity_engine",
+      "payload": {
+        "_fixture": true,
+        "channel_id": "input_cost_crude",
+        "mechanism_id": "crude_input_cost",
+        "horizon": "NEAR_TERM",
+        "direction": "NEGATIVE",
+        "materiality": "HIGH",
+        "weight": 1.0,
+        "evidence_ids": [
+          "ev_fixture_1"
+        ]
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "SENSITIVITY",
+      "kind": "CHANNEL",
+      "company_id": 9001,
+      "created_by": "fixture:sensitivity_engine",
+      "payload": {
+        "_fixture": true,
+        "channel_id": "freight_cost",
+        "mechanism_id": "crude_input_cost",
+        "horizon": "NEAR_TERM",
+        "direction": "NEGATIVE",
+        "materiality": "MEDIUM",
+        "weight": 1.0,
+        "evidence_ids": [
+          "ev_fixture_1"
+        ]
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "POLICY",
+      "kind": "MODIFIER",
+      "company_id": 9001,
+      "created_by": "fixture:policy_registry",
+      "payload": {
+        "_fixture": true,
+        "modifier_id": "FIXTURE_PRICE_FREEZE",
+        "effect": "DAMPEN",
+        "applies_to_channel_id": "input_cost_crude"
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "EVIDENCE",
+      "kind": "EVIDENCE_BINDING",
+      "company_id": 9001,
+      "created_by": "fixture:evidence_classifier",
+      "payload": {
+        "_fixture": true,
+        "claim_id": "cl_fixture_cost",
+        "claim_type": "COST_EXPOSURE",
+        "binding_status": "BOUND",
+        "evidence_grade": "A",
+        "evidence_ids": [
+          "ev_fixture_1"
+        ]
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "EVIDENCE",
+      "kind": "EVIDENCE_BINDING",
+      "company_id": 9001,
+      "created_by": "fixture:evidence_classifier",
+      "payload": {
+        "_fixture": true,
+        "claim_id": "cl_fixture_pass_through",
+        "claim_type": "PASS_THROUGH",
+        "binding_status": "BOUND",
+        "evidence_grade": "B",
+        "evidence_ids": [
+          "ev_fixture_1"
+        ]
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "EMPIRICAL",
+      "kind": "EMPIRICAL_CHECK",
+      "company_id": 9001,
+      "created_by": "fixture:empirical",
+      "payload": {
+        "_fixture": true,
+        "status": "NO_DATA"
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "FALSIFICATION",
+      "kind": "OBJECTION",
+      "company_id": 9001,
+      "created_by": "fixture:falsifier",
+      "payload": {
+        "_fixture": true,
+        "objection_id": "ob_fixture_1",
+        "type": "ALREADY_PRICED",
+        "severity": "WARN",
+        "sustained": false
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "VERIFIER",
+      "kind": "OBJECTION",
+      "company_id": 9001,
+      "created_by": "fixture:verifier",
+      "payload": {
+        "_fixture": true,
+        "objection_id": "ob_fixture_2",
+        "type": "MECHANISM_UNSUPPORTED",
+        "severity": "WARN",
+        "sustained": false
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "ENTITY",
+      "kind": "ENTITY_RESOLUTION",
+      "company_id": 9002,
+      "created_by": "fixture:entity_resolver",
+      "payload": {
+        "_fixture": true,
+        "ticker": "FIXCO2.NS",
+        "isin": "INFIXTURE0002",
+        "resolution": "RESOLVED",
+        "entity_status": "ACTIVE"
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "DISCOVERY",
+      "kind": "DISCOVERY",
+      "company_id": 9002,
+      "created_by": "fixture:engine",
+      "payload": {
+        "_fixture": true,
+        "discovery_source": "SUPPLY_CHAIN",
+        "directness": "INDIRECT",
+        "graph_distance": 3
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "SENSITIVITY",
+      "kind": "CHANNEL",
+      "company_id": 9002,
+      "created_by": "fixture:sensitivity_engine",
+      "payload": {
+        "_fixture": true,
+        "channel_id": "demand_pull",
+        "mechanism_id": "crude_demand",
+        "horizon": "NEAR_TERM",
+        "direction": "POSITIVE",
+        "materiality": "MEDIUM",
+        "weight": 1.0,
+        "evidence_ids": []
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "SENSITIVITY",
+      "kind": "CHANNEL",
+      "company_id": 9002,
+      "created_by": "fixture:sensitivity_engine",
+      "payload": {
+        "_fixture": true,
+        "channel_id": "input_cost",
+        "mechanism_id": "crude_input_cost",
+        "horizon": "NEAR_TERM",
+        "direction": "NEGATIVE",
+        "materiality": "MEDIUM",
+        "weight": 1.0,
+        "evidence_ids": []
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "EVIDENCE",
+      "kind": "EVIDENCE_BINDING",
+      "company_id": 9002,
+      "created_by": "fixture:evidence_classifier",
+      "payload": {
+        "_fixture": true,
+        "claim_id": "cl_fixture_sector",
+        "claim_type": "COST_EXPOSURE",
+        "binding_status": "SECTOR_PROXY",
+        "evidence_grade": "D",
+        "evidence_ids": []
+      }
+    }
+  ],
+  "claims": [
+    {
+      "_fixture": true,
+      "claim_id": "cl_fixture_cost",
+      "company_id": 9001,
+      "claim_type": "COST_EXPOSURE",
+      "fact_class": "DERIVED",
+      "structured": {
+        "_fixture": true,
+        "tag": "input:crude_derivative",
+        "share_of_base": 0.28,
+        "base_kind": "COGS"
+      },
+      "evidence_ids": [
+        "ev_fixture_1"
+      ],
+      "created_by": "fixture:sensitivity_engine"
+    },
+    {
+      "_fixture": true,
+      "claim_id": "cl_fixture_pass_through",
+      "company_id": 9001,
+      "claim_type": "PASS_THROUGH",
+      "fact_class": "FACT",
+      "structured": {
+        "_fixture": true,
+        "lag_months": 2,
+        "share_passed": 0.6
+      },
+      "evidence_ids": [
+        "ev_fixture_1"
+      ],
+      "created_by": "fixture:evidence_classifier"
+    }
+  ],
+  "evidence": [
+    {
+      "_fixture": true,
+      "evidence_id": "ev_fixture_1",
+      "source_type": "ANNUAL_REPORT",
+      "source_name": "FIXCO1 FY-fixture annual report",
+      "source_date": "2026-04-30",
+      "company_ids": [
+        9001
+      ],
+      "quoted_text": "Crude derivatives were 28 percent of cost of goods sold.",
+      "fact_text": "crude derivatives share of COGS"
+    }
+  ]
+}
