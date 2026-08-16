@@ -21,7 +21,7 @@ one of them maps an unrecognised value to None (or drops the signal), never
 to a plausible default.
 """
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import json
 
@@ -115,12 +115,27 @@ def _channels_from_entry(entry: Mapping[str, Any]) -> list[tuple[str, str]]:
 def signals_from_entry(entry: Mapping[str, Any], *, event_id: str,
                        analysis_version: str, created_at: datetime,
                        entity_status: str = "UNKNOWN",
-                       isin: str | None = None) -> list[Signal]:
+                       isin: str | None = None,
+                       sensitivity_channels: Sequence[Signal] = ()) -> list[Signal]:
     """One V4 entry dict -> the signals the reducer needs.
 
     `entity_status` and `isin` come from the resolved `Company` row, which
     the entry does not carry; the caller supplies them. Unsupplied means
     UNKNOWN, and the gate's hard block decides what that means.
+
+    V5 PHASE 2 -- PRECEDENCE. Phase 0 forwarded V4's materiality grade as a
+    CHANNEL payload with the note "Phase 2 replaces the source". This is that
+    replacement, and it is deterministic:
+
+      * `sensitivity_channels` non-empty -> those CHANNEL signals are the
+        company's channels, and the V4 materiality forwarding is NOT emitted.
+        A computed band and a graded vibe must never both reach the reducer;
+      * `sensitivity_channels` empty (an empty ledger -- which is production
+        today) -> the output is byte-identical to what it was before Phase 2
+        existed, and abstention still comes from the absence of a channel.
+
+    Everything the V4 stages know that Phase 2 does not -- entity, discovery,
+    evidence binding, verification -- is emitted either way.
     """
     company_id = entry.get("company_id")
     ticker = str(entry.get("ticker") or "")
@@ -152,7 +167,8 @@ def signals_from_entry(entry: Mapping[str, Any], *, event_id: str,
     materiality = MATERIALITY_GRADE_MAP.get(
         str(entry.get("materiality_grade") or "").upper(), "NONE")
     mechanism_id = entry.get("causal_parent_id") or None
-    for channel_id, direction in _channels_from_entry(entry):
+    for channel_id, direction in (() if sensitivity_channels
+                                  else _channels_from_entry(entry)):
         signals.append(emit("SENSITIVITY", "CHANNEL", {
             "channel_id": channel_id,
             "mechanism_id": str(mechanism_id) if mechanism_id else None,
@@ -191,4 +207,6 @@ def signals_from_entry(entry: Mapping[str, Any], *, event_id: str,
     signals.append(emit("EMPIRICAL", "EMPIRICAL_CHECK",
                         {"status": "NO_DATA", "n_events": None},
                         "empirical:not_available"))
+    # The computed channels take the place the V4 forwarding just vacated.
+    signals.extend(sensitivity_channels)
     return signals

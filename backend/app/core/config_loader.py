@@ -55,10 +55,33 @@ def load_gate_config(path: Path | None = None) -> GateConfig:
 
 
 @lru_cache(maxsize=4)
+def load_sensitivity_policy(path: Path | None = None):
+    """V5 PHASE 2 -- the sign-consistency thresholds, from
+    `config/materiality.yaml`.
+
+    Parsed by `app.analysis.sensitivity.config` so that the reducer's rule
+    and the engine that produces the number read ONE file through ONE parser
+    and cannot drift apart. The reducer itself still imports nothing that
+    touches a disk; it receives the frozen policy in its config.
+    """
+    from app.analysis.sensitivity.config import load_materiality_config
+    from app.core.reducer import SensitivityPolicy
+
+    config = load_materiality_config(path)
+    return SensitivityPolicy(
+        directional_claim_min=config.directional_claim_min,
+        secondary_min=config.secondary_min,
+        mixed_requires_material_tail_pct=config.mixed_requires_material_tail_pct)
+
+
+@lru_cache(maxsize=4)
 def load_reducer_config(path: Path | None = None):
     """The `ReducerConfig` the deployed policy implies. Separate from
     `load_gate_config` so a caller that only wants to inspect the gate does
     not construct a reducer config."""
     from app.core.reducer import ReducerConfig
 
-    return ReducerConfig(gate_config=load_gate_config(path))
+    # `path` is the GATE policy's path; the sensitivity policy always comes
+    # from its own deployed file (config/materiality.yaml).
+    return ReducerConfig(gate_config=load_gate_config(path),
+                         sensitivity_policy=load_sensitivity_policy())

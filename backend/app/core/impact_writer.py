@@ -219,7 +219,7 @@ def record_company_impacts(session, *, article, entries, alert,
     The caller wraps this so a failure here can never break the existing
     persist path -- see app/pipeline.py.
     """
-    from app.core.config_loader import load_gate_config
+    from app.core.config_loader import load_gate_config, load_sensitivity_policy
     from app.core.reducer import EventContext, ReducerConfig, reduce_company_impact
     from app.core.signal_adapters import signals_from_entry
 
@@ -241,9 +241,18 @@ def record_company_impacts(session, *, article, entries, alert,
             # No shock-sizing engine exists yet (Phase 2). Unknown stays
             # unknown; the gate decides what that means.
             shock_magnitude_confidence=None,
-            # No exposure ledger exists yet (Phase 1), so nothing can be
-            # stale. Phase 1 supplies the real answer.
-            exposure_stale=False))
+            # This hook runs on the V4 path, which has no exposure TAGS to
+            # ask about, so it cannot compute a company's staleness here.
+            # Phase 2's sensitivity engine can, and does: it puts the real
+            # flag on every CHANNEL payload it emits, and the reducer
+            # hard-blocks on that (see `reduce_company_impact`). Until the
+            # canonical path runs the engine, this stays False and the
+            # abstention comes from having no channel at all.
+            exposure_stale=False),
+        # PHASE 2: the sign-consistency thresholds, so a computed band
+        # arriving on this path is judged by the deployed policy rather than
+        # refused. V4 signals carry no band and are unaffected.
+        sensitivity_policy=load_sensitivity_policy())
 
     entity_status_by_company = entity_status_by_company or {}
     isin_by_company = isin_by_company or {}

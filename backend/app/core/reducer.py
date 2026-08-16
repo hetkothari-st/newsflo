@@ -19,6 +19,12 @@ PHASE 0 SCOPE, and what is deliberately NOT done here:
 
   * Materiality arrives from the existing V4 logic as a channel payload.
     Phase 2 replaces the source; the reducer's contract does not change.
+    (PHASE 2, additive: when the CHANNEL signals carry a `sensitivity`
+    block -- a computed band from `app.analysis.sensitivity` -- the computed
+    bucket, sign consistency and net effect supersede the ordinal
+    aggregation below. A signal set without that block is reduced exactly as
+    it was before Phase 2 existed, which is every V4 signal set in
+    production today. See `_apply_sensitivity`.)
   * DAMPEN / AMPLIFY modifiers are RECORDED as applied but change no
     number. There is no coefficient in this repo to apply, and inventing a
     dampening factor is exactly the fabrication the master context forbids.
@@ -80,9 +86,28 @@ class EventContext:
 
 
 @dataclass(frozen=True)
+class SensitivityPolicy:
+    """PHASE 2. The sign-consistency rule's thresholds, loaded from
+    `config/materiality.yaml` by `app.core.config_loader` -- the single
+    source of truth the sensitivity engine reads too.
+
+    Every field is REQUIRED. There is deliberately no default: a threshold
+    defaulted here would be a policy nobody chose, and it would silently
+    disagree with the engine that produced the number.
+    """
+    directional_claim_min: float      # >= this -> a direction may be claimed
+    secondary_min: float              # below this -> MIXED or UNCERTAIN
+    mixed_requires_material_tail_pct: float
+
+
+@dataclass(frozen=True)
 class ReducerConfig:
     gate_config: GateConfig
     event_context: EventContext = EventContext()
+    # None means "no sensitivity policy configured". A signal set carrying a
+    # computed band is then REFUSED rather than judged against thresholds
+    # invented here (see `_apply_sensitivity`).
+    sensitivity_policy: "SensitivityPolicy | None" = None
     # Seeded RNG, per the phase file's "no randomness except seeded RNG
     # passed in via config". Nothing in Phase 0 draws from it; it exists so
     # a later phase cannot smuggle in an unseeded source.
@@ -134,6 +159,10 @@ class CompanyImpact:
     rejection_reason: str | None
     gate_trace: tuple[Mapping[str, Any], ...]
     decision_trace_id: str = ""
+    # PHASE 2: the computed materiality band, its drivers and the estimator
+    # that produced them, exactly as the sensitivity engine emitted it. None
+    # for every signal set that carries no computed band.
+    sensitivity: Mapping[str, Any] | None = None
 
 
 def _canonical(value: Any) -> str:
@@ -150,6 +179,72 @@ def _one_of(signals: Sequence[Signal], attribute: str, label: str):
 
 def _payloads(signals: Sequence[Signal], kind: SignalKind) -> list[Mapping]:
     return [s.payload for s in signals if s.kind == kind]
+
+
+def _sensitivity_block(signals: Sequence[Signal]) -> Mapping[str, Any] | None:
+    """The one computed materiality block this company's channels carry.
+
+    Every CHANNEL signal the sensitivity engine emits for a company carries
+    the SAME block (it is a company-level result), so seeing two different
+    ones means two engines disagreed about the same company in the same
+    event. That is refused rather than averaged: an average of two
+    disagreeing bands is a number neither engine computed.
+    """
+    seen: dict[str, Mapping[str, Any]] = {}
+    for payload in _payloads(signals, SignalKind.CHANNEL):
+        block = payload.get("sensitivity")
+        if not block:
+            continue
+        seen[_canonical(block)] = block
+    if not seen:
+        return None
+    if len(seen) > 1:
+        raise ReducerInputError(
+            "two different sensitivity blocks for one company in one event; "
+            "the reducer will not average disagreeing bands")
+    return next(iter(seen.values()))
+
+
+def _apply_sensitivity(block: Mapping[str, Any],
+                       policy: SensitivityPolicy) -> tuple[str, float, str]:
+    """The sign-consistency rule (spec §5.2, phase file Task 2.4).
+
+        sc >= directional_claim_min   -> the sign of p50 is the direction
+        secondary_min <= sc < that    -> UNCERTAIN (and, by the gate's own
+                                         floor, never PRIMARY)
+        sc <  secondary_min           -> MIXED when both tails are material,
+                                         UNCERTAIN otherwise
+
+    MIXED is a claim that BOTH sides are material. When they are not, the
+    honest answer is that we do not know -- and neither is ever collapsed
+    into a direction (invariants 8 and 9).
+    """
+    band = block.get("delta_ebitda_pct") or {}
+    try:
+        p10, p50, p90 = (float(band["p10"]), float(band["p50"]),
+                         float(band["p90"]))
+        consistency = float(block["sign_consistency"])
+        bucket = str(block["bucket"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReducerInputError(
+            f"a sensitivity block must carry p10/p50/p90, sign_consistency "
+            f"and bucket; missing {exc}") from exc
+
+    if bucket not in (*_MATERIALITY_RANK, NET_NO_MATERIAL_IMPACT):
+        raise ReducerInputError(f"unknown materiality bucket {bucket!r}")
+
+    if consistency >= policy.directional_claim_min:
+        net_effect = (NET_POSITIVE if p50 > 0 else
+                      NET_NEGATIVE if p50 < 0 else NET_UNCERTAIN)
+    elif consistency >= policy.secondary_min:
+        net_effect = NET_UNCERTAIN
+    else:
+        tail = policy.mixed_requires_material_tail_pct
+        both_sides_material = (p10 < 0 < p90 and abs(p10) >= tail
+                               and abs(p90) >= tail)
+        net_effect = NET_MIXED if both_sides_material else NET_UNCERTAIN
+
+    return net_effect, round(consistency, 6), bucket
 
 
 def _reject(base: dict, reason: str, trace=()) -> CompanyImpact:
@@ -261,6 +356,17 @@ def reduce_company_impact(signals: Sequence[Signal],
     if materiality_bucket == "NONE":
         materiality_bucket = "NO_MATERIAL_IMPACT"
 
+    # --- 4b. a COMPUTED band supersedes the ordinal aggregation (Phase 2) --
+    sensitivity = _sensitivity_block(ordered)
+    if sensitivity is not None:
+        if config.sensitivity_policy is None:
+            raise ReducerInputError(
+                "a computed sensitivity band arrived but no sensitivity "
+                "policy is configured; the reducer will not invent the "
+                "sign-consistency thresholds it needs to judge it")
+        net_effect, sign_consistency, materiality_bucket = _apply_sensitivity(
+            sensitivity, config.sensitivity_policy)
+
     mechanism_ids = sorted({str(c["mechanism_id"]) for c in material
                             if c.get("mechanism_id")})
     mechanism_id = mechanism_ids[0] if mechanism_ids else None
@@ -328,8 +434,16 @@ def reduce_company_impact(signals: Sequence[Signal],
         claim_bindings=tuple(bindings), empirical_status=empirical_status,
         objections=tuple(objections), directness=directness,
         graph_distance=graph_distance, discovery_source=discovery_source,
-        needs_reanalysis=needs_reanalysis,
+        needs_reanalysis=needs_reanalysis, sensitivity=sensitivity,
     )
+
+    # Staleness reaches the gate from two places (Phase 2 controller
+    # addendum): the caller's event context, and the channels themselves.
+    # Either is enough to hard-block -- a stale exposure must not be able to
+    # back a claim because a caller forgot to thread a flag.
+    exposure_stale = bool(config.event_context.exposure_stale) or any(
+        bool(p.get("exposure_stale"))
+        for p in _payloads(ordered, SignalKind.CHANNEL))
 
     if not entities or resolutions == {"UNRESOLVED"}:
         return _reject(base, "ENTITY_UNRESOLVED")
@@ -340,7 +454,7 @@ def reduce_company_impact(signals: Sequence[Signal],
     draft = ImpactDraft(
         entity_status=entity_status[0] if entity_status else "UNKNOWN",
         entity_ambiguous=False,
-        exposure_stale=config.event_context.exposure_stale,
+        exposure_stale=exposure_stale,
         materiality_bucket=materiality_bucket, graph_distance=graph_distance,
         directness=directness, evidence_grade=evidence_grade,
         weakest_link=weakest_link, sign_consistency=sign_consistency,
@@ -386,6 +500,12 @@ def serialize_company_impact(impact: CompanyImpact) -> dict:
             "channels": [dict(c) for c in impact.channels],
             "policy_modifiers_applied": list(impact.policy_modifiers_applied),
             "policy_modifiers_unmatched": list(impact.policy_modifiers_unmatched),
+            # PHASE 2 (Task 2.5): the computed band, its bucket, its sign
+            # consistency and its top drivers -- emitted whole or not at all,
+            # because a p50 without its band is exactly what this phase
+            # exists to stop shipping.
+            **({"materiality": dict(impact.sensitivity)}
+               if impact.sensitivity else {}),
         },
         "evidence": {
             "grade": impact.evidence_grade,

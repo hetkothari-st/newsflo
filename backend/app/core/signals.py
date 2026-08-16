@@ -76,6 +76,18 @@ _SCHEMAS: dict[str, dict[str, tuple[bool, Any]]] = {
         "materiality": (True, Vocab(MATERIALITY_BUCKETS)),
         "weight": (False, (int, float)),
         "evidence_ids": (False, list),
+        # --- V5 PHASE 2 (sensitivity engine), all OPTIONAL ------------------
+        # A V4-forwarded channel carries none of these and is validated
+        # exactly as before. A channel COMPUTED by the sensitivity engine
+        # carries the ledger row that authorises it, where each parameter
+        # came from, its own contribution, and the company-level Monte Carlo
+        # block the reducer's sign-consistency rule reads.
+        "channel_type": (False, str),
+        "exposure_id": (False, (str, type(None))),
+        "param_sources": (False, dict),
+        "delta_ebitda_pct_p50": (False, (int, float)),
+        "exposure_stale": (False, bool),
+        "sensitivity": (False, dict),
     },
     SignalKind.MODIFIER: {
         "modifier_id": (True, str),
