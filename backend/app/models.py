@@ -1341,6 +1341,288 @@ class CompanyExposure(Base):
     company = relationship("Company", foreign_keys=[company_id])
 
 
+# ===========================================================================
+# V5 PHASE 0 -- canonical truth tables (docs/v5/01_PHASE_0_canonical_truth.md)
+# ===========================================================================
+# These four tables are the V5 surface. They run in PARALLEL to
+# alert_companies, which stays exactly as it is and keeps serving the UI --
+# Phase 0 changes nothing a user sees ("wrong-but-consistent is the correct
+# Phase 0 outcome"). Migration: 0011_v5_single_writer.py.
+
+
+class Signal(Base):
+    """TASK 0.1 -- one stage's immutable OBSERVATION about one company in
+    one event. Append-only, enforced by triggers below: an UPDATE or a
+    DELETE here is a rewrite of history, and the whole point of the signal
+    bus is that history cannot be rewritten.
+
+    `signal_id` is content-addressed (see app.core.signals.signal_id_for),
+    so re-running the same analysis re-derives the same ids and the append
+    is a no-op instead of a duplicate."""
+    __tablename__ = "signal"
+    __table_args__ = (
+        Index("ix_signal_event_company", "event_id", "company_id"),
+    )
+
+    signal_id = Column(String, primary_key=True)
+    # V5 "event" = one analysis run of one article. See
+    # app.core.impact_writer.event_id_for_article for the mapping.
+    event_id = Column(String, nullable=False)
+    company_id = Column(Integer, nullable=True)
+    stage = Column(String, nullable=False)
+    kind = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    created_by = Column(String, nullable=False)
+    analysis_version = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class SupportedVersion(Base):
+    """TASK 0.3 version fencing. A `company_impact` row may only carry a
+    reducer_version registered and active here -- a stale worker running old
+    reducer code is refused BY THE DATABASE, not by a code review."""
+    __tablename__ = "supported_version"
+
+    reducer_version = Column(String, primary_key=True)
+    active = Column(Boolean, nullable=False, default=True, server_default="1")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CompanyImpact(Base):
+    """TASK 0.2/0.3/0.7 -- the canonical record (spec §7.3). ONE row per
+    (event, company, analysis_version), written ONLY by
+    app.core.impact_writer, which is the only code that opens a reducer
+    session.
+
+    The four separation fields (`directness`, `graph_distance`,
+    `discovery_source`, `publication_tier`) are four columns for four
+    questions and are never merged or derived from one another (master
+    context invariant 4). Any of them NULL means the signals did not say --
+    and then `needs_reanalysis` is 1. Nothing here is ever guessed."""
+    __tablename__ = "company_impact"
+    __table_args__ = (
+        UniqueConstraint("event_id", "company_id", "analysis_version",
+                         name="uq_impact"),
+        Index("ix_company_impact_event", "event_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(String, nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    ticker = Column(String, nullable=True)
+    isin = Column(String, nullable=True)
+    analysis_version = Column(String, nullable=False)
+    # FK declared for Postgres and for documentation. SQLite does not
+    # enforce foreign keys unless `PRAGMA foreign_keys=ON`, which this repo
+    # never sets, so the fencing that actually runs is the
+    # company_impact_version_fence_* trigger below.
+    reducer_version = Column(
+        String, ForeignKey("supported_version.reducer_version"), nullable=False)
+    reducer_run_seq = Column(Integer, nullable=False, default=0)
+    gate_config_version = Column(String, nullable=True)
+
+    net_effect = Column(String, nullable=True)
+    headline_horizon = Column(String, nullable=True)
+    direction_by_horizon_json = Column(Text, nullable=True)
+    sign_consistency = Column(Float, nullable=True)
+    materiality_bucket = Column(String, nullable=True)
+    mechanism_id = Column(String, nullable=True)
+    channels_json = Column(Text, nullable=True)
+    policy_modifiers_json = Column(Text, nullable=True)
+
+    evidence_grade = Column(String, nullable=True)
+    weakest_link = Column(String, nullable=True)
+    claim_bindings_json = Column(Text, nullable=True)
+    empirical_status = Column(String, nullable=True)
+    objections_json = Column(Text, nullable=True)
+
+    # --- the four separation fields (Task 0.7) ---------------------------
+    directness = Column(String, nullable=True)        # DIRECT | INDIRECT | REMOTE
+    graph_distance = Column(Integer, nullable=True)
+    # MENTION | MECHANISM | SUPPLY_CHAIN | PEER_CLOSURE
+    discovery_source = Column(String, nullable=True)
+    publication_tier = Column(String, nullable=False)  # PRIMARY | SECONDARY_RIPPLE | REJECTED
+
+    needs_reanalysis = Column(Boolean, nullable=False, default=False,
+                              server_default="0")
+    rejection_reason = Column(String, nullable=True)
+    gate_trace_json = Column(Text, nullable=True)
+    decision_trace_id = Column(String, nullable=True)
+    # server_default as well as the ORM default: the reducer writes this
+    # table with raw SQL (see app.core.impact_writer), and a raw INSERT gets
+    # no ORM default. Spelled identically on SQLite and Postgres.
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                        server_default=text("CURRENT_TIMESTAMP"))
+
+
+class FirewallDeletion(Base):
+    """TASK 0.6 -- every sentence the entailment firewall DELETED, with the
+    reason, the stage that caught it and (stage 2 only) the judge model. A
+    rising deletion rate is the early warning that a prompt or model change
+    has started fabricating."""
+    __tablename__ = "firewall_deletion"
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(String, nullable=True)
+    company_id = Column(Integer, nullable=True)
+    sentence = Column(Text, nullable=False)
+    reason = Column(String, nullable=False)
+    stage = Column(String, nullable=False)        # STAGE_1 | STAGE_2
+    model_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# V5 single-writer + append-only backstop (Task 0.3), SQLite
+# ---------------------------------------------------------------------------
+# SQLite has no roles and no GRANT, so the phase file's `CREATE ROLE
+# newsflo_reducer` cannot be expressed here. The substitute -- ruled binding
+# by the controller -- is a per-connection capability token: a TEMP table
+# named `_newsflo_reducer_session` that ONLY
+# app.core.impact_writer.reducer_session creates, and that these triggers
+# require before any write to company_impact is allowed. A stale worker, an
+# old container or a one-off script holding a write handle to the same
+# database file is refused AT THE DATABASE, which is what the phase file's
+# "proven by integration test, not by inspection" demands. The Postgres role
+# DDL is recorded verbatim in migration 0011's docstring for the port.
+#
+# `pragma_table_list` requires SQLite >= 3.37 (2021-11). It is the only
+# expression a trigger may use to see the temp schema: a trigger body cannot
+# reference `temp.sqlite_master` at all ("trigger cannot reference objects in
+# database temp"), and unqualified `sqlite_temp_master` resolves to `main`.
+#
+# SAME DUPLICATION RULE AS 0008: the SQL below is copied verbatim into
+# alembic/versions/0011_v5_single_writer.py, because a migration must not
+# import app code that drifts underneath it, and
+# tests/phase0/test_migration_0011.py::
+# test_models_and_0011_trigger_ddl_are_byte_identical compares the two.
+_REDUCER_SESSION_TABLE = "_newsflo_reducer_session"
+
+_COMPANY_IMPACT_INSERT_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_impact_reducer_only_insert
+BEFORE INSERT ON company_impact
+FOR EACH ROW
+WHEN (SELECT count(*) FROM pragma_table_list
+      WHERE schema = 'temp' AND name = '_newsflo_reducer_session') = 0
+BEGIN
+  SELECT RAISE(ABORT, 'company_impact is writable only by the reducer session');
+END
+"""
+
+_COMPANY_IMPACT_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_impact_reducer_only_update
+BEFORE UPDATE ON company_impact
+FOR EACH ROW
+WHEN (SELECT count(*) FROM pragma_table_list
+      WHERE schema = 'temp' AND name = '_newsflo_reducer_session') = 0
+BEGIN
+  SELECT RAISE(ABORT, 'company_impact is writable only by the reducer session');
+END
+"""
+
+_COMPANY_IMPACT_VERSION_INSERT_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_impact_version_fence_insert
+BEFORE INSERT ON company_impact
+FOR EACH ROW
+WHEN (SELECT count(*) FROM supported_version
+      WHERE reducer_version = NEW.reducer_version AND active = 1) = 0
+BEGIN
+  SELECT RAISE(ABORT, 'unsupported reducer_version');
+END
+"""
+
+_COMPANY_IMPACT_VERSION_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_impact_version_fence_update
+BEFORE UPDATE ON company_impact
+FOR EACH ROW
+WHEN (SELECT count(*) FROM supported_version
+      WHERE reducer_version = NEW.reducer_version AND active = 1) = 0
+BEGIN
+  SELECT RAISE(ABORT, 'unsupported reducer_version');
+END
+"""
+
+_SIGNAL_APPEND_ONLY_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS signal_append_only_update
+BEFORE UPDATE ON signal
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'signal is append-only');
+END
+"""
+
+_SIGNAL_APPEND_ONLY_DELETE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS signal_append_only_delete
+BEFORE DELETE ON signal
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'signal is append-only');
+END
+"""
+
+COMPANY_IMPACT_TRIGGER_DDL = (
+    _COMPANY_IMPACT_INSERT_TRIGGER,
+    _COMPANY_IMPACT_UPDATE_TRIGGER,
+    _COMPANY_IMPACT_VERSION_INSERT_TRIGGER,
+    _COMPANY_IMPACT_VERSION_UPDATE_TRIGGER,
+)
+
+SIGNAL_TRIGGER_DDL = (
+    _SIGNAL_APPEND_ONLY_UPDATE_TRIGGER,
+    _SIGNAL_APPEND_ONLY_DELETE_TRIGGER,
+)
+
+# All six, in the order 0011 emits them (byte-identity test reads this).
+V5_TRIGGER_DDL = COMPANY_IMPACT_TRIGGER_DDL + SIGNAL_TRIGGER_DDL
+
+
+def emit_v5_triggers(bind, statements=V5_TRIGGER_DDL) -> bool:
+    """Install the Task 0.3 backstop on `bind`. Idempotent (every statement
+    is CREATE TRIGGER IF NOT EXISTS). Returns False on a non-SQLite dialect,
+    where the guarantee comes from real role privileges instead."""
+    if bind.dialect.name != "sqlite":
+        return False
+    for statement in statements:
+        bind.execute(text(statement))
+    return True
+
+
+@event.listens_for(CompanyImpact.__table__, "after_create")
+def _install_company_impact_triggers(target, connection, **kw):
+    # These triggers reference supported_version, so they can only be
+    # created once that table exists -- company_impact declares an FK to it,
+    # which is exactly what makes create_all build it first.
+    emit_v5_triggers(connection, COMPANY_IMPACT_TRIGGER_DDL)
+
+
+@event.listens_for(Signal.__table__, "after_create")
+def _install_signal_triggers(target, connection, **kw):
+    emit_v5_triggers(connection, SIGNAL_TRIGGER_DDL)
+
+
+@event.listens_for(SupportedVersion.__table__, "after_create")
+def _seed_supported_version(target, connection, **kw):
+    """A create_all-built database (the whole test suite, every fresh dev
+    DB) must carry the same version registry migration 0011 writes, or the
+    canonical write would fail everywhere it is tested and pass only in
+    production."""
+    from app.core.reducer import REDUCER_VERSION
+
+    # created_at is NOT NULL with no server default, and SQLite's INSERT OR
+    # IGNORE swallows a NOT NULL violation silently -- so it is supplied
+    # explicitly rather than left to the ORM default (which does not apply
+    # to raw DDL-time SQL).
+    connection.execute(
+        text("INSERT OR IGNORE INTO supported_version "
+             "(reducer_version, active, created_at) "
+             "VALUES (:v, 1, CURRENT_TIMESTAMP)")
+        if connection.dialect.name == "sqlite" else
+        text("INSERT INTO supported_version "
+             "(reducer_version, active, created_at) "
+             "VALUES (:v, true, now()) ON CONFLICT DO NOTHING"),
+        {"v": REDUCER_VERSION})
+
+
 class LLMCallUsage(Base):
     """One row per LLM call: which call it was, which model and tier served
     it, and what it actually cost in tokens (docs: cost-optimization phase

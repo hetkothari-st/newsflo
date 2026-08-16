@@ -156,6 +156,79 @@ def _assert_gated_row_triggers(url: str, scheme: str) -> None:
     raise GatedRowTriggersMissing(message)
 
 
+# ---------------------------------------------------------------------------
+# V5 Phase 0 (Task 0.3) backstop -- ADDITIVE, deliberately separate from the
+# §26 list above, which must not be touched.
+# ---------------------------------------------------------------------------
+# company_impact is writable only inside a reducer session, and `signal` is
+# append-only. Both guarantees are triggers (migration 0011 + app/models.py's
+# after_create hooks), and both die silently if a future migration ever
+# rebuilds those tables. Nothing detects that; this does.
+V5_TRIGGERS = (
+    "company_impact_reducer_only_insert",
+    "company_impact_reducer_only_update",
+    "company_impact_version_fence_insert",
+    "company_impact_version_fence_update",
+    "signal_append_only_update",
+    "signal_append_only_delete",
+)
+
+
+class V5TriggersMissing(RuntimeError):
+    """The V5 single-writer / append-only triggers are absent after migration."""
+
+
+def check_v5_triggers(url: str) -> tuple[str, tuple[str, ...]]:
+    """Same contract as `check_gated_row_triggers`: returns
+    `(status, missing)` with status in {"ok", "missing", "skipped_dialect",
+    "skipped_no_table"}."""
+    from sqlalchemy import create_engine, inspect, text
+
+    if not url.startswith("sqlite"):
+        return "skipped_dialect", ()
+
+    engine = create_engine(url, connect_args={"check_same_thread": False})
+    try:
+        tables = set(inspect(engine).get_table_names())
+        if not {"company_impact", "signal"} <= tables:
+            return "skipped_no_table", ()
+        with engine.connect() as connection:
+            present = {
+                row[0] for row in connection.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'"))
+            }
+    finally:
+        engine.dispose()
+
+    missing = tuple(name for name in V5_TRIGGERS if name not in present)
+    return ("missing" if missing else "ok"), missing
+
+
+def _assert_v5_triggers(url: str, scheme: str) -> None:
+    status, missing = check_v5_triggers(url)
+    if status == "ok":
+        logger.info("[migrate] V5 single-writer trigger backstop present")
+        return
+    if status == "skipped_dialect":
+        logger.info(
+            "[migrate] %s dialect: the V5 backstop is role privileges, not "
+            "triggers (see migration 0011's docstring); check skipped", scheme)
+        return
+    if status == "skipped_no_table":
+        logger.info("[migrate] no company_impact/signal tables; V5 trigger "
+                    "check skipped")
+        return
+
+    message = (
+        "[migrate] FATAL: the V5 single-writer/append-only trigger backstop is "
+        "MISSING after migration -- absent trigger(s): " + ", ".join(missing)
+        + ". company_impact would be writable by any process and `signal` "
+        "would be mutable; refusing to start.")
+    logger.error(message)
+    print(message, file=sys.stderr)
+    raise V5TriggersMissing(message)
+
+
 def _database_url() -> str:
     """Same resolution order as every other entrypoint (app/db.py,
     alembic/env.py): DATABASE_URL wins, else settings' own default."""
@@ -259,6 +332,11 @@ def migrate_on_boot(url: str | None = None) -> str:
     # schema is at head -- raises (and so fails the boot) when a trigger is
     # gone.
     _assert_gated_row_triggers(url, scheme)
+    # V5 Phase 0 Task 0.3 backstop, checked the same way and for the same
+    # reason. Separate function and separate trigger list ON PURPOSE: the
+    # §26 check above polices alert_companies and must stay exactly as it
+    # is; this one polices company_impact and signal.
+    _assert_v5_triggers(url, scheme)
 
     logger.info("[migrate] done (%s DB) -- schema at alembic head", state)
     return state

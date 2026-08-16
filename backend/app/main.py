@@ -128,6 +128,36 @@ def _warn_if_schema_not_at_head() -> None:
 _warn_if_schema_not_at_head()
 
 
+def _assert_api_cannot_write_company_impact() -> None:
+    """V5 Task 0.3: the API process must not be able to write the canonical
+    `company_impact` table. Only app.core.impact_writer holds that
+    capability, and only inside a reducer session.
+
+    Warns rather than blocks when the check itself cannot run (a DB without
+    the V5 tables yet, or a backend where the guarantee comes from real role
+    privileges instead) -- but RAISES if this process genuinely holds the
+    reducer capability at boot, which would mean the single-writer guarantee
+    is already gone."""
+    from app.core.impact_writer import (
+        ReducerPrivilegeError, assert_cannot_write_company_impact,
+    )
+    from app.db import SessionLocal
+
+    log = logging.getLogger(__name__)
+    session = SessionLocal()
+    try:
+        assert_cannot_write_company_impact(session)
+    except ReducerPrivilegeError:
+        raise
+    except Exception as exc:                    # noqa: BLE001 -- see docstring
+        log.warning("[v5] could not verify company_impact write privileges: %s", exc)
+    finally:
+        session.close()
+
+
+_assert_api_cannot_write_company_impact()
+
+
 def _seed_exposure_registry() -> None:
     """Materialize archetype-implied exposures once per knowledge-registry
     version (2026-08-12 fix: seed_company_exposures had no production
