@@ -44,9 +44,15 @@
     {"_fixture": true, "family": "specialty_chemicals", "sector": "Chemicals", "tag": "input:crude_derivative_petchem", "exposure_kind": "INPUT_COST", "share_of_base": 0.22, "companies": 3},
     {"_fixture": true, "family": "logistics", "sector": "Transport", "tag": "input:freight_diesel", "exposure_kind": "INPUT_COST", "share_of_base": 0.25, "companies": 3},
     {"_fixture": true, "family": "cement", "sector": "Cement", "tag": "input:fuel_furnace_pet_coke", "exposure_kind": "INPUT_COST", "share_of_base": 0.06, "companies": 3},
-    {"_fixture": true, "family": "banks_direct", "sector": "Banks", "tag": null, "exposure_kind": null, "share_of_base": null, "companies": 3},
-    {"_fixture": true, "family": "it_services", "sector": "IT", "tag": null, "exposure_kind": null, "share_of_base": null, "companies": 3}
+    {"_fixture": true, "family": "footwear", "sector": "Consumer", "tag": "input:crude_derivative_rubber", "exposure_kind": "INPUT_COST", "share_of_base": 0.06, "companies": 2},
+    {"_fixture": true, "family": "it_services", "sector": "IT", "tag": "input:freight_diesel", "exposure_kind": "INPUT_COST", "share_of_base": 0.03, "companies": 3},
+    {"_fixture": true, "family": "banks_direct", "sector": "Banks", "tag": null, "exposure_kind": null, "share_of_base": null, "companies": 3}
   ],
+  "_falsifiability": {
+    "footwear": "A NON-EXPECTED family that IS tagged on a crude-reachable tag (synthetic rubber, d2). It is DISCOVERED and SIZED and then rejected by the gate on materiality -- so 'precision 1.00' is a RESULT of the gate rather than a structural impossibility. Raise its share and it publishes, and precision falls below 1.0. Review round 1, I1.",
+    "it_services": "An expected_ABSENT family, likewise tagged (freight diesel, d1) and likewise discovered, sized and rejected -- at 3% of COGS it lands below the no-material-impact floor. Raise its share and `absent_violations` fires. Without this the expected_absent assertion could not fail. Review round 1, I1.",
+    "banks_direct": "The other expected_absent family, left UNTAGGED on purpose: `rate:nim_asset_sensitivity` is not reachable from BRENT_CRUDE at all, which is the honest reason a bank does not appear on a crude story. One of the two absent families is unreachable, the other is reachable-and-rejected; both cases are represented."
+  },
   "_uncovered_on_purpose": {
     "city_gas": "an expected ripple family with an edge and NO tagged company -- a C-axis gap, so the harness has a real miss to diagnose",
     "ceramics": "marginal family, no companies",

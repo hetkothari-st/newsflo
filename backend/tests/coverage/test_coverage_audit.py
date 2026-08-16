@@ -214,6 +214,131 @@ def test_the_other_shock_classes_report_ledger_gaps_not_silence(coverage_session
     assert {d.root_cause for d in report.missing} == {"C"}
 
 
+# --- FALSIFIABILITY (review round 1, I1) ------------------------------------
+#
+# A precision of 1.00 measured over a universe where no false positive can be
+# CONSTRUCTED is not a measurement, it is an arithmetic identity. The universe
+# therefore contains two tagged, discoverable families the gate is expected to
+# reject -- `footwear` (not in any expected list) and `it_services` (expected
+# ABSENT) -- and the tests below prove that the metrics move when the gate
+# lets them through.
+
+def test_the_false_positive_path_is_reachable_at_all(coverage_session, universe,
+                                                     crude_report):
+    """Before asserting precision is 1.00, assert the pipeline actually
+    LOOKED at a family that would break it. `footwear` is tagged on synthetic
+    rubber, which the crude graph reaches, so it is discovered and sized --
+    and then rejected. Precision is a verdict, not a vacuum."""
+    from app.discovery.engine import DiscoveryEvent, DiscoveryShock, discover
+
+    session = coverage_session
+    pool = discover(session, DiscoveryEvent(
+        event_id="probe", mentions=(),
+        shocks=(DiscoveryShock(shock_id="probe", variable="BRENT_CRUDE",
+                               sign="UP", magnitude_pct=6.0),)),
+        as_of=FIXTURE_TODAY)
+    discovered = {row[0] for row in session.execute(text(
+        "SELECT COALESCE(sub_sector, sector) FROM companies WHERE id IN "
+        "(" + ",".join(str(c.company_id) for c in pool.candidates) + ")"))}
+    assert "footwear" in discovered
+    assert "it_services" in discovered
+    # ... and neither survived the gate
+    assert "footwear" not in {row.family for row in crude_report.published}
+    assert "it_services" not in {row.family for row in crude_report.published}
+
+
+def test_precision_falls_when_a_non_expected_family_is_admitted(coverage_session):
+    """THE MUTATION. Raise footwear's exposure until it clears the ripple
+    gate and precision must drop below 1.0 and name the family."""
+    from tests.coverage.conftest import build_universe
+
+    build_universe(coverage_session, share_overrides={"footwear": 0.30})
+    report = audit_shock(coverage_session, expected_for("BRENT_CRUDE"),
+                         as_of=FIXTURE_TODAY)
+    assert "footwear" in {row.family for row in report.published}
+    assert "footwear" in report.false_positive_families
+    assert report.secondary_precision < 1.0, report.render()
+
+
+def test_the_expected_absent_check_fires_when_an_absent_family_publishes(
+        coverage_session):
+    """THE MUTATION, for the other assertion. `absent_violations == ()` is
+    only worth asserting if it can be made non-empty."""
+    from tests.coverage.conftest import build_universe
+
+    build_universe(coverage_session, share_overrides={"it_services": 0.30})
+    report = audit_shock(coverage_session, expected_for("BRENT_CRUDE"),
+                         as_of=FIXTURE_TODAY)
+    assert report.absent_violations == ("it_services",)
+    assert report.secondary_precision < 1.0
+
+
+def test_a_published_company_with_no_family_counts_against_precision(
+        coverage_session):
+    """M8. A published row we cannot place in an industry is not a free pass:
+    it counts in the precision denominator and is named, with its ticker, in
+    the false-positive list. Silently dropping it would let an unclassified
+    company improve the score by existing."""
+    from tests.coverage.conftest import build_universe
+
+    build_universe(coverage_session, extra_families=({
+        "family": "unclassified_fixture", "sector": "", "sub_sector": None,
+        "tag": "input:crude_derivative_rubber", "exposure_kind": "INPUT_COST",
+        "share_of_base": 0.30, "companies": 1},))
+    report = audit_shock(coverage_session, expected_for("BRENT_CRUDE"),
+                         as_of=FIXTURE_TODAY)
+
+    unplaced = [row for row in report.published if row.family is None]
+    assert len(unplaced) == 1
+    assert ("UNKNOWN_FAMILY", unplaced[0].ticker) in report.false_positive_families
+    assert report.secondary_precision < 1.0
+    assert report.precision_denominator == len(report.published)
+
+
+# --- MARGINAL EXCLUSION, EXERCISED (review round 1, I2) ---------------------
+
+def test_a_marginal_family_that_publishes_is_excluded_from_precision(
+        coverage_session):
+    """A6.1: marginal families are excluded from BOTH sides. Give cement a
+    band that clears the 0.75% ripple floor and it publishes -- and must
+    still not appear in the precision numerator OR denominator, and must not
+    be a false positive."""
+    from tests.coverage.conftest import build_universe
+
+    build_universe(coverage_session, share_overrides={"cement": 0.30})
+    report = audit_shock(coverage_session, expected_for("BRENT_CRUDE"),
+                         as_of=FIXTURE_TODAY)
+
+    published_cement = [row for row in report.published if row.family == "cement"]
+    assert published_cement, "the mutation did not make cement publish"
+    assert report.marginal_seen == ("cement",)
+    assert "cement" not in report.false_positive_families
+    assert report.precision_denominator == (
+        len(report.published) - len(published_cement))
+    assert report.precision_numerator == report.precision_denominator
+    assert report.secondary_precision == 1.0
+
+
+def test_a_marginal_family_that_does_not_publish_is_excluded_from_recall(
+        coverage_session, universe):
+    """The other side of A6.1. `ceramics` is marginal with no companies at
+    all: it must not be counted as a miss. And when a family is named in BOTH
+    expected_ripple and expected_marginal, the denominator drops -- which is
+    the line in the harness that would otherwise never execute."""
+    entry = expected_for("BRENT_CRUDE")
+    base = audit_shock(coverage_session, entry, as_of=FIXTURE_TODAY)
+    assert base.ripple_denominator == 7
+    assert "ceramics" not in {d.family for d in base.missing}
+    assert "cement" not in {d.family for d in base.missing}
+
+    mutated = dict(entry)
+    mutated["expected_marginal"] = list(entry["expected_marginal"]) + ["city_gas"]
+    report = audit_shock(coverage_session, mutated, as_of=FIXTURE_TODAY)
+    assert report.ripple_denominator == 6
+    assert "city_gas" not in {d.family for d in report.missing}
+    assert report.ripple_recall == 1.0
+
+
 # --- the harness must not cheat --------------------------------------------
 
 def test_the_harness_never_infers_directness_from_distance():

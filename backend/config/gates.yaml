@@ -12,11 +12,34 @@
 # PHASE 0 SCOPE. Several §7.4 inputs do not exist in this repo yet
 # (liquidity ADV, the independent verifier's verdict, the empirical
 # cross-check, exposure freshness). Each has an `unknown_*` policy below
-# saying what an ABSENT input means. They are set FAIL-CLOSED for PRIMARY
-# (an input we cannot evaluate cannot authorize the strongest claim) and
-# permissive for SECONDARY_RIPPLE, which is the honest reading of "we do not
-# know this yet". Phases 1-5 supply the real inputs; the gate's structure
-# does not change when they arrive.
+# saying what an ABSENT input means. Phases 1-5 supply the real inputs; the
+# gate's structure does not change when they arrive.
+#
+# WHICH WAY EACH ONE FAILS -- READ THIS BEFORE TRUSTING THE PARAGRAPH ABOVE.
+# Phase 0 set its four keys FAIL-CLOSED for PRIMARY (an input we cannot
+# evaluate cannot authorize the strongest claim) and permissive for
+# SECONDARY_RIPPLE. Phase 3 added two more, and they are NOT fail-closed:
+#
+#     unknown_materiality_delta_passes: true   # PRIMARY, FAIL-OPEN
+#     unknown_sector_proxy_passes:      true   # PRIMARY, FAIL-OPEN
+#
+# They are fail-OPEN because nothing computes a band or a parameter
+# provenance on the V4-fed canonical path today, and closing them would
+# reject companies that publish now (measured 2026-08-17: 5 test failures
+# when both are flipped -- the list is in the cutover checklist). So a draft
+# with no computed band currently clears the PRIMARY materiality floor, and
+# a draft with unknown parameter provenance currently clears the PRIMARY
+# sector-proxy ban. That is a KNOWN HOLE, not an oversight.
+#
+# THE HAZARD IS THE PARTIAL ROLLOUT. The moment the sensitivity engine feeds
+# SOME drafts, band-less drafts clear those two bars in silence next to
+# drafts that had to earn it. `app/core/gate_warnings.py` emits a structured
+# WARNING on every PRIMARY publication that leant on one of these escapes,
+# so the hole is at least audible while it exists.
+#
+# FLIPPING THEM IS ITEM 1 OF THE "V5 SERVING CUTOVER CHECKLIST" IN
+# DATA_GAPS.md. Do not flip them here without doing the fixture work that
+# section names.
 
 version: gate-v5.0.0
 

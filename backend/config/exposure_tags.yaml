@@ -27,6 +27,34 @@
 # `python -m alembic upgrade head` (or restart, which migrates on boot) so
 # `valid_exposure_tag` picks it up. A leaf that is not in the database cannot
 # be written, which is the point.
+#
+# ---------------------------------------------------------------------------
+# IF YOU CAME HERE FROM THE ADDENDUM, READ THIS FIRST
+# ---------------------------------------------------------------------------
+# NEWSFLO_V5_ADDENDUM_RIPPLE_COVERAGE.md A4.2 lists the priority tags with
+# the GROUP included in the name -- `input:metals:steel_flat`,
+# `input:agri:palm_oil`. Spec 6.1's own YAML (which this file follows) nests
+# the group as a key and does NOT put it in the tag. Both documents mean the
+# same exposure; only one of them is the wire form. THE WIRE FORM IS
+# `family:leaf`, two segments, always -- it is what `company_exposure.
+# exposure_tag` stores, what `mechanism_edge.exposure_tag` stores, what the
+# DB triggers check, and what Phase 1's `check_exposure_tag` has validated
+# since before this file existed. A three-segment tag is REJECTED.
+#
+#   addendum spelling                  ->  wire form (what you write)
+#   input:metals:steel_flat            ->  input:steel_flat
+#   input:metals:aluminium             ->  input:aluminium
+#   input:agri:palm_oil                ->  input:palm_oil
+#   input:crude:crude_derivative_*     ->  input:crude_derivative_*
+#   input:crude:atf                    ->  input:atf
+#   revenue:realization:crude_*        ->  revenue:crude_realization
+#   rate:domestic:floating_debt_share  ->  rate:floating_debt_share
+#
+# The groups are kept in this file (and surfaced by `ExposureVocabulary.
+# group_of`) because they carry real information for a reader -- they are why
+# `atf` and `freight_diesel` are siblings -- but they are documentation, not
+# identity. Flattening them into the tag would also mean every regrouping of
+# the vocabulary rewrote live ledger rows.
 
 version: exposure-tags-v5.0.0
 

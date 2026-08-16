@@ -217,6 +217,54 @@ def test_the_pool_respects_its_maximum_size(ripple_session, crude_universe):
     assert len(pool.candidates) == 2
 
 
+def test_the_pool_never_grows_past_its_bound_even_while_filling(ripple_session,
+                                                                crude_universe):
+    """M6. `max_size` bounds the pool's GROWTH, not just its output. A pool
+    that accumulates ten thousand candidates and slices at the end is a
+    memory profile nobody asked for, and it hides a runaway from every test
+    that only inspects the result."""
+    from app.discovery.config import DiscoveryConfig
+    from app.discovery.engine import Candidate, CandidatePool
+
+    pool = CandidatePool(max_size=3)
+    for company_id in range(20):
+        pool.add(Candidate(company_id=company_id, discovery_source="MECHANISM",
+                           via_tag=TAG_PETCHEM, mechanism_id="e",
+                           graph_distance=2, shock_id="s",
+                           share_of_base=0.01 * (company_id + 1),
+                           expected_materiality_prior=0.01 * (company_id + 1)))
+        assert pool.size <= 3, f"pool grew to {pool.size} while filling"
+    # and the survivors are the strongest, not the first three seen
+    assert [c.company_id for c in pool.candidates] == [19, 18, 17]
+
+
+def test_mentions_survive_the_bound_and_the_deviation_is_documented(
+        ripple_session, crude_universe):
+    """M6. A mention ranks above every mechanism find by construction (its
+    prior is infinite), so with a pool smaller than the mention count the
+    pool is all mentions. That is deliberate -- a company the article NAMES
+    must not be dropped to make room for one the ledger found -- and the
+    engine says so in writing."""
+    from pathlib import Path
+
+    from app.discovery.config import DiscoveryConfig
+    from app.discovery.engine import discover
+
+    source = (BACKEND / "app" / "discovery" / "engine.py").read_text(encoding="utf-8")
+    assert "mentions always survive" in source.lower(), (
+        "engine.py does not document the mentions-always-survive deviation")
+
+    config = DiscoveryConfig(distance_thresholds={1: 0.02, 2: 0.05, 3: 0.10},
+                             max_candidates_per_event=1,
+                             peer_closure_min_members=2,
+                             peer_closure_threshold=0.08,
+                             max_depth=3, modelled_shock_variables=("BRENT_CRUDE",))
+    pool = discover(ripple_session, crude_event(), as_of=FIXTURE_TODAY,
+                    config=config)
+    assert len(pool.candidates) == 1
+    assert pool.candidates[0].discovery_source == "MENTION"
+
+
 def test_the_pool_is_ranked_by_the_expected_materiality_prior(
         ripple_session, crude_universe):
     """The prior orders the pool; it is never published and never becomes a

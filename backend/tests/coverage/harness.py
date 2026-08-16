@@ -116,6 +116,7 @@ class FamilyDiagnostic:
 @dataclass(frozen=True)
 class PublishedCompany:
     company_id: int
+    ticker: str | None
     family: str | None
     mechanism_id: str | None
     graph_distance: int | None
@@ -132,8 +133,12 @@ class CoverageReport:
     ripple_denominator: int
     ripple_recall: float | None
     secondary_precision: float | None
+    precision_numerator: int
+    precision_denominator: int
     published: tuple[PublishedCompany, ...]
-    false_positive_families: tuple[str, ...]
+    # Family slugs, plus a ("UNKNOWN_FAMILY", ticker) pair for any published
+    # company we could not place in an industry at all (review round 1, M8).
+    false_positive_families: tuple
     absent_violations: tuple[str, ...]
     marginal_seen: tuple[str, ...]
 
@@ -147,8 +152,21 @@ class CoverageReport:
 # --- the universe under audit ----------------------------------------------
 
 def _family_of_company(session) -> Mapping[int, str | None]:
-    return {int(row[0]): row[1] for row in session.execute(text(
-        "SELECT id, COALESCE(sub_sector, sector) FROM companies"))}
+    """company_id -> industry slug, or None when the company carries no
+    usable industry at all. A blank string is NOT a family: treating it as
+    one would invent an industry called "" and quietly park companies in it.
+    """
+    out: dict[int, str | None] = {}
+    for row in session.execute(text(
+            "SELECT id, COALESCE(sub_sector, sector) FROM companies")):
+        industry = (row[1] or "").strip()
+        out[int(row[0])] = industry or None
+    return out
+
+
+def _ticker_of_company(session) -> Mapping[int, str]:
+    return {int(row[0]): str(row[1]) for row in session.execute(text(
+        "SELECT id, ticker FROM companies"))}
 
 
 def _tagged_companies(session, tags: Sequence[str], family: str) -> list[int]:
@@ -222,7 +240,7 @@ def _publishable(session, candidate, *, variable_delta: float, as_of: date,
     if evaluate_secondary(draft, load_gate_config()).tier is None:
         return None
     return PublishedCompany(
-        company_id=candidate.company_id, family=None,
+        company_id=candidate.company_id, ticker=None, family=None,
         mechanism_id=candidate.mechanism_id,
         graph_distance=candidate.graph_distance,
         discovery_source=candidate.discovery_source,
@@ -258,6 +276,7 @@ def audit_shock(session, entry: Mapping, *, as_of: date,
                                magnitude_pct=shock_spec.get("magnitude_pct")),))
     pool = discover(session, event, as_of=as_of)
     families = _family_of_company(session)
+    tickers = _ticker_of_company(session)
 
     published: list[PublishedCompany] = []
     for candidate in pool.candidates:
@@ -266,6 +285,7 @@ def audit_shock(session, entry: Mapping, *, as_of: date,
         if row is not None:
             published.append(PublishedCompany(
                 company_id=row.company_id,
+                ticker=tickers.get(row.company_id),
                 family=families.get(row.company_id),
                 mechanism_id=row.mechanism_id,
                 graph_distance=row.graph_distance,
@@ -285,14 +305,23 @@ def audit_shock(session, entry: Mapping, *, as_of: date,
     # excluded from both sides (A6.1): scoring cement on crude as a false
     # positive would push the thresholds up, exactly as scoring it as a
     # required hit would push them down.
+    #
+    # A row we could NOT place in an industry counts against precision and is
+    # named with its ticker (review round 1, M8). Dropping it would let an
+    # unclassified company improve the score by existing, which is the one
+    # direction an error must never point.
     expected_any = set(expected_primary) | set(expected_ripple)
-    judged = [row for row in published if row.family not in marginal]
-    correct = [row for row in judged if row.family in expected_any]
+    judged = [row for row in published
+              if row.family is None or row.family not in marginal]
+    correct = [row for row in judged
+               if row.family is not None and row.family in expected_any]
     precision = (len(correct) / len(judged)) if judged else None
 
     false_positives = tuple(sorted(
         {row.family for row in judged
-         if row.family and row.family not in expected_any}))
+         if row.family and row.family not in expected_any})) + tuple(
+        sorted(("UNKNOWN_FAMILY", row.ticker or str(row.company_id))
+               for row in judged if row.family is None))
     absent_violations = tuple(sorted(
         {row.family for row in published if row.family in absent}))
     marginal_seen = tuple(sorted(
@@ -315,7 +344,8 @@ def audit_shock(session, entry: Mapping, *, as_of: date,
         variable=variable, sign=sign,
         surfaced_ripple=tuple(sorted(surfaced & set(expected_ripple))),
         missing=missing, ripple_denominator=len(scored), ripple_recall=recall,
-        secondary_precision=precision, published=tuple(published),
+        secondary_precision=precision, precision_numerator=len(correct),
+        precision_denominator=len(judged), published=tuple(published),
         false_positive_families=false_positives,
         absent_violations=absent_violations, marginal_seen=marginal_seen)
 

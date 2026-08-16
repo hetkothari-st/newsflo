@@ -54,6 +54,34 @@ def test_every_tag_keeps_the_family_leaf_shape_phase_1_validates():
         check_exposure_tag(tag)
 
 
+def test_the_addendum_spelling_map_is_documented_and_true():
+    """M5. The addendum spells the priority tags WITH the group
+    (`input:metals:steel_flat`); spec §6.1's YAML nests the group and leaves
+    it out of the tag. The file must state the mapping -- and the claim it
+    makes ("a three-segment tag is REJECTED") must actually hold, or the
+    comment is worse than nothing."""
+    from app.ledger.vocabulary import VocabularyError, check_exposure_tag
+
+    header = TAGS_YAML.read_text(encoding="utf-8").split("version:", 1)[0]
+    assert "input:metals:steel_flat" in header
+    assert "input:agri:palm_oil" in header
+    assert "input:steel_flat" in header and "input:palm_oil" in header
+
+    for addendum_spelling in ("input:metals:steel_flat", "input:agri:palm_oil",
+                              "revenue:realization:crude_realization"):
+        with pytest.raises(VocabularyError):
+            check_exposure_tag(addendum_spelling)
+
+
+def test_a_three_segment_tag_is_rejected_at_db_level(ripple_session):
+    """The same claim, at the layer that actually enforces it."""
+    company = make_company(ripple_session, ticker="FIX3S", name="FIXTURE 3S LTD")
+    with pytest.raises(DatabaseError):
+        seed_exposure(ripple_session, exposure_id="fx-3seg",
+                      company_id=company.id,
+                      exposure_tag="input:metals:steel_flat", share_of_base=0.3)
+
+
 def test_the_vocabulary_names_no_company_and_no_financial_figure():
     """A vocabulary is a list of WORDS. A number in it would be data."""
     raw = yaml.safe_load(TAGS_YAML.read_text(encoding="utf-8"))

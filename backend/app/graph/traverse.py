@@ -67,6 +67,19 @@ def usable(row) -> bool:
     A database CHECK cannot express "used in discovery" -- the constraint is
     about a query, not a row -- so the rule lives here and in the SQL above,
     and `tests/phase3/test_discovery_sources.py` pins both halves.
+
+    AN `AUTHORED` EDGE IS TRAVERSABLE WHILE ITS `review_status` IS STILL
+    `PENDING`, and that is deliberate rather than an oversight. The spec
+    gates exactly two derivations -- "CONSTRAINT: derivation IN
+    ('IO_TABLE','EMPIRICAL') requires reviewed_by NOT NULL before the edge
+    may be used in discovery" (phase file Task 3.4) -- because those two are
+    generated in BULK by a machine and are hypotheses by construction. An
+    AUTHORED edge was written by a person in the first place, so there is no
+    second person for it to be waiting on; `review_status` on it records a
+    later re-review, not its birth. Requiring approval for AUTHORED edges too
+    would be a stricter rule than the spec's, and adopting one silently is
+    how a spec stops describing the system. REJECTED still blocks every
+    derivation, including AUTHORED.
     """
     if str(row["review_status"]) == "REJECTED":
         return False

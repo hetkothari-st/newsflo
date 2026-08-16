@@ -587,7 +587,14 @@ def reduce_company_impact(signals: Sequence[Signal],
         publication_tier=result.tier or TIER_REJECTED,
         rejection_reason=result.rejection_reason,
         gate_trace=tuple({"rule": r.name, "passed": r.passed,
-                          "detail": r.detail, "tier": r.tier}
+                          "detail": r.detail, "tier": r.tier,
+                          # V5 Phase 3 (review round 1, I3): a rule that
+                          # passed only because its unknown-input escape
+                          # fired must be distinguishable IN THE PERSISTED
+                          # RECORD, or a postmortem cannot tell which
+                          # published rows leant on one. See
+                          # app/core/gate_warnings.py.
+                          "unknown_escape": r.unknown_escape}
                          for r in result.gate_trace),
         **base))
 

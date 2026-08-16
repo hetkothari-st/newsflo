@@ -271,13 +271,10 @@ honest state, and it is now a number rather than a feeling.
   real article yet, because event → shock extraction is not this phase. The
   V4 discovery path is untouched and is still what serves. **Owner: V5
   serving phase.**
-* **The two A5.1 gate rules are deployed as no-ops today.**
+* **The two A5.1 gate rules are deployed FAIL-OPEN today** —
   `unknown_materiality_delta_passes` and `unknown_sector_proxy_passes` are
-  both `true` in `config/gates.yaml`, because no computed band and no
-  parameter provenance reach a draft on the V4-fed canonical path. They are
-  stated in the file rather than hidden in a default, and **both must be
-  flipped to `false` the day the sensitivity engine feeds every draft.**
-  **Owner: V5 serving phase.**
+  both `true` in `config/gates.yaml`. See the **V5 SERVING CUTOVER CHECKLIST**
+  below; this is item 1 there, not a note here. **Owner: V5 serving phase.**
 * **`coverage_gap` is empty and its UI page says so.** `/graph/gaps` renders
   "the reverse event study needs price history the repo does not have"
   instead of an empty table pretending to be a clean bill of health.
@@ -295,6 +292,84 @@ human approving a verbatim excerpt.
 migrated database's `valid_exposure_tag` contains exactly the YAML rows and
 nothing else, and that `mechanism_edge`, `io_coefficient` and `coverage_gap`
 are empty.
+
+---
+
+## V5 SERVING CUTOVER CHECKLIST
+
+**Do not serve the V5 canonical path until every item here is done.** These
+are not gaps in the data — they are settings that are *correct while V5 is
+parallel and unserved* and *wrong the moment it is not*. They are listed
+separately from the gap sections precisely so that "the ledger is still
+empty" cannot be used to postpone reading them.
+
+The dangerous state is not "V5 off" or "V5 on". It is the **partial
+rollout**: some drafts carrying a computed band and some not, in the same
+feed, indistinguishable to the reader.
+
+### 1. Flip the two fail-OPEN gate keys — `config/gates.yaml`
+
+| Key | Deployed | Must become | Blocks |
+|---|---|---|---|
+| `primary.unknown_materiality_delta_passes` | `true` | `false` | a band-less draft clearing the 2.0% PRIMARY materiality floor |
+| `primary.unknown_sector_proxy_passes` | `true` | `false` | a draft of unknown parameter provenance clearing the PRIMARY sector-proxy ban |
+
+Both are `true` because nothing computes a band or a parameter provenance on
+the V4-fed canonical path today. **Flipping them is not a one-line change.**
+Measured on 2026-08-17 by flipping both and running
+`tests/phase0 tests/phase1 tests/phase2`: **5 failures**, every one of them a
+fixture that reaches PRIMARY without a sensitivity block.
+
+```
+tests/phase0/test_firewall.py::test_primary_prose_has_deletion_rate_zero_on_the_fixture_corpus
+tests/phase0/test_single_truth.py::test_the_fixture_primary_company_reaches_primary
+tests/phase1/test_staleness.py::test_a_stale_exposure_blocks_primary_in_the_gate
+tests/phase2/test_evidence_grade_cap.py::test_a_signal_set_with_no_sensitivity_block_is_unaffected
+tests/phase2/test_sign_consistency_gate.py::test_the_phase0_fixture_company_is_reduced_exactly_as_before
+```
+
+The fixture work — giving those fixtures a computed band, or accepting that
+they now reach SECONDARY — must be done in the **same change**. Do not flip
+the keys and delete the failing assertions: three of those five exist
+precisely to prove a company reaches PRIMARY, and deleting them removes the
+only evidence that the flip did not simply switch PRIMARY off.
+
+*(The Phase 3 review recorded 7 failures for the same experiment. The number
+above is what this session measured on the current tip; the branch gained
+`tests/phase2/test_evidence_grade_cap.py` and other fixtures in between.
+Re-measure before acting rather than trusting either figure.)*
+
+The `secondary_ripple` twins of both keys may stay `true`: a ripple already
+admits weaker evidence by design.
+
+**Owner: V5 serving phase.**
+
+### 2. Confirm the escape warning is silent
+
+`app/core/gate_warnings.py` emits a structured `WARNING` on the
+`newsflo.gate` logger for every PRIMARY publication that passed a rule only
+because one of those escapes fired, carrying
+`gate_unknown_escape_rules`, `gate_tier`, `event_id` and `company_id`. It is
+the audible version of the hole in item 1.
+
+**After item 1, this warning must never fire.** If it still does, a code path
+is constructing an `ImpactDraft` without a band and something is publishing
+it as PRIMARY. Wire the logger into whatever alerting exists before cutover,
+not after.
+
+### 3. Re-run the coverage harness against the REAL universe
+
+Every recall and precision number recorded anywhere in this repo was measured
+on `backend/tests/coverage/fixtures/synthetic_universe.json`. Before serving,
+run `audit_shock` against the production database and record the real
+numbers. Expect them to be bad; the point is that they will be *specific*.
+
+### 4. Get the expected-ripple map signed off
+
+`backend/tests/coverage/fixtures/expected_ripple_map.yaml` is headed
+`PROPOSED-PENDING-OWNER-SIGN-OFF` with `signed_off_by: null`. Until a domain
+expert signs it, every recall figure is relative to the implementer's guess
+at what should have surfaced.
 
 ---
 

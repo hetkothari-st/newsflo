@@ -230,6 +230,128 @@ def test_a_failed_primary_does_not_demote_to_secondary_through_the_new_rules():
     assert not set(r.name for r in primary.gate_trace) & {"__demoted__"}
 
 
+# --- I3: the partial-rollout hazard, made loud -----------------------------
+#
+# The two `unknown_*` flags are correct today and dangerous tomorrow. The
+# moment the sensitivity engine feeds SOME drafts and not others, a band-less
+# draft clears the PRIMARY materiality floor and the PRIMARY sector-proxy ban
+# in silence, next to drafts that had to earn it. Silence is the problem, so
+# the escape is now recorded on the rule and shouted about at PRIMARY.
+
+def test_the_gate_marks_a_rule_that_passed_only_by_the_unknown_escape():
+    from app.core.config_loader import load_gate_config
+    from app.core.gates import evaluate_primary
+
+    draft = ripple_draft(delta_ebitda_pct_abs=None, uses_sector_proxy=None,
+                         materiality_bucket="HIGH", graph_distance=1,
+                         directness="DIRECT", sign_consistency=0.95,
+                         evidence_grade="A", net_effect="NEGATIVE",
+                         verifier_status="PASS", empirical_status="AGREE")
+    result = evaluate_primary(draft, load_gate_config())
+    assert result.tier == "PRIMARY"
+    escaped = {rule.name for rule in result.gate_trace if rule.unknown_escape}
+    assert escaped == {"materiality_floor", "sector_proxy"}
+
+
+def test_a_rule_that_passed_on_its_merits_is_not_marked_as_an_escape():
+    from app.core.config_loader import load_gate_config
+    from app.core.gates import evaluate_primary
+
+    draft = ripple_draft(delta_ebitda_pct_abs=6.0, uses_sector_proxy=False,
+                         materiality_bucket="HIGH", graph_distance=1,
+                         directness="DIRECT", sign_consistency=0.95,
+                         evidence_grade="A", net_effect="NEGATIVE",
+                         verifier_status="PASS", empirical_status="AGREE")
+    result = evaluate_primary(draft, load_gate_config())
+    assert result.tier == "PRIMARY"
+    assert not any(rule.unknown_escape for rule in result.gate_trace)
+
+
+def test_a_primary_publication_that_leant_on_an_escape_logs_a_warning(caplog):
+    import logging
+
+    from app.core.config_loader import load_gate_config
+    from app.core.gate_warnings import warn_on_unknown_escapes
+    from app.core.gates import evaluate
+
+    draft = ripple_draft(delta_ebitda_pct_abs=None, uses_sector_proxy=None,
+                         materiality_bucket="HIGH", graph_distance=1,
+                         directness="DIRECT", sign_consistency=0.95,
+                         evidence_grade="A", net_effect="NEGATIVE",
+                         verifier_status="PASS", empirical_status="AGREE")
+    result = evaluate(draft, load_gate_config())
+    assert result.tier == "PRIMARY"
+
+    with caplog.at_level(logging.WARNING, logger="newsflo.gate"):
+        escapes = warn_on_unknown_escapes(
+            result.gate_trace, tier=result.tier, event_id="fixture:event",
+            company_id=4242)
+
+    assert escapes == ("materiality_floor", "sector_proxy")
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.WARNING
+    assert record.gate_unknown_escape_rules == "materiality_floor,sector_proxy"
+    assert record.gate_tier == "PRIMARY"
+    assert record.company_id == 4242
+    assert "V5 SERVING CUTOVER CHECKLIST" in record.getMessage()
+
+
+def test_a_secondary_publication_does_not_shout(caplog):
+    """The hazard is a PRIMARY claim resting on an input nobody evaluated. A
+    ripple already admits weaker evidence by design, so warning on it would
+    be noise that trains people to ignore the warning that matters."""
+    import logging
+
+    from app.core.config_loader import load_gate_config
+    from app.core.gate_warnings import warn_on_unknown_escapes
+    from app.core.gates import evaluate
+
+    result = evaluate(ripple_draft(delta_ebitda_pct_abs=None,
+                                   uses_sector_proxy=None), load_gate_config())
+    assert result.tier == "SECONDARY_RIPPLE"
+    with caplog.at_level(logging.WARNING, logger="newsflo.gate"):
+        escapes = warn_on_unknown_escapes(
+            result.gate_trace, tier=result.tier, event_id="e", company_id=1)
+    assert escapes == ()
+    assert caplog.records == []
+
+
+def test_the_reducer_carries_the_escape_flag_into_the_gate_trace():
+    """The warning has to be reachable from what is PERSISTED, not only from
+    an in-memory GateResult, or a postmortem cannot tell which published rows
+    leant on an escape."""
+    from app.core.reducer import reduce_company_impact
+    from tests.phase0 import fixtures
+
+    impact = reduce_company_impact(
+        fixtures.signals(fixtures.PRIMARY_COMPANY_ID),
+        fixtures.reducer_config())
+    assert impact.gate_trace
+    assert all("unknown_escape" in row for row in impact.gate_trace)
+
+
+def test_the_cutover_checklist_exists_and_names_both_flags():
+    """I3(3). The instruction to flip these two flags must live in a place
+    somebody reads BEFORE cutover, not in a paragraph of prose."""
+    data_gaps = (BACKEND.parent / "DATA_GAPS.md").read_text(encoding="utf-8")
+    assert "V5 SERVING CUTOVER CHECKLIST" in data_gaps
+    checklist = data_gaps.split("V5 SERVING CUTOVER CHECKLIST", 1)[1]
+    assert "unknown_materiality_delta_passes" in checklist
+    assert "unknown_sector_proxy_passes" in checklist
+
+
+def test_the_gates_yaml_philosophy_comment_admits_the_fail_open_keys():
+    """I3(4). The header said the unknown_* policy is 'FAIL-CLOSED for
+    PRIMARY'. Two of them no longer are, and a comment that is no longer true
+    is worse than no comment."""
+    header = GATES_YAML.read_text(encoding="utf-8").split("version:", 1)[0]
+    assert "fail-open" in header.lower()
+    assert "unknown_materiality_delta_passes" in header
+    assert "unknown_sector_proxy_passes" in header
+    assert "CUTOVER" in header
+
+
 # --- A5.2 sector coherence --------------------------------------------------
 
 def test_three_cleared_companies_publish_the_section():

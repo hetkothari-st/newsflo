@@ -104,24 +104,58 @@ class Candidate:
 
 @dataclass
 class CandidatePool:
-    """A bounded, de-duplicated, source-aware set of candidates."""
+    """A bounded, de-duplicated, source-aware set of candidates.
+
+    BOUNDED WHILE FILLING, not only on the way out. A pool that accumulates
+    every row the index returns and slices at the end has an unbounded memory
+    profile and hides a runaway from every test that inspects only the
+    result, so `add` evicts as it goes and `size` never exceeds `max_size`.
+
+    MENTIONS ALWAYS SURVIVE, and this is a deliberate deviation worth
+    stating. A mention's prior is infinite, so it outranks every mechanism
+    find and the eviction never reaches one: with a pool smaller than the
+    mention count, the pool is all mentions. That is the intended trade --
+    a company the article NAMES must not be dropped to make room for one the
+    ledger inferred, because the reader can see the first kind is missing.
+    The consequence, said plainly: an article naming more than
+    `max_candidates_per_event` companies crowds out mechanism discovery
+    entirely. No such article has been observed, and if one is, the fix is a
+    per-source quota in the config, not a silent reordering here.
+    """
     max_size: int
     _by_company: dict[int, Candidate] = field(default_factory=dict)
     unresolved_mentions: tuple[str, ...] = ()
     unmodelled_variables: tuple[str, ...] = ()
 
+    @staticmethod
+    def _rank_key(candidate: Candidate):
+        """The total order the pool is kept in: strongest prior first, then
+        source precedence, then company_id. Total, so discovery is
+        deterministic."""
+        return (-candidate.expected_materiality_prior,
+                SOURCE_PRECEDENCE.index(candidate.discovery_source),
+                candidate.company_id)
+
+    @property
+    def size(self) -> int:
+        return len(self._by_company)
+
     def add(self, candidate: Candidate) -> None:
         existing = self._by_company.get(candidate.company_id)
-        if existing is None:
-            self._by_company[candidate.company_id] = candidate
+        if existing is not None:
+            if (SOURCE_PRECEDENCE.index(candidate.discovery_source)
+                    < SOURCE_PRECEDENCE.index(existing.discovery_source)):
+                self._by_company[candidate.company_id] = candidate
+            elif (candidate.discovery_source == existing.discovery_source
+                  and candidate.expected_materiality_prior
+                  > existing.expected_materiality_prior):
+                self._by_company[candidate.company_id] = candidate
             return
-        if (SOURCE_PRECEDENCE.index(candidate.discovery_source)
-                < SOURCE_PRECEDENCE.index(existing.discovery_source)):
-            self._by_company[candidate.company_id] = candidate
-        elif (candidate.discovery_source == existing.discovery_source
-              and candidate.expected_materiality_prior
-              > existing.expected_materiality_prior):
-            self._by_company[candidate.company_id] = candidate
+
+        self._by_company[candidate.company_id] = candidate
+        if len(self._by_company) > self.max_size:
+            weakest = max(self._by_company.values(), key=self._rank_key)
+            del self._by_company[weakest.company_id]
 
     def extend(self, candidates: Iterable[Candidate]) -> None:
         for candidate in candidates:
@@ -129,14 +163,8 @@ class CandidatePool:
 
     @property
     def candidates(self) -> tuple[Candidate, ...]:
-        """Ranked, then bounded. The order is total (prior, then source
-        precedence, then company_id), so discovery is deterministic."""
-        ranked = sorted(
-            self._by_company.values(),
-            key=lambda c: (-c.expected_materiality_prior,
-                           SOURCE_PRECEDENCE.index(c.discovery_source),
-                           c.company_id))
-        return tuple(ranked[:self.max_size])
+        """The pool, ranked. It is already bounded -- `add` evicts."""
+        return tuple(sorted(self._by_company.values(), key=self._rank_key))
 
     def serialize(self) -> list[dict]:
         return [candidate.serialize() for candidate in self.candidates]

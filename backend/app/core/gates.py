@@ -140,6 +140,12 @@ class GateRule:
     passed: bool
     detail: str = ""
     tier: str = ""          # "HARD" | "PRIMARY" | "SECONDARY"
+    # True when this rule PASSED ONLY because its `unknown_*_passes` escape
+    # fired -- i.e. the input was absent and the policy said an absent input
+    # is acceptable. It is not a failure and it is not a pass on the merits;
+    # it is a rule nobody evaluated, and `app/core/gate_warnings.py` shouts
+    # about it at PRIMARY. See the CUTOVER note in config/gates.yaml.
+    unknown_escape: bool = False
 
 
 @dataclass(frozen=True)
@@ -264,7 +270,10 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
         empirical_ok = (policy.unknown_empirical_status_passes
                         if draft.empirical_status is None
                         else draft.empirical_status in policy.allowed_empirical_status)
-        rules.append(GateRule("empirical", empirical_ok, str(draft.empirical_status)))
+        rules.append(GateRule("empirical", empirical_ok,
+                              str(draft.empirical_status),
+                              unknown_escape=(empirical_ok
+                                              and draft.empirical_status is None)))
 
     rules.append(GateRule(
         "objections",
@@ -276,19 +285,27 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
         verifier_ok = (policy.unknown_verifier_status_passes
                        if draft.verifier_status is None
                        else draft.verifier_status == policy.required_verifier_status)
-        rules.append(GateRule("verifier", verifier_ok, str(draft.verifier_status)))
+        rules.append(GateRule("verifier", verifier_ok,
+                              str(draft.verifier_status),
+                              unknown_escape=(verifier_ok
+                                              and draft.verifier_status is None)))
 
     if policy.min_adv_inr is not None:
         liquidity_ok = (policy.unknown_liquidity_passes
                         if draft.adv_20d_inr is None
                         else draft.adv_20d_inr >= policy.min_adv_inr)
-        rules.append(GateRule("liquidity", liquidity_ok, str(draft.adv_20d_inr)))
+        rules.append(GateRule("liquidity", liquidity_ok,
+                              str(draft.adv_20d_inr),
+                              unknown_escape=(liquidity_ok
+                                              and draft.adv_20d_inr is None)))
 
     if policy.allowed_event_status:
         event_ok = (policy.unknown_event_status_passes
                     if draft.event_status is None
                     else draft.event_status in policy.allowed_event_status)
-        rules.append(GateRule("event_status", event_ok, str(draft.event_status)))
+        rules.append(GateRule("event_status", event_ok, str(draft.event_status),
+                              unknown_escape=(event_ok
+                                              and draft.event_status is None)))
 
     if policy.require_mechanism_id:            # invariant 7
         rules.append(GateRule("mechanism_id", bool(draft.mechanism_id),
@@ -305,16 +322,20 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
                     else draft.delta_ebitda_pct_abs >= policy.materiality_floor_pct)
         rules.append(GateRule(
             "materiality_floor", floor_ok,
-            f"{draft.delta_ebitda_pct_abs} floor={policy.materiality_floor_pct}%"))
+            f"{draft.delta_ebitda_pct_abs} floor={policy.materiality_floor_pct}%",
+            unknown_escape=(floor_ok and draft.delta_ebitda_pct_abs is None)))
 
     if policy.allow_sector_proxy is not None and not policy.allow_sector_proxy:
         proxy_ok = (policy.unknown_sector_proxy_passes
                     if draft.uses_sector_proxy is None
                     else not draft.uses_sector_proxy)
         rules.append(GateRule("sector_proxy", proxy_ok,
-                              str(draft.uses_sector_proxy)))
+                              str(draft.uses_sector_proxy),
+                              unknown_escape=(proxy_ok
+                                              and draft.uses_sector_proxy is None)))
 
-    return [GateRule(r.name, r.passed, r.detail, tier=tier) for r in rules]
+    return [GateRule(r.name, r.passed, r.detail, tier=tier,
+                     unknown_escape=r.unknown_escape) for r in rules]
 
 
 def _first_failure_reason(rules: Sequence[GateRule], tier: str) -> str | None:

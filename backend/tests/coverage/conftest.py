@@ -60,7 +60,9 @@ def _insert_edge(session, edge):
         ":created_at)"), dict(edge, created_at=FIXTURE_NOW.isoformat()))
 
 
-def build_universe(session, *, untagged_families: tuple[str, ...] = ()) -> dict:
+def build_universe(session, *, untagged_families: tuple[str, ...] = (),
+                   share_overrides: dict | None = None,
+                   extra_families: tuple[dict, ...] = ()) -> dict:
     """Seed the whole synthetic universe. Returns {family: [company_id, ...]}.
 
     `untagged_families` builds the family's COMPANIES but not their exposure
@@ -69,7 +71,18 @@ def build_universe(session, *, untagged_families: tuple[str, ...] = ()) -> dict:
     (Phase 1 fix round 1, I1: nobody deletes a reviewed claim, not even the
     reviewer), and working around that guard in a test would be working
     around the guarantee it exists to give.
+
+    `share_overrides` is {family: share_of_base}. It is the MUTATION knob for
+    the falsifiability tests (review round 1, I1/I2): raise a rejected
+    family's exposure until it clears the gate and watch precision, the
+    expected_absent check or the marginal exclusion react. A metric that
+    cannot be made to move by any mutation is not measuring anything.
+
+    `extra_families` appends rows in the same shape as the fixture's
+    `families` list, for a test that needs a company the shipped universe
+    does not describe.
     """
+    share_overrides = dict(share_overrides or {})
     from app.ledger.review import review_session
     from app.models import Company
 
@@ -82,14 +95,16 @@ def build_universe(session, *, untagged_families: tuple[str, ...] = ()) -> dict:
         _insert_edge(session, edge)
 
     members: dict[str, list[int]] = {}
-    for entry in universe["families"]:
+    for entry in tuple(universe["families"]) + tuple(extra_families):
         family = entry["family"]
         members[family] = []
+        share = float(share_overrides.get(family, entry["share_of_base"] or 0.0))
         for index in range(int(entry["companies"])):
             ticker = f"SYN{family.upper()[:6]}{index}"
             company = Company(
                 ticker=ticker, name=f"SYNTHETIC {family.upper()} {index} LTD",
-                sector=entry["sector"], sub_sector=family, index_tier="OTHER",
+                sector=entry["sector"], sub_sector=entry.get("sub_sector", family),
+                index_tier="OTHER",
                 market="INDIA", market_cap=1000.0, tradeability="NORMAL")
             session.add(company)
             session.flush()
@@ -113,7 +128,7 @@ def build_universe(session, *, untagged_families: tuple[str, ...] = ()) -> dict:
                         "company_id": company.id,
                         "exposure_kind": entry["exposure_kind"],
                         "exposure_tag": entry["tag"],
-                        "share_of_base": float(entry["share_of_base"]),
+                        "share_of_base": share,
                         "base_value_inr": base_value,
                         "as_of_date": FIXTURE_TODAY.isoformat()})
 
