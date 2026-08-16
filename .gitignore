@@ -2,3 +2,4 @@
 .worktrees/
 .vite/
 .playwright-mcp/
+api_keys.txt
