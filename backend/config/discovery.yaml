@@ -1,0 +1,62 @@
+# V5 discovery policy (docs/v5/04_PHASE_3_ripple_discovery.md Task 3.3,
+# spec §6.3).
+#
+# THIS FILE IS POLICY, NOT DATA. It contains thresholds the owner chooses and
+# the names of economic variables the system models. It contains no company,
+# no exposure, no coefficient. Changing a number here changes what discovery
+# LOOKS AT -- it never changes what is true.
+#
+# Read by app/discovery/config.py into the frozen DiscoveryConfig that
+# app/discovery/engine.py queries with. engine.py holds NO threshold of its
+# own (a test scans it for numeric literals), so the policy cannot drift
+# between the file and the code.
+
+version: discovery-v5.0.0
+
+# THRESH[distance] from spec §6.3. An indirect claim must clear a HIGHER
+# exposure bar to be worth a user's attention: at three hops from the shock,
+# a 3% input share is noise.
+distance_thresholds:
+  1: 0.02
+  2: 0.05
+  3: 0.10
+
+# The pool is bounded, and the bound is a product decision rather than a
+# performance one -- past a couple of hundred names an event stops being an
+# analysis and becomes a screen.
+max_candidates_per_event: 250
+
+# How far the causal graph is walked from a shock variable. Matches the
+# deepest distance_thresholds key by construction; a deeper walk would have
+# no threshold to clear.
+max_depth: 3
+
+# PEER CLOSURE (§6.3 source 4). When this many members of an industry are
+# already in the pool, the industry is swept for names the distance walk
+# rejected -- at a threshold of its own. That threshold sits BELOW the d3 bar
+# and ABOVE the d1/d2 bars on purpose: the sweep exists to catch the deep,
+# thinly-exposed peers of an industry that is already visibly implicated, not
+# to widen the shallow rounds.
+peer_closure_min_members: 2
+peer_closure_threshold: 0.08
+
+# AXIS V (addendum A1). The economic variables this system claims to model.
+# A shock naming anything else is REPORTED as unmodelled -- discovery returns
+# it in `unmodelled_variables` rather than guessing a graph entry point. This
+# is a vocabulary of variable NAMES; it asserts nothing about any of them.
+modelled_shock_variables:
+  - BRENT_CRUDE
+  - NATURAL_GAS
+  - USDINR
+  - REPO_RATE
+  - GSEC_10Y
+  - STEEL_FLAT
+  - STEEL_LONG
+  - ALUMINIUM
+  - COPPER
+  - PALM_OIL
+  - WHEAT
+  - SUGAR
+  - MILK
+  - PET_COKE
+  - FREIGHT_RATE
