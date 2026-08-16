@@ -37,13 +37,42 @@ def _tier_policy(raw: Mapping[str, Any]) -> TierPolicy:
     for key, value in raw.items():
         field_type = TierPolicy.__dataclass_fields__[key].type
         kwargs[key] = _tuple(value) if "tuple" in str(field_type) else value
-    return TierPolicy(**kwargs)
+    policy = TierPolicy(**kwargs)
+
+    # V5 PHASE 3 / A5.1: `min_evidence_grade` and `evidence_grades` are two
+    # spellings of ONE policy. A file where they disagree is a file where
+    # nobody knows which one publishes, so it is refused rather than
+    # resolved -- resolving it would mean picking a winner silently.
+    if policy.min_evidence_grade is not None:
+        if not policy.evidence_grades:
+            raise ValueError(
+                "gates.yaml: min_evidence_grade is set but evidence_grades is "
+                "empty")
+        if policy.evidence_grades[-1] != policy.min_evidence_grade:
+            raise ValueError(
+                f"gates.yaml: min_evidence_grade "
+                f"{policy.min_evidence_grade!r} contradicts evidence_grades "
+                f"{list(policy.evidence_grades)} (whose weakest entry is "
+                f"{policy.evidence_grades[-1]!r}). One policy, one value.")
+    return policy
 
 
 @lru_cache(maxsize=4)
 def load_gate_config(path: Path | None = None) -> GateConfig:
     raw = yaml.safe_load((path or GATES_CONFIG_PATH).read_text(encoding="utf-8"))
     hard = raw["hard_blocks"]
+    # A5.1 names the ripple block `secondary_ripple`; Phase 0 deployed it as
+    # `secondary`. Both spellings load into the SAME policy so that renaming
+    # the key could not quietly change what publishes. A file carrying both
+    # is refused: two blocks with one meaning is a config nobody can read.
+    if "secondary_ripple" in raw and "secondary" in raw:
+        raise ValueError(
+            "gates.yaml: both `secondary` and `secondary_ripple` are present. "
+            "They are two spellings of one policy -- keep `secondary_ripple` "
+            "(addendum A5.1) and delete the other.")
+    secondary = raw.get("secondary_ripple", raw.get("secondary"))
+    if secondary is None:
+        raise ValueError("gates.yaml: no `secondary_ripple` block")
     return GateConfig(
         version=raw["version"],
         hard_blocks=HardBlockPolicy(
@@ -51,7 +80,7 @@ def load_gate_config(path: Path | None = None) -> GateConfig:
             min_shock_magnitude_confidence=float(hard["min_shock_magnitude_confidence"]),
             no_impact_buckets=_tuple(hard["no_impact_buckets"])),
         primary=_tier_policy(raw["primary"]),
-        secondary=_tier_policy(raw["secondary"]))
+        secondary=_tier_policy(secondary))
 
 
 @lru_cache(maxsize=4)

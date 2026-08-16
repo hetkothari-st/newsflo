@@ -30,8 +30,29 @@ hard_blocks:
   # Materiality buckets that mean "there is nothing to say".
   no_impact_buckets: [NO_MATERIAL_IMPACT, NONE]
 
+# V5 PHASE 3 (addendum A5.1) split the tier policies explicitly, because
+# thresholds calibrated for PRIMARY silently kill ripple recall: a ripple
+# candidate characteristically has a smaller delta-EBITDA, weaker evidence and
+# proxy parameters. Three A5.1 keys are NEW here and each becomes a gate rule
+# only when a tier names it (`materiality_floor_pct`, `allow_sector_proxy`,
+# `min_companies_per_section`). A5.1's `max_distance` and `min_evidence_grade`
+# are NOT new keys: `max_graph_distance` IS `max_distance`, and
+# `min_evidence_grade` is the weakest entry of `evidence_grades` -- so it is
+# stated here as a floor and the loader REFUSES a file where the two
+# disagree. One policy, one place, two spellings that cannot drift.
+#
+# A5.3, the guardrail: nothing about the ripple block loosens PRIMARY. Every
+# primary threshold below is what Phase 0 deployed, and a test pins each one.
 primary:
   max_graph_distance: 2
+  # Minimum |delta EBITDA| as a percentage of EBITDA_ttm. A draft with no
+  # computed band cannot be shown to clear this and does not pass by omission.
+  materiality_floor_pct: 2.0
+  # A sector-median parameter may never back a PRIMARY call (§7.4). The
+  # forbidden weakest-link list below says the same thing about EVIDENCE;
+  # this says it about PARAMETERS, which is a different input.
+  allow_sector_proxy: false
+  min_evidence_grade: C
   # DIRECT at distance 1, or DIRECT|INDIRECT at distance 2 with HIGH
   # materiality. REMOTE never publishes primary.
   allowed_directness: [DIRECT, INDIRECT]
@@ -51,9 +72,29 @@ primary:
   unknown_empirical_status_passes: false
   unknown_liquidity_passes: true      # nothing to evaluate; not a silent pass
   unknown_event_status_passes: false
+  # PHASE 3. No computed band and no parameter provenance reach a draft on
+  # the V4-fed canonical path today (Phase 2's engine supplies both, and it
+  # needs ledger rows that do not exist). Deployed TRUE so this task changes
+  # no verdict, and stated here rather than hidden in a default. FLIP BOTH TO
+  # FALSE the day the sensitivity engine feeds every draft -- at which point
+  # a draft with no band should not be able to claim anything at all.
+  unknown_materiality_delta_passes: true
+  unknown_sector_proxy_passes: true
 
-secondary:
+secondary_ripple:
   max_graph_distance: 3
+  # Lower than primary -- small but real is still tradeable (A5.1). This is
+  # not a loosening of the primary bar; it is a different claim with a
+  # different bar, which is the whole point of splitting the block.
+  materiality_floor_pct: 0.75
+  # Permitted, WITH UI LABELLING as a sector-level estimate (A4.3). The
+  # structural consequence is already elsewhere: a proxy parameter caps
+  # evidence at C and can never reach PRIMARY.
+  allow_sector_proxy: true
+  min_evidence_grade: D
+  # A5.1. Section-level, not company-level: it is read by
+  # app/discovery/coherence.py, which decides whether a SECTION publishes.
+  min_companies_per_section: 1
   materiality_buckets: [HIGH, MEDIUM]
   low_materiality_evidence_grades: [A, B]
   evidence_grades: [A, B, C, D]
@@ -65,3 +106,7 @@ secondary:
   require_mechanism_id: true
   unknown_verifier_status_passes: true
   unknown_empirical_status_passes: true
+  # See the primary block: TRUE today because nothing computes these on the
+  # canonical path yet, and both flip when the sensitivity engine does.
+  unknown_materiality_delta_passes: true
+  unknown_sector_proxy_passes: true

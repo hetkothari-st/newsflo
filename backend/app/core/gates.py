@@ -49,6 +49,31 @@ class TierPolicy:
     allowed_event_status: tuple[str, ...] = ()
     below_floor_allowed_effects: tuple[str, ...] = ()
     require_mechanism_id: bool = False
+    # --- V5 PHASE 3, addendum A5.1. ADDITIVE: each of these becomes a rule
+    # only when the tier policy names it, so a config that predates Phase 3
+    # walks exactly the rules it walked before.
+    #
+    # Minimum |delta EBITDA| as a percentage of EBITDA_ttm. `None` = the tier
+    # does not express a floor in percent (Phase 0's behaviour).
+    materiality_floor_pct: float | None = None
+    # Whether a SECTOR_PROXY parameter may back a claim at this tier.
+    # `None` = no rule; False = refused; True = admitted (with UI labelling,
+    # which is the serving layer's job, not the gate's).
+    allow_sector_proxy: bool | None = None
+    # A5.1 states the evidence floor as a single grade. It is the weakest
+    # entry of `evidence_grades` and the loader refuses a file where the two
+    # disagree, so this is documentation of one policy rather than a second
+    # rule that could contradict the first.
+    min_evidence_grade: str | None = None
+    # Section-level, read by app/discovery/coherence.py, not by this module.
+    min_companies_per_section: int | None = None
+    # What an ABSENT input means for the two A5.1 rules, stated per tier in
+    # the YAML exactly like the four Phase 0 `unknown_*` keys. There is no
+    # computed band and no parameter provenance on the V4-fed canonical path
+    # today, so both are deployed as True and say so in the open; the day the
+    # sensitivity engine feeds every draft they become False.
+    unknown_materiality_delta_passes: bool = True
+    unknown_sector_proxy_passes: bool = True
     unknown_verifier_status_passes: bool = True
     unknown_empirical_status_passes: bool = True
     unknown_liquidity_passes: bool = True
@@ -97,6 +122,16 @@ class ImpactDraft:
     shock_magnitude_confidence: float | None
     mechanism_id: str | None
     net_effect: str
+    # --- V5 PHASE 3, addendum A5.1. Both default to None = NOT KNOWN, and
+    # both fail the rule that reads them, so a caller that does not supply
+    # them cannot clear a bar by omission.
+    #
+    # |delta EBITDA| as a percentage of EBITDA_ttm, from the sensitivity
+    # engine's computed band. None = no band was computed.
+    delta_ebitda_pct_abs: float | None = None
+    # Whether any parameter behind this claim came from a sector median
+    # rather than the company's own disclosure (§4.2, A4.3).
+    uses_sector_proxy: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -259,6 +294,26 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
         rules.append(GateRule("mechanism_id", bool(draft.mechanism_id),
                               str(draft.mechanism_id)))
 
+    # --- V5 PHASE 3, A5.1 ---------------------------------------------------
+    if policy.materiality_floor_pct is not None:
+        # A draft carrying a computed band is measured against the floor. A
+        # draft with NO band is not silently passed -- the policy says in the
+        # YAML what an absent band means, exactly as it does for the verifier,
+        # the empirical check, liquidity and event status.
+        floor_ok = (policy.unknown_materiality_delta_passes
+                    if draft.delta_ebitda_pct_abs is None
+                    else draft.delta_ebitda_pct_abs >= policy.materiality_floor_pct)
+        rules.append(GateRule(
+            "materiality_floor", floor_ok,
+            f"{draft.delta_ebitda_pct_abs} floor={policy.materiality_floor_pct}%"))
+
+    if policy.allow_sector_proxy is not None and not policy.allow_sector_proxy:
+        proxy_ok = (policy.unknown_sector_proxy_passes
+                    if draft.uses_sector_proxy is None
+                    else not draft.uses_sector_proxy)
+        rules.append(GateRule("sector_proxy", proxy_ok,
+                              str(draft.uses_sector_proxy)))
+
     return [GateRule(r.name, r.passed, r.detail, tier=tier) for r in rules]
 
 
@@ -270,6 +325,10 @@ def _first_failure_reason(rules: Sequence[GateRule], tier: str) -> str | None:
             return "SECONDARY_REQUIRES_MECHANISM"
         if rule.name == "sign_consistency":
             return "SIGN_CONSISTENCY_BELOW_FLOOR"
+        if rule.name == "materiality_floor":
+            return f"{tier}_FAILED_MATERIALITY_FLOOR"
+        if rule.name == "sector_proxy":
+            return f"{tier}_FAILED_SECTOR_PROXY"
         return f"{tier}_FAILED_{rule.name.upper()}"
     return None
 
