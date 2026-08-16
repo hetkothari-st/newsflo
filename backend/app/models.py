@@ -1903,21 +1903,43 @@ class LedgerExposureProposal(Base):
     human approves. A proposal whose `excerpt` is not verbatim in the source
     document, or that cannot say WHERE in the document it came from, is
     stored with status REJECTED_UNVERBATIM and a reason -- retained, not
-    silently dropped (master context invariant 12)."""
+    silently dropped (master context invariant 12).
+
+    THREE REJECTION STATUSES, and the difference matters:
+      REJECTED_UNVERBATIM  the gate could not find the excerpt in the document
+      REJECTED_MALFORMED   the extractor's own output was unusable before the
+                           gate could even run (no excerpt at all, no page, no
+                           share_of_base, a value outside a closed vocabulary)
+      REJECTED             a human read it and said no
+
+    REJECTED_MALFORMED exists because those drops used to live only in
+    memory, so a prompt that regressed into excerpt-less output showed an
+    UNCHANGED approve rate -- the exact signal `extractor_quality` is for
+    (fix round 1, I3). Such a row keeps whatever fields the model did emit
+    plus `raw_payload`, the model's original row verbatim.
+
+    The four vocabulary columns are therefore NULLABLE -- a malformed intake
+    genuinely has no exposure_kind -- and the `proposal_shape` CHECK keeps
+    the guarantee where it counts: a PENDING_REVIEW row (the only kind that
+    can be approved) must still carry all four."""
     __tablename__ = "exposure_proposal"
     __table_args__ = (
+        CheckConstraint(
+            "status <> 'PENDING_REVIEW' OR (exposure_kind IS NOT NULL AND "
+            "base_kind IS NOT NULL AND measurement IS NOT NULL AND "
+            "source_type IS NOT NULL)", name="proposal_shape"),
         Index("ix_exposure_proposal_status", "status"),
     )
 
     proposal_id = Column(String, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
-    exposure_kind = Column(String, nullable=False)
-    exposure_tag = Column(String, nullable=False)
+    exposure_kind = Column(String, nullable=True)
+    exposure_tag = Column(String, nullable=True)
     share_of_base = Column(Numeric, nullable=True)
-    base_kind = Column(String, nullable=False)
+    base_kind = Column(String, nullable=True)
     base_value_inr = Column(Numeric, nullable=True)
-    measurement = Column(String, nullable=False)
-    source_type = Column(String, nullable=False)
+    measurement = Column(String, nullable=True)
+    source_type = Column(String, nullable=True)
     source_url = Column(String, nullable=False)
     source_page = Column(String, nullable=True)
     excerpt = Column(Text, nullable=True)
@@ -1927,6 +1949,10 @@ class LedgerExposureProposal(Base):
     extractor_version = Column(String, nullable=True)
     document_sha256 = Column(String, nullable=True)
     as_of_date = Column(Date, nullable=True)
+    # The extractor's original row, verbatim, for a REJECTED_MALFORMED
+    # proposal: what the model actually said is the evidence that it
+    # regressed. NULL for anything that parsed cleanly.
+    raw_payload = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="PENDING_REVIEW",
                     server_default="PENDING_REVIEW")
     reject_reason = Column(String, nullable=True)
@@ -1970,7 +1996,19 @@ class LedgerFilingArtefact(Base):
 # The UPDATE guard is scoped `OF <claim columns>` on purpose: `stale` and
 # `stale_checked_at` are DERIVED and must remain writable by the nightly job
 # (scripts/flag_stale_exposures.py), which holds no reviewer privilege and
-# must not.
+# must not. Everything else is protected, INCLUDING `exposure_id` (identity)
+# and `created_at` (audit) -- re-keying a row or backdating it is not a
+# correction, it is a rewrite (fix round 1, M1).
+#
+# DELETE IS REFUSED OUTRIGHT -- by everyone, including the review session
+# (fix round 1, I1). The Postgres DDL in migration 0012's docstring revokes
+# DELETE from PUBLIC and grants it back to nobody, and this mirrors that: a
+# human-reviewed claim about a filing is never removed. A correction is an
+# UPDATE inside a review session, which leaves the row, its proposal and its
+# reviewer behind. If a row must genuinely disappear (a filing withdrawn, a
+# reviewer defrauded), that is a deliberate, logged, out-of-band act -- drop
+# the trigger, delete, recreate it -- not something an ordinary code path can
+# do by accident.
 #
 # The SQL below is copied verbatim into
 # alembic/versions/0012_v5_exposure_ledger.py, and
@@ -1991,17 +2029,26 @@ END
 
 _COMPANY_EXPOSURE_UPDATE_TRIGGER = """
 CREATE TRIGGER IF NOT EXISTS company_exposure_review_only_update
-BEFORE UPDATE OF company_id, segment_id, exposure_kind, exposure_tag,
-                 share_of_base, base_kind, base_value_inr, measurement,
-                 source_type, source_url, source_page, as_of_date,
-                 freshness_days, confidence, created_by, reviewed_by,
-                 proposal_id
+BEFORE UPDATE OF exposure_id, company_id, segment_id, exposure_kind,
+                 exposure_tag, share_of_base, base_kind, base_value_inr,
+                 measurement, source_type, source_url, source_page,
+                 as_of_date, freshness_days, confidence, created_by,
+                 reviewed_by, proposal_id, created_at
 ON company_exposure
 FOR EACH ROW
 WHEN (SELECT count(*) FROM pragma_table_list
       WHERE schema = 'temp' AND name = '_newsflo_ledger_review_session') = 0
 BEGIN
   SELECT RAISE(ABORT, 'company_exposure is writable only by the review session');
+END
+"""
+
+_COMPANY_EXPOSURE_DELETE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_exposure_review_only_delete
+BEFORE DELETE ON company_exposure
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'company_exposure rows are never deleted');
 END
 """
 
@@ -2012,9 +2059,11 @@ SELECT created_by AS extractor,
        count(*) AS proposed,
        sum(CASE WHEN status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
        sum(CASE WHEN status = 'APPROVED' AND edited = 1 THEN 1 ELSE 0 END) AS edited,
-       sum(CASE WHEN status IN ('REJECTED', 'REJECTED_UNVERBATIM') THEN 1 ELSE 0 END)
+       sum(CASE WHEN status IN ('REJECTED', 'REJECTED_UNVERBATIM',
+                                'REJECTED_MALFORMED') THEN 1 ELSE 0 END)
          AS rejected,
        sum(CASE WHEN status = 'REJECTED_UNVERBATIM' THEN 1 ELSE 0 END) AS unverbatim,
+       sum(CASE WHEN status = 'REJECTED_MALFORMED' THEN 1 ELSE 0 END) AS malformed,
        sum(CASE WHEN status = 'PENDING_REVIEW' THEN 1 ELSE 0 END) AS pending
 FROM exposure_proposal
 GROUP BY created_by, extractor_version
@@ -2037,6 +2086,7 @@ GROUP BY t.sector, t.exposure_tag
 LEDGER_TRIGGER_DDL = (
     _COMPANY_EXPOSURE_INSERT_TRIGGER,
     _COMPANY_EXPOSURE_UPDATE_TRIGGER,
+    _COMPANY_EXPOSURE_DELETE_TRIGGER,
 )
 
 LEDGER_VIEW_DDL = (
@@ -2044,7 +2094,7 @@ LEDGER_VIEW_DDL = (
     _EXPOSURE_COVERAGE_VIEW,
 )
 
-# All four, in the order 0012 emits them (the byte-identity test reads this).
+# All five, in the order 0012 emits them (the byte-identity test reads this).
 V5_LEDGER_DDL = LEDGER_TRIGGER_DDL + LEDGER_VIEW_DDL
 
 

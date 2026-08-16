@@ -118,7 +118,8 @@ def build_app(engine) -> FastAPI:
                   f"across {stats['companies_tagged']} company(ies) &middot; "
                   f"{stats['stale_rows']} stale &middot; "
                   f"{stats['unverbatim_proposals']} proposal(s) discarded by the "
-                  f"verbatim gate</p>")
+                  f"verbatim gate, {stats['malformed_proposals']} malformed "
+                  f"before it</p>")
         if not rows:
             return _page("Ledger review", (
                 "<h1>Exposure ledger review</h1>" + header +
@@ -282,7 +283,7 @@ def build_app(engine) -> FastAPI:
             f"<td>{_esc(row['extractor_version'])}</td>"
             f"<td>{row['proposed']}</td><td>{row['approved']}</td>"
             f"<td>{row['edited']}</td><td>{row['rejected']}</td>"
-            f"<td>{row['unverbatim']}</td>"
+            f"<td>{row['unverbatim']}</td><td>{row['malformed']}</td>"
             f"<td>{_esc(row['approve_rate'])}</td>"
             f"<td>{_esc(row['edit_rate'])}</td></tr>" for row in extractors)
         who = "".join(
@@ -294,8 +295,9 @@ def build_app(engine) -> FastAPI:
 <p class='meta'>A falling approve rate, or a rising edit rate, is the signal that an
  extraction prompt regressed.</p>
 <table><tr><th>extractor</th><th>version</th><th>proposed</th><th>approved</th>
-<th>edited</th><th>rejected</th><th>unverbatim</th><th>approve rate</th>
-<th>edit rate</th></tr>{rows or "<tr><td colspan='9'>no proposals yet</td></tr>"}</table>
+<th>edited</th><th>rejected</th><th>unverbatim</th><th>malformed</th>
+<th>approve rate</th><th>edit rate</th></tr>
+{rows or "<tr><td colspan='10'>no proposals yet</td></tr>"}</table>
 <h2>Reviewer throughput</h2>
 <table><tr><th>reviewer</th><th>reviewed</th><th>approved</th><th>edited</th></tr>
 {who or "<tr><td colspan='4'>nobody has reviewed anything yet</td></tr>"}</table>

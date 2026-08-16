@@ -25,7 +25,12 @@ SOURCE_TYPES = ("ANNUAL_REPORT", "QUARTERLY", "EXCHANGE_FILING", "EARNINGS_CALL"
 MODIFIER_KINDS = ("HEDGE", "PASS_THROUGH", "CONTRACT_FLOOR", "PRICE_CAP",
                   "SUBSIDY_SHARE", "WINDFALL_LEVY", "TAKE_OR_PAY", "FORMULA_PRICING")
 CURVE_BASES = ("DISCLOSED_CALL", "FILED", "ESTIMATED", "SECTOR_MEDIAN")
-PROPOSAL_STATUSES = ("PENDING_REVIEW", "APPROVED", "REJECTED", "REJECTED_UNVERBATIM")
+PROPOSAL_STATUSES = ("PENDING_REVIEW", "APPROVED", "REJECTED",
+                     # the verbatim gate could not find the excerpt
+                     "REJECTED_UNVERBATIM",
+                     # the extractor's own output was unusable before the
+                     # gate could run (fix round 1, I3)
+                     "REJECTED_MALFORMED")
 
 _TAG_SHAPE = re.compile(r"^[a-z][a-z0-9_]*:[a-z0-9_]+$")
 

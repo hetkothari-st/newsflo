@@ -67,6 +67,28 @@ def test_a_fabricated_excerpt_is_not_contained(filing_fixture):
         document.text, filing_fixture["fabricated_proposal"]["excerpt"])
 
 
+def test_a_non_page_label_is_not_read_as_a_page_number(filing_fixture):
+    """FIX ROUND 1 / M4. 'Note 11' is a note reference, not page 11. Only a
+    label that actually looks like a page is turned into a page index;
+    anything else takes the UNVERIFIED path the docstring promises."""
+    from app.ingest.filings.verbatim import check_excerpt, page_number_from
+
+    assert page_number_from("2") == 2
+    assert page_number_from(" p. 2 ") == 2
+    assert page_number_from("Page 2") == 2
+    assert page_number_from("Note 11") is None
+    assert page_number_from("F-12") is None
+    assert page_number_from("11.2") is None
+
+    document = _document(filing_fixture)
+    result = check_excerpt(document,
+                           excerpt=filing_fixture["honest_proposal"]["excerpt"],
+                           source_page="Note 11")
+    assert result.ok is True
+    assert result.page_verified is False
+    assert result.page_number is None
+
+
 def test_a_trivially_short_excerpt_is_refused(filing_fixture):
     """'the' appears in every document. An excerpt must actually locate a
     claim, so there is a minimum length."""
@@ -330,6 +352,63 @@ def test_the_extractor_drops_a_model_row_that_omits_an_excerpt(
     proposals = extractor.propose(_document(filing_fixture), company_id=company.id,
                                   as_of_date=date(2222, 2, 22))
     assert proposals == []
+
+
+def test_a_malformed_model_row_is_persisted_with_its_reason(
+        ledger_session, filing_fixture, company):
+    """FIX ROUND 1 / I3. A row the extractor drops BEFORE the verbatim gate
+    (no excerpt, no page, no share) used to vanish into memory, so a prompt
+    that regressed into excerpt-less output showed an UNCHANGED approve rate.
+    Drops are now retained as REJECTED_MALFORMED, with the raw model payload,
+    and they count."""
+    from app.ingest.filings.llm_extract import ExposureExtractor
+    from app.ingest.filings.proposals import record_malformed
+
+    honest = {k: v for k, v in filing_fixture["honest_proposal"].items()
+              if not k.startswith("_")}
+    honest.pop("excerpt")
+    extractor = ExposureExtractor(_StubClient({"proposals": [honest]}),
+                                  model_id="fixture-model-not-real",
+                                  extractor_version="fixture-v0")
+    document = _document(filing_fixture)
+    assert extractor.propose(document, company_id=company.id,
+                             as_of_date=date(2222, 2, 22)) == []
+
+    written = record_malformed(ledger_session, extractor.dropped, document,
+                               company_id=company.id,
+                               created_by="llm:fixture-model-not-real",
+                               model_id="fixture-model-not-real",
+                               extractor_version="fixture-v0")
+    assert written == 1
+
+    row = ledger_session.execute(text(
+        "SELECT status, reject_reason, model_id, raw_payload, exposure_tag "
+        "FROM exposure_proposal")).one()
+    assert row[0] == "REJECTED_MALFORMED"
+    assert row[1] == "NO_EXCERPT"
+    assert row[2] == "fixture-model-not-real"
+    assert "input:fixture_foo" in row[3]        # the raw model row is kept
+    assert row[4] == "input:fixture_foo"        # whatever fields existed survive
+    assert ledger_session.execute(
+        text("SELECT count(*) FROM company_exposure")).scalar() == 0
+
+
+def test_a_malformed_row_can_never_be_approved(ledger_session, filing_fixture,
+                                               company):
+    from app.ingest.filings.proposals import DroppedRow, record_malformed
+    from app.ledger.review import LedgerReviewError, approve_proposal, pending_queue
+
+    record_malformed(ledger_session,
+                     [DroppedRow("NO_SHARE_OF_BASE", {"exposure_tag": "input:x"})],
+                     _document(filing_fixture), company_id=company.id,
+                     created_by="llm:fixture-model-not-real",
+                     model_id="fixture-model-not-real",
+                     extractor_version="fixture-v0")
+    assert pending_queue(ledger_session) == []
+    proposal_id = ledger_session.execute(
+        text("SELECT proposal_id FROM exposure_proposal")).scalar()
+    with pytest.raises(LedgerReviewError):
+        approve_proposal(ledger_session, proposal_id, reviewed_by="human:fixture")
 
 
 def test_the_extractor_never_invents_a_share_of_base(

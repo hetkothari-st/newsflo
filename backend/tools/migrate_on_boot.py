@@ -240,6 +240,10 @@ def _assert_v5_triggers(url: str, scheme: str) -> None:
 LEDGER_TRIGGERS = (
     "company_exposure_review_only_insert",
     "company_exposure_review_only_update",
+    # Nobody deletes a reviewed claim -- not even the reviewer session. The
+    # guard is worthless if a later migration can drop it unnoticed, so it is
+    # boot-asserted like the other two.
+    "company_exposure_review_only_delete",
 )
 
 

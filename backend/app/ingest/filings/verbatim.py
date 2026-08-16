@@ -33,7 +33,13 @@ from app.ingest.filings.documents import SourceDocument, normalize_whitespace
 # that a one-line disclosure still fits.
 MIN_EXCERPT_CHARS = 24
 
-_PAGE_NUMBER = re.compile(r"(\d+)")
+# A page LABEL, not "the first integer anywhere in the string" (fix round 1,
+# M4). "Note 11" is a note reference and reading it as page 11 mislabels the
+# citation -- it fails closed, but it fails closed for the wrong reason and
+# tells the reviewer a page number nobody wrote. Anything this does not match
+# takes the UNVERIFIED path instead.
+_PAGE_NUMBER = re.compile(r"^\s*(?:p|p\.|pg|pg\.|page)?\s*(\d+)\s*$",
+                          re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -53,7 +59,9 @@ def contains_verbatim(document_text: str, excerpt: str) -> bool:
 
 
 def page_number_from(source_page: str) -> int | None:
-    match = _PAGE_NUMBER.search(str(source_page or ""))
+    """The page index a label denotes, or None when the label is not a page
+    reference at all ("Note 11", "F-12", "11.2")."""
+    match = _PAGE_NUMBER.match(str(source_page or ""))
     return int(match.group(1)) if match else None
 
 

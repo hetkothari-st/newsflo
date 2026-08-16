@@ -77,6 +77,58 @@ def test_a_plain_session_cannot_rewrite_an_approved_claim(ledger_session):
         text("SELECT share_of_base FROM company_exposure")).scalar()) == 0.1111
 
 
+def test_nobody_can_delete_an_approved_exposure_row(ledger_session):
+    """FIX ROUND 1 / I1. The Postgres DDL this migration documents revokes
+    DELETE from PUBLIC and grants it back to nobody -- not even the reviewer
+    role. A human-reviewed claim about a filing is never removed; a
+    correction is an UPDATE inside a review session, which leaves an audit
+    trail. The SQLite trigger mirrors that: DELETE is refused unconditionally,
+    including from inside a review session."""
+    from app.ledger.review import review_session
+
+    with review_session(ledger_session):
+        ledger_session.execute(_INSERT, _ROW)
+    ledger_session.commit()
+
+    with pytest.raises(DatabaseError):
+        ledger_session.execute(text("DELETE FROM company_exposure"))
+        ledger_session.commit()
+    ledger_session.rollback()
+
+    # And not even the reviewer may.
+    with pytest.raises(DatabaseError):
+        with review_session(ledger_session):
+            ledger_session.execute(text(
+                "DELETE FROM company_exposure WHERE exposure_id = :id"),
+                {"id": _ROW["exposure_id"]})
+    ledger_session.rollback()
+
+    assert ledger_session.execute(
+        text("SELECT count(*) FROM company_exposure")).scalar() == 1
+
+
+def test_an_unprivileged_session_cannot_rekey_or_backdate_a_row(ledger_session):
+    """FIX ROUND 1 / M1. `exposure_id` and `created_at` are identity and
+    audit, so they belong in the protected column list alongside the claim
+    columns."""
+    from app.ledger.review import review_session
+
+    with review_session(ledger_session):
+        ledger_session.execute(_INSERT, _ROW)
+    ledger_session.commit()
+
+    for statement in ("UPDATE company_exposure SET exposure_id = 'fixture-rekeyed'",
+                      "UPDATE company_exposure SET created_at = '1999-01-01 00:00:00'"):
+        with pytest.raises(DatabaseError):
+            ledger_session.execute(text(statement))
+            ledger_session.commit()
+        ledger_session.rollback()
+
+    assert ledger_session.execute(
+        text("SELECT exposure_id FROM company_exposure")).scalar() \
+        == _ROW["exposure_id"]
+
+
 def test_the_staleness_flag_is_maintainable_without_the_review_capability(ledger_session):
     """The ledger's CLAIM columns are review-only. `stale` is a DERIVED flag
     the nightly job maintains, so the guard is scoped to the claim columns

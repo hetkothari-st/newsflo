@@ -62,9 +62,28 @@ def test_migration_installs_the_ledger_write_guard(tmp_path):
         views = {row[0] for row in connection.execute(text(
             "SELECT name FROM sqlite_master WHERE type='view'"))}
     assert {"company_exposure_review_only_insert",
-            "company_exposure_review_only_update"} <= triggers
+            "company_exposure_review_only_update",
+            "company_exposure_review_only_delete"} <= triggers
     assert {"extractor_quality", "exposure_coverage"} <= views
     engine.dispose()
+
+
+def test_the_boot_check_polices_the_delete_guard_too(tmp_path):
+    """FIX ROUND 1 / I1: the DELETE guard is worthless if a later migration
+    can drop it unnoticed, so it joins the boot-asserted list."""
+    from tools.migrate_on_boot import LEDGER_TRIGGERS, check_ledger_guard
+
+    assert "company_exposure_review_only_delete" in LEDGER_TRIGGERS
+
+    url = _upgrade(tmp_path)
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TRIGGER company_exposure_review_only_delete"))
+    engine.dispose()
+
+    status, missing = check_ledger_guard(url)
+    assert status == "missing"
+    assert "company_exposure_review_only_delete" in missing
 
 
 def test_migration_leaves_the_earlier_triggers_installed(tmp_path):

@@ -85,6 +85,40 @@ def test_with_an_injected_client_the_script_records_proposals_for_review(
         text("SELECT count(*) FROM company_exposure")).scalar() == 0
 
 
+def test_the_script_reports_and_persists_malformed_model_rows(
+        ledger_session, filing_fixture, company, tmp_path):
+    """FIX ROUND 1 / I3. One good row, one excerpt-less row, one fabricated
+    row: the run reports all three buckets and every one of them is in the
+    database."""
+    from scripts.extract_filing import run
+
+    honest = {k: v for k, v in filing_fixture["honest_proposal"].items()
+              if not k.startswith("_")}
+    fabricated = {k: v for k, v in filing_fixture["fabricated_proposal"].items()
+                  if not k.startswith("_")}
+    malformed = dict(honest, exposure_tag="input:fixture_malformed")
+    malformed.pop("excerpt")
+
+    class _Client:
+        def generate(self, prompt: str) -> str:
+            return json.dumps({"proposals": [honest, fabricated, malformed]})
+
+    result = run(ledger_session, path=_pdf(tmp_path, filing_fixture),
+                 url=filing_fixture["source_url"], company_id=company.id,
+                 as_of_date=date(2222, 2, 22), source_type="ANNUAL_REPORT",
+                 retrieved_at=FIXTURE_NOW, artefacts_dir=tmp_path / "artefacts",
+                 client=_Client(), model_id="fixture-model-not-real",
+                 extractor_version="fixture-v0")
+
+    assert (result.accepted, result.rejected, result.malformed) == (1, 1, 1)
+    counts = dict(ledger_session.execute(text(
+        "SELECT status, count(*) FROM exposure_proposal GROUP BY status")).all())
+    assert counts == {"PENDING_REVIEW": 1, "REJECTED_UNVERBATIM": 1,
+                      "REJECTED_MALFORMED": 1}
+    assert ledger_session.execute(
+        text("SELECT count(*) FROM company_exposure")).scalar() == 0
+
+
 def test_the_script_never_constructs_a_client_by_itself():
     """`--llm` is opt-in and explicit. Importing or running the script
     without it must not be able to reach a provider."""

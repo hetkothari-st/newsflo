@@ -13,6 +13,11 @@ fabricated excerpt is visible in the review console and countable in
 retained with a reason). Silently dropping them would hide exactly the signal
 that an extraction prompt has started inventing.
 
+And so is everything the extractor could not even shape into a proposal:
+`record_malformed` persists those as REJECTED_MALFORMED with the model's raw
+row, for the same reason (fix round 1, I3). A drop that lives only in memory
+is a regression nobody can see.
+
 This module writes ONE table: `exposure_proposal`. It cannot write
 `company_exposure` -- the database refuses it.
 """
@@ -20,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
+import json
 import logging
 import uuid
 
@@ -60,6 +66,15 @@ class ExposureProposal:
 
 
 @dataclass(frozen=True)
+class DroppedRow:
+    """A row the extractor could not shape into a proposal at all. Defined
+    here (not in `llm_extract`) so that persisting one does not require
+    importing a provider-facing module."""
+    reason: str
+    payload: dict
+
+
+@dataclass(frozen=True)
 class ProposalOutcome:
     accepted: int
     rejected: int
@@ -71,7 +86,7 @@ _COLUMNS = (
     "proposal_id", "company_id", "exposure_kind", "exposure_tag", "share_of_base",
     "base_kind", "base_value_inr", "measurement", "source_type", "source_url",
     "source_page", "excerpt", "extraction_confidence", "model_id", "created_by",
-    "extractor_version", "document_sha256", "as_of_date", "status",
+    "extractor_version", "document_sha256", "as_of_date", "raw_payload", "status",
     "reject_reason", "created_at",
 )
 
@@ -99,6 +114,7 @@ def _row(proposal: ExposureProposal, document: SourceDocument, *, status: str,
         "extractor_version": proposal.extractor_version,
         "document_sha256": document.sha256,
         "as_of_date": proposal.as_of_date,
+        "raw_payload": None,
         "status": status,
         "reject_reason": reason,
         "created_at": datetime.now(timezone.utc),
@@ -131,3 +147,60 @@ def record_proposals(session, proposals: Sequence[ExposureProposal],
     commit_if_owned(session)
     return ProposalOutcome(len(accepted), len(rejected), tuple(accepted),
                            tuple(rejected))
+
+
+# Fields of a dropped model row worth keeping if the model happened to emit
+# them. Everything else survives in `raw_payload` regardless.
+_SALVAGEABLE = ("exposure_kind", "exposure_tag", "share_of_base", "base_kind",
+                "base_value_inr", "measurement", "source_type", "source_page",
+                "excerpt", "extraction_confidence")
+
+
+def record_malformed(session, dropped: Sequence[DroppedRow],
+                     document: SourceDocument, *, company_id: int,
+                     created_by: str, model_id: str | None = None,
+                     extractor_version: str | None = None,
+                     as_of_date: date | None = None) -> int:
+    """Persist the rows an extractor dropped BEFORE the verbatim gate.
+
+    Without this, those drops lived only in the extractor's memory: a prompt
+    that regressed into excerpt-less output produced fewer proposals and an
+    UNCHANGED approve rate, so `extractor_quality` -- whose entire purpose is
+    to notice a regression -- stayed flat while the extractor fell apart.
+
+    They land as REJECTED_MALFORMED, keeping whatever fields the model did
+    emit plus `raw_payload` (its original row, verbatim). They can never be
+    approved: approval requires PENDING_REVIEW.
+    """
+    written = 0
+    for row in dropped:
+        payload = dict(row.payload or {})
+        record = {column: None for column in _COLUMNS}
+        record.update({
+            "proposal_id": str(uuid.uuid4()),
+            "company_id": int(company_id),
+            "source_url": str(payload.get("source_url") or document.url),
+            "model_id": model_id,
+            "created_by": created_by,
+            "extractor_version": extractor_version,
+            "document_sha256": document.sha256,
+            "as_of_date": as_of_date,
+            "raw_payload": json.dumps(payload, sort_keys=True, default=str),
+            "status": "REJECTED_MALFORMED",
+            "reject_reason": row.reason,
+            "created_at": datetime.now(timezone.utc),
+        })
+        for field_name in _SALVAGEABLE:
+            value = payload.get(field_name)
+            # Only keep a salvaged value if it is the right SHAPE; a
+            # malformed row's junk must not masquerade as a real field.
+            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                record[field_name] = value
+        session.execute(text(
+            f"INSERT INTO exposure_proposal ({', '.join(_COLUMNS)}) VALUES "
+            f"({', '.join(':' + c for c in _COLUMNS)})"), record)
+        written += 1
+        logger.warning("[ledger] malformed extraction from %s: %s (%s)",
+                       created_by, row.reason, document.url)
+    commit_if_owned(session)
+    return written

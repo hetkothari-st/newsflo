@@ -91,6 +91,11 @@ def extractor_quality(session) -> list[dict]:
             "edited": edited,
             "rejected": int(row["rejected"] or 0),
             "unverbatim": int(row["unverbatim"] or 0),
+            # Rows the extractor could not even shape into a proposal. They
+            # are IN the `proposed` denominator on purpose: a prompt that
+            # regresses into excerpt-less output must move the approve rate,
+            # which is the entire point of this view (fix round 1, I3).
+            "malformed": int(row["malformed"] or 0),
             "pending": int(row["pending"] or 0),
             "approve_rate": round(approved / proposed, 6) if proposed else None,
             # Of the approvals, how many needed correcting.
@@ -124,6 +129,9 @@ def ledger_stats(session, *, as_of: date) -> dict:
         "unverbatim_proposals": int(session.execute(text(
             "SELECT count(*) FROM exposure_proposal "
             "WHERE status = 'REJECTED_UNVERBATIM'")).scalar() or 0),
+        "malformed_proposals": int(session.execute(text(
+            "SELECT count(*) FROM exposure_proposal "
+            "WHERE status = 'REJECTED_MALFORMED'")).scalar() or 0),
         "age_p50_days": _percentile(ages, 0.50),
         "age_p90_days": _percentile(ages, 0.90),
         "companies_tagged": int(session.execute(text(
@@ -163,6 +171,9 @@ def metrics_text(session, *, as_of: date) -> str:
         "# HELP newsflo_ledger_unverbatim_proposals Proposals the verbatim gate discarded.",
         "# TYPE newsflo_ledger_unverbatim_proposals gauge",
         f"newsflo_ledger_unverbatim_proposals {stats['unverbatim_proposals']}",
+        "# HELP newsflo_ledger_malformed_proposals Extractor rows too broken to gate.",
+        "# TYPE newsflo_ledger_malformed_proposals gauge",
+        f"newsflo_ledger_malformed_proposals {stats['malformed_proposals']}",
     ]
     if stats["age_p50_days"] is not None:
         lines += [

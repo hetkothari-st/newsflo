@@ -57,6 +57,7 @@ port is a transcription rather than a redesign:
     REVOKE INSERT, UPDATE, DELETE ON company_exposure FROM PUBLIC;
     GRANT  INSERT, UPDATE          ON company_exposure TO newsflo_ledger_reviewer;
     GRANT  SELECT                  ON company_exposure TO newsflo_readonly;
+    -- DELETE is granted to NOBODY, deliberately. See below.
 
     -- the nightly staleness job maintains a DERIVED flag, not a claim:
     GRANT  UPDATE (stale, stale_checked_at) ON company_exposure TO newsflo_app;
@@ -66,6 +67,15 @@ port is a transcription rather than a redesign:
 
 On Postgres the application connects as `newsflo_ledger_reviewer` ONLY in
 app/ledger/review.py.
+
+NOBODY DELETES (fix round 1, I1). No role above is granted DELETE on
+`company_exposure`, and the SQLite trigger below refuses it unconditionally
+-- from a plain session AND from inside a review session. A human-reviewed
+claim about a filing is not something a code path removes: a correction is
+an UPDATE inside a review session, which leaves the row, its proposal and
+its reviewer behind. A row that must genuinely disappear (a withdrawn
+filing, a defrauded reviewer) is a deliberate out-of-band act: drop the
+trigger, delete, recreate it -- and say so in writing.
 
 ------------------------------------------------------------------------
 THE SQLITE SUBSTITUTION
@@ -79,6 +89,9 @@ extractor write directly to the ledger under any circumstance" requires.
 
 The UPDATE trigger is scoped `BEFORE UPDATE OF <claim columns>`: `stale` and
 `stale_checked_at` are derived and must stay writable by the nightly job.
+Everything else is protected, `exposure_id` and `created_at` included --
+re-keying a row or backdating its creation is a rewrite, not a correction
+(fix round 1, M1).
 
 `pragma_table_list` requires SQLite >= 3.37 (2021-11) -- same constraint and
 same reasoning as migration 0011, whose docstring explains why no other
@@ -128,17 +141,26 @@ END
 
 _COMPANY_EXPOSURE_UPDATE_TRIGGER = """
 CREATE TRIGGER IF NOT EXISTS company_exposure_review_only_update
-BEFORE UPDATE OF company_id, segment_id, exposure_kind, exposure_tag,
-                 share_of_base, base_kind, base_value_inr, measurement,
-                 source_type, source_url, source_page, as_of_date,
-                 freshness_days, confidence, created_by, reviewed_by,
-                 proposal_id
+BEFORE UPDATE OF exposure_id, company_id, segment_id, exposure_kind,
+                 exposure_tag, share_of_base, base_kind, base_value_inr,
+                 measurement, source_type, source_url, source_page,
+                 as_of_date, freshness_days, confidence, created_by,
+                 reviewed_by, proposal_id, created_at
 ON company_exposure
 FOR EACH ROW
 WHEN (SELECT count(*) FROM pragma_table_list
       WHERE schema = 'temp' AND name = '_newsflo_ledger_review_session') = 0
 BEGIN
   SELECT RAISE(ABORT, 'company_exposure is writable only by the review session');
+END
+"""
+
+_COMPANY_EXPOSURE_DELETE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_exposure_review_only_delete
+BEFORE DELETE ON company_exposure
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'company_exposure rows are never deleted');
 END
 """
 
@@ -149,9 +171,11 @@ SELECT created_by AS extractor,
        count(*) AS proposed,
        sum(CASE WHEN status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
        sum(CASE WHEN status = 'APPROVED' AND edited = 1 THEN 1 ELSE 0 END) AS edited,
-       sum(CASE WHEN status IN ('REJECTED', 'REJECTED_UNVERBATIM') THEN 1 ELSE 0 END)
+       sum(CASE WHEN status IN ('REJECTED', 'REJECTED_UNVERBATIM',
+                                'REJECTED_MALFORMED') THEN 1 ELSE 0 END)
          AS rejected,
        sum(CASE WHEN status = 'REJECTED_UNVERBATIM' THEN 1 ELSE 0 END) AS unverbatim,
+       sum(CASE WHEN status = 'REJECTED_MALFORMED' THEN 1 ELSE 0 END) AS malformed,
        sum(CASE WHEN status = 'PENDING_REVIEW' THEN 1 ELSE 0 END) AS pending
 FROM exposure_proposal
 GROUP BY created_by, extractor_version
@@ -174,6 +198,7 @@ GROUP BY t.sector, t.exposure_tag
 _TRIGGERS = (
     _COMPANY_EXPOSURE_INSERT_TRIGGER,
     _COMPANY_EXPOSURE_UPDATE_TRIGGER,
+    _COMPANY_EXPOSURE_DELETE_TRIGGER,
 )
 
 _VIEWS = (
@@ -366,13 +391,17 @@ def upgrade() -> None:
             'exposure_proposal',
             sa.Column('proposal_id', sa.String(), nullable=False),
             sa.Column('company_id', sa.Integer(), nullable=False),
-            sa.Column('exposure_kind', sa.String(), nullable=False),
-            sa.Column('exposure_tag', sa.String(), nullable=False),
+            # NULLABLE for a REJECTED_MALFORMED intake (a row the extractor
+            # could not even shape); the proposal_shape CHECK below keeps
+            # them mandatory for anything PENDING_REVIEW, which is the only
+            # status that can be approved.
+            sa.Column('exposure_kind', sa.String(), nullable=True),
+            sa.Column('exposure_tag', sa.String(), nullable=True),
             sa.Column('share_of_base', sa.Numeric(), nullable=True),
-            sa.Column('base_kind', sa.String(), nullable=False),
+            sa.Column('base_kind', sa.String(), nullable=True),
             sa.Column('base_value_inr', sa.Numeric(), nullable=True),
-            sa.Column('measurement', sa.String(), nullable=False),
-            sa.Column('source_type', sa.String(), nullable=False),
+            sa.Column('measurement', sa.String(), nullable=True),
+            sa.Column('source_type', sa.String(), nullable=True),
             sa.Column('source_url', sa.String(), nullable=False),
             sa.Column('source_page', sa.String(), nullable=True),
             sa.Column('excerpt', sa.Text(), nullable=True),
@@ -382,6 +411,7 @@ def upgrade() -> None:
             sa.Column('extractor_version', sa.String(), nullable=True),
             sa.Column('document_sha256', sa.String(), nullable=True),
             sa.Column('as_of_date', sa.Date(), nullable=True),
+            sa.Column('raw_payload', sa.Text(), nullable=True),
             sa.Column('status', sa.String(), server_default='PENDING_REVIEW',
                       nullable=False),
             sa.Column('reject_reason', sa.String(), nullable=True),
@@ -391,6 +421,10 @@ def upgrade() -> None:
             sa.Column('exposure_id', sa.String(), nullable=True),
             sa.Column('created_at', sa.DateTime(timezone=True),
                       server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
+            sa.CheckConstraint(
+                "status <> 'PENDING_REVIEW' OR (exposure_kind IS NOT NULL AND "
+                "base_kind IS NOT NULL AND measurement IS NOT NULL AND "
+                "source_type IS NOT NULL)", name='proposal_shape'),
             sa.ForeignKeyConstraint(['company_id'], ['companies.id']),
             sa.PrimaryKeyConstraint('proposal_id'),
         )
@@ -432,7 +466,8 @@ def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
         for name in ("company_exposure_review_only_insert",
-                     "company_exposure_review_only_update"):
+                     "company_exposure_review_only_update",
+                     "company_exposure_review_only_delete"):
             bind.execute(sa.text(f"DROP TRIGGER IF EXISTS {name}"))
         for name in ("extractor_quality", "exposure_coverage"):
             bind.execute(sa.text(f"DROP VIEW IF EXISTS {name}"))

@@ -106,6 +106,10 @@ def test_metrics_are_exported_in_prometheus_text_format(ledger_session):
     assert "newsflo_ledger_exposure_rows 1" in body
     assert "newsflo_ledger_exposure_age_p90_days" in body
     assert "newsflo_ledger_stale_exposure_rows" in body
+    # FIX ROUND 1 / I3: both extraction-failure modes are exported, since an
+    # extractor that has started producing rubbish is an operational event.
+    assert "newsflo_ledger_unverbatim_proposals" in body
+    assert "newsflo_ledger_malformed_proposals" in body
 
 
 def test_the_p90_age_alert_fires_past_the_configured_threshold(ledger_session):
@@ -172,3 +176,50 @@ def test_extractor_quality_tracks_approve_and_edit_rate(ledger_session, filing_f
     assert row["edited"] == 1
     assert row["approve_rate"] == 0.5
     assert row["edit_rate"] == 1.0
+
+
+def test_malformed_rows_count_against_the_extractors_approve_rate(
+        ledger_session, filing_fixture):
+    """FIX ROUND 1 / I3. The regression signal only works if a prompt that
+    starts emitting excerpt-less rows MOVES the approve rate. A malformed row
+    is in the denominator."""
+    from app.ingest.filings.documents import document_from_pages
+    from app.ingest.filings.proposals import (
+        DroppedRow, ExposureProposal, record_malformed, record_proposals,
+    )
+    from app.ledger.coverage import extractor_quality
+    from app.ledger.review import approve_proposal
+    from tests.phase1.conftest import FIXTURE_NOW
+
+    company = make_company(ledger_session, ticker="FIXCO.NS",
+                           name=filing_fixture["company_name"],
+                           isin=filing_fixture["isin"], market_cap=11111.0)
+    document = document_from_pages(filing_fixture["pages"],
+                                   url=filing_fixture["source_url"],
+                                   retrieved_at=FIXTURE_NOW, media_type="text/plain")
+    honest = {k: v for k, v in filing_fixture["honest_proposal"].items()
+              if not k.startswith("_")}
+    record_proposals(ledger_session, [ExposureProposal(
+        company_id=company.id, as_of_date=date(2222, 2, 22),
+        created_by="llm:fixture-model-not-real", extractor_version="fixture-v0",
+        **honest)], document)
+    proposal_id = ledger_session.execute(
+        text("SELECT proposal_id FROM exposure_proposal")).scalar()
+    approve_proposal(ledger_session, proposal_id, reviewed_by="human:fixture")
+
+    before = extractor_quality(ledger_session)[0]
+    assert before["approve_rate"] == 1.0
+    assert before["malformed"] == 0
+
+    record_malformed(ledger_session,
+                     [DroppedRow("NO_EXCERPT", {"exposure_tag": "input:fixture_x"})],
+                     document, company_id=company.id,
+                     created_by="llm:fixture-model-not-real",
+                     model_id="fixture-model-not-real",
+                     extractor_version="fixture-v0")
+
+    after = extractor_quality(ledger_session)[0]
+    assert after["proposed"] == 2
+    assert after["malformed"] == 1
+    assert after["rejected"] == 1
+    assert after["approve_rate"] == 0.5

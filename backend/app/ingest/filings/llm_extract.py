@@ -20,13 +20,15 @@ THREE HARD RULES, all structural rather than instructed:
    `source_page`, or without a `share_of_base` is DROPPED here, before it
    even reaches the verbatim gate. "Missing is missing" (phase file DO NOT):
    a plausible default at this seam would become a permanent ledger row.
+   Every drop is collected on `self.dropped` and the caller PERSISTS it via
+   `proposals.record_malformed` -- a drop that lives only in memory is a
+   regression `extractor_quality` cannot see (fix round 1, I3).
 
 The prompt asks for the excerpt to be copied verbatim, but the ask is not
 the guarantee -- `verbatim.check_excerpt` is, and it runs over every
 proposal in `proposals.record_proposals` regardless of what the model
 claimed.
 """
-from dataclasses import dataclass
 from datetime import date
 from typing import Any, Protocol, Sequence
 
@@ -34,7 +36,7 @@ import json
 import logging
 
 from app.ingest.filings.documents import SourceDocument
-from app.ingest.filings.proposals import ExposureProposal
+from app.ingest.filings.proposals import DroppedRow, ExposureProposal
 from app.ledger.vocabulary import (
     BASE_KINDS, EXPOSURE_KINDS, MEASUREMENTS, SOURCE_TYPES,
 )
@@ -77,12 +79,6 @@ class JSONClient(Protocol):
     """The one method this module is allowed to call."""
 
     def generate(self, prompt: str) -> str: ...
-
-
-@dataclass(frozen=True)
-class DroppedRow:
-    reason: str
-    payload: dict
 
 
 class ExposureExtractor:

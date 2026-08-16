@@ -50,7 +50,9 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from app.ingest.filings.acquire import store_artefact  # noqa: E402
 from app.ingest.filings.documents import document_from_bytes  # noqa: E402
 from app.ingest.filings.llm_extract import ExposureExtractor  # noqa: E402
-from app.ingest.filings.proposals import record_proposals  # noqa: E402
+from app.ingest.filings.proposals import (  # noqa: E402
+    record_malformed, record_proposals,
+)
 
 DEFAULT_MODEL_ID = "unspecified-model"
 
@@ -60,9 +62,15 @@ class ExtractionRun:
     artefact_id: str
     pages: int
     characters: int
+    # Rows the model returned that became proposals at all.
     proposed: int
     accepted: int
+    # Failed the verbatim gate (the excerpt is not in the document).
     rejected: int
+    # Never reached the gate: the model's own row was unusable. Reported
+    # separately because the two failures mean different things -- one is a
+    # model inventing text, the other is a model producing rubbish.
+    malformed: int = 0
 
 
 def _media_type(path: Path) -> str:
@@ -99,9 +107,15 @@ def run(session, *, path: Path | str, url: str, company_id: int,
     proposals = extractor.propose(document, company_id=company_id,
                                   as_of_date=as_of_date)
     outcome = record_proposals(session, proposals, document)
+    # Everything the extractor dropped before the gate is persisted too, so
+    # `extractor_quality` can see a prompt regress (fix round 1, I3).
+    malformed = record_malformed(
+        session, extractor.dropped, document, company_id=company_id,
+        created_by=f"llm:{model_id}", model_id=model_id,
+        extractor_version=extractor_version, as_of_date=as_of_date)
     return ExtractionRun(artefact.artefact_id, len(document.pages),
                          len(document.text), len(proposals), outcome.accepted,
-                         outcome.rejected)
+                         outcome.rejected, malformed)
 
 
 class _ClaudeAdapter:
@@ -233,7 +247,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[extract] artefact {result.artefact_id}: {result.pages} page(s), "
           f"{result.characters} chars")
     print(f"[extract] {result.proposed} proposal(s): {result.accepted} pending "
-          f"review, {result.rejected} discarded by the verbatim gate")
+          f"review, {result.rejected} discarded by the verbatim gate, "
+          f"{result.malformed} malformed before it")
+    if result.malformed:
+        print("[extract] malformed rows are stored as REJECTED_MALFORMED and "
+              "count against this extractor's approve rate "
+              "(http://127.0.0.1:8601/ledger/quality)")
     if not args.llm:
         print("[extract] Stage C was not run (no --llm). Nothing was proposed.")
     print("[extract] nothing entered company_exposure -- review at "
