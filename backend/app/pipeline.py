@@ -1350,10 +1350,65 @@ def _persist_alert(
     article.category = category
     session.commit()
 
+    _record_canonical_impacts(session, article, alert, entries)
+
     new_notifications = match_alert_to_holdings(session, alert)
     send_pending_notifications(session, new_notifications)
     manager.broadcast_sync(_alert_broadcast_payload(session, alert))
     return alert
+
+
+def _record_canonical_impacts(session: Session, article: Article, alert: Alert,
+                              entries: list[dict]) -> None:
+    """V5 Phase 0 post-analysis hook (docs/v5/01_PHASE_0_canonical_truth.md).
+
+    ADDITIVE AND FAILURE-ISOLATED. It converts the entry dicts this function
+    just persisted into signals, runs the Canonical Reducer, and writes the
+    parallel `company_impact` records. It writes ONLY to `signal` and
+    `company_impact`; every row a user sees still comes from
+    `alert_companies`, which this function does not touch.
+
+    Its exception can NEVER break the persist path: the alert is already
+    committed above, and anything that goes wrong here is logged and
+    swallowed. Phase 0 adds a second, canonical bookkeeping of an analysis
+    that has already succeeded -- it must not be able to fail that analysis.
+    Pinned by tests/phase0/test_pipeline_hook.py::
+    test_a_failing_hook_never_breaks_the_existing_persist_path.
+    """
+    try:
+        from app.core import impact_writer
+
+        # Real entity facts the entry dict does not carry, read from the
+        # already-resolved Company rows (never invented).
+        company_ids = [e["company_id"] for e in entries
+                       if e.get("company_id") is not None]
+        entity_status, isins = {}, {}
+        if company_ids:
+            for row in session.query(Company).filter(Company.id.in_(company_ids)).all():
+                entity_status[row.id] = _V5_ENTITY_STATUS.get(
+                    (row.tradeability or "").upper(), "UNKNOWN")
+                isins[row.id] = row.isin
+        impact_writer.record_company_impacts(
+            session, article=article, entries=entries, alert=alert,
+            entity_status_by_company=entity_status, isin_by_company=isins)
+    except Exception:
+        logger.exception(
+            "[v5] canonical company_impact write failed for alert_id=%s; the "
+            "existing alert and its alert_companies rows are unaffected",
+            getattr(alert, "id", None))
+        session.rollback()
+
+
+# Company.tradeability -> the V5 entity_status vocabulary. RESTRICTED maps
+# to ACTIVE deliberately: a restricted scrip is still a live, tradeable
+# entity, and the §7.4 hard block is about entities that no longer exist or
+# cannot trade at all. An unrecognised value maps to UNKNOWN, never ACTIVE.
+_V5_ENTITY_STATUS = {
+    "NORMAL": "ACTIVE",
+    "RESTRICTED": "ACTIVE",
+    "SME": "ACTIVE",
+    "SUSPENDED": "SUSPENDED",
+}
 
 
 def build_anchor_sub_sectors(session: Session, companies: list) -> dict[str, set[str]]:
