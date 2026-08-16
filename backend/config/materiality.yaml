@@ -1,0 +1,87 @@
+# V5 sensitivity engine policy (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §5,
+# docs/v5/03_PHASE_2_sensitivity_engine.md Tasks 2.2-2.4).
+#
+# THIS FILE IS POLICY, NOT DATA. It carries thresholds and band widths the
+# owner chooses. It carries NO parameter value: there is no pass-through
+# ratio, no hedge ratio, no elasticity and no cost share here, because those
+# are claims about a company and may only come from the ledger (spec §4.1).
+# A test asserts that (tests/phase2/test_no_fixture_data_reaches_production.py).
+#
+# SINGLE SOURCE OF TRUTH. Bucketing thresholds and the sign-consistency
+# floors live here and nowhere else -- app/analysis/sensitivity/* and the
+# reducer's sign-consistency rule both read this file through
+# app/analysis/sensitivity/config.py / app/core/config_loader.py, and a test
+# asserts the numbers are not duplicated in code.
+
+version: materiality-v5.0.0
+
+# |p50| of delta EBITDA %, evaluated top-down; below LOW => NO_MATERIAL_IMPACT.
+buckets:
+  HIGH:   {min_abs_pct: 5.0}
+  MEDIUM: {min_abs_pct: 2.0}
+  LOW:    {min_abs_pct: 0.5}
+
+sign_consistency:
+  directional_claim_min: 0.90     # required for a direction (and for PRIMARY)
+  secondary_min: 0.60             # below this => MIXED or UNCERTAIN
+  # Below the floor, MIXED is only honest when BOTH tails are material. The
+  # minimum |tail| that counts as material is the LOW bucket floor, named
+  # here rather than re-derived, so the two cannot drift apart.
+  mixed_requires_material_tail_pct: 0.5
+
+monte_carlo:
+  n: 2000
+  # Equal-count bins for the correlation-ratio (eta-squared) driver
+  # attribution. More bins resolve sharper non-linearity and cost variance
+  # per bin; 20 over 2000 draws is 100 draws per bin.
+  attribution_bins: 20
+  # lo/hi are the 10th and 90th percentiles of a `normal` parameter, so the
+  # band means the same thing whatever the distribution shape.
+  normal_band_z: 1.2815515655446004
+  # Drivers surfaced on the API/UI (phase file Task 2.5: "top 3 drivers").
+  top_drivers: 3
+
+# Relative half-width of the band around a resolved point value, by how the
+# value was measured. A number a company filed is not a number a peer's
+# median implies, and the band is where that difference becomes visible.
+band_width:
+  FILED: 0.10
+  DISCLOSED_CALL: 0.20
+  SECTOR_PROXY: 0.40
+  # A reviewed ESTIMATED ledger row is somebody's judgement, not a
+  # disclosure; it is banded as widely as a sector proxy and graded lower.
+  MODELLED: 0.40
+
+distribution:
+  FILED: triangular
+  DISCLOSED_CALL: triangular
+  SECTOR_PROXY: triangular
+  MODELLED: triangular
+
+# The best evidence grade a channel resting on such a parameter may claim.
+# §7.4 forbids a SECTOR_PROXY weakest link from reaching PRIMARY; this is
+# where that cap is set.
+evidence_grade_cap:
+  SECTOR_PROXY: C
+  MODELLED: D
+
+# Phase 4 hook (policy modifier registry). When a modifier's state is
+# UNKNOWN the parameter is not wrong, it is less known -- so the band widens
+# by this multiplier. Phase 4 supplies the modifier states; the multiplier is
+# in place now so the widening is not bolted on later.
+unknown_modifier_state:
+  band_width_multiplier: 1.5
+
+# Parameters that are fractions of something and cannot leave [0, 1]. A band
+# is clipped to these bounds: a pass-through of 1.3 is not a wider belief,
+# it is a meaningless one. A parameter NOT named here (an elasticity, for
+# instance) is left unclipped -- inventing bounds for it would be inventing
+# economics.
+param_bounds:
+  pass_through: [0.0, 1.0]
+  hedge_ratio: [0.0, 1.0]
+  natural_hedge_fraction: [0.0, 1.0]
+  net_investment_hedge_ratio: [0.0, 1.0]
+  regulatory_capture_fraction: [0.0, 1.0]
+  repricing_fraction: [0.0, 1.0]
+  contribution_margin: [0.0, 1.0]

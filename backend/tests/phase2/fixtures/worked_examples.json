@@ -1,0 +1,475 @@
+{
+  "_fixture": true,
+  "corpus_id": "phase2-worked-examples-v1",
+  "note": "20 HAND-COMPUTED channel examples. Every number here is an obviously fake round placeholder for a company that does not exist (FIXTURECO). The arithmetic for each case is derived step by step in .superpowers/sdd/2026-08-17-v5-session0/phase2-worked-examples.md, which is flagged PENDING-OWNER-VERIFICATION. No value here is a real elasticity, pass-through ratio, hedge ratio or cost share.",
+  "ebitda_ttm_inr": {"_fixture": true, "value": 2000000000.0},
+  "pass_through_curve": {
+    "_fixture": true,
+    "curve_id": "fixture-curve-1",
+    "points": [
+      {"_fixture": true, "lag_days": 0, "fraction": 0.0},
+      {"_fixture": true, "lag_days": 30, "fraction": 0.25},
+      {"_fixture": true, "lag_days": 90, "fraction": 0.4}
+    ]
+  },
+  "cases": [
+    {
+      "_fixture": true,
+      "case_id": "C1",
+      "channel_type": "COST",
+      "description": "Cost channel, pass-through read off the fixture curve at 90 days.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-C1",
+        "company_id": 9101,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.25,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-C1", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.4, "source": "DISCLOSED_CALL"},
+        "hedge_ratio": {"_fixture": true, "point": 0.5, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -75000000.0,
+      "expected_delta_ebitda_pct": -3.75
+    },
+    {
+      "_fixture": true,
+      "case_id": "C2",
+      "channel_type": "COST",
+      "description": "Full pass-through absorbs the whole shock: the channel is exactly zero, not 'small'.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-C2",
+        "company_id": 9101,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.25,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-C2", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 1.0, "source": "FILED"},
+        "hedge_ratio": {"_fixture": true, "point": 0.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 0.0,
+      "expected_delta_ebitda_pct": 0.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "C3",
+      "channel_type": "COST",
+      "description": "A negative input-cost shock is a positive EBITDA channel (sign discipline).",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-C3",
+        "company_id": 9102,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 4000000000.0,
+        "share_of_base": 0.5,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-C3", "exposure_tag": "input_cost:fixture_input", "delta_pct": -0.2, "horizon_days": 90},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.25, "source": "DISCLOSED_CALL"},
+        "hedge_ratio": {"_fixture": true, "point": 0.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 300000000.0,
+      "expected_delta_ebitda_pct": 15.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "C4",
+      "channel_type": "COST",
+      "description": "Segment ownership fraction 0.60 scales the whole channel (unlisted-subsidiary attachment).",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-C4",
+        "company_id": 9102,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.2,
+        "segment_ownership_fraction": 0.6
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-C4", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.5, "source": "FILED"},
+        "hedge_ratio": {"_fixture": true, "point": 0.2, "source": "DISCLOSED_CALL"}
+      },
+      "expected_delta_ebitda_inr": -48000000.0,
+      "expected_delta_ebitda_pct": -2.4
+    },
+    {
+      "_fixture": true,
+      "case_id": "C5",
+      "channel_type": "COST",
+      "description": "A fully hedged exposure produces no channel at this horizon.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-C5",
+        "company_id": 9102,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 5000000000.0,
+        "share_of_base": 0.4,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-C5", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.3, "horizon_days": 30},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.0, "source": "FILED"},
+        "hedge_ratio": {"_fixture": true, "point": 1.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 0.0,
+      "expected_delta_ebitda_pct": 0.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "C6",
+      "channel_type": "COST",
+      "description": "Same exposure and shock as C1, same curve, read at 30 days instead of 90: less pass-through has happened, so the near-term hit is LARGER. This is why pass-through must be a curve.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-C1",
+        "company_id": 9101,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.25,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-C6", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.1, "horizon_days": 30},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.25, "source": "DISCLOSED_CALL"},
+        "hedge_ratio": {"_fixture": true, "point": 0.5, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -93750000.0,
+      "expected_delta_ebitda_pct": -4.6875
+    },
+    {
+      "_fixture": true,
+      "case_id": "R1",
+      "channel_type": "REVENUE_REALIZATION",
+      "description": "Realization channel with partial regulatory capture.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-R1",
+        "company_id": 9103,
+        "exposure_kind": "REVENUE_REALIZATION",
+        "exposure_tag": "realization:fixture_product",
+        "base_value_inr": 8000000000.0,
+        "share_of_base": 0.5,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-R1", "exposure_tag": "realization:fixture_product", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "realization_elasticity": {"_fixture": true, "point": 0.8, "source": "DISCLOSED_CALL"},
+        "regulatory_capture_fraction": {"_fixture": true, "point": 0.25, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 240000000.0,
+      "expected_delta_ebitda_pct": 12.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "R2",
+      "channel_type": "REVENUE_REALIZATION",
+      "description": "Full regulatory capture takes the entire realization gain: the channel is zero, and saying POSITIVE here is exactly the naive call the modifier registry exists to prevent.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-R2",
+        "company_id": 9103,
+        "exposure_kind": "REVENUE_REALIZATION",
+        "exposure_tag": "realization:fixture_product",
+        "base_value_inr": 8000000000.0,
+        "share_of_base": 0.5,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-R2", "exposure_tag": "realization:fixture_product", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "realization_elasticity": {"_fixture": true, "point": 0.8, "source": "DISCLOSED_CALL"},
+        "regulatory_capture_fraction": {"_fixture": true, "point": 1.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 0.0,
+      "expected_delta_ebitda_pct": 0.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "R3",
+      "channel_type": "REVENUE_REALIZATION",
+      "description": "Falling realization at 80% segment ownership.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-R3",
+        "company_id": 9104,
+        "exposure_kind": "REVENUE_REALIZATION",
+        "exposure_tag": "realization:fixture_product",
+        "base_value_inr": 6000000000.0,
+        "share_of_base": 0.25,
+        "segment_ownership_fraction": 0.8
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-R3", "exposure_tag": "realization:fixture_product", "delta_pct": -0.2, "horizon_days": 90},
+      "params": {
+        "realization_elasticity": {"_fixture": true, "point": 0.5, "source": "FILED"},
+        "regulatory_capture_fraction": {"_fixture": true, "point": 0.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -120000000.0,
+      "expected_delta_ebitda_pct": -6.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "V1",
+      "channel_type": "VOLUME_DEMAND",
+      "description": "Demand contraction: elastic volume, thin contribution margin.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-V1",
+        "company_id": 9105,
+        "exposure_kind": "VOLUME_DEMAND",
+        "exposure_tag": "demand:fixture_enduse",
+        "base_value_inr": 20000000000.0,
+        "share_of_base": 0.1,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-V1", "exposure_tag": "demand:fixture_enduse", "delta_pct": -0.04, "horizon_days": 180},
+      "params": {
+        "demand_elasticity": {"_fixture": true, "point": 1.5, "source": "DISCLOSED_CALL"},
+        "contribution_margin": {"_fixture": true, "point": 0.3, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -36000000.0,
+      "expected_delta_ebitda_pct": -1.8
+    },
+    {
+      "_fixture": true,
+      "case_id": "V2",
+      "channel_type": "VOLUME_DEMAND",
+      "description": "Demand expansion, inelastic volume.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-V2",
+        "company_id": 9105,
+        "exposure_kind": "VOLUME_DEMAND",
+        "exposure_tag": "demand:fixture_enduse",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.5,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-V2", "exposure_tag": "demand:fixture_enduse", "delta_pct": 0.08, "horizon_days": 180},
+      "params": {
+        "demand_elasticity": {"_fixture": true, "point": 0.5, "source": "FILED"},
+        "contribution_margin": {"_fixture": true, "point": 0.25, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 50000000.0,
+      "expected_delta_ebitda_pct": 2.5
+    },
+    {
+      "_fixture": true,
+      "case_id": "F1",
+      "channel_type": "FX_TRANSACTION",
+      "description": "Net exposure after the natural hedge, then after the financial hedge.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-F1",
+        "company_id": 9106,
+        "exposure_kind": "FX_TRANSACTION",
+        "exposure_tag": "fx:fixture_usd_receipts",
+        "base_value_inr": 4000000000.0,
+        "share_of_base": 1.0,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-F1", "exposure_tag": "fx:fixture_usd_receipts", "delta_pct": 0.05, "horizon_days": 90},
+      "params": {
+        "natural_hedge_fraction": {"_fixture": true, "point": 0.4, "source": "FILED"},
+        "hedge_ratio": {"_fixture": true, "point": 0.5, "source": "DISCLOSED_CALL"}
+      },
+      "expected_delta_ebitda_inr": 60000000.0,
+      "expected_delta_ebitda_pct": 3.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "F2",
+      "channel_type": "FX_TRANSACTION",
+      "description": "Adverse FX move, no natural hedge, partial financial hedge.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-F2",
+        "company_id": 9106,
+        "exposure_kind": "FX_TRANSACTION",
+        "exposure_tag": "fx:fixture_usd_payments",
+        "base_value_inr": 6000000000.0,
+        "share_of_base": 0.5,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-F2", "exposure_tag": "fx:fixture_usd_payments", "delta_pct": -0.1, "horizon_days": 90},
+      "params": {
+        "natural_hedge_fraction": {"_fixture": true, "point": 0.0, "source": "FILED"},
+        "hedge_ratio": {"_fixture": true, "point": 0.25, "source": "DISCLOSED_CALL"}
+      },
+      "expected_delta_ebitda_inr": -225000000.0,
+      "expected_delta_ebitda_pct": -11.25
+    },
+    {
+      "_fixture": true,
+      "case_id": "F3",
+      "channel_type": "FX_TRANSACTION",
+      "description": "A fully naturally hedged exposure has no FX transaction channel at all.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-F3",
+        "company_id": 9106,
+        "exposure_kind": "FX_TRANSACTION",
+        "exposure_tag": "fx:fixture_usd_receipts",
+        "base_value_inr": 4000000000.0,
+        "share_of_base": 1.0,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-F3", "exposure_tag": "fx:fixture_usd_receipts", "delta_pct": 0.05, "horizon_days": 90},
+      "params": {
+        "natural_hedge_fraction": {"_fixture": true, "point": 1.0, "source": "FILED"},
+        "hedge_ratio": {"_fixture": true, "point": 0.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 0.0,
+      "expected_delta_ebitda_pct": 0.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "T1",
+      "channel_type": "FX_TRANSLATION",
+      "description": "Translation of a foreign subsidiary's EBITDA, partially covered by a net-investment hedge.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-T1",
+        "company_id": 9107,
+        "exposure_kind": "FX_TRANSLATION",
+        "exposure_tag": "fx:fixture_subsidiary_ebitda",
+        "base_value_inr": 5000000000.0,
+        "share_of_base": 0.4,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-T1", "exposure_tag": "fx:fixture_subsidiary_ebitda", "delta_pct": 0.06, "horizon_days": 90},
+      "params": {
+        "net_investment_hedge_ratio": {"_fixture": true, "point": 0.25, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": 90000000.0,
+      "expected_delta_ebitda_pct": 4.5
+    },
+    {
+      "_fixture": true,
+      "case_id": "T2",
+      "channel_type": "FX_TRANSLATION",
+      "description": "Unhedged translation exposure held through a 50%-owned entity.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-T2",
+        "company_id": 9107,
+        "exposure_kind": "FX_TRANSLATION",
+        "exposure_tag": "fx:fixture_subsidiary_ebitda",
+        "base_value_inr": 5000000000.0,
+        "share_of_base": 0.4,
+        "segment_ownership_fraction": 0.5
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-T2", "exposure_tag": "fx:fixture_subsidiary_ebitda", "delta_pct": -0.06, "horizon_days": 90},
+      "params": {
+        "net_investment_hedge_ratio": {"_fixture": true, "point": 0.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -60000000.0,
+      "expected_delta_ebitda_pct": -3.0
+    },
+    {
+      "_fixture": true,
+      "case_id": "I1",
+      "channel_type": "INTEREST_RATE",
+      "description": "+50bp on floating debt, fully repriced within the horizon, unhedged. delta_pct is an ABSOLUTE rate change here (0.005 == 50bp), not a percentage change.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-I1",
+        "company_id": 9108,
+        "exposure_kind": "INTEREST_RATE",
+        "exposure_tag": "rates:fixture_floating_debt",
+        "base_value_inr": 20000000000.0,
+        "share_of_base": 0.5,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-I1", "exposure_tag": "rates:fixture_floating_debt", "delta_pct": 0.005, "horizon_days": 365},
+      "params": {
+        "hedge_ratio": {"_fixture": true, "point": 0.0, "source": "FILED"},
+        "repricing_fraction": {"_fixture": true, "point": 1.0, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -50000000.0,
+      "expected_delta_ebitda_pct": -2.5
+    },
+    {
+      "_fixture": true,
+      "case_id": "I2",
+      "channel_type": "INTEREST_RATE",
+      "description": "+100bp but only a quarter of the book reprices inside the horizon, and half of it is hedged.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-I2",
+        "company_id": 9108,
+        "exposure_kind": "INTEREST_RATE",
+        "exposure_tag": "rates:fixture_floating_debt",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.4,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-I2", "exposure_tag": "rates:fixture_floating_debt", "delta_pct": 0.01, "horizon_days": 90},
+      "params": {
+        "hedge_ratio": {"_fixture": true, "point": 0.5, "source": "DISCLOSED_CALL"},
+        "repricing_fraction": {"_fixture": true, "point": 0.25, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -5000000.0,
+      "expected_delta_ebitda_pct": -0.25
+    },
+    {
+      "_fixture": true,
+      "case_id": "P1",
+      "channel_type": "COST",
+      "description": "C1's arithmetic exactly, but pass-through comes from a SECTOR median instead of the company's own disclosure. The point value -- and therefore the point delta -- is unchanged; the BAND widens to +/-40% relative and the evidence grade is capped at C, so this channel can never reach PRIMARY.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-P1",
+        "company_id": 9109,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.25,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-P1", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.4, "source": "SECTOR_PROXY"},
+        "hedge_ratio": {"_fixture": true, "point": 0.5, "source": "FILED"}
+      },
+      "expected_delta_ebitda_inr": -75000000.0,
+      "expected_delta_ebitda_pct": -3.75,
+      "expected_grade_cap": "C",
+      "expected_band": {"_fixture": true, "param": "pass_through", "lo": 0.24, "hi": 0.56}
+    },
+    {
+      "_fixture": true,
+      "case_id": "X1",
+      "channel_type": "COST",
+      "description": "The hedge ratio does not exist anywhere -- not for the company, not for its sector. There is no fourth branch: the channel is UNCOMPUTABLE and publishes nothing.",
+      "exposure": {
+        "_fixture": true,
+        "exposure_id": "fixture-exp-X1",
+        "company_id": 9110,
+        "exposure_kind": "INPUT_COST",
+        "exposure_tag": "input_cost:fixture_input",
+        "base_value_inr": 10000000000.0,
+        "share_of_base": 0.25,
+        "segment_ownership_fraction": 1.0
+      },
+      "shock": {"_fixture": true, "shock_id": "fixture-shock-X1", "exposure_tag": "input_cost:fixture_input", "delta_pct": 0.1, "horizon_days": 90},
+      "params": {
+        "pass_through": {"_fixture": true, "point": 0.4, "source": "DISCLOSED_CALL"}
+      },
+      "expected_raises": "InsufficientParameterData"
+    }
+  ]
+}
