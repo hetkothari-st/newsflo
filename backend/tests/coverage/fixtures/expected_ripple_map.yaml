@@ -1,0 +1,85 @@
+# =============================================================================
+# PROPOSED-PENDING-OWNER-SIGN-OFF
+#
+# THE OWNER OWNS THIS LIST. Addendum A6.1 assigns the expected-ripple map to a
+# DOMAIN EXPERT: "for 12-15 canonical shock classes, a domain expert authors
+# the ripple families that a competent analyst would expect to see". This file
+# is a PROPOSAL written by the implementer to make the harness runnable and to
+# show the owner the shape of the artefact they are being asked for. It is
+# four shock classes, not twelve, and no line of it has been signed off.
+#
+# Until it is signed off, every recall and precision number the harness
+# produces is a statement about the MACHINERY, not about coverage of the
+# Indian market. Recorded in DATA_GAPS.md §7.
+#
+# WHAT THE OWNER MUST DO
+#   1. Correct the families below (add, remove, re-classify marginal/absent).
+#   2. Extend to 12-15 shock classes.
+#   3. Replace this header with a sign-off line naming themselves and a date.
+#
+# `expected_marginal` families are excluded from BOTH the numerator and the
+# denominator (A6.1). Cement on crude is genuinely 0.5-1.5% of EBITDA;
+# scoring it as a mandatory hit would push the thresholds down and import
+# false positives. DO NOT tune to capture them.
+# =============================================================================
+version: expected-ripple-map-v0.1.0-PROPOSED
+signed_off_by: null
+signed_off_on: null
+
+# Family -> the exposure tags (config/exposure_tags.yaml) through which a
+# shock can reach that family. This is the harness's M axis: "does a path
+# exist from the variable to a tag this family carries".
+family_tags:
+  upstream_oil: [revenue:crude_realization]
+  oil_marketing: [revenue:refining_gross_margin, revenue:marketing_margin_retail_fuel]
+  aviation: [input:atf]
+  paints: [input:crude_derivative_petchem]
+  adhesives: [input:crude_derivative_petchem]
+  packaging_films: [input:crude_derivative_petchem]
+  specialty_chemicals: [input:crude_derivative_petchem]
+  tyres: [input:crude_derivative_rubber]
+  city_gas: [revenue:gas_realization_market]
+  logistics: [input:freight_diesel]
+  cement: [input:fuel_furnace_pet_coke]
+  ceramics: [input:fuel_furnace_pet_coke]
+  banks_direct: [rate:nim_asset_sensitivity]
+  it_services: [fx:usd_revenue_share]
+  it_exporters: [fx:usd_revenue_share]
+  pharma_exporters: [fx:usd_revenue_share]
+  electronics_importers: [fx:usd_cost_share]
+  nbfc: [rate:floating_debt_share]
+  real_estate: [rate:floating_debt_share]
+  infra: [rate:floating_debt_share]
+  auto_oem: [input:steel_flat]
+  appliances: [input:steel_flat]
+  capital_goods: [input:steel_flat]
+
+shocks:
+  - shock: {_fixture: true, variable: BRENT_CRUDE, sign: UP, magnitude_pct: 6}
+    expected_primary: [upstream_oil, oil_marketing, aviation]
+    expected_ripple: [paints, tyres, adhesives, packaging_films, city_gas,
+                      logistics, specialty_chemicals]
+    expected_macro: [inr, imported_inflation, cad]
+    expected_marginal: [cement, ceramics]
+    expected_absent: [banks_direct, it_services]
+
+  - shock: {_fixture: true, variable: USDINR, sign: UP, magnitude_pct: 3}
+    expected_primary: [it_exporters, pharma_exporters]
+    expected_ripple: [electronics_importers]
+    expected_macro: [imported_inflation, cad]
+    expected_marginal: [oil_marketing]
+    expected_absent: [cement]
+
+  - shock: {_fixture: true, variable: REPO_RATE, sign: UP, magnitude_pct: 0.5}
+    expected_primary: [nbfc]
+    expected_ripple: [real_estate, infra]
+    expected_macro: [inr, credit_growth]
+    expected_marginal: [auto_oem]
+    expected_absent: [it_services]
+
+  - shock: {_fixture: true, variable: STEEL_FLAT, sign: UP, magnitude_pct: 8}
+    expected_primary: [auto_oem]
+    expected_ripple: [appliances, capital_goods]
+    expected_macro: [imported_inflation]
+    expected_marginal: [infra]
+    expected_absent: [it_services]

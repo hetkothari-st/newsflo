@@ -1,0 +1,56 @@
+{
+  "_fixture": true,
+  "_note": "A SYNTHETIC listed universe. Not one company here exists, and not one number here was taken from a filing: the shares, bases and EBITDAs are round placeholders chosen so the arithmetic is easy to follow. Its ONLY purpose is to prove that the coverage harness's own mathematics -- recall, precision, per-axis attribution -- is correct when data exists. It says NOTHING about coverage of the Indian market, which is zero today (DATA_GAPS §7).",
+  "_shock": {
+    "_fixture": true,
+    "variable": "BRENT_CRUDE",
+    "sign": "UP",
+    "delta_pct": 0.06,
+    "horizon_days": 90
+  },
+  "_parameters": {
+    "_fixture": true,
+    "pass_through_fraction": 0.2,
+    "hedge_ratio": 0.0,
+    "ebitda_inr": 500.0,
+    "base_value_inr": 1000.0
+  },
+  "edges": [
+    {"edge_id": "syn-crude-realization", "from_node": "BRENT_CRUDE", "to_node": "upstream", "exposure_tag": "revenue:crude_realization", "relationship_type": "DEMAND"},
+    {"edge_id": "syn-crude-refining", "from_node": "BRENT_CRUDE", "to_node": "refining", "exposure_tag": "revenue:refining_gross_margin", "relationship_type": "DEMAND"},
+    {"edge_id": "syn-crude-marketing", "from_node": "BRENT_CRUDE", "to_node": "fuel_retail", "exposure_tag": "revenue:marketing_margin_retail_fuel", "relationship_type": "DEMAND"},
+    {"edge_id": "syn-crude-atf", "from_node": "BRENT_CRUDE", "to_node": "atf", "exposure_tag": "input:atf", "relationship_type": "INPUT_COST"},
+    {"edge_id": "syn-crude-naphtha", "from_node": "BRENT_CRUDE", "to_node": "naphtha", "exposure_tag": "input:crude_direct", "relationship_type": "INPUT_COST"},
+    {"edge_id": "syn-naphtha-petchem", "from_node": "naphtha", "to_node": "petchem", "exposure_tag": "input:crude_derivative_petchem", "relationship_type": "INPUT_COST"},
+    {"edge_id": "syn-naphtha-rubber", "from_node": "naphtha", "to_node": "synthetic_rubber", "exposure_tag": "input:crude_derivative_rubber", "relationship_type": "INPUT_COST"},
+    {"edge_id": "syn-crude-diesel", "from_node": "BRENT_CRUDE", "to_node": "diesel", "exposure_tag": "input:freight_diesel", "relationship_type": "INPUT_COST"},
+    {"edge_id": "syn-crude-citygas", "from_node": "BRENT_CRUDE", "to_node": "city_gas", "exposure_tag": "revenue:gas_realization_market", "relationship_type": "DEMAND"},
+    {"edge_id": "syn-crude-petcoke", "from_node": "BRENT_CRUDE", "to_node": "pet_coke", "exposure_tag": "input:fuel_furnace_pet_coke", "relationship_type": "INPUT_COST"},
+
+    {"edge_id": "syn-usdinr-rev", "from_node": "USDINR", "to_node": "export_revenue", "exposure_tag": "fx:usd_revenue_share", "relationship_type": "DEMAND"},
+    {"edge_id": "syn-usdinr-cost", "from_node": "USDINR", "to_node": "import_cost", "exposure_tag": "fx:usd_cost_share", "relationship_type": "INPUT_COST"},
+
+    {"edge_id": "syn-repo-floating", "from_node": "REPO_RATE", "to_node": "floating_debt", "exposure_tag": "rate:floating_debt_share", "relationship_type": "INPUT_COST"},
+    {"edge_id": "syn-repo-nim", "from_node": "REPO_RATE", "to_node": "bank_nim", "exposure_tag": "rate:nim_asset_sensitivity", "relationship_type": "DEMAND"},
+
+    {"edge_id": "syn-steel-flat", "from_node": "STEEL_FLAT", "to_node": "flat_steel_users", "exposure_tag": "input:steel_flat", "relationship_type": "INPUT_COST"}
+  ],
+  "families": [
+    {"_fixture": true, "family": "aviation", "sector": "Transport", "tag": "input:atf", "exposure_kind": "INPUT_COST", "share_of_base": 0.35, "companies": 3},
+    {"_fixture": true, "family": "paints", "sector": "Chemicals", "tag": "input:crude_derivative_petchem", "exposure_kind": "INPUT_COST", "share_of_base": 0.30, "companies": 4},
+    {"_fixture": true, "family": "tyres", "sector": "Auto Ancillary", "tag": "input:crude_derivative_rubber", "exposure_kind": "INPUT_COST", "share_of_base": 0.28, "companies": 4},
+    {"_fixture": true, "family": "adhesives", "sector": "Chemicals", "tag": "input:crude_derivative_petchem", "exposure_kind": "INPUT_COST", "share_of_base": 0.25, "companies": 3},
+    {"_fixture": true, "family": "packaging_films", "sector": "Packaging", "tag": "input:crude_derivative_petchem", "exposure_kind": "INPUT_COST", "share_of_base": 0.24, "companies": 3},
+    {"_fixture": true, "family": "specialty_chemicals", "sector": "Chemicals", "tag": "input:crude_derivative_petchem", "exposure_kind": "INPUT_COST", "share_of_base": 0.22, "companies": 3},
+    {"_fixture": true, "family": "logistics", "sector": "Transport", "tag": "input:freight_diesel", "exposure_kind": "INPUT_COST", "share_of_base": 0.25, "companies": 3},
+    {"_fixture": true, "family": "cement", "sector": "Cement", "tag": "input:fuel_furnace_pet_coke", "exposure_kind": "INPUT_COST", "share_of_base": 0.06, "companies": 3},
+    {"_fixture": true, "family": "banks_direct", "sector": "Banks", "tag": null, "exposure_kind": null, "share_of_base": null, "companies": 3},
+    {"_fixture": true, "family": "it_services", "sector": "IT", "tag": null, "exposure_kind": null, "share_of_base": null, "companies": 3}
+  ],
+  "_uncovered_on_purpose": {
+    "city_gas": "an expected ripple family with an edge and NO tagged company -- a C-axis gap, so the harness has a real miss to diagnose",
+    "ceramics": "marginal family, no companies",
+    "upstream_oil": "expected PRIMARY family, edge only -- the harness scores the SECONDARY_RIPPLE walk",
+    "oil_marketing": "expected PRIMARY family, edge only"
+  }
+}
