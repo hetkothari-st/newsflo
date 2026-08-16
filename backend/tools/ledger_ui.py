@@ -46,6 +46,7 @@ from fastapi.responses import (  # noqa: E402
     HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
 )
 
+from app.ledger import edge_review_pages  # noqa: E402
 from app.ledger import review as review_api  # noqa: E402
 from app.ledger.coverage import (  # noqa: E402
     age_alert, coverage_rows, extractor_quality, ledger_stats, metrics_text,
@@ -337,6 +338,12 @@ def build_app(engine) -> FastAPI:
     def metrics() -> PlainTextResponse:
         with engine.connect() as connection:
             return PlainTextResponse(metrics_text(connection, as_of=_today()))
+
+    # V5 Phase 3, ADDITIVE: /graph/edges, /graph/edge, /graph/approve,
+    # /graph/reject and /graph/gaps. Same console, same reviewer, same
+    # discipline -- a machine proposes, a person decides. Nothing above this
+    # line changed.
+    edge_review_pages.register(app, engine, _page)
 
     return app
 

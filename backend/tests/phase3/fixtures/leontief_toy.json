@@ -1,0 +1,27 @@
+{
+  "_fixture": true,
+  "_note": "A 3x3 toy input matrix and its HAND-COMPUTED Leontief inverse. It describes no economy: the entries are round tenths chosen so the cofactor arithmetic can be written out in full (see .superpowers/sdd/2026-08-17-v5-session0/phase3-leontief-toy.md). It is deliberately ASYMMETRIC and CYCLIC (1 -> 2 -> 3 -> 1) so a transposed orientation fails rather than passes.",
+  "industries": ["IND_A", "IND_B", "IND_C"],
+  "A": [
+    [0.2, 0.1, 0.0],
+    [0.0, 0.2, 0.1],
+    [0.1, 0.0, 0.2]
+  ],
+  "I_minus_A": [
+    [0.8, -0.1, 0.0],
+    [0.0, 0.8, -0.1],
+    [-0.1, 0.0, 0.8]
+  ],
+  "determinant_of_I_minus_A": 0.511,
+  "adjugate_of_I_minus_A": [
+    [0.64, 0.08, 0.01],
+    [0.01, 0.64, 0.08],
+    [0.08, 0.01, 0.64]
+  ],
+  "leontief_inverse": [
+    [1.252446, 0.156556, 0.019569],
+    [0.019569, 1.252446, 0.156556],
+    [0.156556, 0.019569, 1.252446]
+  ],
+  "_verification": "PENDING-OWNER-VERIFICATION. adjugate / determinant, to 6dp. (I - A) @ leontief_inverse == I is asserted independently by test_the_inverse_really_inverts_i_minus_a, so the pinned numbers are falsifiable rather than merely transcribed."
+}

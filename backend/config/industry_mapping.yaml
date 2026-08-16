@@ -1,0 +1,50 @@
+# IOTT/NIC INDUSTRY CODE -> internal sector_id -> exposure_tag
+# (docs/v5/04_PHASE_3_ripple_discovery.md Task 3.4 step 4)
+#
+# ============================================================================
+# THIS FILE SHIPS AS STRUCTURE ONLY. EVERY ROW BELOW IS AN EXAMPLE AND THE
+# LOADER REFUSES TO LOAD IT.
+# ============================================================================
+#
+# The phase file says this mapping "is hand-authored and reviewable". It is
+# also the single point where an input-output table stops being arithmetic
+# and starts being a claim about which listed industry an IOTT code refers
+# to -- which is exactly the kind of judgement the fabrication guard forbids
+# an implementer from inventing. So the file ships with the SHAPE documented
+# and no usable content: `app/graph/io_bootstrap/mapping.py` raises
+# `IndustryMappingError` on any row carrying `_example: true`.
+#
+# DATA_GAPS §7 records the hand-authoring as owed work, with its owner.
+#
+# EACH REAL ROW NEEDS
+#   industry_code   the IOTT/NIC code exactly as the published table spells it
+#   sector_id       the internal industry slug (matches companies.sub_sector)
+#   exposure_tag    a tag from config/exposure_tags.yaml -- the loader checks
+#                   membership and refuses anything outside the closed set
+#   reviewed_by     the human who checked that this code means this industry
+#   source_url      the classification document the mapping was read from
+#
+# AND ONE MORE THING WORTH KNOWING BEFORE YOU START. An IOTT code is an
+# INDUSTRY, and an exposure_tag is an INPUT. The mapping from one to the
+# other is many-to-many and lossy: "Manufacture of rubber products" carries
+# input:crude_derivative_rubber, but so does part of "Manufacture of
+# footwear", and neither carries it in the same proportion. This file is a
+# hypothesis generator feeding a review queue, and nothing that comes out of
+# it publishes without a human on it.
+
+version: industry-mapping-v0-EXAMPLES-ONLY
+
+mappings:
+  - _example: true
+    industry_code: "EXAMPLE_IOTT_CODE_1"
+    sector_id: "example_sector_slug"
+    exposure_tag: "input:crude_derivative_petchem"
+    reviewed_by: null
+    source_url: "https://example.invalid/replace-with-the-real-classification"
+
+  - _example: true
+    industry_code: "EXAMPLE_IOTT_CODE_2"
+    sector_id: "another_example_sector_slug"
+    exposure_tag: "input:crude_derivative_rubber"
+    reviewed_by: null
+    source_url: "https://example.invalid/replace-with-the-real-classification"
