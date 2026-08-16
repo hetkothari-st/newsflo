@@ -40,7 +40,7 @@ from typing import Any, Mapping, Sequence
 import hashlib
 import random
 
-from app.analysis.sensitivity.channels import ChannelResult
+from app.analysis.sensitivity.channels import ChannelResult, UncomputableChannel
 from app.analysis.sensitivity.config import (
     MaterialityConfig, load_materiality_config,
 )
@@ -75,7 +75,8 @@ class MaterialityResult:
     sign_consistency: float
     bucket: str
     driver_ranking: tuple[DriverContribution, ...]
-    uncomputable_channels: tuple[str, ...]
+    uncomputable_channels: tuple[UncomputableChannel, ...]
+    materiality_bases: tuple[str, ...]
     n: int
     seed: int
     attribution_method: str
@@ -151,7 +152,7 @@ def _weakest_cap(caps) -> str | None:
 def simulate(channels: Sequence[ChannelResult], *, ebitda_ttm_inr: float | None,
              event_id: str, company_id: int | None, analysis_version: str,
              n: int | None = None, seed: int | None = None,
-             uncomputable_channels: Sequence[str] = (),
+             uncomputable_channels: Sequence[UncomputableChannel] = (),
              config: MaterialityConfig | None = None) -> MaterialityResult:
     """Spec §5.2. Deterministic per (event, company, analysis_version)."""
     config = config or load_materiality_config()
@@ -179,10 +180,14 @@ def simulate(channels: Sequence[ChannelResult], *, ebitda_ttm_inr: float | None,
         for key, dist in sorted(distinct.items(), key=lambda kv: str(kv[0]))}
 
     base = float(ebitda_ttm_inr)
+    # Floating-point addition is not associative, so the channels are summed
+    # in a fixed order (fix round 1, M4). Without this the published band
+    # depended on the order the caller happened to pass them in.
+    ordered_channels = sorted(channels, key=lambda c: c.channel_id)
     outputs: list[float] = []
     for index in range(draws):
         total = 0.0
-        for channel in channels:
+        for channel in ordered_channels:
             total += channel.evaluate({
                 name: series[dist.key()][index]
                 for name, dist in channel.params.items()})
@@ -208,6 +213,7 @@ def simulate(channels: Sequence[ChannelResult], *, ebitda_ttm_inr: float | None,
         bucket=config.bucket_for(band.p50),
         driver_ranking=_rank_drivers(distinct, series, outputs, config),
         uncomputable_channels=tuple(uncomputable_channels),
+        materiality_bases=tuple(sorted({c.materiality_base for c in channels})),
         n=draws, seed=resolved_seed, attribution_method=ATTRIBUTION_METHOD,
         engine_version=ENGINE_VERSION,
         channel_ids=tuple(sorted(c.channel_id for c in channels)),
@@ -269,7 +275,10 @@ def serialize_materiality(result: MaterialityResult,
             {"param": d.param, "contribution": d.contribution,
              "source": d.source, "point": d.point, "evidence_id": d.evidence_id}
             for d in result.driver_ranking[:config.top_drivers]],
-        "uncomputable_channels": list(result.uncomputable_channels),
+        "uncomputable_channels": [u.as_dict() for u in result.uncomputable_channels],
+        # Which P&L line(s) the number describes. An interest-line effect is
+        # not an EBITDA effect, and the renderer must not print it as one.
+        "materiality_bases": list(result.materiality_bases),
         "channel_ids": list(result.channel_ids),
         "evidence_grade_cap": result.evidence_grade_cap,
         "n": result.n,

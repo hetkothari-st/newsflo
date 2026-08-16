@@ -85,9 +85,30 @@ RESOLVABLE_PARAMS = (
 )
 
 
+# WHY a channel could not be computed (fix round 1, I3). A channel that
+# vanishes silently is indistinguishable from a company nobody looked at, so
+# every abstention carries one of these and is logged.
+REASON_MISSING_ROW = "MISSING_ROW"                  # nothing in the ledger
+REASON_MISSING_MEASUREMENT = "MISSING_MEASUREMENT"  # a row, but unbandable
+REASON_MISSING_OWNERSHIP = "MISSING_OWNERSHIP"      # no ownership fraction
+REASON_NO_FORMULA = "NO_FORMULA"                    # no §5.1 formula exists
+UNCOMPUTABLE_REASONS = (REASON_MISSING_ROW, REASON_MISSING_MEASUREMENT,
+                        REASON_MISSING_OWNERSHIP, REASON_NO_FORMULA)
+
+
 class InsufficientParameterData(LookupError):
     """No sourced value exists for this parameter, for this company, at this
-    horizon -- and none may be invented. The channel is UNCOMPUTABLE."""
+    horizon -- and none may be invented. The channel is UNCOMPUTABLE.
+
+    Carries a reason code and the parameter it is about, so the caller can
+    report WHY rather than just that something is missing.
+    """
+
+    def __init__(self, message: str, *, reason: str = REASON_MISSING_ROW,
+                 param: str | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.param = param
 
 
 class ParameterNameError(KeyError):
@@ -252,32 +273,41 @@ def _peer_ids(session, *, sector: str, exclude_company_id: int) -> list[int]:
 
 
 def _modifier_value(parameters_json: str, param_name: str,
-                    horizon_days: int) -> tuple[float, str] | None:
-    """(value, measurement) from one modifier's JSON, or None when the row
-    does not carry this parameter in a usable form."""
+                    horizon_days: int) -> tuple[float, str] | str:
+    """`(value, measurement)` from one modifier's JSON, or a REASON string
+    saying why the row is unusable.
+
+    The two failures are worth telling apart (fix round 1, I3): a row that
+    does not mention this parameter is MISSING_ROW, while a row that DOES
+    mention it but cannot say how it was measured is MISSING_MEASUREMENT --
+    a data-entry defect somebody can fix, which used to be invisible.
+    """
     try:
         parameters = json.loads(parameters_json or "{}")
     except (TypeError, ValueError):
-        return None
+        return REASON_MISSING_ROW
     if not isinstance(parameters, dict):
-        return None
+        return REASON_MISSING_ROW
+
+    curve = parameters.get(f"{param_name}_curve")
+    has_curve = isinstance(curve, list) and bool(curve)
+    scalar = parameters.get(param_name)
+    has_scalar = not isinstance(scalar, bool) and isinstance(scalar, (int, float))
+    if not has_curve and not has_scalar:
+        return REASON_MISSING_ROW
+
     measurement = parameters.get("measurement")
     if measurement not in MODIFIER_MEASUREMENTS:
         # "Missing is missing": a value we cannot band is a value we cannot
         # use. See the module docstring.
-        return None
+        return REASON_MISSING_MEASUREMENT
 
-    curve = parameters.get(f"{param_name}_curve")
-    if isinstance(curve, list) and curve:
+    if has_curve:
         try:
             return evaluate_curve(curve, horizon_days), str(measurement)
         except (KeyError, TypeError, ValueError, InsufficientParameterData):
-            return None
-
-    value = parameters.get(param_name)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value), str(measurement)
+            return REASON_MISSING_ROW
+    return float(scalar), str(measurement)
 
 
 # --- the three outcomes -----------------------------------------------------
@@ -294,12 +324,13 @@ def resolve_param(session, *, company_id: int, tag: str, param_name: str,
             f"takes; the closed set is {RESOLVABLE_PARAMS}")
 
     # --- 1. the company's own value ----------------------------------------
-    own = (_own_pass_through(session, company_id=company_id, tag=tag,
-                             horizon_days=horizon_days, as_of=as_of)
-           if param_name == PASS_THROUGH
-           else _own_modifier(session, company_id=company_id, tag=tag,
-                              param_name=param_name, horizon_days=horizon_days,
-                              as_of=as_of))
+    if param_name == PASS_THROUGH:
+        own, reason = _own_pass_through(session, company_id=company_id, tag=tag,
+                                        horizon_days=horizon_days, as_of=as_of)
+    else:
+        own, reason = _own_modifier(session, company_id=company_id, tag=tag,
+                                    param_name=param_name,
+                                    horizon_days=horizon_days, as_of=as_of)
     if own is not None:
         point, source, evidence_id, detail = own
         return ResolvedParam(
@@ -310,9 +341,10 @@ def resolve_param(session, *, company_id: int, tag: str, param_name: str,
             widened=modifier_state_unknown, detail=detail)
 
     # --- 2. the sector median, computed here and now -----------------------
-    proxy = _sector_median(session, company_id=company_id, tag=tag,
-                           param_name=param_name, horizon_days=horizon_days,
-                           as_of=as_of)
+    proxy, peer_reason = _sector_median(
+        session, company_id=company_id, tag=tag, param_name=param_name,
+        horizon_days=horizon_days, as_of=as_of)
+    reason = _worse_reason(reason, peer_reason)
     if proxy is not None:
         point, detail = proxy
         return ResolvedParam(
@@ -325,15 +357,22 @@ def resolve_param(session, *, company_id: int, tag: str, param_name: str,
     raise InsufficientParameterData(
         f"no sourced value for {param_name!r} on tag {tag!r} for company "
         f"{company_id} at {horizon_days}d, and no sector median to stand in "
-        f"for it. The channel is UNCOMPUTABLE and publishes nothing.")
+        f"for it ({reason}). The channel is UNCOMPUTABLE and publishes "
+        f"nothing.", reason=reason, param=param_name)
 
 
 def _own_pass_through(session, *, company_id: int, tag: str, horizon_days: int,
                       as_of: date):
+    """`((value, source, evidence_id, detail) | None, reason)`."""
+    reason = REASON_MISSING_ROW
     for row in _curve_rows(session, exposure_tag=tag, as_of=as_of,
                            company_id=company_id):
         source = CURVE_BASIS_TO_SOURCE.get(str(row["basis"]))
         if source is None:
+            # A curve exists but its basis is outside the vocabulary, so we
+            # cannot say how wide to band it. Same defect as a modifier with
+            # no measurement, and repairable in the same way.
+            reason = _worse_reason(reason, REASON_MISSING_MEASUREMENT)
             continue
         try:
             points = json.loads(row["points"] or "[]")
@@ -342,31 +381,46 @@ def _own_pass_through(session, *, company_id: int, tag: str, horizon_days: int,
         except (TypeError, ValueError, KeyError, InsufficientParameterData):
             continue
         return (value, source, row["evidence_id"],
-                f"pass_through_curve:{row['curve_id']}@{horizon_days}d")
-    return None
+                f"pass_through_curve:{row['curve_id']}@{horizon_days}d"), reason
+    return None, reason
 
 
 def _own_modifier(session, *, company_id: int, tag: str, param_name: str,
                   horizon_days: int, as_of: date):
+    """`(value, source, evidence_id, detail)` or None. Records the most
+    informative failure reason it saw in `_own_modifier.last_reason`-style
+    fashion by returning it alongside -- see `_first_usable`."""
+    reason = REASON_MISSING_ROW
     for row in _modifier_rows(session, applies_to_tag=tag, as_of=as_of,
                               company_id=company_id):
         resolved = _modifier_value(row["parameters"], param_name, horizon_days)
-        if resolved is None:
+        if isinstance(resolved, str):
+            reason = _worse_reason(reason, resolved)
             continue
         value, measurement = resolved
         return (value, measurement, None,
-                f"company_modifier:{row['modifier_id']}")
-    return None
+                f"company_modifier:{row['modifier_id']}"), reason
+    return None, reason
+
+
+def _worse_reason(current: str, candidate: str) -> str:
+    """MISSING_MEASUREMENT is the more informative of the two: it means a row
+    exists and can be repaired."""
+    return (REASON_MISSING_MEASUREMENT
+            if REASON_MISSING_MEASUREMENT in (current, candidate)
+            else candidate or current)
 
 
 def _sector_median(session, *, company_id: int, tag: str, param_name: str,
                    horizon_days: int, as_of: date):
     """The median over the company's SECTOR PEERS, computed from ledger rows
-    at runtime. An empty ledger has no median, so this returns None and the
-    caller raises -- there is no stored sector table to fall back on."""
+    at runtime, as `(value_and_detail | None, reason)`. An empty ledger has no
+    median, so this returns None and the caller raises -- there is no stored
+    sector table to fall back on."""
+    reason = REASON_MISSING_ROW
     sector = _sector_of(session, company_id)
     if not sector:
-        return None
+        return None, reason
 
     if param_name == PASS_THROUGH:
         # A sector-level curve is itself the median somebody approved.
@@ -377,17 +431,19 @@ def _sector_median(session, *, company_id: int, tag: str, param_name: str,
                                        horizon_days, ceiling=row["ceiling"])
             except (TypeError, ValueError, KeyError, InsufficientParameterData):
                 continue
-            return value, f"pass_through_curve:{row['curve_id']}(sector)"
+            return (value, f"pass_through_curve:{row['curve_id']}(sector)"), reason
 
     peers = _peer_ids(session, sector=str(sector), exclude_company_id=company_id)
     if not peers:
-        return None
+        return None, reason
 
     values: list[float] = []
     if param_name == PASS_THROUGH:
         for peer in peers:
-            own = _own_pass_through(session, company_id=peer, tag=tag,
-                                    horizon_days=horizon_days, as_of=as_of)
+            own, peer_reason = _own_pass_through(
+                session, company_id=peer, tag=tag, horizon_days=horizon_days,
+                as_of=as_of)
+            reason = _worse_reason(reason, peer_reason)
             if own is not None:
                 values.append(own[0])
     else:
@@ -398,11 +454,12 @@ def _sector_median(session, *, company_id: int, tag: str, param_name: str,
             if peer in seen:
                 continue           # one vote per company, newest row first
             resolved = _modifier_value(row["parameters"], param_name, horizon_days)
-            if resolved is None:
+            if isinstance(resolved, str):
+                reason = _worse_reason(reason, resolved)
                 continue
             seen.add(peer)
             values.append(resolved[0])
 
     if not values:
-        return None
-    return median(values), f"sector_median:{sector}:n={len(values)}"
+        return None, reason
+    return (median(values), f"sector_median:{sector}:n={len(values)}"), reason

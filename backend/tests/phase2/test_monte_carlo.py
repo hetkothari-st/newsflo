@@ -223,9 +223,12 @@ def test_a_filed_point_of_one_is_still_banded_below_one():
 # --- uncomputable channels and abstention ----------------------------------
 
 def test_uncomputable_channels_are_carried_through_to_the_result():
-    result = simulate([channel("C1")],
-                      uncomputable_channels=("input_cost:fixture_missing",))
-    assert result.uncomputable_channels == ("input_cost:fixture_missing",)
+    from app.analysis.sensitivity.channels import UncomputableChannel
+
+    missing = UncomputableChannel("input_cost:fixture_missing", "MISSING_ROW",
+                                  "hedge_ratio")
+    result = simulate([channel("C1")], uncomputable_channels=(missing,))
+    assert result.uncomputable_channels == (missing,)
 
 
 def test_no_channels_at_all_is_not_a_zero_impact_claim():
@@ -254,7 +257,45 @@ def test_percentiles_are_ordered_and_the_worked_example_point_sits_inside_them()
 
 
 def test_the_grade_cap_of_the_weakest_parameter_reaches_the_result():
-    """DO NOT: sector proxies must not reach PRIMARY. The cap has to travel
-    with the number."""
+    """The cap TRAVELS with the number -- which is all this test checks.
+
+    CORRECTION (fix round 1): this docstring used to say "sector proxies must
+    not reach PRIMARY", which implied an enforcement that did not exist
+    anywhere. Carrying a cap and honouring it are different things; the
+    honouring is now done in the reducer and is pinned by
+    `tests/phase2/test_evidence_grade_cap.py`.
+    """
     assert simulate([channel("P1")]).evidence_grade_cap == "C"
     assert simulate([channel("C1")]).evidence_grade_cap is None
+
+
+# --- FIX ROUND 1 -----------------------------------------------------------
+
+def test_the_band_does_not_depend_on_the_order_the_caller_passes_channels(
+        ):
+    """M4. Floating-point addition is not associative, so summing the
+    channels in the caller's order made the published band depend on an
+    iteration order nobody controls."""
+    from app.analysis.sensitivity.monte_carlo import serialize_materiality
+
+    channels = [channel("C1"), channel("R1"), channel("V1")]
+    forward = json.dumps(serialize_materiality(simulate(channels)), sort_keys=True)
+    reverse = json.dumps(serialize_materiality(simulate(list(reversed(channels)))),
+                         sort_keys=True)
+    assert forward == reverse
+
+
+def test_the_materiality_bases_of_the_channels_reach_the_result():
+    """Concern 4b. An interest-line effect is not an EBITDA effect, and the
+    result has to say which it is carrying."""
+    assert simulate([channel("C1")]).materiality_bases == ("EBITDA",)
+    assert simulate([channel("I1")]).materiality_bases == ("PRE_TAX_INTEREST_LINE",)
+    assert simulate([channel("C1"), channel("I1")]).materiality_bases == (
+        "EBITDA", "PRE_TAX_INTEREST_LINE")
+
+
+def test_the_serialized_block_carries_the_bases():
+    from app.analysis.sensitivity.monte_carlo import serialize_materiality
+
+    payload = serialize_materiality(simulate([channel("I1")]))
+    assert payload["materiality_bases"] == ["PRE_TAX_INTEREST_LINE"]

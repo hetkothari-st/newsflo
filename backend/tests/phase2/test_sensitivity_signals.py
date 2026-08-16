@@ -82,7 +82,8 @@ def test_an_exposure_with_no_resolvable_parameter_is_uncomputable_not_guessed(
     run = analyse(sensitivity_session, company.id)
     assert run.channels == ()
     assert run.signals == ()
-    assert run.uncomputable_channels == (TAG,)
+    assert [(u.channel_id, u.reason) for u in run.uncomputable_channels] == [
+        (TAG, "MISSING_ROW")]
 
 
 def test_a_company_with_no_ebitda_base_publishes_nothing(sensitivity_session):
@@ -352,3 +353,211 @@ def test_the_ui_contract_line_refuses_an_impact_with_no_sensitivity_block():
         phase0_fixtures.reducer_config())
     with pytest.raises(ValueError):
         materiality_line(impact)
+
+
+# --- FIX ROUND 1: ownership is never a silent default (I1) -----------------
+
+def test_with_no_ownership_mapping_the_caller_asserts_consolidated_basis(
+        sensitivity_session):
+    """The normal case: a company's own consolidated exposure row. The rule is
+    explicit (1.0 because a company owns all of its own P&L line) and it is
+    RECORDED on the channel, not left as a dict default nobody can see."""
+    company = seed_company_with_a_computable_channel(sensitivity_session,
+                                                     ticker="FIXQ.NS")
+    run = analyse(sensitivity_session, company.id)
+    assert run.channels[0].segment_ownership_fraction == 1.0
+    assert run.channels[0].ownership_basis == "SELF_CONSOLIDATED"
+
+
+def test_a_supplied_ownership_mapping_must_be_complete(sensitivity_session):
+    """If the caller knows about attached exposures at all, it must say
+    something about EVERY exposure being sized. A key it forgot is not a
+    company that owns 100% of the line."""
+    company = seed_company_with_a_computable_channel(sensitivity_session,
+                                                     ticker="FIXR.NS")
+    run = analyse(sensitivity_session, company.id,
+                  segment_ownership_fractions={"fixture-exp-other": 0.4})
+    assert run.channels == ()
+    assert run.signals == ()
+    assert [(u.channel_id, u.reason) for u in run.uncomputable_channels] == [
+        (TAG, "MISSING_OWNERSHIP")]
+
+
+def test_a_supplied_ownership_fraction_is_used_and_recorded(sensitivity_session):
+    company = seed_company_with_a_computable_channel(sensitivity_session,
+                                                     ticker="FIXS.NS")
+    run = analyse(sensitivity_session, company.id,
+                  segment_ownership_fractions={"fixture-exp-FIXS.NS": 0.5})
+    assert run.channels[0].segment_ownership_fraction == 0.5
+    assert run.channels[0].ownership_basis == "SUPPLIED"
+    assert abs(run.channels[0].delta_ebitda_inr - (-37500000.0)) <= 37500.0
+
+
+# --- FIX ROUND 1: uncomputables are reason-coded and logged (I3) -----------
+
+def test_a_missing_parameter_row_is_reported_as_missing_row(sensitivity_session):
+    company = make_company(sensitivity_session, ticker="FIXT.NS", name="FIXTURECO T")
+    seed_exposure(sensitivity_session, exposure_id="fixture-exp-T",
+                  company_id=company.id, exposure_tag=TAG,
+                  exposure_kind="INPUT_COST", base_value_inr=10000000000.0,
+                  share_of_base=0.25)
+    seed_financials(sensitivity_session, company_id=company.id,
+                    ebitda_inr=2000000000.0)
+    run = analyse(sensitivity_session, company.id)
+    assert [(u.channel_id, u.reason) for u in run.uncomputable_channels] == [
+        (TAG, "MISSING_ROW")]
+
+
+def test_a_modifier_without_a_measurement_is_reported_as_missing_measurement(
+        sensitivity_session):
+    """The failure mode a reviewer would otherwise never see: the row EXISTS,
+    it just cannot be banded, so the channel quietly disappears."""
+    company = make_company(sensitivity_session, ticker="FIXU.NS", name="FIXTURECO U")
+    seed_exposure(sensitivity_session, exposure_id="fixture-exp-U",
+                  company_id=company.id, exposure_tag=TAG,
+                  exposure_kind="INPUT_COST", base_value_inr=10000000000.0,
+                  share_of_base=0.25)
+    seed_curve(sensitivity_session, curve_id="fixture-curve-U",
+               company_id=company.id, exposure_tag=TAG,
+               points=load_worked_examples()["pass_through_curve"]["points"],
+               basis="DISCLOSED_CALL")
+    seed_modifier(sensitivity_session, modifier_id="fixture-mod-U",
+                  company_id=company.id, applies_to_tag=TAG, modifier_kind="HEDGE",
+                  parameters={"hedge_ratio": 0.5})      # no "measurement"
+    seed_financials(sensitivity_session, company_id=company.id,
+                    ebitda_inr=2000000000.0)
+    run = analyse(sensitivity_session, company.id)
+    assert [(u.channel_id, u.reason) for u in run.uncomputable_channels] == [
+        (TAG, "MISSING_MEASUREMENT")]
+    assert run.uncomputable_channels[0].param == "hedge_ratio"
+
+
+def test_an_exposure_kind_with_no_formula_is_reported_as_no_formula(
+        sensitivity_session):
+    from app.analysis.sensitivity.channels import Shock
+    from app.analysis.sensitivity.engine import analyse_company
+
+    company = make_company(sensitivity_session, ticker="FIXW.NS", name="FIXTURECO W")
+    seed_exposure(sensitivity_session, exposure_id="fixture-exp-W",
+                  company_id=company.id, exposure_tag="regulatory:fixture_rule",
+                  exposure_kind="REGULATORY", base_value_inr=10000000000.0,
+                  share_of_base=0.25, base_kind="EBITDA")
+    seed_financials(sensitivity_session, company_id=company.id,
+                    ebitda_inr=2000000000.0)
+    run = analyse_company(
+        sensitivity_session, company_id=company.id,
+        shocks=[Shock(shock_id="fixture-shock-reg",
+                      exposure_tag="regulatory:fixture_rule", delta_pct=0.1,
+                      horizon_days=90, mechanism_id="fixture:mechanism:1")],
+        event_id=FIXTURE_EVENT_ID, analysis_version=FIXTURE_ANALYSIS_VERSION,
+        created_at=FIXTURE_NOW, as_of=FIXTURE_TODAY)
+    assert [(u.channel_id, u.reason) for u in run.uncomputable_channels] == [
+        ("regulatory:fixture_rule", "NO_FORMULA")]
+
+
+def test_a_company_that_sizes_nothing_says_so_in_the_log(sensitivity_session,
+                                                        caplog):
+    """Silence was the complaint: a company could fall out of the analysis
+    with no trace anywhere."""
+    import logging
+
+    company = make_company(sensitivity_session, ticker="FIXX.NS", name="FIXTURECO X")
+    seed_exposure(sensitivity_session, exposure_id="fixture-exp-X",
+                  company_id=company.id, exposure_tag=TAG,
+                  exposure_kind="INPUT_COST", base_value_inr=10000000000.0,
+                  share_of_base=0.25)
+    seed_financials(sensitivity_session, company_id=company.id,
+                    ebitda_inr=2000000000.0)
+    with caplog.at_level(logging.WARNING, logger="app.analysis.sensitivity.engine"):
+        analyse(sensitivity_session, company.id)
+    assert any("MISSING_ROW" in record.getMessage() for record in caplog.records)
+    assert any(str(company.id) in record.getMessage() for record in caplog.records)
+
+
+def test_the_uncomputable_reasons_reach_the_materiality_block(sensitivity_session):
+    """A company that sizes SOME channels still has to disclose the ones it
+    could not size, with their reasons."""
+    from app.analysis.sensitivity.channels import Shock
+    from app.analysis.sensitivity.engine import analyse_company
+
+    company = seed_company_with_a_computable_channel(sensitivity_session,
+                                                     ticker="FIXY.NS")
+    seed_exposure(sensitivity_session, exposure_id="fixture-exp-FIXY-fx",
+                  company_id=company.id, exposure_tag="fx:fixture_usd_receipts",
+                  exposure_kind="FX_TRANSACTION", base_value_inr=4000000000.0,
+                  share_of_base=1.0)
+    run = analyse_company(
+        sensitivity_session, company_id=company.id,
+        shocks=[_shock(), Shock(shock_id="fixture-shock-fx",
+                                exposure_tag="fx:fixture_usd_receipts",
+                                delta_pct=0.05, horizon_days=90,
+                                mechanism_id="fixture:mechanism:2")],
+        event_id=FIXTURE_EVENT_ID, analysis_version=FIXTURE_ANALYSIS_VERSION,
+        created_at=FIXTURE_NOW, as_of=FIXTURE_TODAY)
+    assert run.channels, "the cost channel still computes"
+    block = dict(run.signals[0].payload)["sensitivity"]
+    assert block["uncomputable_channels"] == [
+        {"channel_id": "fx:fixture_usd_receipts", "reason": "MISSING_ROW",
+         "param": "natural_hedge_fraction"}]
+
+
+# --- FIX ROUND 1: presentation (concern 4b, M3) ----------------------------
+
+def test_an_interest_line_effect_is_not_rendered_as_percent_of_ebitda(
+        sensitivity_session):
+    from app.analysis.sensitivity.channels import Shock
+    from app.analysis.sensitivity.engine import analyse_company
+    from app.analysis.sensitivity.presentation import materiality_line
+    from app.core.config_loader import load_gate_config, load_sensitivity_policy
+    from app.core.reducer import EventContext, ReducerConfig, reduce_company_impact
+
+    company = make_company(sensitivity_session, ticker="FIXD1.NS",
+                           name="FIXTURECO D1")
+    seed_exposure(sensitivity_session, exposure_id="fixture-exp-D1",
+                  company_id=company.id, exposure_tag="rates:fixture_floating_debt",
+                  exposure_kind="INTEREST_RATE", base_value_inr=20000000000.0,
+                  share_of_base=0.5, base_kind="DEBT")
+    seed_modifier(sensitivity_session, modifier_id="fixture-mod-D1",
+                  company_id=company.id,
+                  applies_to_tag="rates:fixture_floating_debt",
+                  modifier_kind="HEDGE",
+                  parameters={"hedge_ratio": 0.0, "repricing_fraction": 1.0,
+                              "measurement": "FILED"})
+    seed_financials(sensitivity_session, company_id=company.id,
+                    ebitda_inr=2000000000.0)
+
+    run = analyse_company(
+        sensitivity_session, company_id=company.id,
+        shocks=[Shock(shock_id="fixture-shock-rate",
+                      exposure_tag="rates:fixture_floating_debt", delta_pct=0.005,
+                      horizon_days=365, mechanism_id="fixture:mechanism:3")],
+        event_id=FIXTURE_EVENT_ID, analysis_version=FIXTURE_ANALYSIS_VERSION,
+        created_at=FIXTURE_NOW, as_of=FIXTURE_TODAY)
+    assert run.materiality is not None
+    impact = reduce_company_impact(
+        list(run.signals) + _supporting_signals(company.id),
+        ReducerConfig(gate_config=load_gate_config(),
+                      event_context=EventContext(event_status="CONFIRMED",
+                                                 shock_magnitude_confidence=0.9),
+                      sensitivity_policy=load_sensitivity_policy()))
+    line = materiality_line(impact)
+    assert "EBITDA (range" not in line, line
+    assert "interest line" in line, line
+
+
+def test_the_driver_line_names_the_evidence_document():
+    """M3. "sector proxy" tells an analyst the CATEGORY; the evidence id tells
+    them which document to open."""
+    from app.analysis.sensitivity.presentation import format_driver
+
+    rendered = format_driver({"param": "pass_through", "contribution": 0.7,
+                              "source": "DISCLOSED_CALL", "point": 0.55,
+                              "evidence_id": "fixture-ev-77"})
+    assert "55%" in rendered
+    assert "earnings call disclosure" in rendered
+    assert "fixture-ev-77" in rendered
+    # No document recorded -> the category alone, and no dangling punctuation.
+    bare = format_driver({"param": "pass_through", "contribution": 0.7,
+                          "source": "SECTOR_PROXY", "point": 0.4,
+                          "evidence_id": None})
+    assert bare.endswith("(sector proxy)")

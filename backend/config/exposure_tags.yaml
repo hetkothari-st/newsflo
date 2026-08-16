@@ -1,0 +1,71 @@
+# V5 CONTROLLED EXPOSURE VOCABULARY
+# (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §6.1, docs/v5/04_PHASE_3_ripple_discovery.md
+#  Task 3.1)
+#
+# THIS FILE IS VOCABULARY, NOT DATA. Every entry is a WORD this system is
+# allowed to use for an economic exposure. There is no company here, no
+# coefficient, no share, no financial figure -- a test asserts the file
+# contains no numeral at all outside `version`.
+#
+# IT IS CLOSED. `exposure_tag` on `company_exposure` and on `mechanism_edge`
+# must appear in this file. That is enforced at the DATABASE (migration 0013
+# populates `valid_exposure_tag` from this file and installs triggers that
+# RAISE on anything else), not by a Python `if` an extractor could route
+# around. Extending the vocabulary is therefore a code review of THIS FILE
+# plus a re-run of the loader -- never a runtime decision by a model.
+#
+# IT IS HIERARCHICAL. A family (`input`, `revenue`, `fx`, `rate`) groups
+# leaves; the wire form is `family:leaf`, which is exactly the shape
+# `app/ledger/vocabulary.check_exposure_tag` has validated since Phase 1.
+# Intermediate grouping keys (`crude`, `metals`, `agri`) are ORGANISATIONAL:
+# they exist so a reader can see why `atf` and `freight_diesel` are siblings,
+# and they do NOT appear in the tag. `input:crude:atf` is not a tag;
+# `input:atf` is.
+#
+# ADDING A LEAF: add it under the right family, in the right group, with a
+# comment naming the industries that carry it. Then run
+# `python -m alembic upgrade head` (or restart, which migrates on boot) so
+# `valid_exposure_tag` picks it up. A leaf that is not in the database cannot
+# be written, which is the point.
+
+version: exposure-tags-v5.0.0
+
+families:
+  input:
+    crude:
+      crude_direct:               # crude as a literal input: refiners, petchem crackers
+      crude_derivative_petchem:   # naphtha, propylene, polymers -> paints, plastics, adhesives, packaging films
+      crude_derivative_rubber:    # synthetic rubber, carbon black -> tyres, belts, footwear
+      crude_derivative_bitumen:   # bitumen -> roads, infrastructure contractors
+      atf:                        # aviation turbine fuel -> airlines
+      fuel_furnace_pet_coke:      # furnace oil, pet coke -> cement, ceramics, glass
+      freight_diesel:             # diesel-linked freight -> logistics, FMCG distribution, e-commerce
+    metals:
+      steel_flat:                 # flat steel -> autos, appliances, capital goods
+      steel_long:                 # long steel -> construction, infrastructure
+      aluminium:                  # aluminium -> packaging, autos, electricals
+      copper:                     # copper -> cables, electricals, EV components
+    agri:
+      palm_oil:                   # palm oil -> FMCG soaps, foods
+      wheat:                      # wheat -> flour, biscuits, packaged foods
+      sugar:                      # sugar -> confectionery, beverages
+      milk:                       # milk -> dairy processors
+
+  revenue:
+    realization:
+      crude_realization:              # upstream producers' crude realisation
+      refining_gross_margin:          # refiners' gross refining margin
+      marketing_margin_retail_fuel:   # fuel retailers' marketing margin
+      gas_realization_apm:            # administered-price gas realisation
+      gas_realization_market:         # market-price gas realisation, city gas distribution
+
+  fx:
+    usd:
+      usd_revenue_share:          # share of revenue billed in USD -> IT, pharma exporters
+      usd_cost_share:             # share of cost incurred in USD -> electronics importers
+      usd_debt_share:             # share of debt denominated in USD
+
+  rate:
+    domestic:
+      floating_debt_share:        # share of debt on a floating rate -> leveraged infra, real estate, NBFC
+      nim_asset_sensitivity:      # net-interest-margin sensitivity -> banks

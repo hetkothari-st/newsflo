@@ -54,7 +54,8 @@ from typing import Callable, Mapping
 
 from app.analysis.sensitivity.config import MaterialityConfig, load_materiality_config
 from app.analysis.sensitivity.params import (
-    InsufficientParameterData, ParamDist, resolve_param,  # noqa: F401 (re-export)
+    InsufficientParameterData, ParamDist, REASON_MISSING_ROW, REASON_NO_FORMULA,
+    resolve_param,  # noqa: F401 (re-export)
 )
 
 # Phase 0/1 use a single horizon bucket; Phase 4 adds IMMEDIATE and
@@ -66,17 +67,29 @@ NEAR_TERM = "NEAR_TERM"
 # comparison rather than a special case.
 _GRADE_ORDER = ("A", "B", "C", "D", "E")
 
+# WHICH P&L LINE A CHANNEL MOVES (fix round 1, concern 4b). Five of the six
+# channels move EBITDA. The interest-rate channel moves the interest line,
+# which sits BELOW EBITDA -- §5.1 still divides it by EBITDA_ttm to get a
+# comparable percentage, but the record must not let the field name imply the
+# effect is an EBITDA effect, and the renderer must not print it as one.
+BASE_EBITDA = "EBITDA"
+BASE_PRE_TAX_INTEREST_LINE = "PRE_TAX_INTEREST_LINE"
+
+# How a channel's `segment_ownership_fraction` was arrived at.
+OWNERSHIP_SELF_CONSOLIDATED = "SELF_CONSOLIDATED"   # the company's own line
+OWNERSHIP_SUPPLIED = "SUPPLIED"                     # an attached exposure
+
 
 @dataclass(frozen=True)
 class ExposureView:
     """One `company_exposure` row as the channel formulas see it.
 
-    `segment_ownership_fraction` is NEVER defaulted here. The engine supplies
-    1.0 only for a company's OWN exposure row -- a company owns all of its
-    own P&L line, which is a structural fact, not an estimate -- and for an
-    exposure attached from another entity it comes from Phase 1's
-    `attach_exposure_to_listco`, which refuses to attach at all when the
-    ownership fraction is unknown.
+    `segment_ownership_fraction` is NEVER defaulted here, and since fix round
+    1 it is not defaulted in the engine either: it is either 1.0 under the
+    stated SELF_CONSOLIDATED rule (a company owns all of its own P&L line) or
+    a value the caller supplied for an attached exposure. `ownership_basis`
+    records WHICH, so the choice is visible in the channel rather than buried
+    in a dictionary lookup.
     """
     exposure_id: str
     company_id: int
@@ -86,6 +99,24 @@ class ExposureView:
     share_of_base: float
     segment_ownership_fraction: float
     evidence_ids: tuple[str, ...] = ()
+    ownership_basis: str = OWNERSHIP_SELF_CONSOLIDATED
+
+
+@dataclass(frozen=True)
+class UncomputableChannel:
+    """A channel that could NOT be sized, and why (fix round 1, I3).
+
+    Abstention is the right behaviour; abstaining silently is not. Every one
+    of these is reported on the run, logged, and carried into the published
+    materiality block, so "this company dropped out" is always answerable.
+    """
+    channel_id: str
+    reason: str                      # one of params.UNCOMPUTABLE_REASONS
+    param: str | None = None
+
+    def as_dict(self) -> dict:
+        return {"channel_id": self.channel_id, "reason": self.reason,
+                "param": self.param}
 
 
 @dataclass(frozen=True)
@@ -119,6 +150,11 @@ class ChannelResult:
     params: Mapping[str, ParamDist]
     constants: Mapping[str, float]
     grade_cap: str | None
+    # Which P&L line this channel actually moves, and how its ownership
+    # fraction was arrived at. Both travel with the number.
+    materiality_base: str = BASE_EBITDA
+    segment_ownership_fraction: float = 1.0
+    ownership_basis: str = OWNERSHIP_SELF_CONSOLIDATED
     exposure_stale: bool = False
     delta_ebitda_inr: float = field(default=0.0)
 
@@ -191,6 +227,15 @@ CHANNEL_FOR_KIND: Mapping[str, str] = {
     "INTEREST_RATE": "INTEREST_RATE",
 }
 
+MATERIALITY_BASE_FOR_TYPE: Mapping[str, str] = {
+    "COST": BASE_EBITDA,
+    "REVENUE_REALIZATION": BASE_EBITDA,
+    "VOLUME_DEMAND": BASE_EBITDA,
+    "FX_TRANSACTION": BASE_EBITDA,
+    "FX_TRANSLATION": BASE_EBITDA,
+    "INTEREST_RATE": BASE_PRE_TAX_INTEREST_LINE,
+}
+
 REQUIRED_PARAMS: Mapping[str, tuple[str, ...]] = {
     "COST": ("pass_through", "hedge_ratio"),
     "REVENUE_REALIZATION": ("realization_elasticity", "regulatory_capture_fraction"),
@@ -219,7 +264,8 @@ def _build(channel_type: str, exposure: ExposureView, shock: Shock,
         raise InsufficientParameterData(
             f"{channel_type} channel on {exposure.exposure_tag!r} needs "
             f"{sorted(missing)} and the ledger has no sourced value for them. "
-            f"The channel is UNCOMPUTABLE and publishes nothing.")
+            f"The channel is UNCOMPUTABLE and publishes nothing.",
+            reason=REASON_MISSING_ROW, param=sorted(missing)[0])
 
     used = {name: params[name] for name in required}
     constants = {
@@ -241,6 +287,9 @@ def _build(channel_type: str, exposure: ExposureView, shock: Shock,
         constants=constants,
         grade_cap=_weakest_cap(
             config.evidence_grade_cap.get(dist.source) for dist in used.values()),
+        materiality_base=MATERIALITY_BASE_FOR_TYPE[channel_type],
+        segment_ownership_fraction=float(exposure.segment_ownership_fraction),
+        ownership_basis=str(exposure.ownership_basis),
     )
     point = result.evaluate({name: dist.point for name, dist in used.items()})
     return ChannelResult(**{**result.__dict__, "delta_ebitda_inr": point})
@@ -316,6 +365,7 @@ def compute_channel(exposure: ExposureView, shock: Shock,
         raise InsufficientParameterData(
             f"exposure_kind {exposure.exposure_kind!r} has no §5.1 channel "
             f"formula. It is a real exposure and it is recorded, but it "
-            f"cannot be sized, so it publishes nothing.")
+            f"cannot be sized, so it publishes nothing.",
+            reason=REASON_NO_FORMULA)
     return CHANNEL_FUNCTIONS[channel_type](
         exposure, shock, params, horizon_days, horizon=horizon, config=config)

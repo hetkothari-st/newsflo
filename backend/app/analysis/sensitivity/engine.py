@@ -28,10 +28,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Mapping, Sequence
 
+import logging
+
 from sqlalchemy import text
 
 from app.analysis.sensitivity.channels import (
-    CHANNEL_FOR_KIND, ChannelResult, ExposureView, REQUIRED_PARAMS, Shock,
+    CHANNEL_FOR_KIND, ChannelResult, ExposureView, OWNERSHIP_SELF_CONSOLIDATED,
+    OWNERSHIP_SUPPLIED, REQUIRED_PARAMS, Shock, UncomputableChannel,
     compute_channel, NEAR_TERM,
 )
 from app.analysis.sensitivity.config import MaterialityConfig, load_materiality_config
@@ -39,11 +42,14 @@ from app.analysis.sensitivity.monte_carlo import (
     ENGINE_VERSION, MaterialityResult, serialize_materiality, simulate,
 )
 from app.analysis.sensitivity.params import (
-    InsufficientParameterData, ParameterNameError, resolve_param,
+    InsufficientParameterData, ParameterNameError, REASON_MISSING_OWNERSHIP,
+    REASON_MISSING_ROW, REASON_NO_FORMULA, resolve_param,
 )
 from app.core.signals import Signal, make_signal
 from app.ledger.channels import ledger_exposures
 from app.ledger.staleness import company_exposure_is_stale
+
+logger = logging.getLogger(__name__)
 
 STAGE = "SENSITIVITY"
 CREATED_BY = f"sensitivity:{ENGINE_VERSION}"
@@ -59,7 +65,7 @@ class SensitivityRun:
     company_id: int
     channels: tuple[ChannelResult, ...]
     materiality: MaterialityResult | None
-    uncomputable_channels: tuple[str, ...]
+    uncomputable_channels: tuple[UncomputableChannel, ...]
     zero_delta_channels: tuple[str, ...]
     exposure_stale: bool
     signals: tuple[Signal, ...]
@@ -98,9 +104,29 @@ def analyse_company(session, *, company_id: int, shocks: Sequence[Shock],
                     config: MaterialityConfig | None = None,
                     created_by: str = CREATED_BY) -> SensitivityRun:
     """Size one company against one event's shocks. Emits nothing when it
-    cannot compute -- abstention is the default, not the exception."""
+    cannot compute -- abstention is the default, not the exception.
+
+    OWNERSHIP (fix round 1, I1). `segment_ownership_fractions` is
+    exposure_id -> fraction, and there are exactly two ways to be sized:
+
+      * the caller passes NO mapping. It thereby asserts that every exposure
+        being sized is the company's own consolidated line, and each channel
+        records `ownership_basis = SELF_CONSOLIDATED`. That is the normal
+        case, it is a structural fact (a company owns all of its own P&L
+        line), and it is now an explicit assertion in the record instead of a
+        dictionary default;
+      * the caller passes a mapping, in which case the mapping must be
+        COMPLETE. An exposure it does not mention is not a company owning
+        100% of the line -- it is an ownership fraction nobody supplied, so
+        the channel is uncomputable with reason MISSING_OWNERSHIP.
+
+    There is no persisted path from Phase 1's `attach_exposure_to_listco` to
+    here (`company_exposure` has no ownership column), which is exactly why
+    the silent default was dangerous. Recorded in DATA_GAPS.md §6.
+    """
     config = config or load_materiality_config()
     ownership = dict(segment_ownership_fractions or {})
+    ownership_supplied = segment_ownership_fractions is not None
     tags = sorted({str(shock.exposure_tag) for shock in shocks})
 
     stale = company_exposure_is_stale(session, int(company_id), as_of=as_of,
@@ -113,30 +139,35 @@ def analyse_company(session, *, company_id: int, shocks: Sequence[Shock],
         by_tag.setdefault(str(row["exposure_tag"]), []).append(row)
 
     channels: list[ChannelResult] = []
-    uncomputable: list[str] = []
+    uncomputable: list[UncomputableChannel] = []
     zero_delta: list[str] = []
 
     for shock in sorted(shocks, key=lambda s: (s.exposure_tag, s.shock_id)):
         for row in by_tag.get(str(shock.exposure_tag), []):
+            tag = str(row["exposure_tag"])
             kind = str(row["exposure_kind"])
             channel_type = CHANNEL_FOR_KIND.get(kind)
             if channel_type is None:
                 # A real exposure with no §5.1 formula. Recorded, not sized.
-                uncomputable.append(str(row["exposure_tag"]))
+                uncomputable.append(UncomputableChannel(tag, REASON_NO_FORMULA))
                 continue
 
             exposure_id = str(row["exposure_id"])
+            if ownership_supplied and exposure_id not in ownership:
+                uncomputable.append(
+                    UncomputableChannel(tag, REASON_MISSING_OWNERSHIP))
+                continue
+
             exposure = ExposureView(
                 exposure_id=exposure_id, company_id=int(company_id),
-                exposure_kind=kind, exposure_tag=str(row["exposure_tag"]),
+                exposure_kind=kind, exposure_tag=tag,
                 base_value_inr=float(row["base_value_inr"]),
                 share_of_base=float(row["share_of_base"]),
-                # A company's OWN exposure row: it owns all of its own P&L
-                # line. An exposure attached from another entity arrives with
-                # its fraction supplied by Phase 1's attachment rules, which
-                # refuse to attach at all when the fraction is unknown.
-                segment_ownership_fraction=float(ownership.get(exposure_id, 1.0)),
-                evidence_ids=(exposure_id,))
+                segment_ownership_fraction=(float(ownership[exposure_id])
+                                            if ownership_supplied else 1.0),
+                evidence_ids=(exposure_id,),
+                ownership_basis=(OWNERSHIP_SUPPLIED if ownership_supplied
+                                 else OWNERSHIP_SELF_CONSOLIDATED))
             try:
                 params = _resolve_params(
                     session, company_id=int(company_id),
@@ -145,25 +176,36 @@ def analyse_company(session, *, company_id: int, shocks: Sequence[Shock],
                 channel = compute_channel(exposure, shock, params,
                                           shock.horizon_days, horizon=horizon,
                                           config=config)
-            except InsufficientParameterData:
-                uncomputable.append(str(row["exposure_tag"]))
+            except InsufficientParameterData as exc:
+                uncomputable.append(UncomputableChannel(
+                    tag, getattr(exc, "reason", REASON_MISSING_ROW),
+                    getattr(exc, "param", None)))
                 continue
             channels.append(ChannelResult(
                 **{**channel.__dict__, "exposure_stale": stale}))
 
+    uncomputable = list(dict.fromkeys(uncomputable))
     base = ebitda_ttm_inr if ebitda_ttm_inr is not None else ebitda_ttm(
         session, int(company_id))
 
     if not channels or not base:
+        _log_abstention(company_id=int(company_id), event_id=event_id,
+                        uncomputable=uncomputable, tags=tags,
+                        no_ebitda=not base, stale=bool(stale))
         return SensitivityRun(
             company_id=int(company_id), channels=tuple(channels), materiality=None,
-            uncomputable_channels=tuple(dict.fromkeys(uncomputable)),
+            uncomputable_channels=tuple(uncomputable),
             zero_delta_channels=(), exposure_stale=bool(stale), signals=())
+
+    if uncomputable:
+        _log_abstention(company_id=int(company_id), event_id=event_id,
+                        uncomputable=uncomputable, tags=tags, no_ebitda=False,
+                        stale=bool(stale), partial=True)
 
     materiality = simulate(
         channels, ebitda_ttm_inr=base, event_id=event_id, company_id=company_id,
         analysis_version=analysis_version,
-        uncomputable_channels=tuple(dict.fromkeys(uncomputable)), config=config)
+        uncomputable_channels=tuple(uncomputable), config=config)
     block = serialize_materiality(materiality, config)
 
     signals: list[Signal] = []
@@ -195,6 +237,26 @@ def analyse_company(session, *, company_id: int, shocks: Sequence[Shock],
     return SensitivityRun(
         company_id=int(company_id), channels=tuple(channels),
         materiality=materiality,
-        uncomputable_channels=tuple(dict.fromkeys(uncomputable)),
+        uncomputable_channels=tuple(uncomputable),
         zero_delta_channels=tuple(zero_delta), exposure_stale=bool(stale),
         signals=tuple(signals))
+
+
+def _log_abstention(*, company_id: int, event_id: str,
+                    uncomputable: Sequence[UncomputableChannel],
+                    tags: Sequence[str], no_ebitda: bool, stale: bool,
+                    partial: bool = False) -> None:
+    """A structured line per company (fix round 1, I3).
+
+    A company that silently sizes nothing looks exactly like a company nobody
+    considered. This is the difference, and it is the first thing an operator
+    will grep when coverage looks wrong.
+    """
+    reasons = ";".join(sorted(
+        f"{u.channel_id}={u.reason}" + (f"({u.param})" if u.param else "")
+        for u in uncomputable)) or "NO_EXPOSURE_ROW"
+    logger.warning(
+        "[v5-sensitivity] %s company_id=%s event_id=%s tags=%s "
+        "uncomputable=%s no_ebitda=%s exposure_stale=%s",
+        "PARTIAL" if partial else "ABSTAINED", company_id, event_id,
+        ",".join(tags) or "-", reasons, no_ebitda, stale)

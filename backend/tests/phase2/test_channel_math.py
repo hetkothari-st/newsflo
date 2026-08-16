@@ -316,3 +316,46 @@ def test_the_curve_is_interpolated_not_snapped():
     _assert_close(evaluate_curve(points, 60), 0.325, "curve at 60")
     # Beyond the last point the curve is flat, never extrapolated upward.
     _assert_close(evaluate_curve(points, 400), 0.4, "curve beyond the last point")
+
+
+# --- FIX ROUND 1 -----------------------------------------------------------
+
+def test_every_channel_declares_the_p_and_l_line_it_moves():
+    """Concern 4b. Five of the six channels move EBITDA. The interest-rate
+    channel moves the interest line, which sits BELOW EBITDA, and the record
+    has to say so rather than letting the field name imply otherwise."""
+    from app.analysis.sensitivity.channels import compute_channel
+
+    bases = {}
+    for case in COMPUTABLE:
+        result = compute_channel(
+            exposure_from_case(case), shock_from_case(case), params_from_case(case),
+            horizon_days=int(case["shock"]["horizon_days"]))
+        bases[result.channel_type] = result.materiality_base
+    assert bases["COST"] == "EBITDA"
+    assert bases["REVENUE_REALIZATION"] == "EBITDA"
+    assert bases["VOLUME_DEMAND"] == "EBITDA"
+    assert bases["FX_TRANSACTION"] == "EBITDA"
+    assert bases["FX_TRANSLATION"] == "EBITDA"
+    assert bases["INTEREST_RATE"] == "PRE_TAX_INTEREST_LINE"
+
+
+def test_the_volume_channel_scales_with_segment_ownership():
+    """M1. §5.1's VOLUME_DEMAND line does not name an ownership factor; this
+    implementation applies it as every other channel does, because a listco
+    owns only its fraction of a segment's volume. That is a DEVIATION from the
+    literal spec text, it is conservative (it can only shrink a claim), and it
+    is documented in channels.py and in the worked-examples file. Here it is
+    pinned: half the ownership, half the channel."""
+    from app.analysis.sensitivity.channels import ExposureView, compute_channel
+
+    case = case_by_id("V1")
+    whole = compute_channel(exposure_from_case(case), shock_from_case(case),
+                            params_from_case(case), horizon_days=180)
+    half = compute_channel(
+        ExposureView(**{**exposure_from_case(case).__dict__,
+                        "segment_ownership_fraction": 0.5}),
+        shock_from_case(case), params_from_case(case), horizon_days=180)
+    _assert_close(half.delta_ebitda_inr, whole.delta_ebitda_inr * 0.5,
+                  "V1 at half ownership")
+    _assert_close(half.delta_ebitda_inr, -18000000.0, "V1 at half ownership (hand)")

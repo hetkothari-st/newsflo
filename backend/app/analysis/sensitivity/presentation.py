@@ -36,23 +36,49 @@ def _pct(value: float) -> str:
     return f"{value:.1f}%"
 
 
-def format_band(band: Mapping[str, Any]) -> str:
-    return (f"{_pct(float(band['p50']))} EBITDA "
+# FIX ROUND 1 (concern 4b). An interest-rate channel moves the interest line,
+# which sits BELOW EBITDA. §5.1 still measures it against EBITDA_ttm to get a
+# comparable percentage, but rendering it as "-2.5% EBITDA" would state
+# something false about which line moved.
+BASE_PHRASES = {
+    ("EBITDA",): "EBITDA",
+    ("PRE_TAX_INTEREST_LINE",): "of EBITDA, interest line (below EBITDA)",
+}
+MIXED_BASE_PHRASE = "of EBITDA, mixed EBITDA and interest line"
+
+
+def base_phrase(bases: Any) -> str:
+    key = tuple(bases or ("EBITDA",))
+    if key in BASE_PHRASES:
+        return BASE_PHRASES[key]
+    return MIXED_BASE_PHRASE
+
+
+def format_band(band: Mapping[str, Any], bases: Any = ("EBITDA",)) -> str:
+    return (f"{_pct(float(band['p50']))} {base_phrase(bases)} "
             f"(range {_pct(float(band['p10']))} to {_pct(float(band['p90']))})")
 
 
 def format_driver(driver: Mapping[str, Any]) -> str:
-    """"pass-through 55% (earnings call disclosure)". A parameter that is a
-    fraction of something is shown as a percentage; anything else (an
-    elasticity, say) is shown as itself -- 150% would be a nonsense reading
-    of an elasticity of 1.5."""
+    """"pass-through 55% (earnings call disclosure, ev-123)".
+
+    A parameter that is a fraction of something is shown as a percentage;
+    anything else (an elasticity, say) is shown as itself -- 150% would be a
+    nonsense reading of an elasticity of 1.5.
+
+    FIX ROUND 1 (M3): the evidence id is rendered alongside the source
+    category. "Sector proxy" tells an analyst what KIND of number it is; the
+    id tells them which document to open and argue with.
+    """
     config = load_materiality_config()
     name = str(driver["param"])
     bare = name.split("(")[0]
     point = float(driver["point"])
     value = f"{point * 100:.0f}%" if bare in config.param_bounds else f"{point:g}"
     label = SOURCE_LABELS.get(str(driver["source"]), str(driver["source"]))
-    return f"{name.replace('_', '-')} {value} ({label})"
+    evidence_id = driver.get("evidence_id")
+    reference = f"{label}, {evidence_id}" if evidence_id else label
+    return f"{name.replace('_', '-')} {value} ({reference})"
 
 
 def materiality_line(impact) -> str:
@@ -67,7 +93,8 @@ def materiality_line(impact) -> str:
         raise ValueError("a p50 may never be shown without its p10 and p90")
 
     horizon = str(impact.headline_horizon).replace("_", " ")
-    head = f"{impact.net_effect} | {horizon} | {format_band(band)}"
+    head = (f"{impact.net_effect} | {horizon} | "
+            f"{format_band(band, block.get('materiality_bases'))}")
     drivers = block.get("driver_ranking") or []
     if not drivers:
         return head + "\nMost sensitive to: no parameter with any uncertainty"

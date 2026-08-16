@@ -300,6 +300,79 @@ def _assert_ledger_guard(url: str, scheme: str) -> None:
     raise LedgerGuardMissing(message)
 
 
+# ---------------------------------------------------------------------------
+# V5 Phase 3 (Task 3.1) vocabulary backstop -- ADDITIVE again, and again
+# deliberately separate from all three lists above.
+# ---------------------------------------------------------------------------
+# `exposure_tag` on `company_exposure` and `mechanism_edge` is a CLOSED
+# vocabulary (config/exposure_tags.yaml). SQLite cannot express that as a
+# CHECK against another table, so it is four triggers (migration 0013 +
+# app/models.py's metadata after_create hook). Without them the ledger and
+# the causal graph would silently accept a tag a model invented, which is the
+# exact failure Task 3.1 exists to remove -- and nothing else would notice.
+RIPPLE_TRIGGERS = (
+    "company_exposure_valid_tag_insert",
+    "company_exposure_valid_tag_update",
+    "mechanism_edge_valid_tag_insert",
+    "mechanism_edge_valid_tag_update",
+)
+
+
+class RippleGuardMissing(RuntimeError):
+    """The V5 closed-vocabulary triggers are absent after migration."""
+
+
+def check_ripple_guard(url: str) -> tuple[str, tuple[str, ...]]:
+    """Same contract as the three checks above: returns `(status, missing)`
+    with status in {"ok", "missing", "skipped_dialect", "skipped_no_table"}."""
+    from sqlalchemy import create_engine, inspect, text
+
+    if not url.startswith("sqlite"):
+        return "skipped_dialect", ()
+
+    engine = create_engine(url, connect_args={"check_same_thread": False})
+    try:
+        tables = set(inspect(engine).get_table_names())
+        if not {"company_exposure", "mechanism_edge",
+                "valid_exposure_tag"} <= tables:
+            return "skipped_no_table", ()
+        with engine.connect() as connection:
+            present = {
+                row[0] for row in connection.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'"))
+            }
+    finally:
+        engine.dispose()
+
+    missing = tuple(name for name in RIPPLE_TRIGGERS if name not in present)
+    return ("missing" if missing else "ok"), missing
+
+
+def _assert_ripple_guard(url: str, scheme: str) -> None:
+    status, missing = check_ripple_guard(url)
+    if status == "ok":
+        logger.info("[migrate] V5 closed-vocabulary guard present")
+        return
+    if status == "skipped_dialect":
+        logger.info(
+            "[migrate] %s dialect: the vocabulary guard is a foreign key, not "
+            "triggers (see migration 0013's docstring); check skipped", scheme)
+        return
+    if status == "skipped_no_table":
+        logger.info("[migrate] no mechanism_edge/valid_exposure_tag tables; "
+                    "vocabulary guard check skipped")
+        return
+
+    message = (
+        "[migrate] FATAL: the V5 closed exposure-tag vocabulary guard is "
+        "MISSING after migration -- absent trigger(s): " + ", ".join(missing)
+        + ". company_exposure and mechanism_edge would accept any tag string; "
+        "refusing to start.")
+    logger.error(message)
+    print(message, file=sys.stderr)
+    raise RippleGuardMissing(message)
+
+
 def _database_url() -> str:
     """Same resolution order as every other entrypoint (app/db.py,
     alembic/env.py): DATABASE_URL wins, else settings' own default."""
@@ -411,6 +484,9 @@ def migrate_on_boot(url: str | None = None) -> str:
     # V5 Phase 1 Task 1.1/1.4 backstop: the exposure ledger's review-only
     # write guard. Third separate list, same discipline.
     _assert_ledger_guard(url, scheme)
+    # V5 Phase 3 Task 3.1 backstop: the closed exposure-tag vocabulary.
+    # Fourth separate list, same discipline.
+    _assert_ripple_guard(url, scheme)
 
     logger.info("[migrate] done (%s DB) -- schema at alembic head", state)
     return state

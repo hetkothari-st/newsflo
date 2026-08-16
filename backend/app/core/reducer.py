@@ -247,6 +247,63 @@ def _apply_sensitivity(block: Mapping[str, Any],
     return net_effect, round(consistency, 6), bucket
 
 
+def cap_evidence_grade(grade: str | None, cap: str | None) -> str | None:
+    """FIX ROUND 1 (C1). The WORST of a claim's evidence grade and the cap its
+    parameters allow.
+
+    "At most the cap" means at most in BADNESS: a cap of C turns an A into a
+    C and leaves a D alone. A company with no graded binding at all whose
+    parameters are sector medians is not ungraded -- it is at best the cap.
+    """
+    if cap is None:
+        return grade
+    if grade is None:
+        return cap
+    # _GRADE_RANK is higher-is-better, so the worst of the two is the min.
+    # An unrecognised grade ranks 0 and therefore wins, which is fail-closed.
+    return min((grade, cap), key=lambda g: _GRADE_RANK.get(g, 0))
+
+
+def _band_magnitude(block: Mapping[str, Any] | None) -> float | None:
+    """|p50| of the computed band, or None when there is no computed band.
+    None means NOT KNOWN and the gate's own policy decides what that means --
+    it is never rendered as 0.0, which would read as "no impact"."""
+    if not block:
+        return None
+    try:
+        return abs(float((block.get("delta_ebitda_pct") or {})["p50"]))
+    except (KeyError, TypeError, ValueError):          # pragma: no cover
+        return None
+
+
+def _uses_sector_proxy(signals: Sequence[Signal]) -> bool | None:
+    """True when ANY parameter behind ANY channel came from a sector median,
+    False when the channels are computed and none did, None when no channel
+    reports its parameter sources at all (every V4-forwarded channel)."""
+    reported = False
+    for payload in _payloads(signals, SignalKind.CHANNEL):
+        sources = payload.get("param_sources")
+        if not isinstance(sources, Mapping):
+            continue
+        reported = True
+        if any(str(source) == "SECTOR_PROXY" for source in sources.values()):
+            return True
+    return False if reported else None
+
+
+def _dominant_proxy_param(block: Mapping[str, Any]) -> str | None:
+    """The parameter driving more than half of the attributed variance, when
+    that parameter is a SECTOR_PROXY. None otherwise."""
+    for driver in block.get("driver_ranking") or []:
+        try:
+            contribution = float(driver.get("contribution", 0.0))
+        except (TypeError, ValueError):             # pragma: no cover
+            continue
+        if contribution > 0.5 and str(driver.get("source")) == "SECTOR_PROXY":
+            return str(driver.get("param") or "parameter").split("(")[0]
+    return None
+
+
 def _reject(base: dict, reason: str, trace=()) -> CompanyImpact:
     impact = CompanyImpact(publication_tier=TIER_REJECTED, rejection_reason=reason,
                            gate_trace=trace, **base)
@@ -389,6 +446,42 @@ def reduce_company_impact(signals: Sequence[Signal],
     unbound_claim_ids = tuple(b["claim_id"] for b in bindings
                               if b["binding_status"] == "UNBOUND")
 
+    # --- 5b. the parameter grade cap, ENFORCED (fix round 1, C1) -----------
+    #
+    # The sensitivity engine caps the evidence grade a channel may claim when
+    # a parameter came from a sector median (C) or a modelled judgement (D).
+    # Phase 2 computed that cap and nothing consumed it: an all-sector-proxy
+    # company with an A-graded claim binding published PRIMARY.
+    #
+    # Both halves of the fix live here, at draft construction, because
+    # `config/gates.yaml` and `app/core/gates.py` are owned by another phase
+    # and the gate's existing rules already do the right thing once their
+    # INPUTS are honest:
+    #
+    #   1. the evidence grade is capped to the worst of (claim grade, param
+    #      cap). PRIMARY admits {A,B,C} and MEDIUM materiality needs {A,B},
+    #      so a capped grade demotes exactly where it should;
+    #   2. THE VOCABULARY BRIDGE. `forbidden_weakest_link_statuses` is
+    #      written in the CLAIM-BINDING vocabulary, where "SECTOR_PROXY"
+    #      means "the evidence is about the sector, not this company". A
+    #      parameter taken from a sector median is the same statement about a
+    #      different part of the chain, and the two spellings are homonyms,
+    #      not synonyms -- so nothing bridged them. When the DOMINANT driver
+    #      (>50% of attributed variance) is a SECTOR_PROXY parameter, the
+    #      weakest link of this company's chain IS that parameter, and it is
+    #      named as such: "<param>:SECTOR_PROXY". The existing gate rule then
+    #      refuses it for PRIMARY, legitimately and readably in the trace.
+    #
+    # An UNBOUND claim binding is worse than a sector proxy and is never
+    # overwritten: the record must keep describing its true weakest point.
+    if sensitivity is not None:
+        evidence_grade = cap_evidence_grade(
+            evidence_grade, sensitivity.get("evidence_grade_cap"))
+        proxy_param = _dominant_proxy_param(sensitivity)
+        current_status = (weakest_link or "").rsplit(":", 1)[-1]
+        if proxy_param and current_status != "UNBOUND":
+            weakest_link = f"{proxy_param}:SECTOR_PROXY"
+
     # --- 6. objections -----------------------------------------------------
     objections = sorted(
         ({"objection_id": str(p["objection_id"]), "type": str(p["type"]),
@@ -451,7 +544,7 @@ def reduce_company_impact(signals: Sequence[Signal],
         return _reject(base, "ENTITY_AMBIGUOUS")
 
     # --- 7. publication gate ----------------------------------------------
-    draft = ImpactDraft(
+    draft_fields: dict[str, Any] = dict(
         entity_status=entity_status[0] if entity_status else "UNKNOWN",
         entity_ambiguous=False,
         exposure_stale=exposure_stale,
@@ -464,6 +557,29 @@ def reduce_company_impact(signals: Sequence[Signal],
         event_status=config.event_context.event_status,
         shock_magnitude_confidence=config.event_context.shock_magnitude_confidence,
         mechanism_id=mechanism_id, net_effect=net_effect)
+
+    # Gate inputs a LATER phase's gate may ask for. They are supplied only
+    # when that phase's `ImpactDraft` actually declares them, so this reducer
+    # keeps working against either version of the gate while the two phases
+    # land -- and the moment the field exists, it is filled with the computed
+    # answer instead of defaulting to "unknown".
+    #
+    #   delta_ebitda_pct_abs -- the magnitude the gate's materiality floor
+    #                           compares against, |p50| of the computed band;
+    #   uses_sector_proxy    -- whether ANY parameter behind ANY channel came
+    #                           from a sector median. This is the same fact
+    #                           the weakest-link bridge above expresses in the
+    #                           claim vocabulary; here it is stated in its
+    #                           own terms, which is better.
+    optional_draft_fields = {
+        "delta_ebitda_pct_abs": _band_magnitude(sensitivity),
+        "uses_sector_proxy": _uses_sector_proxy(ordered),
+    }
+    for name, value in optional_draft_fields.items():
+        if name in ImpactDraft.__dataclass_fields__:
+            draft_fields[name] = value
+
+    draft = ImpactDraft(**draft_fields)
     result = evaluate_gate(draft, config.gate_config)
 
     # --- 8. emit -----------------------------------------------------------

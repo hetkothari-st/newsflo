@@ -2120,3 +2120,284 @@ def _install_company_exposure_guard(target, connection, **kw):
 @event.listens_for(LedgerExposureProposal.__table__, "after_create")
 def _install_extractor_quality_view(target, connection, **kw):
     emit_ledger_ddl(connection, (_EXTRACTOR_QUALITY_VIEW,))
+
+
+# ---------------------------------------------------------------------------
+# V5 PHASE 3 -- ripple discovery (docs/v5/04_PHASE_3_ripple_discovery.md,
+# addendum A2.3). Tables: valid_exposure_tag, mechanism_edge, io_coefficient,
+# coverage_gap. Migration 0013.
+# ---------------------------------------------------------------------------
+
+class ValidExposureTag(Base):
+    """TASK 3.1 -- the closed vocabulary, as a table so the DATABASE can
+    enforce it.
+
+    THE ONE PHASE 3 TABLE THAT SHIPS NON-EMPTY, and the reason is written
+    down rather than assumed: a tag name is a WORD this system may use, not a
+    claim about a company. `input:crude_derivative_rubber` asserts that
+    "tyres buy synthetic rubber" is expressible; it asserts nothing about any
+    tyre maker. The claim that a specific company carries that exposure lives
+    in `company_exposure`, which ships empty. See app/ledger/exposure_tags.py
+    and DATA_GAPS section 7."""
+    __tablename__ = "valid_exposure_tag"
+
+    exposure_tag = Column(String, primary_key=True)
+    # 'config/exposure_tags.yaml' for the deployed vocabulary; anything else
+    # is a tag some other caller registered, and is distinguishable as such.
+    source = Column(String, nullable=False)
+    registered_at = Column(DateTime(timezone=True), nullable=False,
+                           server_default=text("CURRENT_TIMESTAMP"))
+
+
+class MechanismEdge(Base):
+    """Addendum A2.3 -- one edge of the causal graph: an economic variable or
+    industry, the node it reaches, and the exposure tag that carries the
+    effect. SHIPS EMPTY.
+
+    `derivation` is load-bearing. IO_TABLE edges are generated in bulk from
+    published input-output tables and EMPIRICAL edges from event studies;
+    BOTH are hypotheses, and `app/graph/traverse.py` refuses to walk either
+    one until a named human has reviewed it (A2.4, A3.2). AUTHORED edges were
+    written by a human in the first place.
+
+    `distance` is the AUTHORED hop length of this edge. It is NOT the
+    traversal distance, which is a property of the path and is computed by
+    the walk -- see `GraphEdge.graph_distance`."""
+    __tablename__ = "mechanism_edge"
+    __table_args__ = (
+        Index("ix_mechanism_edge_from", "from_node"),
+        Index("ix_mechanism_edge_tag", "exposure_tag"),
+    )
+
+    edge_id = Column(String, primary_key=True)
+    from_node = Column(String, nullable=False)
+    to_node = Column(String, nullable=False)
+    exposure_tag = Column(String, nullable=False)
+    # INPUT_COST | REVENUE_REALIZATION | DEMAND | FX | RATE | REGULATORY
+    relationship_type = Column(String, nullable=False)
+    distance = Column(Integer, nullable=False)
+    io_total_coeff = Column(Numeric, nullable=True)   # NULL for non-IO edges
+    derivation = Column(String, nullable=False)       # IO_TABLE|EMPIRICAL|AUTHORED
+    reviewed_by = Column(String, nullable=True)       # mandatory for IO_TABLE/EMPIRICAL
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # PENDING | APPROVED | REJECTED. A rejected edge is RETAINED with its
+    # reason (invariant 12) and can never be traversed again.
+    review_status = Column(String, nullable=False, default="PENDING",
+                           server_default="PENDING")
+    review_note = Column(Text, nullable=True)
+    confidence = Column(Numeric, nullable=False)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    # THE ONE RULE: an edge is a causal claim, so it names where it came from
+    # (the IO table's URL, the paper, the filing, or the internal authoring
+    # note). A2.3 omits this; the master context does not permit the omission.
+    source_url = Column(String, nullable=False)
+    table_year = Column(Integer, nullable=True)       # for IO_TABLE edges
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                        server_default=text("CURRENT_TIMESTAMP"))
+
+
+class IoCoefficient(Base):
+    """Addendum A2.3 -- direct and total (Leontief) input coefficients from
+    India's Supply-Use / Input-Output Transaction Tables. SHIPS EMPTY, AND
+    STAYS EMPTY until someone loads a published table.
+
+    There is no code path that writes a coefficient from anything other than
+    a parsed file with a source URL and a table year
+    (`app/graph/io_bootstrap/load.py` raises without both). The phase file is
+    explicit: "Do not populate io_coefficient from memory. It comes from
+    published tables or the table stays empty."
+    """
+    __tablename__ = "io_coefficient"
+
+    source_industry = Column(String, primary_key=True)   # IOTT/NIC code
+    target_industry = Column(String, primary_key=True)
+    table_year = Column(Integer, primary_key=True)
+    direct_coeff = Column(Numeric, nullable=False)       # a(A->B)
+    total_coeff = Column(Numeric, nullable=False)        # from (I-A)^-1
+    source_url = Column(String, nullable=False)
+    loaded_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                       server_default=text("CURRENT_TIMESTAMP"))
+
+
+class CoverageGap(Base):
+    """TASK 3.5 -- an industry that empirically reacts to a shock variable and
+    that the graph cannot explain. SHIPS EMPTY.
+
+    A WORK QUEUE, NEVER A PUBLICATION. A row here is a statistic with no
+    mechanism, and invariant 7 refuses to publish one: SECONDARY_RIPPLE
+    requires a non-null mechanism_id, which only a reviewed `mechanism_edge`
+    can supply. The workflow is: empirical signal -> this queue -> a human
+    authors a mechanism -> the edge is reviewed -> companies are tagged ->
+    only then publishable."""
+    __tablename__ = "coverage_gap"
+    __table_args__ = (
+        UniqueConstraint("variable", "sign", "industry",
+                         name="uq_coverage_gap_variable_sign_industry"),
+    )
+
+    gap_id = Column(String, primary_key=True)
+    variable = Column(String, nullable=False)
+    sign = Column(String, nullable=False)
+    industry = Column(String, nullable=False)
+    window_days = Column(Integer, nullable=False)
+    n = Column(Integer, nullable=False)
+    median_car = Column(Numeric, nullable=False)
+    iqr_low = Column(Numeric, nullable=True)
+    iqr_high = Column(Numeric, nullable=True)
+    sign_consistency = Column(Numeric, nullable=False)
+    p_value = Column(Numeric, nullable=False)
+    industry_mcap = Column(Numeric, nullable=True)
+    priority = Column(Numeric, nullable=False)
+    status = Column(String, nullable=False, default="OPEN", server_default="OPEN")
+    computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                         server_default=text("CURRENT_TIMESTAMP"))
+
+
+# ---------------------------------------------------------------------------
+# V5 Phase 3 vocabulary guard + exposure index, SQLite
+# ---------------------------------------------------------------------------
+# Task 3.1 asks for a "DB-level CHECK against a valid_exposure_tag table".
+# SQLite CHECK constraints cannot reference another table, so the check is a
+# BEFORE trigger -- the same substitution 0008/0011/0012 made for roles, and
+# strictly equivalent in effect: the write is refused AT THE DATABASE, by
+# every connection, whatever code holds it.
+#
+# NEW TRIGGER NAMES ONLY. `company_exposure` already carries three triggers
+# from 0012 (review_only_insert/update/delete); none of them is touched, and
+# SQLite runs all matching BEFORE triggers, so the vocabulary check composes
+# with the review capability check rather than replacing it.
+#
+# Task 3.2 asks for a MATERIALIZED VIEW. SQLite has none. `exposure_index` is
+# a plain VIEW -- the join and the filter are trivial at this scale, and a
+# live view cannot be stale, so "REFRESH CONCURRENTLY on ledger write"
+# becomes a no-op rather than a lie. The covering index the task asks for is
+# expressed on the BASE TABLE, which is where SQLite can use it. The Postgres
+# MV DDL is recorded verbatim in migration 0013's docstring.
+#
+# The SQL below is copied verbatim into
+# alembic/versions/0013_v5_ripple_discovery.py, and
+# tests/phase3/test_migration_0013.py::
+# test_models_and_0013_ddl_are_byte_identical compares the two.
+
+_COMPANY_EXPOSURE_TAG_INSERT_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_exposure_valid_tag_insert
+BEFORE INSERT ON company_exposure
+FOR EACH ROW
+WHEN (SELECT count(*) FROM valid_exposure_tag
+      WHERE exposure_tag = NEW.exposure_tag) = 0
+BEGIN
+  SELECT RAISE(ABORT, 'exposure_tag is not in the closed vocabulary');
+END
+"""
+
+_COMPANY_EXPOSURE_TAG_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_exposure_valid_tag_update
+BEFORE UPDATE OF exposure_tag ON company_exposure
+FOR EACH ROW
+WHEN (SELECT count(*) FROM valid_exposure_tag
+      WHERE exposure_tag = NEW.exposure_tag) = 0
+BEGIN
+  SELECT RAISE(ABORT, 'exposure_tag is not in the closed vocabulary');
+END
+"""
+
+_MECHANISM_EDGE_TAG_INSERT_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS mechanism_edge_valid_tag_insert
+BEFORE INSERT ON mechanism_edge
+FOR EACH ROW
+WHEN (SELECT count(*) FROM valid_exposure_tag
+      WHERE exposure_tag = NEW.exposure_tag) = 0
+BEGIN
+  SELECT RAISE(ABORT, 'exposure_tag is not in the closed vocabulary');
+END
+"""
+
+_MECHANISM_EDGE_TAG_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS mechanism_edge_valid_tag_update
+BEFORE UPDATE OF exposure_tag ON mechanism_edge
+FOR EACH ROW
+WHEN (SELECT count(*) FROM valid_exposure_tag
+      WHERE exposure_tag = NEW.exposure_tag) = 0
+BEGIN
+  SELECT RAISE(ABORT, 'exposure_tag is not in the closed vocabulary');
+END
+"""
+
+_EXPOSURE_INDEX_VIEW = """
+CREATE VIEW IF NOT EXISTS exposure_index AS
+SELECT e.exposure_id AS exposure_id,
+       e.exposure_tag AS exposure_tag,
+       e.exposure_kind AS exposure_kind,
+       e.company_id AS company_id,
+       e.share_of_base AS share_of_base,
+       e.base_value_inr AS base_value_inr,
+       e.confidence AS confidence,
+       e.as_of_date AS as_of_date,
+       e.freshness_days AS freshness_days,
+       m.adv_20d_inr AS adv_20d_inr,
+       COALESCE(m.status, 'ACTIVE') AS status
+FROM company_exposure e
+JOIN companies c ON c.id = e.company_id
+LEFT JOIN company_entity_meta m ON m.company_id = e.company_id
+WHERE e.share_of_base >= 0.02
+  AND COALESCE(m.status, 'ACTIVE') = 'ACTIVE'
+"""
+
+_EXPOSURE_INDEX_BASE_INDEX = """
+CREATE INDEX IF NOT EXISTS ix_company_exposure_tag_share
+ON company_exposure (exposure_tag, share_of_base DESC)
+"""
+
+RIPPLE_TRIGGER_DDL = (
+    _COMPANY_EXPOSURE_TAG_INSERT_TRIGGER,
+    _COMPANY_EXPOSURE_TAG_UPDATE_TRIGGER,
+    _MECHANISM_EDGE_TAG_INSERT_TRIGGER,
+    _MECHANISM_EDGE_TAG_UPDATE_TRIGGER,
+)
+
+RIPPLE_VIEW_DDL = (
+    _EXPOSURE_INDEX_VIEW,
+    _EXPOSURE_INDEX_BASE_INDEX,
+)
+
+# All six, in the order 0013 emits them (the byte-identity test reads this).
+V5_RIPPLE_DDL = RIPPLE_TRIGGER_DDL + RIPPLE_VIEW_DDL
+
+
+def emit_ripple_ddl(bind, statements=V5_RIPPLE_DDL) -> bool:
+    """Install the Phase 3 vocabulary guard and the exposure index on `bind`.
+    Idempotent (every statement is CREATE ... IF NOT EXISTS). Returns False on
+    a non-SQLite dialect, where the guarantee is a real FK plus a materialized
+    view (see migration 0013's docstring)."""
+    if bind.dialect.name != "sqlite":
+        return False
+    for statement in statements:
+        bind.execute(text(statement))
+    return True
+
+
+@event.listens_for(Base.metadata, "after_create")
+def _install_ripple_guard(target, connection, **kw):
+    """Metadata-level rather than per-table, ON PURPOSE: the vocabulary
+    triggers span THREE tables (`valid_exposure_tag`, `company_exposure`,
+    `mechanism_edge`) and `exposure_index` reads a fourth. A per-table
+    `after_create` hook would fire while some of them still did not exist.
+    This one runs after create_all has finished, and checks first."""
+    if connection.dialect.name != "sqlite":
+        return
+    present = {row[0] for row in connection.execute(text(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"))}
+    needed = {"valid_exposure_tag", "company_exposure", "mechanism_edge",
+              "companies", "company_entity_meta"}
+    if not needed <= present:
+        return
+    emit_ripple_ddl(connection)
+    # Seed the closed vocabulary, so a create_all-built database (every test
+    # database, every fresh dev database) refuses an unknown tag for the same
+    # reason a migrated one does. Imported here rather than at module scope:
+    # app.ledger.exposure_tags imports app.ledger.vocabulary, and app.models
+    # must stay importable without the ledger package.
+    from app.ledger.exposure_tags import register_vocabulary
+
+    register_vocabulary(connection)

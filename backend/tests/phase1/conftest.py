@@ -27,16 +27,42 @@ FIXTURE_NOW = datetime(2226, 2, 22, 2, 22, tzinfo=timezone.utc)
 FIXTURE_TODAY = date(2226, 2, 22)
 
 
+# V5 PHASE 3 closed the exposure-tag vocabulary (config/exposure_tags.yaml)
+# and enforces it with a DATABASE TRIGGER, so `company_exposure` now refuses
+# a tag that names nothing real. Phase 1's fixture tags name nothing real ON
+# PURPOSE -- they belong to companies that do not exist -- so this package
+# REGISTERS them explicitly, which is exactly the act Task 3.1 requires of
+# anyone widening the vocabulary. They are registered with a `source` of
+# "tests/phase1", so a production database's vocabulary and a tag a test
+# invented remain distinguishable in the table itself
+# (tests/phase3/test_no_fixture_data_reaches_production.py asserts a
+# migrated database contains only the YAML rows).
+FIXTURE_TAGS = (
+    "input:fixture_foo", "input:fixture_bar", "input:fixture_big",
+    "input:fixture_det", "input:fixture_fresh", "input:fixture_old",
+    "input:fixture_malformed", "input:fixture_other", "input:fixture_x",
+    "input:x",
+) + tuple(f"input:fixture_{i}" for i in range(10))
+
+
 @pytest.fixture()
 def ledger_engine():
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False},
         poolclass=StaticPool)
     Base.metadata.create_all(engine)
+    _register_fixture_tags(engine)
     try:
         yield engine
     finally:
         engine.dispose()
+
+
+def _register_fixture_tags(engine) -> None:
+    from app.ledger.exposure_tags import register_tags
+
+    with engine.begin() as connection:
+        register_tags(connection, FIXTURE_TAGS, source="tests/phase1")
 
 
 @pytest.fixture()

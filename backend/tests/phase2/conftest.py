@@ -96,16 +96,39 @@ def params_from_case(case: dict) -> dict:
     }
 
 
+# V5 PHASE 3 closed the exposure-tag vocabulary (config/exposure_tags.yaml)
+# and enforces it with a DATABASE TRIGGER, so `company_exposure` now refuses
+# a tag that names nothing real. Phase 2's fixture tags name nothing real ON
+# PURPOSE, so this package REGISTERS them explicitly -- the act Task 3.1
+# requires of anyone widening the vocabulary -- with a `source` that keeps
+# them distinguishable from the deployed vocabulary in the table itself.
+FIXTURE_TAGS = (
+    "input_cost:fixture_input", "input_cost:fixture_missing",
+    "realization:fixture_product", "demand:fixture_enduse",
+    "fx:fixture_usd_receipts", "fx:fixture_usd_payments",
+    "fx:fixture_subsidiary_ebitda", "rates:fixture_floating_debt",
+    "regulatory:fixture_rule",
+)
+
+
 @pytest.fixture()
 def sensitivity_engine():
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False},
         poolclass=StaticPool)
     Base.metadata.create_all(engine)
+    _register_fixture_tags(engine)
     try:
         yield engine
     finally:
         engine.dispose()
+
+
+def _register_fixture_tags(engine) -> None:
+    from app.ledger.exposure_tags import register_tags
+
+    with engine.begin() as connection:
+        register_tags(connection, FIXTURE_TAGS, source="tests/phase2")
 
 
 @pytest.fixture()
@@ -133,6 +156,26 @@ def make_company(session, *, ticker: str, name: str, sector: str = "Fixture Sect
     return company
 
 
+def register_fixture_tag(session, exposure_tag: str) -> None:
+    """Make a FIXTURE tag writable in THIS test database.
+
+    Phase 3 closed the exposure-tag vocabulary at the database (migration
+    0013 populates `valid_exposure_tag` from `config/exposure_tags.yaml` and
+    installs triggers that RAISE on anything else). Phase 2's fixtures use
+    obviously fake tags on purpose -- `input_cost:fixture_input` names no
+    real economic exposure and must never appear in the deployed vocabulary.
+
+    So they are registered here, in the in-memory test database only, with a
+    `source` that says exactly what they are. That is the mechanism Phase 3's
+    own model docstring describes ("a tag some other caller registered, and
+    is distinguishable as such"), it touches no Phase 3 file, and
+    `config/exposure_tags.yaml` stays free of fixture words.
+    """
+    session.execute(text(
+        "INSERT OR IGNORE INTO valid_exposure_tag (exposure_tag, source) "
+        "VALUES (:tag, 'tests/phase2:fixture')"), {"tag": exposure_tag})
+
+
 def seed_exposure(session, *, exposure_id: str, company_id: int, exposure_tag: str,
                   exposure_kind: str, base_value_inr: float, share_of_base: float,
                   measurement: str = "FILED", as_of_date: date = FIXTURE_TODAY,
@@ -143,6 +186,8 @@ def seed_exposure(session, *, exposure_id: str, company_id: int, exposure_tag: s
     test cannot seed the ledger by accident -- it has to say so.
     """
     from app.ledger.review import review_session
+
+    register_fixture_tag(session, exposure_tag)
 
     with review_session(session):
         session.execute(text(
