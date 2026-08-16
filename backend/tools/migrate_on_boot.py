@@ -229,6 +229,73 @@ def _assert_v5_triggers(url: str, scheme: str) -> None:
     raise V5TriggersMissing(message)
 
 
+# ---------------------------------------------------------------------------
+# V5 Phase 1 (Task 1.1/1.4) ledger backstop -- ADDITIVE again, and again
+# deliberately separate from both lists above.
+# ---------------------------------------------------------------------------
+# `company_exposure` is writable only inside a review session (migration 0012
+# + app/models.py's after_create hooks). Without these triggers any process --
+# including an LLM extractor -- could write the ledger directly, which is the
+# one thing the phase file forbids "under any circumstance".
+LEDGER_TRIGGERS = (
+    "company_exposure_review_only_insert",
+    "company_exposure_review_only_update",
+)
+
+
+class LedgerGuardMissing(RuntimeError):
+    """The V5 ledger review-only triggers are absent after migration."""
+
+
+def check_ledger_guard(url: str) -> tuple[str, tuple[str, ...]]:
+    """Same contract as the two checks above: returns `(status, missing)`
+    with status in {"ok", "missing", "skipped_dialect", "skipped_no_table"}."""
+    from sqlalchemy import create_engine, inspect, text
+
+    if not url.startswith("sqlite"):
+        return "skipped_dialect", ()
+
+    engine = create_engine(url, connect_args={"check_same_thread": False})
+    try:
+        if "company_exposure" not in set(inspect(engine).get_table_names()):
+            return "skipped_no_table", ()
+        with engine.connect() as connection:
+            present = {
+                row[0] for row in connection.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'"))
+            }
+    finally:
+        engine.dispose()
+
+    missing = tuple(name for name in LEDGER_TRIGGERS if name not in present)
+    return ("missing" if missing else "ok"), missing
+
+
+def _assert_ledger_guard(url: str, scheme: str) -> None:
+    status, missing = check_ledger_guard(url)
+    if status == "ok":
+        logger.info("[migrate] V5 ledger review-only guard present")
+        return
+    if status == "skipped_dialect":
+        logger.info(
+            "[migrate] %s dialect: the ledger guard is role privileges, not "
+            "triggers (see migration 0012's docstring); check skipped", scheme)
+        return
+    if status == "skipped_no_table":
+        logger.info("[migrate] no company_exposure table; ledger guard check "
+                    "skipped")
+        return
+
+    message = (
+        "[migrate] FATAL: the V5 exposure-ledger review-only guard is MISSING "
+        "after migration -- absent trigger(s): " + ", ".join(missing)
+        + ". company_exposure would be writable without review; refusing to "
+        "start.")
+    logger.error(message)
+    print(message, file=sys.stderr)
+    raise LedgerGuardMissing(message)
+
+
 def _database_url() -> str:
     """Same resolution order as every other entrypoint (app/db.py,
     alembic/env.py): DATABASE_URL wins, else settings' own default."""
@@ -337,6 +404,9 @@ def migrate_on_boot(url: str | None = None) -> str:
     # §26 check above polices alert_companies and must stay exactly as it
     # is; this one polices company_impact and signal.
     _assert_v5_triggers(url, scheme)
+    # V5 Phase 1 Task 1.1/1.4 backstop: the exposure ledger's review-only
+    # write guard. Third separate list, same discipline.
+    _assert_ledger_guard(url, scheme)
 
     logger.info("[migrate] done (%s DB) -- schema at alembic head", state)
     return state

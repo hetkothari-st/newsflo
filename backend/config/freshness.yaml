@@ -1,0 +1,44 @@
+# V5 exposure-ledger freshness policy
+# (docs/v5/02_PHASE_1_exposure_ledger.md Task 1.1).
+#
+# THIS FILE IS POLICY, NOT DATA. It says how old a disclosure may be before
+# the system stops relying on it. It contains no company, no exposure, no
+# ratio and no financial figure -- changing a number here changes what the
+# system is willing to claim, never what is true.
+#
+# Read by app/ledger/freshness.py. The values are the phase file's suggested
+# defaults, taken as-is:
+#
+#   INPUT_COST 400 · REVENUE_REALIZATION 400 · FX 200 · INTEREST_RATE 200
+#   · REGULATORY 120
+#
+# 400 days is "the next annual report has had time to arrive"; 200 is "the
+# next two quarterly disclosures have"; 120 is "a regulatory position older
+# than a quarter is not a current position".
+#
+# The phase file writes a single `FX` entry. The schema's exposure_kind
+# vocabulary (spec §4.1) splits FX into FX_TRANSACTION and FX_TRANSLATION,
+# so the 200 is spelled out for both rather than silently applied to a kind
+# the policy never named.
+#
+# KINDS DELIBERATELY ABSENT: VOLUME_DEMAND, LOGISTICS_ENERGY,
+# CUSTOMER_CONCENTRATION. The phase file suggests no default for them and we
+# have no basis to invent one, so `freshness_days_for()` RAISES for these
+# instead of returning a plausible number -- a reviewer must state the
+# freshness explicitly when approving such a row. Missing is missing.
+
+version: freshness-v5.0.0
+
+freshness_days:
+  INPUT_COST: 400
+  REVENUE_REALIZATION: 400
+  FX_TRANSACTION: 200
+  FX_TRANSLATION: 200
+  INTEREST_RATE: 200
+  REGULATORY: 120
+
+# Task 1.5: alert when the 90th-percentile exposure age crosses this.
+# Set to the longest configured freshness window: if the slowest-decaying
+# exposure kind is at its limit for a tenth of the ledger, the ledger is
+# going stale faster than it is being refreshed.
+p90_age_alert_days: 400

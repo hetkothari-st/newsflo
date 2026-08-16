@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, text
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, event, text
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -1677,3 +1677,396 @@ class LLMCallUsage(Base):
     prompt_version = Column(String, nullable=True)
     schema_version = Column(String, nullable=True)
     estimated_cost_usd = Column(Float, nullable=True)
+
+
+# ===========================================================================
+# V5 PHASE 1 -- the company exposure ledger
+# (docs/v5/02_PHASE_1_exposure_ledger.md, spec §4.1)
+# ===========================================================================
+# THE DURABLE ASSET, AND IT SHIPS EMPTY. Phase 1 builds the schema, the
+# extraction pipeline, the review workflow and the instrumentation; it
+# produces NO data. Every row that ever lands in `company_exposure` is a
+# human approving a proposal that carries a verbatim excerpt from a filing
+# (app/ledger/review.py is the only writer). Migration:
+# 0012_v5_exposure_ledger.py.
+#
+# NAMING: the V5 ledger table is `company_exposure` (singular). The existing
+# `company_exposures` (plural, class CompanyExposure above) is the V4
+# ordinal-rating table and is deliberately untouched -- the two coexist.
+#
+# uuid -> TEXT and jsonb -> TEXT(JSON) throughout: this deployment is
+# SQLite. The Postgres types are recorded in migration 0012's docstring.
+
+
+class CompanyEntityMeta(Base):
+    """Task 1.2 -- the §4.1 `company` columns this repo's `companies` table
+    does not have, as an ADJUNCT table rather than an ALTER (0008's warning:
+    a SQLite batch rebuild silently drops a table's triggers, and `companies`
+    is joined by half the app).
+
+    Every row carries a source_url: an ownership chain or a corporate status
+    is a claim about the world and obeys THE ONE RULE like any other."""
+    __tablename__ = "company_entity_meta"
+
+    company_id = Column(Integer, ForeignKey("companies.id"), primary_key=True)
+    # ISIN of the parent/holdco. NULL = no parent recorded, never "no parent".
+    parent_isin = Column(String, nullable=True)
+    # Fraction of THIS entity the parent owns. NULL blocks attachment to the
+    # parent (app.entities.resolver) -- it is never defaulted to 1.0.
+    ownership_fraction = Column(Float, nullable=True)
+    listed = Column(Boolean, nullable=True)
+    status = Column(String, nullable=False, default="ACTIVE",
+                    server_default="ACTIVE")  # ACTIVE|SUSPENDED|DELISTED|MERGED
+    entity_kind = Column(String, nullable=True)          # OPERATING | HOLDCO
+    free_float_mcap = Column(Numeric, nullable=True)
+    adv_20d_inr = Column(Numeric, nullable=True)          # 7.4 liquidity gate input
+    valid_from = Column(Date, nullable=True)
+    valid_to = Column(Date, nullable=True)
+    source_url = Column(String, nullable=False)
+    as_of_date = Column(Date, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                        onupdate=utcnow)
+
+
+class EntityCorporateAction(Base):
+    """Task 1.2 -- merger / demerger / name change / delisting, with the
+    effective date a claim is checked against. A claim on an entity after
+    its merger effective date resolves ENTITY_WRONG."""
+    __tablename__ = "entity_corporate_action"
+
+    action_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    action_type = Column(String, nullable=False)   # MERGER|DEMERGER|NAME_CHANGE|DELISTING
+    effective_date = Column(Date, nullable=False)
+    successor_isin = Column(String, nullable=True)
+    source_url = Column(String, nullable=False)
+    as_of_date = Column(Date, nullable=False)
+
+
+class CompanyAliasWindow(Base):
+    """Task 1.2's `company_alias` with VALIDITY. The existing
+    `company_aliases` table (the match ladder's index) has no time dimension
+    and is left exactly as it is; this table adds the FORMER-name window the
+    phase file asks for, so a filing filed under an old name resolves only
+    for the period that name was the company's."""
+    __tablename__ = "company_alias_window"
+    __table_args__ = (
+        Index("ix_alias_window_normalized", "normalized"),
+    )
+
+    alias_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    alias = Column(String, nullable=False)
+    kind = Column(String, nullable=False)        # TICKER|LEGAL|COMMON|FORMER
+    normalized = Column(String, nullable=False)
+    valid_from = Column(Date, nullable=True)
+    valid_to = Column(Date, nullable=True)
+    source_url = Column(String, nullable=False)
+
+
+class LedgerCompanyExposure(Base):
+    """spec 4.1 `company_exposure` -- ONE sourced exposure of one company to
+    one tag. SHIPS EMPTY.
+
+    `no_selfcertify`: a MODELLED number is the model's belief, and a belief
+    without a reviewer is not a ledger row.
+
+    Writes are refused by the DB unless the connection holds the review
+    capability (see the trigger DDL below) -- the SQLite substitution for the
+    Postgres reviewer role. `stale` is excluded from that guard: it is a
+    DERIVED flag the nightly job maintains, not a claim."""
+    __tablename__ = "company_exposure"
+    __table_args__ = (
+        CheckConstraint("measurement <> 'MODELLED' OR reviewed_by IS NOT NULL",
+                        name="no_selfcertify"),
+        Index("ix_company_exposure_tag", "exposure_tag"),
+        Index("ix_company_exposure_company", "company_id"),
+    )
+
+    exposure_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    segment_id = Column(String, nullable=True)       # NULL = consolidated
+    exposure_kind = Column(String, nullable=False)
+    exposure_tag = Column(String, nullable=False)
+    share_of_base = Column(Numeric, nullable=False)
+    base_kind = Column(String, nullable=False)
+    base_value_inr = Column(Numeric, nullable=False)
+    measurement = Column(String, nullable=False)
+    source_type = Column(String, nullable=False)
+    source_url = Column(String, nullable=False)
+    source_page = Column(String, nullable=True)
+    as_of_date = Column(Date, nullable=False)
+    freshness_days = Column(Integer, nullable=False)
+    confidence = Column(Numeric, nullable=False)
+    created_by = Column(String, nullable=False)      # the extractor/model that proposed
+    reviewed_by = Column(String, nullable=True)      # the human who approved
+    # The proposal this row came from. `exposure_proposal` is the only path
+    # into this table, so this is never NULL for a row the app wrote.
+    proposal_id = Column(String, nullable=True)
+    stale = Column(Boolean, nullable=False, default=False, server_default="0")
+    stale_checked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                        server_default=text("CURRENT_TIMESTAMP"))
+
+
+class LedgerCompanySegment(Base):
+    """Ind AS 108 segment note (phase file Task 1.1). SHIPS EMPTY."""
+    __tablename__ = "company_segment"
+
+    segment_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    segment_name = Column(String, nullable=False)
+    revenue_inr = Column(Numeric, nullable=True)
+    ebitda_inr = Column(Numeric, nullable=True)
+    revenue_share = Column(Numeric, nullable=True)
+    ebitda_share = Column(Numeric, nullable=True)
+    fiscal_year = Column(Integer, nullable=False)
+    source_url = Column(String, nullable=False)
+    source_page = Column(String, nullable=True)
+    as_of_date = Column(Date, nullable=False)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                        server_default=text("CURRENT_TIMESTAMP"))
+
+
+class LedgerCompanyFinancials(Base):
+    """P&L / balance-sheet lines the sensitivity engine computes against
+    (phase file Task 1.1). SHIPS EMPTY. Every column is nullable except the
+    key and the provenance: a line the filing does not disclose stays NULL,
+    it is never zero."""
+    __tablename__ = "company_financials"
+
+    company_id = Column(Integer, ForeignKey("companies.id"), primary_key=True)
+    fiscal_period = Column(String, primary_key=True)      # 'FY26Q1'
+    revenue_inr = Column(Numeric, nullable=True)
+    ebitda_inr = Column(Numeric, nullable=True)
+    pat_inr = Column(Numeric, nullable=True)
+    cogs_inr = Column(Numeric, nullable=True)
+    raw_material_inr = Column(Numeric, nullable=True)
+    power_fuel_inr = Column(Numeric, nullable=True)
+    freight_inr = Column(Numeric, nullable=True)
+    employee_inr = Column(Numeric, nullable=True)
+    gross_debt_inr = Column(Numeric, nullable=True)
+    floating_debt_inr = Column(Numeric, nullable=True)
+    fx_earnings_inr = Column(Numeric, nullable=True)
+    fx_expenditure_inr = Column(Numeric, nullable=True)
+    source_url = Column(String, nullable=False)
+    as_of_date = Column(Date, nullable=False)
+    created_by = Column(String, nullable=True)
+
+
+class LedgerPassThroughCurve(Base):
+    """spec 4.2 -- pass-through as a CURVE, never a scalar. SHIPS EMPTY.
+
+    `curve_needs_review`: an ESTIMATED curve is somebody's judgement, and an
+    unreviewed judgement is exactly the "single most abused parameter" the
+    spec warns about."""
+    __tablename__ = "pass_through_curve"
+    __table_args__ = (
+        CheckConstraint("basis <> 'ESTIMATED' OR reviewed_by IS NOT NULL",
+                        name="curve_needs_review"),
+    )
+
+    curve_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    sector_id = Column(String, nullable=True)     # set when company_id is NULL
+    exposure_tag = Column(String, nullable=False)
+    points = Column(Text, nullable=False)         # JSON [{"lag_days":..,"fraction":..}]
+    ceiling = Column(Numeric, nullable=True)
+    basis = Column(String, nullable=False)        # DISCLOSED_CALL|FILED|ESTIMATED|SECTOR_MEDIAN
+    evidence_id = Column(String, nullable=True)
+    as_of_date = Column(Date, nullable=False)
+    reviewed_by = Column(String, nullable=True)
+
+
+class LedgerCompanyModifier(Base):
+    """spec 4.1 `company_modifier` -- hedge / pass-through / cap / levy
+    parameters, sourced. SHIPS EMPTY."""
+    __tablename__ = "company_modifier"
+
+    modifier_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    modifier_kind = Column(String, nullable=False)
+    applies_to_tag = Column(String, nullable=False)
+    parameters = Column(Text, nullable=False)     # JSON
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    source_url = Column(String, nullable=False)
+    as_of_date = Column(Date, nullable=False)
+    confidence = Column(Numeric, nullable=False)
+
+
+class LedgerExposureProposal(Base):
+    """Task 1.3 Stage D -- THE ONLY PATH INTO THE LEDGER.
+
+    An extractor (deterministic or LLM) proposes; nothing is written until a
+    human approves. A proposal whose `excerpt` is not verbatim in the source
+    document, or that cannot say WHERE in the document it came from, is
+    stored with status REJECTED_UNVERBATIM and a reason -- retained, not
+    silently dropped (master context invariant 12)."""
+    __tablename__ = "exposure_proposal"
+    __table_args__ = (
+        Index("ix_exposure_proposal_status", "status"),
+    )
+
+    proposal_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    exposure_kind = Column(String, nullable=False)
+    exposure_tag = Column(String, nullable=False)
+    share_of_base = Column(Numeric, nullable=True)
+    base_kind = Column(String, nullable=False)
+    base_value_inr = Column(Numeric, nullable=True)
+    measurement = Column(String, nullable=False)
+    source_type = Column(String, nullable=False)
+    source_url = Column(String, nullable=False)
+    source_page = Column(String, nullable=True)
+    excerpt = Column(Text, nullable=True)
+    extraction_confidence = Column(Numeric, nullable=True)
+    model_id = Column(String, nullable=True)
+    created_by = Column(String, nullable=False)     # 'ingest:..' | 'llm:..' | 'human:..'
+    extractor_version = Column(String, nullable=True)
+    document_sha256 = Column(String, nullable=True)
+    as_of_date = Column(Date, nullable=True)
+    status = Column(String, nullable=False, default="PENDING_REVIEW",
+                    server_default="PENDING_REVIEW")
+    reject_reason = Column(String, nullable=True)
+    edited = Column(Boolean, nullable=False, default=False, server_default="0")
+    reviewed_by = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    exposure_id = Column(String, nullable=True)     # set on approval
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow,
+                        server_default=text("CURRENT_TIMESTAMP"))
+
+
+class LedgerFilingArtefact(Base):
+    """Task 1.3 Stage A -- the raw source document, with its URL and
+    retrieval timestamp. Never discard the source document."""
+    __tablename__ = "filing_artefact"
+    __table_args__ = (
+        UniqueConstraint("content_sha256", "source_url", name="uq_artefact_content_url"),
+    )
+
+    artefact_id = Column(String, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    source_url = Column(String, nullable=False)
+    source_type = Column(String, nullable=False)
+    media_type = Column(String, nullable=True)
+    content_sha256 = Column(String, nullable=False)
+    byte_size = Column(Integer, nullable=True)
+    storage_path = Column(String, nullable=False)
+    fiscal_period = Column(String, nullable=True)
+    retrieved_at = Column(DateTime(timezone=True), nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# V5 ledger write guard + reporting views (Task 1.1/1.4/1.5), SQLite
+# ---------------------------------------------------------------------------
+# Same substitution and the same duplication rule as 0008/0011: SQLite has no
+# roles, so the reviewer privilege is a per-connection capability token -- a
+# TEMP table `_newsflo_ledger_review_session` that ONLY app/ledger/review.py
+# creates. An extractor, a script, the API or a stale worker holding a write
+# handle to the same file is refused AT THE DATABASE.
+#
+# The UPDATE guard is scoped `OF <claim columns>` on purpose: `stale` and
+# `stale_checked_at` are DERIVED and must remain writable by the nightly job
+# (scripts/flag_stale_exposures.py), which holds no reviewer privilege and
+# must not.
+#
+# The SQL below is copied verbatim into
+# alembic/versions/0012_v5_exposure_ledger.py, and
+# tests/phase1/test_migration_0012.py::
+# test_models_and_0012_ddl_are_byte_identical compares the two.
+_LEDGER_REVIEW_SESSION_TABLE = "_newsflo_ledger_review_session"
+
+_COMPANY_EXPOSURE_INSERT_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_exposure_review_only_insert
+BEFORE INSERT ON company_exposure
+FOR EACH ROW
+WHEN (SELECT count(*) FROM pragma_table_list
+      WHERE schema = 'temp' AND name = '_newsflo_ledger_review_session') = 0
+BEGIN
+  SELECT RAISE(ABORT, 'company_exposure is writable only by the review session');
+END
+"""
+
+_COMPANY_EXPOSURE_UPDATE_TRIGGER = """
+CREATE TRIGGER IF NOT EXISTS company_exposure_review_only_update
+BEFORE UPDATE OF company_id, segment_id, exposure_kind, exposure_tag,
+                 share_of_base, base_kind, base_value_inr, measurement,
+                 source_type, source_url, source_page, as_of_date,
+                 freshness_days, confidence, created_by, reviewed_by,
+                 proposal_id
+ON company_exposure
+FOR EACH ROW
+WHEN (SELECT count(*) FROM pragma_table_list
+      WHERE schema = 'temp' AND name = '_newsflo_ledger_review_session') = 0
+BEGIN
+  SELECT RAISE(ABORT, 'company_exposure is writable only by the review session');
+END
+"""
+
+_EXTRACTOR_QUALITY_VIEW = """
+CREATE VIEW IF NOT EXISTS extractor_quality AS
+SELECT created_by AS extractor,
+       extractor_version AS extractor_version,
+       count(*) AS proposed,
+       sum(CASE WHEN status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
+       sum(CASE WHEN status = 'APPROVED' AND edited = 1 THEN 1 ELSE 0 END) AS edited,
+       sum(CASE WHEN status IN ('REJECTED', 'REJECTED_UNVERBATIM') THEN 1 ELSE 0 END)
+         AS rejected,
+       sum(CASE WHEN status = 'REJECTED_UNVERBATIM' THEN 1 ELSE 0 END) AS unverbatim,
+       sum(CASE WHEN status = 'PENDING_REVIEW' THEN 1 ELSE 0 END) AS pending
+FROM exposure_proposal
+GROUP BY created_by, extractor_version
+"""
+
+_EXPOSURE_COVERAGE_VIEW = """
+CREATE VIEW IF NOT EXISTS exposure_coverage AS
+SELECT t.sector AS sector,
+       t.exposure_tag AS exposure_tag,
+       count(*) AS companies_tagged,
+       sum(COALESCE(t.market_cap, 0)) AS tagged_market_cap,
+       (SELECT sum(COALESCE(c2.market_cap, 0)) FROM companies c2
+         WHERE c2.sector = t.sector) AS sector_market_cap
+FROM (SELECT DISTINCT c.sector AS sector, e.exposure_tag AS exposure_tag,
+             c.id AS company_id, c.market_cap AS market_cap
+        FROM company_exposure e JOIN companies c ON c.id = e.company_id) t
+GROUP BY t.sector, t.exposure_tag
+"""
+
+LEDGER_TRIGGER_DDL = (
+    _COMPANY_EXPOSURE_INSERT_TRIGGER,
+    _COMPANY_EXPOSURE_UPDATE_TRIGGER,
+)
+
+LEDGER_VIEW_DDL = (
+    _EXTRACTOR_QUALITY_VIEW,
+    _EXPOSURE_COVERAGE_VIEW,
+)
+
+# All four, in the order 0012 emits them (the byte-identity test reads this).
+V5_LEDGER_DDL = LEDGER_TRIGGER_DDL + LEDGER_VIEW_DDL
+
+
+def emit_ledger_ddl(bind, statements=V5_LEDGER_DDL) -> bool:
+    """Install the Phase 1 write guard and reporting views on `bind`.
+    Idempotent (every statement is CREATE ... IF NOT EXISTS). Returns False
+    on a non-SQLite dialect, where the guarantee comes from role
+    privileges."""
+    if bind.dialect.name != "sqlite":
+        return False
+    for statement in statements:
+        bind.execute(text(statement))
+    return True
+
+
+@event.listens_for(LedgerCompanyExposure.__table__, "after_create")
+def _install_company_exposure_guard(target, connection, **kw):
+    # `exposure_coverage` reads companies, which company_exposure declares an
+    # FK to -- so create_all has already built it by the time this fires.
+    emit_ledger_ddl(connection, LEDGER_TRIGGER_DDL + (_EXPOSURE_COVERAGE_VIEW,))
+
+
+@event.listens_for(LedgerExposureProposal.__table__, "after_create")
+def _install_extractor_quality_view(target, connection, **kw):
+    emit_ledger_ddl(connection, (_EXTRACTOR_QUALITY_VIEW,))
