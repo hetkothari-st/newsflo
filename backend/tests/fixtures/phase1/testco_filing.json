@@ -1,0 +1,73 @@
+{
+  "_fixture": true,
+  "_note": "OBVIOUSLY FAKE filing text for the Phase 1 extraction tests. Every numeral here is a repeated-digit placeholder (11111, 22222, 0.1111) belonging to a company that does not exist. Master context fabrication guard: nothing in this file may ever reach a production table, and tests/phase1/test_no_direct_write.py asserts it does not.",
+  "company_name": "TESTCO FIXTURE LTD",
+  "isin": "INFIXTURE001",
+  "source_url": "https://fixture.invalid/testco/annual-report-fixture.pdf",
+  "source_type": "ANNUAL_REPORT",
+  "as_of_date": "2222-02-22",
+  "pages": [
+    "TESTCO FIXTURE LTD - FIXTURE ANNUAL REPORT. This document is a test fixture and describes no real company. Page one carries the fixture cover only.",
+    "NOTE 11 - RAW MATERIAL CONSUMED. During the fixture year the Company consumed fixture input FOO of INR 11111 lakh, being 11.11 percent of the fixture cost of goods consumed of INR 99999 lakh. All figures on this page are fixture placeholders.",
+    "NOTE 22 - FOREIGN CURRENCY. Fixture earnings in foreign currency were INR 22222 lakh and fixture expenditure in foreign currency was INR 22222 lakh for the fixture year."
+  ],
+  "honest_proposal": {
+    "_fixture": true,
+    "exposure_kind": "INPUT_COST",
+    "exposure_tag": "input:fixture_foo",
+    "share_of_base": 0.1111,
+    "base_kind": "COGS",
+    "base_value_inr": 99999.0,
+    "measurement": "FILED",
+    "source_type": "ANNUAL_REPORT",
+    "source_page": "2",
+    "excerpt": "the Company consumed fixture input FOO of INR 11111 lakh, being 11.11 percent of the fixture cost of goods consumed",
+    "extraction_confidence": 0.1111,
+    "model_id": "fixture-model-not-real"
+  },
+  "fabricated_proposal": {
+    "_fixture": true,
+    "_why": "The adversarial case. This excerpt is a plausible sentence in the register of a real annual report and appears NOWHERE in `pages`. The verbatim containment check must discard it.",
+    "exposure_kind": "INPUT_COST",
+    "exposure_tag": "input:fixture_bar",
+    "share_of_base": 0.2222,
+    "base_kind": "COGS",
+    "base_value_inr": 99999.0,
+    "measurement": "FILED",
+    "source_type": "ANNUAL_REPORT",
+    "source_page": "2",
+    "excerpt": "The Company has a long-standing policy of hedging its fixture input exposure and passes through cost increases within one quarter.",
+    "extraction_confidence": 0.9999,
+    "model_id": "fixture-model-not-real"
+  },
+  "pageless_proposal": {
+    "_fixture": true,
+    "_why": "Excerpt is genuinely present in the document, but the proposal does not say WHERE. A claim nobody can locate is not reviewable.",
+    "exposure_kind": "INPUT_COST",
+    "exposure_tag": "input:fixture_foo",
+    "share_of_base": 0.1111,
+    "base_kind": "COGS",
+    "base_value_inr": 99999.0,
+    "measurement": "FILED",
+    "source_type": "ANNUAL_REPORT",
+    "source_page": "",
+    "excerpt": "the Company consumed fixture input FOO of INR 11111 lakh",
+    "extraction_confidence": 0.1111,
+    "model_id": "fixture-model-not-real"
+  },
+  "wrong_page_proposal": {
+    "_fixture": true,
+    "_why": "Excerpt IS in the document, but on page 2, not the cited page 3. A citation that does not locate the claim is not a citation.",
+    "exposure_kind": "INPUT_COST",
+    "exposure_tag": "input:fixture_foo",
+    "share_of_base": 0.1111,
+    "base_kind": "COGS",
+    "base_value_inr": 99999.0,
+    "measurement": "FILED",
+    "source_type": "ANNUAL_REPORT",
+    "source_page": "3",
+    "excerpt": "the Company consumed fixture input FOO of INR 11111 lakh",
+    "extraction_confidence": 0.1111,
+    "model_id": "fixture-model-not-real"
+  }
+}
