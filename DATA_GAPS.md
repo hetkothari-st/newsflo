@@ -98,13 +98,84 @@ form. Running it is a deliberate act; nothing schedules it.
 
 ---
 
+## 5. The exposure ledger itself — OPEN (this is the big one)
+
+V5 Phase 1 built the schema, the extraction pipeline, the review console and
+the instrumentation, and **produced no data**. Every ledger table ships with
+zero rows and `tests/phase1/test_ledger_schema.py::
+test_every_ledger_table_ships_empty` keeps it that way. Nothing downstream
+(Phase 2's sensitivity engine, Phase 3's tag index) can be measured until
+these tables have real rows — and per the phase file's DO NOT, **Phase 2 must
+not start on an empty Tier 1 ledger.**
+
+| | |
+|---|---|
+| **Tables** | `company_exposure`, `company_segment`, `company_financials`, `pass_through_curve`, `company_modifier` (migration 0012) |
+| **Rows today** | 0 in all five. Shipped empty deliberately. |
+| **What is needed** | Spec §4.3 bootstrapping order. **Tier 1 first: Nifty 200 + all F&O names.** Per company: Ind AS 108 segment revenue/EBITDA, raw-material-consumed breakup, forex earnings & expenditure note, borrowings note (fixed vs floating), power & fuel line, employee cost. |
+| **Where it comes from** | The companies' own filings — annual reports and quarterly results (PDF/XBRL) from BSE/NSE. Not derivable from anything already in this repo, and **not generatable by a model**: a `share_of_base` we produced from our own knowledge is precisely the fabrication the master context forbids. |
+| **Who must supply it** | **The repo owner (user)**, as the acquirer of the documents and the reviewer of every proposal. The pipeline can propose; only a human can approve. Rough shape: Tier 1 is ~250 companies × ~6 disclosures. |
+| **Tooling ready** | `app/ingest/filings/` (acquire → pypdf/XBRL → LLM propose → verbatim gate → `exposure_proposal`), `backend/tools/ledger_ui.py` (review console, port 8601 — APPROVE / EDIT+APPROVE / REJECT, bulk approve for deterministic extractors only), `backend/scripts/flag_stale_exposures.py` (nightly staleness), `/ledger/coverage` and `/ledger/metrics` for progress. |
+| **Blocked until closed** | Phase 2 (sensitivity/materiality) and Phase 3 (tag index) are meaningless on an empty ledger. Today the system correctly abstains: with no exposure rows there are no channels, so every company reduces to `NO_MATERIAL_IMPACT` and the gate rejects (`test_staleness.py::test_the_pipeline_with_an_empty_ledger_abstains_and_publishes_nothing`). |
+
+### Sub-gaps recorded with it
+
+* **The 5-real-annual-report end-to-end run — DEFERRED to the user.** The
+  phase file's DoD asks the pipeline to run "end to end on 5 real annual
+  reports". `data/samples/` contains none, and downloading five real annual
+  reports was ruled a user action by the controller adaptation. The pipeline
+  is exercised end to end against **fixture** documents instead
+  (`tests/fixtures/phase1/testco_filing.json` plus a programmatically built
+  PDF read through the real pypdf adapter). **Owner: repo owner.** Until it
+  is done, the pypdf text-extraction quality on real Indian annual-report
+  layouts is *unmeasured* — a known unknown, not a claim that it works.
+* **`config/exposure_tags.yaml` (spec §6.1) does not exist.** Phase 1
+  validates only the SHAPE of an `exposure_tag` (`family:leaf`); the closed
+  vocabulary is Phase 3's. Until it lands, two reviewers could spell the same
+  exposure differently. **Owner: Phase 3.**
+* **Pass-through curves and company modifiers have no source yet.** The
+  tables and their review constraints exist (`curve_needs_review` rejects an
+  ESTIMATED curve without a reviewer); no curve is seeded, and the spec's
+  "use the sector median curve" fallback is deliberately NOT implemented as a
+  default — there is no sector median to compute from zero rows.
+* **`HOLDCO_DISCOUNT` carries no coefficient.** `attach_exposure_to_listco`
+  records that the modifier applies and caps the tier at `SECONDARY_RIPPLE`;
+  the size of the discount is Phase 4 policy data that does not exist.
+* **`company_entity_meta` / `entity_corporate_action` / `company_alias_window`
+  are empty.** So parent/subsidiary chains, ownership fractions, corporate
+  actions and former-name windows are unknown for every company. The resolver
+  fails closed on all of them (an unlisted subsidiary with no consolidated
+  segment evidence does not attach; a missing `ownership_fraction` blocks
+  attachment rather than defaulting to 1.0). **Owner: repo owner**, sourced
+  from exchange filings and annual-report shareholding notes.
+
+**Gap §3's `exposure_stale` row is now half-closed:**
+`app.ledger.staleness.company_exposure_is_stale` supplies a real answer where
+the ledger has rows. With the ledger empty it returns `False` — the honest
+answer, since nothing exists that could be stale. The pipeline's Phase 0 hook
+still passes the hard-coded `False`; wiring the real function into
+`app/core/impact_writer.py` waits for Phase 2, which is also when a company's
+exposure tags become known.
+
+---
+
 ## Not gaps
 
-The V5 exposure ledger, transmission coefficients, pass-through curves and
-empirical calibration tables (`docs/v5` Phases 1–5) are **not listed here
-yet** — those phases have not started and their tables do not exist. They
-join this file when their schemas land, per the fabrication guard. Phase 0
-created **no** financial data: it touched no exposure, coefficient or
+Transmission coefficients and empirical calibration tables (`docs/v5` Phases
+4–5) are **not listed here yet** — those phases have not started and their
+tables do not exist. They join this file when their schemas land, per the
+fabrication guard.
+
+Phase 0 created **no** financial data: it touched no exposure, coefficient or
 empirical table, and the only row any Phase 0 migration writes is the
 reducer-version fence (`supported_version('r5.0.0')`), which is policy, not
 data about the world.
+
+Phase 1 created **no** financial data either. Migration 0012 writes zero
+rows. `backend/config/freshness.yaml` contains policy numbers (how old a
+disclosure may be before it is distrusted) and no company facts, and
+`tests/phase1/test_ledger_schema.py` asserts it names no company and no
+financial figure. Every numeral in `tests/fixtures/phase1/` is a
+repeated-digit placeholder inside an object marked `"_fixture": true`, and
+`tests/phase1/test_no_direct_write.py` asserts no production module can read
+those fixtures.
