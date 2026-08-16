@@ -1,0 +1,60 @@
+{
+  "_fixture": true,
+  "_note": "SYNTHETIC Gate Zero fixture. No real news event, no real ticker, no financial figure of any kind. Exercises the importer's JSON bundle path only; every string here is invented for the test suite and must never be loaded into a production database.",
+  "events": [
+    {
+      "_fixture": true,
+      "event_id": "evt_fixture_json_001",
+      "stratum": "commodity",
+      "article_ref": "https://fixture.invalid/crude-json-1",
+      "notes": "SYNTHETIC FIXTURE -- not a real news event"
+    },
+    {
+      "_fixture": true,
+      "event_id": "evt_fixture_json_002",
+      "stratum": "null_event",
+      "article_ref": "https://fixture.invalid/null-json-1",
+      "notes": "SYNTHETIC FIXTURE -- not a real news event"
+    }
+  ],
+  "labels": [
+    {
+      "_fixture": true,
+      "event_id": "evt_fixture_json_001",
+      "company_ref": "FIXTREF",
+      "labeler": "labeler_a",
+      "expected_tier": "PRIMARY",
+      "expected_direction": "bearish",
+      "expected_mechanism": "crude input cost",
+      "expected_materiality": "HIGH",
+      "rationale": "SYNTHETIC FIXTURE label"
+    },
+    {
+      "_fixture": true,
+      "event_id": "evt_fixture_json_001",
+      "company_ref": "FIXTREF",
+      "labeler": "labeler_b",
+      "expected_tier": "PRIMARY",
+      "expected_direction": "bearish",
+      "expected_mechanism": "crude input cost",
+      "expected_materiality": "HIGH",
+      "rationale": "SYNTHETIC FIXTURE label"
+    }
+  ],
+  "event_labels": [
+    {
+      "_fixture": true,
+      "event_id": "evt_fixture_json_001",
+      "labeler": "labeler_a",
+      "ripple_families": ["refiners", "paints"],
+      "rationale": "SYNTHETIC FIXTURE event-level label"
+    },
+    {
+      "_fixture": true,
+      "event_id": "evt_fixture_json_001",
+      "labeler": "labeler_b",
+      "ripple_families": ["refiners"],
+      "rationale": "SYNTHETIC FIXTURE event-level label"
+    }
+  ]
+}

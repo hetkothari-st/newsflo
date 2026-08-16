@@ -1,0 +1,3 @@
+event_id,stratum,article_ref,notes,_fixture
+evt_fixture_001,commodity,https://fixture.invalid/crude-1,SYNTHETIC FIXTURE -- not a real news event,true
+evt_fixture_002,null_event,https://fixture.invalid/null-1,SYNTHETIC FIXTURE -- not a real news event,true

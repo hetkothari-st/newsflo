@@ -1,0 +1,5 @@
+event_id,labeler,ripple_families,rationale,_fixture
+evt_fixture_001,labeler_a,refiners;oil marketing;paints,SYNTHETIC FIXTURE event-level label,true
+evt_fixture_001,labeler_b,refiners;paints,SYNTHETIC FIXTURE event-level label,true
+evt_fixture_002,labeler_a,,SYNTHETIC FIXTURE event-level label,true
+evt_fixture_002,labeler_b,,SYNTHETIC FIXTURE event-level label,true

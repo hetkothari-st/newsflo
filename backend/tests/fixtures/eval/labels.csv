@@ -1,0 +1,9 @@
+event_id,company_ref,labeler,expected_tier,expected_direction,expected_mechanism,expected_materiality,rationale,_fixture
+evt_fixture_001,FIXTREF,labeler_a,PRIMARY,bearish,crude input cost,HIGH,SYNTHETIC FIXTURE label,true
+evt_fixture_001,FIXTOMC,labeler_a,PRIMARY,bullish,marketing margin,MEDIUM,SYNTHETIC FIXTURE label,true
+evt_fixture_001,FIXTBNK,labeler_a,ABSENT,,,,SYNTHETIC FIXTURE label,true
+evt_fixture_001,FIXTREF,labeler_b,PRIMARY,bearish,crude input cost,HIGH,SYNTHETIC FIXTURE label,true
+evt_fixture_001,FIXTOMC,labeler_b,SECONDARY_RIPPLE,bullish,marketing margin,LOW,SYNTHETIC FIXTURE label,true
+evt_fixture_001,FIXTBNK,labeler_b,ABSENT,,,,SYNTHETIC FIXTURE label,true
+evt_fixture_002,FIXTBNK,labeler_a,ABSENT,,,,SYNTHETIC FIXTURE label,true
+evt_fixture_002,FIXTBNK,labeler_b,ABSENT,,,,SYNTHETIC FIXTURE label,true
