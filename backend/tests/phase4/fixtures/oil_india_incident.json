@@ -1,0 +1,106 @@
+{
+  "_fixture": true,
+  "_what_this_is": [
+    "The V4 incident's SHAPE, rebuilt from fake numbers: one upstream",
+    "producer, one event, and three channels that point three different ways",
+    "at three different horizons. In V4 that shape produced three",
+    "contradictory representations of the same company in the same run.",
+    "Nothing here is a claim about Oil India or about any producer: the",
+    "EBITDA is a round five billion, the inventory a round twenty, and the",
+    "company does not exist. The regression asserts a STRUCTURAL property --",
+    "one canonical row, no field-level contradiction -- not a number."
+  ],
+  "company": {
+    "_fixture": true,
+    "ticker": "FIXOIL",
+    "name": "Fixture Upstream Producers Ltd",
+    "sector": "Fixture Sector",
+    "ebitda_ttm_inr": 5000000000.0
+  },
+  "shock": {
+    "_fixture": true,
+    "delta_pct": 0.06,
+    "level_before": 100.0,
+    "level_after": 106.0
+  },
+  "expected": {
+    "_fixture": true,
+    "IMMEDIATE": {"_fixture": true, "delta_inr": 300000000.0},
+    "NEAR_TERM": {"_fixture": true, "delta_inr": -540000000.0},
+    "STRUCTURAL": {"_fixture": true, "delta_inr": -240000000.0}
+  },
+  "exposures": [
+    {
+      "_fixture": true,
+      "exposure_id": "fixture-oil-inventory",
+      "exposure_kind": "INVENTORY",
+      "exposure_tag": "realization:fixture_inventory_stock",
+      "base_kind": "REVENUE",
+      "base_value_inr": 20000000000.0,
+      "share_of_base": 0.5,
+      "modifier": {
+        "_fixture": true,
+        "modifier_id": "fixture-oil-inventory-mod",
+        "modifier_kind": "PASS_THROUGH",
+        "parameters": {
+          "_fixture": true,
+          "measurement": "FILED",
+          "inventory_realization_fraction_curve": [
+            {"_fixture": true, "lag_days": 5, "fraction": 0.5},
+            {"_fixture": true, "lag_days": 90, "fraction": 0.0},
+            {"_fixture": true, "lag_days": 270, "fraction": 0.0}
+          ]
+        }
+      }
+    },
+    {
+      "_fixture": true,
+      "exposure_id": "fixture-oil-cost",
+      "exposure_kind": "INPUT_COST",
+      "exposure_tag": "input:fixture_regional",
+      "base_kind": "COGS",
+      "base_value_inr": 20000000000.0,
+      "share_of_base": 0.5,
+      "modifier": {
+        "_fixture": true,
+        "modifier_id": "fixture-oil-cost-mod",
+        "modifier_kind": "HEDGE",
+        "parameters": {
+          "_fixture": true,
+          "measurement": "FILED",
+          "hedge_ratio": 0.0
+        }
+      },
+      "curve": {
+        "_fixture": true,
+        "curve_id": "fixture-oil-cost-curve",
+        "basis": "FILED",
+        "points": [
+          {"_fixture": true, "lag_days": 5, "fraction": 0.9},
+          {"_fixture": true, "lag_days": 90, "fraction": 0.0},
+          {"_fixture": true, "lag_days": 270, "fraction": 0.5}
+        ]
+      }
+    },
+    {
+      "_fixture": true,
+      "exposure_id": "fixture-oil-realization",
+      "exposure_kind": "REVENUE_REALIZATION",
+      "exposure_tag": "realization:fixture_crude",
+      "base_kind": "REVENUE",
+      "base_value_inr": 10000000000.0,
+      "share_of_base": 1.0,
+      "modifier": {
+        "_fixture": true,
+        "modifier_id": "fixture-oil-realization-mod",
+        "modifier_kind": "PASS_THROUGH",
+        "parameters": {
+          "_fixture": true,
+          "measurement": "FILED",
+          "realization_elasticity": 1.0,
+          "regulatory_capture_fraction": 0.0
+        }
+      }
+    }
+  ]
+}

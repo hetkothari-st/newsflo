@@ -1,0 +1,106 @@
+{
+  "_fixture": true,
+  "_what_this_is": [
+    "The phase file's OMC worked example, built ENTIRELY out of fake numbers.",
+    "No figure here is a claim about any Indian oil marketing company: the",
+    "EBITDA is a round billion, the inventory is a round five billion, the",
+    "elasticities are round tenths, and the company does not exist.",
+    "What the fixture is FOR is the SHAPE: an inventory revaluation that",
+    "dominates the immediate horizon, a marketing margin squeezed at the",
+    "near-term horizon because an administered price is frozen, and a",
+    "structural horizon nobody can call because the freeze state does not",
+    "reach that far forward."
+  ],
+  "company": {
+    "_fixture": true,
+    "ticker": "FIXOMC",
+    "name": "Fixture Fuel Retailers Ltd",
+    "sector": "Fixture Sector",
+    "ebitda_ttm_inr": 1000000000.0
+  },
+  "shock": {
+    "_fixture": true,
+    "delta_pct": 0.064,
+    "level_before": 100.0,
+    "level_after": 106.4
+  },
+  "expected": {
+    "_fixture": true,
+    "IMMEDIATE": {"_fixture": true, "delta_inr": 25600000.0, "delta_pct": 2.56},
+    "NEAR_TERM": {"_fixture": true, "delta_inr": -56000000.0, "delta_pct": -5.6},
+    "STRUCTURAL": {"_fixture": true, "delta_inr": -9600000.0, "delta_pct": -0.96}
+  },
+  "exposures": [
+    {
+      "_fixture": true,
+      "exposure_id": "fixture-omc-inventory",
+      "exposure_kind": "INVENTORY",
+      "exposure_tag": "realization:fixture_inventory_stock",
+      "base_kind": "REVENUE",
+      "base_value_inr": 5000000000.0,
+      "share_of_base": 0.5,
+      "modifier": {
+        "_fixture": true,
+        "modifier_id": "fixture-omc-inventory-mod",
+        "modifier_kind": "PASS_THROUGH",
+        "parameters": {
+          "_fixture": true,
+          "measurement": "DISCLOSED_CALL",
+          "inventory_realization_fraction_curve": [
+            {"_fixture": true, "lag_days": 5, "fraction": 0.2},
+            {"_fixture": true, "lag_days": 90, "fraction": 0.05},
+            {"_fixture": true, "lag_days": 270, "fraction": 0.0}
+          ]
+        }
+      }
+    },
+    {
+      "_fixture": true,
+      "exposure_id": "fixture-omc-marketing",
+      "exposure_kind": "REVENUE_REALIZATION",
+      "exposure_tag": "realization:fixture_marketing_margin",
+      "base_kind": "REVENUE",
+      "base_value_inr": 1000000000.0,
+      "share_of_base": 1.0,
+      "modifier": {
+        "_fixture": true,
+        "modifier_id": "fixture-omc-marketing-mod",
+        "modifier_kind": "PASS_THROUGH",
+        "parameters": {
+          "_fixture": true,
+          "measurement": "DISCLOSED_CALL",
+          "regulatory_capture_fraction": 0.5,
+          "realization_elasticity_curve": [
+            {"_fixture": true, "lag_days": 5, "fraction": -0.1},
+            {"_fixture": true, "lag_days": 90, "fraction": -1.0},
+            {"_fixture": true, "lag_days": 270, "fraction": -1.0}
+          ]
+        }
+      }
+    },
+    {
+      "_fixture": true,
+      "exposure_id": "fixture-omc-structural-volume",
+      "exposure_kind": "VOLUME_DEMAND",
+      "exposure_tag": "realization:fixture_structural_volume",
+      "base_kind": "REVENUE",
+      "base_value_inr": 1400000000.0,
+      "share_of_base": 1.0,
+      "modifier": {
+        "_fixture": true,
+        "modifier_id": "fixture-omc-volume-mod",
+        "modifier_kind": "PASS_THROUGH",
+        "parameters": {
+          "_fixture": true,
+          "measurement": "MODELLED",
+          "contribution_margin": 0.25,
+          "demand_elasticity_curve": [
+            {"_fixture": true, "lag_days": 5, "fraction": 0.0},
+            {"_fixture": true, "lag_days": 90, "fraction": 0.0},
+            {"_fixture": true, "lag_days": 270, "fraction": 1.0}
+          ]
+        }
+      }
+    }
+  ]
+}

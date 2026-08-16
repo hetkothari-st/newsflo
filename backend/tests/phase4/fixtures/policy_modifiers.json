@@ -1,0 +1,195 @@
+{
+  "_fixture": true,
+  "_what_this_is": [
+    "Six FAKE policy modifiers, one per modifier type, with obviously fake",
+    "round parameters. They exist so the TRANSFER FUNCTIONS can be verified",
+    "by hand. Not one number here is a claim about India, about any real",
+    "levy, ceiling, duty or subsidy, or about any company.",
+    "The DEPLOYED registry (backend/config/policy_modifiers.yaml) carries",
+    "structure only: every parameter value there is null and its owner is a",
+    "placeholder the loader refuses to activate."
+  ],
+  "modifiers": [
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_A_THRESHOLD",
+      "applies_to_tag": "realization:fixture_product",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "THRESHOLD_CAPTURE",
+      "parameters": {
+        "_fixture": true,
+        "threshold_level": 100.0,
+        "capture_fraction_above": 0.5
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/threshold",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "hand check: before=90 after=110 threshold=100 -> half the move sits above the threshold, half of that is captured, so the channel keeps 0.75"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_B_CAP",
+      "applies_to_tag": "realization:fixture_capped",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "HARD_CAP",
+      "parameters": {
+        "_fixture": true,
+        "cap_level": 7.5
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/cap",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "hand check: before=5 after=10 cap=7.5 -> only half the move is realisable, so the channel keeps 0.5"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_C_STATE",
+      "applies_to_tag": "realization:fixture_state_dependent",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "STATE_DEPENDENT",
+      "parameters": {
+        "_fixture": true,
+        "state_key": "fixture_revision_active",
+        "when": {
+          "FROZEN": {"param_overrides": {"regulatory_capture_fraction": 0.0}}
+        }
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/state",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "when the fixture regime is FROZEN the offsetting capture collapses to zero"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_D_SUBSIDY",
+      "applies_to_tag": "realization:fixture_shared",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "SUBSIDY_SHARE",
+      "parameters": {
+        "_fixture": true,
+        "retained_fraction": 0.25
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/subsidy",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "three quarters of the gain or loss goes to the other party"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_E_FORMULA",
+      "applies_to_tag": "realization:fixture_formula",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "FORMULA_PRICING",
+      "parameters": {
+        "_fixture": true,
+        "administered_delta_pct": 0.02
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/formula",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "the market moved 8%; the administered formula moves 2%, so the channel is rescaled by 0.25"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_F_REGIONAL",
+      "applies_to_tag": "input:fixture_regional",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "REGIONAL_MULTIPLIER",
+      "parameters": {
+        "_fixture": true,
+        "region_multipliers": {"NORTH_FIXTURE": 2.0, "SOUTH_FIXTURE": 0.5}
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/regional",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "with a 50/50 fixture geography mix the weighted multiplier is 1.25"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_LEVY_UPSTREAM",
+      "applies_to_tag": "realization:fixture_crude",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "THRESHOLD_CAPTURE",
+      "parameters": {
+        "_fixture": true,
+        "threshold_level": 100.0,
+        "capture_fraction_above": 0.9
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/upstream-levy",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 15,
+      "last_reviewed_at": "2226-02-22",
+      "note": "the whole of the fixture move sits above the fixture threshold, so nine tenths of the realisation upside is transferred away"
+    },
+    {
+      "_fixture": true,
+      "modifier_id": "FIXTURE_OMC_FREEZE",
+      "applies_to_tag": "realization:fixture_marketing_margin",
+      "jurisdiction": "FIXTURELAND",
+      "modifier_type": "STATE_DEPENDENT",
+      "parameters": {
+        "_fixture": true,
+        "state_key": "fixture_retail_revision_active",
+        "when": {
+          "FROZEN": {"param_overrides": {"regulatory_capture_fraction": 0.0}}
+        }
+      },
+      "effective_from": "2200-01-01",
+      "effective_to": null,
+      "source_url": "https://fixture.invalid/notification/omc-freeze",
+      "owner": "human:fixture-owner",
+      "review_interval_days": 30,
+      "last_reviewed_at": "2226-02-22",
+      "note": "the fixture retail regime is frozen inside its freshness window and UNKNOWN beyond it"
+    }
+  ],
+  "states": [
+    {
+      "_fixture": true,
+      "state_key": "fixture_revision_active",
+      "state_value": {"state": "FROZEN"},
+      "as_of": "2226-02-22",
+      "freshness_days": 30,
+      "source_url": "https://fixture.invalid/state/revision",
+      "owner": "human:fixture-owner"
+    },
+    {
+      "_fixture": true,
+      "state_key": "fixture_retail_revision_active",
+      "state_value": {"state": "FROZEN"},
+      "as_of": "2226-02-22",
+      "freshness_days": 120,
+      "source_url": "https://fixture.invalid/state/retail-revision",
+      "owner": "human:fixture-owner"
+    },
+    {
+      "_fixture": true,
+      "state_key": "fixture_stale_state",
+      "state_value": {"state": "FROZEN"},
+      "as_of": "2225-01-01",
+      "freshness_days": 30,
+      "source_url": "https://fixture.invalid/state/stale",
+      "owner": "human:fixture-owner"
+    }
+  ]
+}
