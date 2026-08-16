@@ -177,6 +177,9 @@ def run(apply: bool) -> dict:
                 with reducer_session(session):
                     upsert_impact_row(session, payload)
                 stats["written"] += 1
+        # Committed OUTSIDE every reducer_session block (fix round 2, C1): a
+        # commit inside one releases the connection to the pool while the
+        # capability token is still on it.
         if apply:
             session.commit()
     finally:

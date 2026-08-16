@@ -1,9 +1,68 @@
-from sqlalchemy import create_engine
+import logging
+import sqlite3
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 Base = declarative_base()
+
+
+# ---------------------------------------------------------------------------
+# Capability scrub on pool check-in (V5 Phase 0 fix round 2, C1)
+# ---------------------------------------------------------------------------
+# Two write capabilities in this codebase are granted per CONNECTION, as a
+# SQLite TEMP table that a BEFORE INSERT/UPDATE trigger looks for:
+# `_newsflo_reducer_session` (app/core/impact_writer.py, company_impact) and
+# `_newsflo_ledger_review_session` (app/ledger, the exposure ledger).
+#
+# A TEMP table lives on the connection, and a pooled connection outlives the
+# Session that borrowed it. Two ways that ends badly, both empirically
+# reproduced on a QueuePool engine:
+#   * a `commit()` inside the grant block returns the connection to the pool
+#     WITH the token still on it -- the next Session to borrow that
+#     connection could write the guarded table;
+#   * with more than one pooled connection, a cleanup DROP can execute on a
+#     DIFFERENT connection than the one that got the CREATE. It succeeds,
+#     changes nothing, and leaves the original privileged for the lifetime
+#     of the process.
+#
+# The grant blocks are written to drop the token before committing (that is
+# the primary fix). This listener is the backstop: NO connection may re-enter
+# the pool carrying a capability, whatever the code that borrowed it did.
+#
+# Registered on the Engine CLASS rather than one engine instance so it also
+# covers engines built by tests, scripts and tools -- an unguarded engine is
+# exactly where this class of bug hides.
+CAPABILITY_TEMP_TABLES = (
+    "_newsflo_reducer_session",
+    "_newsflo_ledger_review_session",
+)
+
+
+def scrub_capability_tables(dbapi_connection, connection_record) -> None:
+    """Drop every per-connection capability token. SQLite only (the token
+    mechanism does not exist on other backends, where the guarantee comes
+    from real role privileges), and EXCEPTION-SAFE: a connection that cannot
+    return to the pool would take the process down with it, so a failed drop
+    is logged loudly and swallowed."""
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    for table in CAPABILITY_TEMP_TABLES:
+        try:
+            dbapi_connection.execute(f"DROP TABLE IF EXISTS temp.{table}")
+        except Exception:
+            logger.exception(
+                "[db] could not scrub capability table %s on connection "
+                "check-in -- this connection may still hold a write "
+                "capability it should not have", table)
+
+
+event.listen(Engine, "checkin", scrub_capability_tables)
 
 
 def get_engine(url: str | None = None):

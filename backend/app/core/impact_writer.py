@@ -169,7 +169,19 @@ def persist_company_impact(session, impact: CompanyImpact,
     """Write one canonical record. Opens (and closes) the reducer session."""
     with reducer_session(session):
         upsert_impact_row(session, _row_from_impact(impact, reducer_run_seq))
-        session.commit()
+    # COMMITTED OUTSIDE THE BLOCK, deliberately (fix round 2, C1). A
+    # Session.commit() releases the connection back to the pool, and a
+    # SQLite TEMP table lives on the CONNECTION -- committing while the
+    # capability token still existed handed the next borrower of that
+    # connection the right to write company_impact (empirically reproduced
+    # on a QueuePool engine: the very next Session wrote a row). Worse, with
+    # more than one pooled connection the `finally` DROP could land on a
+    # DIFFERENT connection -- a silent no-op leaving the original privileged
+    # for the process lifetime. Dropping first, inside the same transaction
+    # and before any commit, makes both impossible. The triggers fire at
+    # INSERT time, not at commit time, so the write above is unaffected.
+    # Pinned by tests/phase0/test_writer_pool_isolation.py.
+    session.commit()
 
 
 def append_signals(session, signals: Iterable) -> int:
@@ -256,6 +268,9 @@ def record_company_impacts(session, *, article, entries, alert,
         with reducer_session(session):
             upsert_impact_row(session, _row_from_impact(impact, alert.id))
         written += 1
+    # Outside every guard block, for the reason spelled out in
+    # persist_company_impact: a commit inside one would release a connection
+    # to the pool still carrying the capability token.
     session.commit()
     logger.info("[v5] wrote %s company_impact rows for %s (reducer %s)",
                 written, event_id, REDUCER_VERSION)
