@@ -24,21 +24,21 @@ exist, every claim about whether the system is good is an opinion.
 |---|---|
 | **Tables** | `eval_event`, `eval_label`, `eval_event_label`, `eval_adjudication` (migration 0010) |
 | **Rows today** | 0 in all four. Shipped empty deliberately. |
-| **What is needed** | **50 labeled events: 40 crude-shock events + 10 null events** (financial news that should produce no company impact). Per event: expected PRIMARY companies, expected ripple families, expected ABSENT companies, expected direction per company, free-text rationale. |
+| **What is needed** | **40 labeled events in total: 30 real crude-shock events + 10 null events** (financial news that should produce no company impact), exactly as `EXECUTION_CONTRACT.md` §2 states. Per event: expected PRIMARY companies, expected ripple families, expected ABSENT companies, expected direction per company, free-text rationale. |
 | **How many labelers** | **Two independent labelers per event**, event-only, without seeing system output (`docs/v5/08_PHASE_7_eval_harness.md` labeling protocol — anchoring destroys the label's value). Disagreements resolved in `/eval/adjudicate`; anything unresolved stays `DISPUTED` and is excluded from precision denominators. |
 | **Where it comes from** | Human judgment over already-ingested articles in the `articles` table. Not derivable from any external dataset and **not generatable by the system being measured** — a corpus we produced would measure our own imagination. |
 | **Who must supply it** | **The repo owner (user).** Two people, roughly 5–8 person-days total. |
 | **Tooling ready** | `backend/tools/eval_ui.py` (labeling + adjudication UI, port 8600), `backend/tools/eval_import.py` (CSV/JSON import for offline spreadsheet labeling), `backend/scripts/score_baseline.py` (scores and emits `BASELINE.md`). |
 | **Blocked until closed** | `BASELINE.md` does not exist, so V5 Phase 0 cannot start. The scorer refuses to run on an empty corpus rather than reporting a meaningless 0% or 100%. |
 
-**Null events are the important half.** Ten of the fifty must be financial
+**Null events are the important quarter.** Ten of the forty must be financial
 news with no material listed-company impact. They are the only measurement
 of whether the system can say nothing, and they are the slice most likely
 to be quietly dropped because it is boring to build.
 
 ### Closing it
 
-1. Pick the events (40 crude, 10 null) from the `articles` table and load
+1. Pick the events (30 crude, 10 null) from the `articles` table and load
    them: `python backend/tools/eval_import.py --events events.csv`.
 2. Two people label independently:
    `python backend/tools/eval_ui.py` → `http://127.0.0.1:8600/eval/label?labeler=NAME`.

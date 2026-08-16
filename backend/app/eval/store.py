@@ -14,6 +14,7 @@ this tooling must run identically against both.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
@@ -28,6 +29,9 @@ from app.eval.schema import (
     eval_event_label,
     eval_label,
 )
+
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
 
 class EvalValidationError(ValueError):
@@ -82,10 +86,52 @@ def parse_direction_map(value: str | None) -> dict[str, str]:
     return out
 
 
+# Exchange suffixes actually present in the live universe, measured
+# 2026-08-17 against backend/newsflo.db: .BO 2418, .NS 2396, .B 2, .KS 1,
+# out of 4817 suffixed tickers in 5321 companies. Labelers type the BARE
+# symbol (RELIANCE, not RELIANCE.NS), so without stripping these, ~90% of
+# the universe can never match a label -- every expectation becomes a false
+# negative and every published company a false positive, and the baseline
+# reads near zero with real-looking denominators.
+#
+# .NSE / .BSE are accepted too: they are not in the DB today but are the
+# spelling a labeler is most likely to type by hand.
+#
+# An UNKNOWN dotted suffix is deliberately left INTACT rather than stripped
+# by a generic rule -- it then surfaces in BASELINE.md's UNMATCHED section,
+# which is a loud, fixable signal, instead of being silently mangled into a
+# different company (BRK.A is not BRK).
+EXCHANGE_SUFFIXES = ("NS", "BO", "NSE", "BSE", "KS", "B")
+
+
+def canonical_company_ref(value: str) -> str:
+    """Upper-case and strip a known exchange suffix.
+
+    The ONE spelling both sides of the scorer's join are reduced to: the
+    labeler's typed ref and the universe's ``companies.ticker``. Applied at
+    write time as well, so two labelers typing ``RELIANCE`` and
+    ``RELIANCE.NS`` produce one label row, not a spurious disagreement.
+    """
+    text = (value or "").strip().upper()
+    if "." in text:
+        head, _, suffix = text.rpartition(".")
+        if head and suffix in EXCHANGE_SUFFIXES:
+            return head
+    return text
+
+
 def normalize_company_ref(value: str) -> str:
-    """Tickers are compared case-insensitively everywhere; store them
-    upper-cased so ``infy`` and ``INFY`` are one label, not two."""
-    return (value or "").strip().upper()
+    """Alias of :func:`canonical_company_ref`, kept as the name every call
+    site already uses."""
+    return canonical_company_ref(value)
+
+
+def normalize_alias(value: str) -> str:
+    """Lower-case, punctuation-to-space, collapsed. Used only to look a
+    labeler's typed ref up in ``company_aliases``; deliberately our own
+    normalization rather than an import of app.companies (which would pull
+    the application, and its provider clients, into the scorer)."""
+    return " ".join(_NON_ALNUM_RE.sub(" ", (value or "").lower()).split())
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +224,84 @@ def resolve_article(conn: sa.Connection, article_ref: str) -> dict[str, Any] | N
     else:
         row = conn.execute(sa.text(sql + "url = :v"), {"v": ref}).mappings().first()
     return dict(row) if row else None
+
+
+def load_company_index(conn: sa.Connection) -> dict[str, Any]:
+    """Everything needed to turn a labeler-typed reference into a company.
+
+    Two rungs, in order:
+
+      1. **canonical ticker** -- ``canonical_company_ref(ref)`` against
+         ``canonical_company_ref(companies.ticker)``. This is what makes a
+         bare ``RELIANCE`` find ``RELIANCE.NS``.
+      2. **alias** -- ``company_aliases`` (LEGAL name, BSE_ID, NSE_SYMBOL,
+         TRADE_NAME…), so ``RIL`` and ``Reliance Industries`` also resolve.
+
+    Ambiguity is preserved, not resolved: a ref that maps to more than one
+    company comes back as ambiguous and is reported rather than guessed at.
+    Two listings of the SAME company (RELIANCE.NS and RELIANCE.BO) collapse
+    to one canonical ticker and are therefore not ambiguous -- they are one
+    company with two lines.
+    """
+    by_canonical: dict[str, set[str]] = {}
+    id_to_canonical: dict[int, str] = {}
+    for company_id, ticker in conn.execute(sa.text("SELECT id, ticker FROM companies")):
+        canonical = canonical_company_ref(ticker or "")
+        if not canonical:
+            continue
+        by_canonical.setdefault(canonical, set()).add(canonical)
+        id_to_canonical[company_id] = canonical
+
+    by_alias: dict[str, set[str]] = {}
+    try:
+        rows = conn.execute(sa.text(
+            "SELECT company_id, alias, normalized FROM company_aliases"))
+    except sa.exc.SQLAlchemyError:
+        rows = []  # table absent on a minimal DB -- rung 1 still works
+    for company_id, alias, normalized in rows:
+        canonical = id_to_canonical.get(company_id)
+        if not canonical:
+            continue
+        for key in (normalize_alias(alias), normalize_alias(normalized)):
+            if key:
+                by_alias.setdefault(key, set()).add(canonical)
+    return {"by_canonical": by_canonical, "by_alias": by_alias}
+
+
+def resolve_ref(index: dict[str, Any], ref: str) -> tuple[str | None, str]:
+    """-> (canonical ticker, reason). ``None`` means the reference matched
+    no company; the reason is written into BASELINE.md verbatim."""
+    canonical = canonical_company_ref(ref)
+    if not canonical:
+        return None, "blank reference"
+    if canonical in index["by_canonical"]:
+        return canonical, "ticker"
+    matches = index["by_alias"].get(normalize_alias(ref)) or set()
+    if len(matches) == 1:
+        return next(iter(matches)), "alias"
+    if len(matches) > 1:
+        return None, f"ambiguous: matches {len(matches)} companies ({', '.join(sorted(matches))})"
+    return None, "no company in the universe matches this reference"
+
+
+def load_family_vocabulary(conn: sa.Connection) -> dict[str, list[str]]:
+    """The canonical ripple-family vocabulary, generated from the universe
+    itself: ``SELECT DISTINCT sub_sector`` plus ``sector``.
+
+    Shown to the labeler in the labeling form (so they type wording the
+    scorer can match) and consulted by the scorer. It is the WHOLE
+    vocabulary every time -- never filtered to the event on screen, which
+    would leak the answer.
+    """
+    sub_sectors = sorted({
+        row[0] for row in conn.execute(sa.text(
+            "SELECT DISTINCT sub_sector FROM companies WHERE sub_sector IS NOT NULL"))
+        if (row[0] or "").strip()})
+    sectors = sorted({
+        row[0] for row in conn.execute(sa.text(
+            "SELECT DISTINCT sector FROM companies WHERE sector IS NOT NULL"))
+        if (row[0] or "").strip()})
+    return {"sub_sectors": sub_sectors, "sectors": sectors}
 
 
 def get_event(conn: sa.Connection, event_id: str) -> dict[str, Any] | None:

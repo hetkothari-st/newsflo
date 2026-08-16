@@ -1,0 +1,123 @@
+# Ripple-family vocabulary map — analyst wording -> taxonomy slugs
+#
+# Gate Zero scoring only. A labeler writes "refiners"; the universe stores
+# sub_sector "refining_marketing". Without this map the two never meet and
+# ripple-family recall reads as a near-total miss that measures our
+# vocabulary rather than the engine.
+#
+# STRUCTURAL TERM MAPPINGS ONLY. Nothing here is data: no exposure, no
+# pass-through ratio, no weight, no financial figure of any kind. Each entry
+# says "this is another name for that group of companies" and nothing more.
+# A test asserts this file contains no numeric/financial token.
+#
+# Right-hand values MUST be slugs that exist in companies.sub_sector or
+# companies.sector. Values were checked against backend/newsflo.db on
+# 2026-08-17 (43 distinct sub_sectors, 11 sectors). A term that maps to a
+# slug the universe does not have is reported by the scorer, not silently
+# scored as a miss.
+#
+# Terms not listed here still work when the labeler types the slug itself
+# (or a close string match); this map exists for the wording people
+# actually use. Unknown wording is reported in BASELINE.md's MISMATCHED
+# FAMILIES section — add it here rather than letting it score as zero.
+#
+# Format: `term: [slug, ...]` or `term: slug`. Lower-case terms.
+
+# --- energy ---------------------------------------------------------------
+refiners: [refining_marketing]
+refining: [refining_marketing]
+refiners and marketers: [refining_marketing]
+oil marketing: [refining_marketing]
+oil marketing companies: [refining_marketing]
+omc: [refining_marketing]
+omcs: [refining_marketing]
+downstream: [refining_marketing]
+upstream: [upstream_exploration]
+exploration: [upstream_exploration]
+exploration and production: [upstream_exploration]
+e and p: [upstream_exploration]
+oil producers: [upstream_exploration]
+city gas: [gas_distribution]
+city gas distribution: [gas_distribution]
+cgd: [gas_distribution]
+gas utilities: [gas_distribution]
+coal: [mining_coal]
+mining: [mining_coal]
+power: [power_utilities]
+utilities: [power_utilities]
+gencos: [power_utilities]
+discoms: [power_utilities]
+
+# --- transport ------------------------------------------------------------
+airlines: [aviation]
+carriers: [aviation]
+air carriers: [aviation]
+
+# --- autos ----------------------------------------------------------------
+two wheelers: [two_wheeler]
+2w: [two_wheeler]
+motorcycles: [two_wheeler]
+passenger vehicles: [passenger_vehicle]
+pv: [passenger_vehicle]
+car makers: [passenger_vehicle]
+commercial vehicles: [commercial_vehicle]
+cv: [commercial_vehicle]
+trucks: [commercial_vehicle]
+auto components: [auto_component]
+auto ancillaries: [auto_component]
+ancillaries: [auto_component]
+
+# --- materials ------------------------------------------------------------
+non ferrous: [non_ferrous]
+aluminium: [non_ferrous]
+copper: [non_ferrous]
+zinc: [non_ferrous]
+steel makers: [steel]
+cement makers: [cement]
+
+# --- financials -----------------------------------------------------------
+banks: [private_bank, psu_bank, banking_other]
+private banks: [private_bank]
+psu banks: [psu_bank]
+public sector banks: [psu_bank]
+lenders: [private_bank, psu_bank, banking_other, nbfc]
+nbfcs: [nbfc]
+financiers: [nbfc]
+housing finance companies: [housing_finance]
+hfc: [housing_finance]
+insurers: [insurance]
+asset managers: [asset_management]
+amc: [asset_management]
+
+# --- technology -----------------------------------------------------------
+it services: [it_services_large_cap, it_services_mid_small_cap]
+it: [it_services_large_cap, it_services_mid_small_cap, it_other]
+saas: [product_saas]
+software products: [product_saas]
+
+# --- healthcare -----------------------------------------------------------
+generics: [generics_formulations]
+formulations: [generics_formulations]
+api: [api_cdmo]
+apis: [api_cdmo]
+bulk drugs: [api_cdmo]
+cdmo: [api_cdmo]
+hospitals: [hospital_diagnostics]
+diagnostics: [hospital_diagnostics]
+
+# --- consumer -------------------------------------------------------------
+staples: [staples_food]
+packaged foods: [staples_food]
+food: [staples_food]
+personal care: [personal_care]
+retailers: [retail]
+
+# --- telecom / industrials ------------------------------------------------
+telcos: [telecom_operator]
+telecom operators: [telecom_operator]
+towers: [telecom_infrastructure]
+tower companies: [telecom_infrastructure]
+capital goods makers: [capital_goods]
+engineering: [capital_goods, construction_engineering]
+epc: [construction_engineering]
+construction: [construction_engineering]

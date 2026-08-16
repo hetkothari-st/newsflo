@@ -20,6 +20,7 @@ docs/v5/00_MASTER_CONTEXT.md's fabrication guard:
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -327,15 +328,26 @@ def test_no_fixture_data_reaches_production_tables(eval_db):
     from app.db import Base
     from app import models  # noqa: F401
 
+    # Compared BEFORE/AFTER rather than asserted empty: create_all() may
+    # legitimately seed a bootstrap row (a schema-version marker, say), and
+    # the claim under test is that the IMPORT wrote nothing outside eval_*,
+    # not that the production schema starts life with zero rows anywhere.
+    def snapshot():
+        with eval_db.engine.connect() as conn:
+            return {t: conn.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
+                    for t in Base.metadata.tables}
+
+    before = snapshot()
     run_import(eval_db.engine,
                events=FIXTURES / "events.csv",
                labels=FIXTURES / "labels.csv",
                event_labels=FIXTURES / "event_labels.csv")
+    after = snapshot()
 
-    with eval_db.engine.connect() as conn:
-        for table in Base.metadata.tables:
-            count = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
-            assert count == 0, f"eval fixture import wrote {count} row(s) into {table}"
+    for table, count in after.items():
+        assert count == before[table], (
+            f"eval fixture import wrote {count - before[table]} row(s) into the "
+            f"production table {table}")
 
 
 def test_fixture_files_are_marked_as_fixtures():
@@ -509,6 +521,10 @@ def test_scorer_fails_loudly_when_events_exist_but_no_labels(eval_db, tmp_path):
 FORBIDDEN_IMPORT_ROOTS = (
     "anthropic", "openai", "google", "groq", "httpx", "requests", "urllib3",
     "app.analysis", "app.pipeline", "app.scheduler", "app.ingestion", "app.main",
+    # M4: the wider app also reaches providers and the network -- translation
+    # calls an LLM, supply_links calls an LLM, routers pull the whole app in,
+    # and alerting sends real e-mail.
+    "app.translation", "app.companies.supply_links", "app.routers", "app.alerting",
 )
 
 
@@ -534,7 +550,9 @@ def test_scorer_process_never_loads_a_provider_sdk():
     probe = (
         "import sys; sys.path.insert(0, '.');"
         "import scripts.score_baseline;"
-        "bad=[m for m in ('anthropic','openai','groq','google.generativeai') if m in sys.modules];"
+        "bad=[m for m in ('anthropic','openai','groq','google.generativeai','httpx',"
+        "'requests','app.analysis','app.pipeline','app.main','app.translation',"
+        "'app.routers','app.alerting') if m in sys.modules];"
         "print('LOADED:'+','.join(bad));"
         "raise SystemExit(1 if bad else 0)"
     )
@@ -717,14 +735,22 @@ def test_scorer_counts_false_primary_on_null_events(scored_corpus, tmp_path):
 
 
 def test_scorer_measures_ripple_family_recall(scored_corpus):
+    """Expected families are {Paints, Aviation}. RIPCO (sub_sector Paints)
+    is published secondary, so Paints is a hit.
+
+    Aviation is a VOCABULARY gap in this corpus -- no company in it is
+    classified into any aviation-like family, so no engine could ever have
+    hit it. Per review finding I1 it is excluded from the denominator and
+    reported under MISMATCHED FAMILIES, rather than scored as an engine
+    miss. Family recall is therefore 1/1, and the excluded term is visible.
+    """
     from scripts.score_baseline import score_corpus
 
     with scored_corpus.engine.connect() as conn:
         result = score_corpus(conn)
-    # expected families {Paints, Aviation}; RIPCO (sub_sector Paints) is
-    # published secondary -> 1 of 2.
-    assert result.ripple_families_expected == 2
+    assert result.ripple_families_expected == 1
     assert result.ripple_families_hit == 1
+    assert ("evt_crude", "Aviation") in result.mismatched_families
 
 
 def test_scorer_excludes_disputed_from_precision_denominators(scored_corpus):
@@ -822,3 +848,360 @@ def test_secondary_tier_spellings_track_the_publication_gate():
 
     assert PRIMARY_TIER == TIER_PRIMARY
     assert set(SECONDARY_TIERS) == {TIER_SECONDARY_RIPPLE, *LEGACY_SECONDARY_SPELLINGS}
+
+
+# ===========================================================================
+# FIX ROUND 1 -- review findings C1, I1-I5, M1-M7
+# ===========================================================================
+
+def _seed_alias(conn, *, alias_id, company_id, alias, alias_type="TRADE_NAME",
+                normalized=None):
+    conn.execute(text(
+        "INSERT INTO company_aliases (id, company_id, alias, alias_type, normalized) "
+        "VALUES (:i, :c, :a, :t, :n)"
+    ), {"i": alias_id, "c": company_id, "a": alias, "t": alias_type,
+        "n": normalized if normalized is not None else alias.lower()})
+
+
+@pytest.fixture()
+def suffix_corpus(eval_db):
+    """The live universe shape the review measured: 4817 of 5321 tickers
+    carry an exchange suffix while labelers type the bare symbol."""
+    with eval_db.engine.begin() as conn:
+        _seed_article(conn, article_id=1, title="Crude spikes",
+                      body="Brent rose after a supply outage.",
+                      url="https://fixture.invalid/crude-1")
+        _seed_company(conn, company_id=1, ticker="ASIANPAINT.NS",
+                      name="Asian Paints Ltd.", sector="other", sub_sector="paints")
+        _seed_company(conn, company_id=2, ticker="RELIANCE.NS",
+                      name="Reliance Industries Ltd", sector="oil_gas",
+                      sub_sector="refining_marketing")
+        _seed_alias(conn, alias_id=1, company_id=2, alias="RIL", normalized="ril")
+        _seed_alert(conn, alert_id=1, article_id=1,
+                    facts="Brent rose after a supply outage.")
+        _seed_alert_company(conn, alert_id=1, company_id=1, direction="bearish",
+                            display_tier="primary", mechanism="crude input cost")
+        _seed_alert_company(conn, alert_id=1, company_id=2, direction="bearish",
+                            display_tier="primary", mechanism="refining margin")
+        conn.execute(text("INSERT INTO eval_event (event_id, stratum, article_ref) "
+                          "VALUES ('evt_sfx', 'commodity', '1')"))
+        for who in ("anita", "bharat"):
+            # bare symbol, and an alias -- neither matches companies.ticker
+            for ref in ("ASIANPAINT", "RIL"):
+                conn.execute(text(
+                    "INSERT INTO eval_label (event_id, company_ref, labeler, "
+                    "expected_tier, expected_direction, labeled_at) "
+                    "VALUES ('evt_sfx', :c, :l, 'PRIMARY', 'bearish', :ts)"),
+                    {"c": ref, "l": who, "ts": datetime(2026, 8, 15, tzinfo=timezone.utc)})
+            conn.execute(text(
+                "INSERT INTO eval_event_label (event_id, labeler, ripple_families_json, "
+                "labeled_at) VALUES ('evt_sfx', :l, '[]', :ts)"),
+                {"l": who, "ts": datetime(2026, 8, 15, tzinfo=timezone.utc)})
+    return eval_db
+
+
+def test_C1_bare_company_ref_matches_a_suffixed_ticker(suffix_corpus):
+    """A labeler types ASIANPAINT; the universe stores ASIANPAINT.NS. Before
+    the fix this was a false negative AND a false positive on the same
+    company, and the whole baseline read near zero."""
+    from scripts.score_baseline import score_corpus
+
+    with suffix_corpus.engine.connect() as conn:
+        result = score_corpus(conn)
+    assert result.primary_true_positives == 2, result.false_positive_detail
+    assert result.primary_false_positives == 0
+    assert result.primary_false_negatives == 0
+    assert result.primary_precision == pytest.approx(1.0)
+
+
+def test_C1_company_ref_resolves_through_company_aliases(suffix_corpus):
+    """RIL is neither a ticker nor a bare ticker -- only company_aliases
+    connects it to RELIANCE.NS."""
+    from app.eval import store
+
+    with suffix_corpus.engine.connect() as conn:
+        index = store.load_company_index(conn)
+    assert store.resolve_ref(index, "RIL")[0] == "RELIANCE"
+    assert store.resolve_ref(index, "ASIANPAINT")[0] == "ASIANPAINT"
+    assert store.resolve_ref(index, "ASIANPAINT.BO")[0] == "ASIANPAINT"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("RELIANCE.NS", "RELIANCE"), ("reliance.bo", "RELIANCE"),
+    ("TCS.NSE", "TCS"), ("TCS.BSE", "TCS"), ("AAPL", "AAPL"),
+    (" infy ", "INFY"), ("BRK.A", "BRK.A"),
+])
+def test_C1_canonical_company_ref(raw, expected):
+    """Known exchange suffixes are stripped; an unknown dotted suffix is
+    left intact so it surfaces as UNMATCHED instead of being mangled."""
+    from app.eval.store import canonical_company_ref
+
+    assert canonical_company_ref(raw) == expected
+
+
+def test_C1_unmatched_company_refs_are_reported_and_excluded(suffix_corpus, tmp_path):
+    from scripts.score_baseline import score_corpus
+
+    with suffix_corpus.engine.begin() as conn:
+        for who in ("anita", "bharat"):
+            conn.execute(text(
+                "INSERT INTO eval_label (event_id, company_ref, labeler, expected_tier, "
+                "labeled_at) VALUES ('evt_sfx', 'NOTACOMPANY', :l, 'PRIMARY', :ts)"),
+                {"l": who, "ts": datetime(2026, 8, 15, tzinfo=timezone.utc)})
+    with suffix_corpus.engine.connect() as conn:
+        result = score_corpus(conn)
+
+    assert any(ref == "NOTACOMPANY" for _e, ref, _why in result.unmatched_refs)
+    # excluded, not scored as a miss
+    assert result.primary_false_negatives == 0
+    assert result.primary_recall == pytest.approx(1.0)
+
+    proc, out = _score(suffix_corpus, tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    md = out.read_text(encoding="utf-8")
+    assert "UNMATCHED" in md and "NOTACOMPANY" in md
+
+
+def test_I2_fabricated_numerals_use_token_sets_not_substrings():
+    """The two false negatives the reviewer demonstrated: '37' hid inside
+    '1370' and '3.5' inside '13.55'."""
+    from scripts.score_baseline import fabricated_numerals_in
+
+    assert fabricated_numerals_in("margins fall 37%", "output was 1370 units") == ["37"]
+    assert fabricated_numerals_in("a ratio of 3.5", "the ratio was 13.55") == ["3.5"]
+    # genuine presences still pass
+    assert fabricated_numerals_in("the ratio was 13.55", "the ratio was 13.55") == []
+    assert fabricated_numerals_in("1,370 units", "output was 1370 units") == []
+    assert fabricated_numerals_in("3.50 percent", "it was 3.5 percent") == []
+    assert fabricated_numerals_in("no numerals here", "") == []
+
+
+@pytest.fixture()
+def family_corpus(eval_db):
+    """Real taxonomy slugs, and analyst wording that does not resemble them."""
+    with eval_db.engine.begin() as conn:
+        _seed_article(conn, article_id=1, title="Crude spikes",
+                      body="Brent rose after a supply outage.",
+                      url="https://fixture.invalid/crude-1")
+        _seed_company(conn, company_id=1, ticker="RELIANCE.NS", name="Reliance",
+                      sector="oil_gas", sub_sector="refining_marketing")
+        _seed_company(conn, company_id=2, ticker="ASIANPAINT.NS", name="Asian Paints",
+                      sector="other", sub_sector="paints")
+        _seed_company(conn, company_id=3, ticker="INDIGO.NS", name="IndiGo",
+                      sector="other", sub_sector="aviation")
+        _seed_alert(conn, alert_id=1, article_id=1,
+                    facts="Brent rose after a supply outage.")
+        _seed_alert_company(conn, alert_id=1, company_id=1, direction="bearish",
+                            display_tier="secondary_ripple", causal_distance=2,
+                            mechanism="refining margin")
+        conn.execute(text("INSERT INTO eval_event (event_id, stratum, article_ref) "
+                          "VALUES ('evt_fam', 'commodity', '1')"))
+        for who in ("anita", "bharat"):
+            conn.execute(text(
+                "INSERT INTO eval_event_label (event_id, labeler, ripple_families_json, "
+                "labeled_at) VALUES ('evt_fam', :l, :f, :ts)"),
+                {"l": who, "f": json.dumps(["refiners", "paints", "florists"]),
+                 "ts": datetime(2026, 8, 15, tzinfo=timezone.utc)})
+    return eval_db
+
+
+def test_I1_family_map_translates_analyst_terms_to_taxonomy_slugs(family_corpus):
+    """'refiners' must reach sub_sector 'refining_marketing'; string
+    comparison alone never could."""
+    from scripts.score_baseline import score_corpus
+
+    with family_corpus.engine.connect() as conn:
+        result = score_corpus(conn)
+    assert result.ripple_families_hit == 1              # refiners -> refining_marketing
+    assert result.ripple_families_expected == 2         # refiners + paints
+    assert ("evt_fam", "paints") in [(e, f) for e, f in result.missed_families]
+
+
+def test_I1_unmapped_family_is_reported_not_scored_as_a_miss(family_corpus):
+    from scripts.score_baseline import score_corpus
+
+    with family_corpus.engine.connect() as conn:
+        result = score_corpus(conn)
+    assert any(f == "florists" for _e, f in result.mismatched_families)
+    # not in the denominator: 2 expected, not 3
+    assert result.ripple_families_expected == 2
+
+
+def test_I1_mismatched_families_section_in_baseline(family_corpus, tmp_path):
+    proc, out = _score(family_corpus, tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    md = out.read_text(encoding="utf-8")
+    assert "MISMATCHED FAMILIES" in md.upper()
+    assert "florists" in md
+
+
+def test_I1_family_map_file_is_structural_only():
+    """config/eval_family_map.yaml maps analyst wording to taxonomy slugs
+    and must contain no financial data of any kind."""
+    from app.eval.families import FAMILY_MAP_PATH, load_family_map
+
+    mapping = load_family_map()
+    assert mapping["refiners"] == ["refining_marketing"]
+    assert "airlines" in mapping
+    raw = FAMILY_MAP_PATH.read_text(encoding="utf-8")
+    assert not re.search(r"\d+(\.\d+)?\s*(%|crore|cr|bn|mn|usd|inr|rs)\b", raw, re.I)
+
+
+def test_I1_family_map_loads_without_pyyaml(monkeypatch):
+    """PyYAML is installed here but is NOT in requirements.txt, and this
+    session may not edit requirements.txt. The fallback parser must produce
+    the identical mapping."""
+    from app.eval import families
+
+    with_yaml = families.load_family_map()
+    families.load_family_map.cache_clear()
+    monkeypatch.setattr(families, "_yaml_module", lambda: None)
+    without_yaml = families.load_family_map()
+    families.load_family_map.cache_clear()
+    assert with_yaml == without_yaml
+
+
+def test_I1_label_form_shows_the_live_family_vocabulary(ui_client, eval_db):
+    """(a) of the fix: the labeler is shown the canonical family vocabulary
+    generated from the DB, so they type slugs the scorer can match. It is
+    the WHOLE vocabulary, never filtered to this event -- a filtered list
+    would leak the answer."""
+    with eval_db.engine.begin() as conn:
+        _seed_company(conn, company_id=2, ticker="INDIGO.NS", name="IndiGo",
+                      sector="other", sub_sector="aviation")
+        _seed_company(conn, company_id=3, ticker="TATASTEEL.NS", name="Tata Steel",
+                      sector="metals", sub_sector="steel")
+    resp = ui_client.get("/eval/label", params={"labeler": "labeler_a"})
+    assert "<datalist" in resp.text
+    # both companies' families appear, including the one unrelated to the event
+    assert "aviation" in resp.text and "steel" in resp.text
+
+
+def test_I3_scorer_exits_2_when_the_eval_tables_are_absent(tmp_path):
+    from app.db import Base
+    from app import models  # noqa: F401
+
+    path = tmp_path / "no_eval.db"
+    engine = create_engine(f"sqlite:///{path.as_posix()}")
+    Base.metadata.create_all(engine)  # production schema only, no migration 0010
+
+    proc = subprocess.run(
+        [sys.executable, "scripts/score_baseline.py", "--db",
+         f"sqlite:///{path.as_posix()}", "--out", str(tmp_path / "B.md")],
+        cwd=BACKEND, capture_output=True, text=True,
+        env=dict(os.environ, ENABLE_SCHEDULER="false"))
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    combined = proc.stdout + proc.stderr
+    assert "alembic upgrade head" in combined
+    assert not (tmp_path / "B.md").exists()
+
+
+def test_I4_baseline_prints_the_labeler_role_legend(scored_corpus, tmp_path):
+    proc, out = _score(scored_corpus, tmp_path)
+    md = out.read_text(encoding="utf-8")
+    assert "A = labeler_a" in md and "B = labeler_b" in md
+
+
+def test_I4_adjudicate_form_names_the_labelers_on_the_options(ui_client):
+    for labeler, primaries in (("labeler_a", "AAA,BBB"), ("labeler_b", "AAA")):
+        ui_client.post("/eval/label", data={
+            "labeler": labeler, "event_id": "evt_ui_1", "primary_companies": primaries,
+            "absent_companies": "", "ripple_families": "", "directions": "",
+            "rationale": "x"}, follow_redirects=False)
+    view = ui_client.get("/eval/adjudicate", params={"event_id": "evt_ui_1"})
+    assert "LABELER_A (labeler_a)" in view.text
+    assert "LABELER_B (labeler_b)" in view.text
+
+
+def test_I5_all_derived_tiers_emit_a_loud_banner(scored_corpus, tmp_path):
+    with scored_corpus.engine.begin() as conn:
+        conn.execute(text("UPDATE alert_companies SET display_tier=NULL"))
+    proc, out = _score(scored_corpus, tmp_path)
+    md = out.read_text(encoding="utf-8")
+    assert "ALL tiers derived" in md
+    assert "V4 strict" in md
+
+
+def test_M1_ambiguous_empty_label_is_reported(scored_corpus, tmp_path):
+    """A non-null_event labeled with no companies at all: deliberate
+    'nothing here' or an unfinished label? Indistinguishable -- so it is
+    reported rather than silently counted as an empty expected set."""
+    from scripts.score_baseline import score_corpus
+
+    with scored_corpus.engine.begin() as conn:
+        conn.execute(text("DELETE FROM eval_label WHERE event_id='evt_crude'"))
+    with scored_corpus.engine.connect() as conn:
+        result = score_corpus(conn)
+    assert any(event == "evt_crude" for event, _who in result.ambiguous_empty_labels)
+
+
+def test_M2_ambiguity_line_carries_the_unadjudicated_count(scored_corpus, tmp_path):
+    with scored_corpus.engine.begin() as conn:
+        conn.execute(text("DELETE FROM eval_label WHERE event_id='evt_crude' "
+                          "AND company_ref='MISSCO' AND labeler='labeler_b'"))
+    proc, out = _score(scored_corpus, tmp_path)
+    md = out.read_text(encoding="utf-8")
+    assert "unadjudicated" in md.lower()
+
+
+def test_M3_single_labeler_families_are_listed(scored_corpus, tmp_path):
+    with scored_corpus.engine.begin() as conn:
+        conn.execute(text("DELETE FROM eval_event_label WHERE event_id='evt_crude' "
+                          "AND labeler='labeler_b'"))
+    from scripts.score_baseline import score_corpus
+    with scored_corpus.engine.connect() as conn:
+        result = score_corpus(conn)
+    assert "evt_crude" in result.single_labeler_families
+    proc, out = _score(scored_corpus, tmp_path)
+    assert "one labeler" in out.read_text(encoding="utf-8").lower()
+
+
+def test_M4_forbidden_import_roots_cover_the_wider_app():
+    for root in ("app.translation", "app.companies.supply_links", "app.routers",
+                 "app.alerting"):
+        assert root in FORBIDDEN_IMPORT_ROOTS
+
+
+def test_M5_ui_rejects_an_unknown_direction_token(ui_client, eval_db):
+    resp = ui_client.post("/eval/label", data={
+        "labeler": "labeler_a", "event_id": "evt_ui_1", "primary_companies": "AAA",
+        "absent_companies": "", "ripple_families": "", "directions": "AAA:sideways",
+        "rationale": "x"}, follow_redirects=False)
+    assert resp.status_code == 400
+    assert "sideways" in resp.text
+    with eval_db.engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM eval_label")).scalar() == 0
+
+
+def test_M6_no_dead_macro_tier_constant():
+    import scripts.score_baseline as scorer
+
+    assert not hasattr(scorer, "MACRO_TIER")
+
+
+def test_M6_labeler_is_urlencoded_in_redirects(ui_client):
+    resp = ui_client.post("/eval/label", data={
+        "labeler": "anita rao", "event_id": "evt_ui_1", "primary_companies": "AAA",
+        "absent_companies": "", "ripple_families": "", "directions": "",
+        "rationale": "x"}, follow_redirects=False)
+    assert resp.status_code == 303
+    location = resp.headers["location"]
+    assert "anita%20rao" in location or "anita+rao" in location
+
+
+def test_M7_data_gaps_states_the_contract_corpus_size():
+    """Controller ruling: EXECUTION_CONTRACT §2 verbatim wins -- 40 events
+    total (30 real crude + 10 null), not 40 crude + 10 null."""
+    md = (REPO_ROOT / "DATA_GAPS.md").read_text(encoding="utf-8")
+    assert "10 null" in md
+    assert "40 crude" not in md
+    assert "50 labeled events" not in md
+
+
+def test_I1_headline_family_recall_discloses_excluded_families(family_corpus, tmp_path):
+    """A recall of 100% over an interpretable subset must not read as 100%
+    over what the labelers actually asked for."""
+    proc, out = _score(family_corpus, tmp_path)
+    headline = out.read_text(encoding="utf-8").split("## Corpus")[0]
+    assert "Ripple family recall" in headline
+    assert "EXCLUDED" in headline

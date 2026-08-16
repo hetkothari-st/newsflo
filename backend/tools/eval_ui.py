@@ -43,6 +43,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -83,10 +84,11 @@ _STYLE = """
 """
 
 
-def _page(title: str, body: str) -> HTMLResponse:
+def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
     return HTMLResponse(
         f"<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{html.escape(title)}</title>{_STYLE}</head><body>{body}</body></html>")
+        f"<title>{html.escape(title)}</title>{_STYLE}</head><body>{body}</body></html>",
+        status_code=status_code)
 
 
 def _esc(value) -> str:
@@ -141,9 +143,14 @@ def build_app(engine) -> FastAPI:
             if event is None:
                 return _page("Label", f"<h1 class='warn'>No such event "
                              f"{_esc(target)}</h1><p><a href='/'>Index</a></p>")
-            # The ONLY other read in this handler, and the only one allowed:
-            # the article itself. No system output, ever.
+            # The ONLY other reads in this handler, and the only ones
+            # allowed: the article itself, and the GLOBAL family vocabulary.
+            # The vocabulary is never filtered to this event -- it is the
+            # whole taxonomy, identical on every page, so it tells the
+            # labeler how to spell a family without hinting which one
+            # applies here.
             article = store.resolve_article(conn, event["article_ref"])
+            vocabulary = store.load_family_vocabulary(conn)
 
         if article is None:
             doc = ("<div class='doc warn'><h2>Article not found</h2>"
@@ -159,6 +166,13 @@ def build_app(engine) -> FastAPI:
                    f"<a href='{_esc(article.get('url'))}'>source</a></p>"
                    f"<p>{_esc(body_text).replace(chr(10), '<br>')}</p></div>")
 
+        family_terms = list(vocabulary["sub_sectors"]) + list(vocabulary["sectors"])
+        families_options = "".join(
+            f"<option value='{_esc(term)}'>" for term in family_terms)
+        families_inline = _esc(", ".join(family_terms)) or "none — the companies " \
+            "table has no sector/sub-sector values yet"
+        family_count = len(family_terms)
+
         form = f"""
 <h1>Label event <code>{_esc(target)}</code></h1>
 <p class='meta'>labeler: {_esc(labeler)} &middot; stratum: {_esc(event['stratum'])} &middot;
@@ -173,9 +187,16 @@ def build_app(engine) -> FastAPI:
   event it is the right one.</span>
   <input type='text' name='primary_companies' autofocus></label>
  <label>Expected ripple families
-  <span class='hint'>comma-separated family names (sector / sub-sector wording,
-  e.g. refiners, paints, aviation). Families, not companies.</span>
-  <input type='text' name='ripple_families'></label>
+  <span class='hint'>comma-separated family names — families, not companies.
+  Type a slug from the list below wherever one fits: the scorer matches against
+  this vocabulary, and common analyst wording (refiners, airlines, omc…) is
+  translated via <code>config/eval_family_map.yaml</code>. Anything it cannot
+  translate is reported, not scored.</span>
+  <input type='text' name='ripple_families' list='family_vocabulary'></label>
+ <datalist id='family_vocabulary'>{families_options}</datalist>
+ <details><summary class='meta'>the {family_count} families this universe
+  actually classifies companies into</summary>
+  <p class='meta'>{families_inline}</p></details>
  <label>Expected ABSENT companies
   <span class='hint'>companies a reader might expect but that should NOT appear.</span>
   <input type='text' name='absent_companies'></label>
@@ -201,6 +222,17 @@ company you do not name is scored as one you expected to be absent.</p>
                    rationale: str = Form("")):
         labeler = labeler.strip()
         directions_map = store.parse_direction_map(directions)
+        # M5: a direction outside the vocabulary is rejected, not stored and
+        # not silently dropped -- a labeler who wrote "sideways" meant
+        # something, and the wrong-direction metric must never score against
+        # a value nobody can interpret.
+        unknown = sorted({d for d in directions_map.values() if d not in DIRECTIONS})
+        if unknown:
+            return _page("Label", (
+                f"<h1 class='warn'>Unrecognized direction: "
+                f"{_esc(', '.join(unknown))}</h1>"
+                f"<p>Allowed: {', '.join(DIRECTIONS)}. Nothing was saved — press back "
+                f"and correct the direction field.</p>"), status_code=400)
         families = store.parse_list(ripple_families)
         with engine.begin() as conn:
             for tier, raw in (("PRIMARY", primary_companies), ("ABSENT", absent_companies)):
@@ -218,7 +250,9 @@ company you do not name is scored as one you expected to be absent.</p>
             store.upsert_event_label(conn, event_id=event_id, labeler=labeler,
                                      ripple_families=families,
                                      rationale=rationale or None)
-        return RedirectResponse(f"/eval/label?labeler={labeler}", status_code=303)
+        # M6: a labeler name with a space (or any reserved character) must
+        # survive the round trip.
+        return RedirectResponse(f"/eval/label?labeler={quote(labeler)}", status_code=303)
 
     # ----------------------------------------------------------- adjudicate
     @app.get("/eval/adjudicate", response_class=HTMLResponse)
@@ -268,8 +302,18 @@ company you do not name is scored as one you expected to be absent.</p>
                         f"<div class='meta'>{_esc(entry.get('expected_mechanism') or '')}</div></td>")
             differs = len(set(tiers)) > 1
             current = existing.get(company, {}).get("resolution", "")
+            # I4: LABELER_A/LABELER_B are positional (labelers sorted by
+            # name). Naming them on the option is what stops an adjudicator
+            # picking the wrong one.
+            labels_for_option = {
+                "": "— unresolved —",
+                "LABELER_A": f"LABELER_A ({labelers[0]})",
+                "LABELER_B": f"LABELER_B ({labelers[1]})",
+                "MERGED": "MERGED", "DISPUTED": "DISPUTED",
+            }
             options = "".join(
-                f"<option value='{r}'{' selected' if current == r else ''}>{r}</option>"
+                f"<option value='{r}'{' selected' if current == r else ''}>"
+                f"{_esc(labels_for_option.get(r, r))}</option>"
                 for r in ("",) + RESOLUTIONS)
             rows.append(
                 f"<tr class='{'diff' if differs else ''}'>"
@@ -286,7 +330,9 @@ company you do not name is scored as one you expected to be absent.</p>
         head = "".join(f"<th>{_esc(who)}</th>" for who in labelers)
         page = f"""
 <h1>Adjudicate <code>{_esc(event_id)}</code></h1>
-<p class='meta'>stratum: {_esc(event['stratum'])} &middot; labelers: {_esc(', '.join(labelers))}</p>
+<p class='meta'>stratum: {_esc(event['stratum'])} &middot;
+ <strong>A = {_esc(labelers[0])}</strong> &middot; <strong>B = {_esc(labelers[1])}</strong>
+ (roles are positional: the event's labelers sorted by name)</p>
 <h2>Expected ripple families</h2><ul>{families or '<li><em>none recorded</em></li>'}</ul>
 <h2>Per-company</h2>
 <form method='post' action='/eval/adjudicate'>
@@ -321,7 +367,8 @@ company you do not name is scored as one you expected to be absent.</p>
                 store.upsert_adjudication(
                     conn, event_id=event_id, company_ref=company, resolution=resolution,
                     resolved_by=resolved_by, resolved_note=note)
-        return RedirectResponse(f"/eval/adjudicate?event_id={event_id}", status_code=303)
+        return RedirectResponse(f"/eval/adjudicate?event_id={quote(event_id)}",
+                                status_code=303)
 
     return app
 
