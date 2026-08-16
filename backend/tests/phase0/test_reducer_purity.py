@@ -172,3 +172,60 @@ def test_ambiguous_entity_resolution_rejects():
     impact = reduce_company_impact(signal_set, config)
     assert impact.publication_tier == "REJECTED"
     assert impact.rejection_reason == "ENTITY_AMBIGUOUS"
+
+
+# --- fix round 1 ------------------------------------------------------------
+
+def _modifier_signal(applies_to, modifier_id="FIXTURE_UNMATCHED"):
+    from app.core.signals import make_signal
+
+    return make_signal(
+        event_id=fixtures.EVENT_ID, company_id=fixtures.PRIMARY_COMPANY_ID,
+        stage="POLICY", kind="MODIFIER",
+        payload={"_fixture": True, "modifier_id": modifier_id,
+                 "effect": "BLOCK", "applies_to_channel_id": applies_to},
+        created_by="fixture:policy_registry",
+        analysis_version=fixtures.ANALYSIS_VERSION,
+        created_at=fixtures.FIXTURE_CREATED_AT)
+
+
+def test_a_modifier_that_matches_no_channel_is_not_recorded_as_applied():
+    """It never touched anything, so claiming it was applied is a small lie
+    in the audit trail -- and the policy_modifiers list is exactly what a
+    postmortem reads to explain a number."""
+    from app.core.reducer import reduce_company_impact
+
+    signals = list(fixtures.signals(fixtures.PRIMARY_COMPANY_ID))
+    signals.append(_modifier_signal("no_such_channel"))
+    impact = reduce_company_impact(signals, fixtures.reducer_config())
+
+    assert "FIXTURE_UNMATCHED" not in impact.policy_modifiers_applied
+    assert "FIXTURE_UNMATCHED" in impact.policy_modifiers_unmatched
+    # ...and it changed nothing about the outcome.
+    assert impact.net_effect == reduce_company_impact(
+        fixtures.signals(fixtures.PRIMARY_COMPANY_ID),
+        fixtures.reducer_config()).net_effect
+
+
+def test_a_modifier_that_matches_a_channel_is_recorded_as_applied():
+    from app.core.reducer import reduce_company_impact
+
+    signals = list(fixtures.signals(fixtures.PRIMARY_COMPANY_ID))
+    signals.append(_modifier_signal("input_cost_crude", "FIXTURE_MATCHED"))
+    impact = reduce_company_impact(signals, fixtures.reducer_config())
+
+    assert "FIXTURE_MATCHED" in impact.policy_modifiers_applied
+    assert "FIXTURE_MATCHED" not in impact.policy_modifiers_unmatched
+    blocked = [c for c in impact.channels if c["channel_id"] == "input_cost_crude"]
+    assert blocked and blocked[0]["material"] is False
+
+
+def test_the_unmatched_modifier_list_is_serialized():
+    from app.core.reducer import reduce_company_impact, serialize_company_impact
+
+    signals = list(fixtures.signals(fixtures.PRIMARY_COMPANY_ID))
+    signals.append(_modifier_signal("no_such_channel"))
+    payload = serialize_company_impact(
+        reduce_company_impact(signals, fixtures.reducer_config()))
+    assert payload["fundamental"]["policy_modifiers_unmatched"] == ["FIXTURE_UNMATCHED"]
+    assert payload["fundamental"]["policy_modifiers_applied"] == ["FIXTURE_PRICE_FREEZE"]

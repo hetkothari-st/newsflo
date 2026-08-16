@@ -39,7 +39,15 @@ _ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _MONTH_DATE = re.compile(
     r"\b(?:\d{1,2}\s+)?(?:January|February|March|April|May|June|July|August|"
     r"September|October|November|December)\s+\d{4}\b")
-_CAPITALISED = re.compile(r"\b[A-Z][A-Za-z0-9&.\-']*\b")
+# Entity-shaped tokens. NOT `[A-Z]…`: real NSE tickers start with digits
+# (3MINDIA.NS, 5PAISA.NS, 63MOONS.NS), and a pattern that could not see them
+# left their leading digits to the numeral check, which then deleted an
+# otherwise honest sentence for "numeral not in record set: 63" (fix round
+# 1, finding I3). A token counts as entity-shaped when it contains at least
+# one UPPERCASE letter -- that is what separates `63MOONS.NS` from `90`, and
+# an ordinary lowercase word from a name.
+_TOKEN = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9&.\-']*\b")
+_HAS_UPPER = re.compile(r"[A-Z]")
 
 # Capitalised words that are ordinary English, not entities. Deliberately
 # short: anything not here must be justified by the record set.
@@ -97,8 +105,9 @@ class FirewallResult:
 def _entity_tokens(*values: Any) -> set[str]:
     tokens: set[str] = set()
     for value in values:
-        for token in _CAPITALISED.findall(str(value or "")):
-            tokens.add(token.rstrip("."))
+        for token in _TOKEN.findall(str(value or "")):
+            if _HAS_UPPER.search(token):
+                tokens.add(token.rstrip("."))
     return tokens
 
 
@@ -151,28 +160,53 @@ def _numeral_in(value: float, record_set: RecordSet) -> bool:
     return False
 
 
+def _blank(text: str) -> str:
+    """Same length, no content -- masking rather than deleting keeps every
+    other token's word boundaries intact, so a numeral sitting next to a
+    masked ticker is still seen."""
+    return re.sub(r"[^\s]", " ", text)
+
+
 def stage_one(sentence: str, record_set: RecordSet) -> str | None:
     """The deterministic checks. Returns a failure reason, or None to pass.
 
-    Dates are extracted and removed BEFORE numerals, so an unknown date is
-    reported as a date problem rather than three unknown numbers."""
+    ORDER IS LOAD-BEARING (fix round 1, finding I3):
+      1. dates, so an unknown date is reported as a date problem rather than
+         as three unknown numbers;
+      2. entities, and every VALIDATED entity is then MASKED OUT -- the
+         digits inside `63MOONS.NS` are part of its name, not a claim about
+         the world, and reading them as numerals deleted honest sentences.
+         Only validated entities are masked: an unknown ticker-shaped token
+         still fails as an entity, and numerals adjacent to a masked ticker
+         are still checked;
+      3. numerals, over what is left.
+    """
     remainder = sentence
     for pattern in (_ISO_DATE, _MONTH_DATE):
         for match in pattern.findall(remainder):
             if match not in record_set.dates:
                 return f"date not in record set: {match}"
-        remainder = pattern.sub(" ", remainder)
+        remainder = pattern.sub(_blank, remainder)
+
+    masked: list[str] = []
+    position = 0
+    for match in _TOKEN.finditer(remainder):
+        token = match.group(0)
+        if not _HAS_UPPER.search(token):
+            continue                       # ordinary word or bare number
+        cleaned = token.rstrip(".")
+        if cleaned not in ALLOWED_CAPITALISED and cleaned not in record_set.entities:
+            return f"entity not in record set: {cleaned}"
+        masked.append(remainder[position:match.start()])
+        masked.append(_blank(token))
+        position = match.end()
+    masked.append(remainder[position:])
+    remainder = "".join(masked)
 
     for raw in _NUMERAL.findall(remainder):
         value = float(raw.replace(",", ""))
         if not _numeral_in(value, record_set):
             return f"numeral not in record set: {raw}"
-
-    for token in _CAPITALISED.findall(remainder):
-        cleaned = token.rstrip(".")
-        if cleaned in ALLOWED_CAPITALISED or cleaned in record_set.entities:
-            continue
-        return f"entity not in record set: {cleaned}"
     return None
 
 

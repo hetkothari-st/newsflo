@@ -15,6 +15,8 @@ import ast
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.phase0 import fixtures
 
 CORE = Path(__file__).resolve().parents[2] / "app" / "core"
@@ -117,3 +119,35 @@ def test_mutating_market_data_leaves_company_impact_byte_identical():
         sort_keys=True)
 
     assert after == baseline
+
+
+# --- fix round 1: bool is not a graph distance -------------------------------
+
+@pytest.mark.parametrize("value", [True, False])
+def test_a_boolean_causal_distance_is_not_read_as_a_graph_distance(value):
+    """`isinstance(True, int)` is True in Python, so an entry carrying a
+    boolean would have produced graph_distance=1 -- a fabricated distance
+    from a field that never held one."""
+    from app.core.signal_adapters import signals_from_entry
+    from app.core.signals import SignalKind
+
+    signals = signals_from_entry(
+        {"company_id": 9001, "ticker": "FIXCO1.NS", "causal_distance": value},
+        event_id="fixture:bool", analysis_version="v3:fixture",
+        created_at=fixtures.FIXTURE_CREATED_AT)
+    discovery = [s for s in signals if s.kind == SignalKind.DISCOVERY][0]
+    assert discovery.payload["graph_distance"] is None
+
+
+@pytest.mark.parametrize("value,expected", [(True, None), (False, None),
+                                            (3, 3), (None, None), ("2", None)])
+def test_backfill_graph_distance_mapping_rejects_booleans(value, expected):
+    import importlib.util
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "backfill_company_impact", backend / "scripts" / "backfill_company_impact.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.map_graph_distance(value) == expected

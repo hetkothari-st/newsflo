@@ -268,3 +268,78 @@ def test_deletion_rate_is_exposed_as_a_prometheus_metric(record_set):
     assert "newsflo_firewall_sentences_total" in exposition
     assert "newsflo_firewall_deletions_total" in exposition
     assert 'stage="STAGE_1"' in exposition
+
+
+# --- fix round 1: I3, digit-bearing tickers ---------------------------------
+
+class _TickerImpact:
+    """Minimal CompanyImpact-shaped stand-in for record_set_from. Real NSE
+    tickers START WITH DIGITS (3MINDIA.NS, 5PAISA.NS, 63MOONS.NS), which is
+    the case the first cut of stage 1 got wrong."""
+    ticker = "3MINDIA.NS"
+    isin = None
+    channels = ()
+    mechanism_id = "input_cost"
+    net_effect = "NEGATIVE"
+    materiality_bucket = "HIGH"
+    directness = "DIRECT"
+    discovery_source = "MENTION"
+    publication_tier = "PRIMARY"
+    graph_distance = 1
+    sign_consistency = 1.0
+
+
+@pytest.fixture()
+def ticker_record_set():
+    from app.output.firewall import RecordSet, record_set_from
+
+    base = record_set_from(_TickerImpact())
+    # 5PAISA.NS and 63MOONS.NS are real, resolved entities of this event too.
+    return RecordSet(
+        numerals=base.numerals,
+        entities=base.entities | {"5PAISA.NS", "63MOONS.NS"},
+        dates=base.dates)
+
+
+@pytest.mark.parametrize("ticker", ["3MINDIA.NS", "5PAISA.NS", "63MOONS.NS"])
+def test_digit_bearing_ticker_is_not_read_as_a_numeral(ticker, ticker_record_set):
+    """I3: the digits inside a ticker are part of its NAME. Reading them as
+    claims made the firewall delete honest sentences the moment a real NSE
+    ticker appeared."""
+    from app.output.firewall import firewall
+
+    sentence = f"{ticker} is exposed through the input cost channel."
+    result = firewall([sentence], ticker_record_set)
+    assert result.kept == [sentence], (
+        [(d.reason, d.stage) for d in result.deletions])
+
+
+@pytest.mark.parametrize("ticker", ["3MINDIA.NS", "5PAISA.NS", "63MOONS.NS"])
+def test_a_real_numeral_next_to_a_ticker_is_still_checked(ticker, ticker_record_set):
+    """The mask must remove the TICKER, not the numbers around it."""
+    from app.output.firewall import firewall
+
+    sentence = f"{ticker} hedged 90 percent of its exposure."
+    result = firewall([sentence], ticker_record_set)
+    assert result.kept == []
+    assert "numeral" in result.deletions[0].reason
+    assert "90" in result.deletions[0].reason
+
+
+def test_a_digit_bearing_token_that_is_not_a_known_entity_is_deleted(ticker_record_set):
+    """Masking applies only to VALIDATED entities -- an unknown ticker-shaped
+    token is still an unsupported entity, not a free pass."""
+    from app.output.firewall import firewall
+
+    result = firewall(["7SEAS.NS is exposed through the input cost channel."],
+                      ticker_record_set)
+    assert result.kept == []
+    assert "entity" in result.deletions[0].reason
+    assert "7SEAS.NS" in result.deletions[0].reason
+
+
+def test_record_set_captures_digit_leading_entities():
+    from app.output.firewall import record_set_from
+
+    record_set = record_set_from(_TickerImpact())
+    assert "3MINDIA.NS" in record_set.entities

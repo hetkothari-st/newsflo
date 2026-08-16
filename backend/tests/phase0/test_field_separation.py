@@ -160,12 +160,28 @@ def _scan() -> list[str]:
     return violations
 
 
+def _location(violation: str) -> str:
+    """'path:line' out of 'path:line: message'. Compared EXACTLY (fix round
+    1, finding: a `startswith` baseline of '…FeedV4.tsx:373' would also have
+    exempted lines 3730-3739 of that file)."""
+    path, line, _ = violation.split(":", 2)
+    return f"{path}:{line}"
+
+
 def test_no_source_file_concatenates_a_directness_with_a_tier():
-    unexpected = [v for v in _scan()
-                  if not any(v.startswith(b) for b in BASELINE)]
+    baseline = set(BASELINE)
+    unexpected = [v for v in _scan() if _location(v) not in baseline]
     assert not unexpected, (
         "new directness/tier concatenation introduced:\n  " +
         "\n  ".join(unexpected))
+
+
+def test_the_baseline_is_matched_exactly_not_by_prefix():
+    """A prefix match would silently exempt every line whose number STARTS
+    with a baselined one (373 exempting 3730-3739)."""
+    assert _location("frontend/src/v4/FeedV4.tsx:373: msg") == \
+           "frontend/src/v4/FeedV4.tsx:373"
+    assert _location("frontend/src/v4/FeedV4.tsx:3730: msg") not in set(BASELINE)
 
 
 def test_the_lint_actually_catches_a_violation(tmp_path):

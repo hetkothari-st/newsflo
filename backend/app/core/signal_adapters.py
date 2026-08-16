@@ -71,6 +71,14 @@ _EFFECT_DIRECTIONS = {
 }
 
 
+def _graph_distance(value: Any) -> int | None:
+    """An int, or None. Booleans are refused: they are ints in Python, and
+    `True` would silently become distance 1."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
 def _slug(text: str) -> str:
     keep = [ch.lower() if ch.isalnum() else "_" for ch in str(text)[:48]]
     return "".join(keep).strip("_") or "unnamed"
@@ -135,8 +143,10 @@ def signals_from_entry(entry: Mapping[str, Any], *, event_id: str,
         "discovery_source": DISCOVERY_SOURCE_MAP.get(
             str(entry.get("discovery_source_vocab") or "")),
         "directness": directness if directness in DIRECTNESS_VALUES else None,
-        "graph_distance": (entry.get("causal_distance")
-                           if isinstance(entry.get("causal_distance"), int) else None),
+        # `isinstance(True, int)` is True in Python, so a boolean would
+        # have become graph_distance=1 -- a distance fabricated out of a
+        # field that never held one (fix round 1).
+        "graph_distance": _graph_distance(entry.get("causal_distance")),
     }, "v4:impact_graph_engine"))
 
     materiality = MATERIALITY_GRADE_MAP.get(

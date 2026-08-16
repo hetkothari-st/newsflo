@@ -109,6 +109,9 @@ class CompanyImpact:
     sign_consistency: float
     channels: tuple[Mapping[str, Any], ...]
     policy_modifiers_applied: tuple[str, ...]
+    # Modifiers whose target channel does not exist in this signal set. They
+    # changed nothing, and saying otherwise would misdescribe the record.
+    policy_modifiers_unmatched: tuple[str, ...]
     materiality_bucket: str
     mechanism_id: str | None
 
@@ -205,6 +208,7 @@ def reduce_company_impact(signals: Sequence[Signal],
     modifiers = sorted(_payloads(ordered, SignalKind.MODIFIER),
                        key=lambda m: str(m["modifier_id"]))
     applied: list[str] = []
+    unmatched: list[str] = []
     for modifier in modifiers:
         modifier_id = str(modifier["modifier_id"])
         effect = str(modifier["effect"])
@@ -221,7 +225,11 @@ def reduce_company_impact(signals: Sequence[Signal],
             # DAMPEN / AMPLIFY: recorded, not applied -- see the module
             # docstring. There is no coefficient to apply and one must not
             # be invented.
-        applied.append(modifier_id)
+        # A modifier whose target channel does not exist touched NOTHING.
+        # Listing it as applied is a small lie in exactly the field a
+        # postmortem reads to explain a number, so it is recorded honestly
+        # in its own list instead (fix round 1).
+        (applied if touched else unmatched).append(modifier_id)
 
     # --- 4. net effect -----------------------------------------------------
     material = [c for c in channels if c["material"]]
@@ -314,6 +322,7 @@ def reduce_company_impact(signals: Sequence[Signal],
         headline_horizon=NEAR_TERM, net_effect=net_effect,
         sign_consistency=sign_consistency, channels=tuple(channels),
         policy_modifiers_applied=tuple(applied),
+        policy_modifiers_unmatched=tuple(unmatched),
         materiality_bucket=materiality_bucket, mechanism_id=mechanism_id,
         evidence_grade=evidence_grade, weakest_link=weakest_link,
         claim_bindings=tuple(bindings), empirical_status=empirical_status,
@@ -376,6 +385,7 @@ def serialize_company_impact(impact: CompanyImpact) -> dict:
             "mechanism_id": impact.mechanism_id,
             "channels": [dict(c) for c in impact.channels],
             "policy_modifiers_applied": list(impact.policy_modifiers_applied),
+            "policy_modifiers_unmatched": list(impact.policy_modifiers_unmatched),
         },
         "evidence": {
             "grade": impact.evidence_grade,

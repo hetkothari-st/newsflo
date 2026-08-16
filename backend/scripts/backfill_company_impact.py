@@ -91,7 +91,12 @@ def map_directness(value):
 
 
 def map_graph_distance(value):
-    return value if isinstance(value, int) else None
+    """An int, or None. Booleans are excluded explicitly: `isinstance(True,
+    int)` is True in Python, so a boolean column value would otherwise be
+    backfilled as distance 1 (fix round 1)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def map_discovery_source(value):
