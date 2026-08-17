@@ -154,3 +154,66 @@ under `app/` holds a mechanism→label mapping outside
 above, so a fourth instance cannot be introduced silently.
 
 **Owner: V5 serving phase.**
+
+### 7. Re-run discovery, or re-validate persisted `mechanism_id` — HARD REQUIREMENT
+
+**The cutover may not be declared done while a third option is live.** Exactly
+two serving shapes are permitted:
+
+| # | shape | why it is safe |
+|---|---|---|
+| **A** | the serving path **re-runs discovery** for every render | every `mechanism_id` is re-derived from `traverse`, which since the D10 fix returns only `review_status = 'APPROVED'` rows with a non-null `reviewed_by` |
+| **B** | the serving path **re-validates** each persisted `mechanism_id` against `mechanism_edge` before rendering | the id is checked against the row's *current* state rather than the state it had when it was written |
+
+Anything else — rendering sections straight from stored `company_impact` rows —
+is **not permitted**, and is the reason this is a checklist item rather than a
+note.
+
+#### Why it is a requirement and not a nicety
+
+D2 (`docs/v5/defects/DEFECTS-001-ceat-proof-of-life.md`) is *"an unreviewed
+mechanism edge published"*: `gates.py:363` tests `bool(draft.mechanism_id)` —
+presence of a non-null string — and reads neither `review_status` nor
+`reviewed_by` nor whether the id resolves to a row at all.
+
+D10's fix closes the **writer** side: nothing unapproved is walkable, so no
+V5 discovery site can mint an unresolvable id. That is verified — every value
+is `None` (`discovery/engine.py:237`) or an `edge.edge_id` from `traverse`
+(`:264`, `:427`, and inherited at `:314`).
+
+But **an id is written once and read later**, and the row underneath it can
+move in between:
+
+* `app/core/impact_writer.py:185` persists `mechanism_id` onto `company_impact`.
+* `app/output/sections.py:59` keys `section_key` off `impact.mechanism_id`.
+* `edge_review.reject_edge` can set `review_status = 'REJECTED'` at any time,
+  and `traverse._SELECT` filters `effective_from` / `effective_to` against
+  `as_of`, so an edge can also simply fall out of its window.
+
+So an edge that was APPROVED and in-window when the candidate was built can be
+REJECTED, or lapse, **afterwards**. Under the forbidden third shape that stored
+id keeps publishing and nothing re-checks it. **D2's failure mode then arrives
+WITH the cutover instead of closing at it** — and it arrives on the V5 path,
+carrying V5's authority, which is strictly worse than the V4 leak it replaced.
+
+Today this is safe only because V5 serves nothing: references from
+`pipeline.py`, `main.py` and `routers/` to `app.discovery`, `app.core.gates`,
+`app.core.reducer`, `app.output.sections` and `app.graph.traverse` are **0**.
+That is a fact about the wiring, not a property of the design, and it stops
+being true on the day this checklist is worked.
+
+#### Acceptance test — armed now, fails on the day it matters
+
+`backend/tests/test_cutover_d2_reader_requirement.py`
+
+It is a **tripwire**, not a conditional skip. While V5 is dark it asserts that
+V5 is dark, so it is green and load-bearing. The moment anyone wires a V5
+canonical module into the serving path it goes **RED**, and the only ways to
+green it are shape A or shape B. It cannot be satisfied by the third option,
+and it cannot be quietly outlived — wiring V5 without reading this item breaks
+the build.
+
+Deleting or `xfail`-ing that test is the same act as choosing the third option,
+and should be reviewed as such.
+
+**Owner: V5 serving phase.**
