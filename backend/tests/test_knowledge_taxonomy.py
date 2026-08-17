@@ -74,3 +74,86 @@ def test_fix_round_1_disputed_entries():
     # housing_demand_rates -- not a direct physical effect.
     assert knowledge.MECHANISMS["agrochemical_volume"]["directness"] == "INDIRECT"
     assert knowledge.MECHANISMS["agrochemical_volume"]["relation"] == "DEMAND"
+
+
+# --- canonical id resolution (node-id consolidation, P0) --------------------
+#
+# `normalize_node_id` is the canonical WRITER transform, but 9 of the 42
+# MECHANISMS keys change under it, so a persisted `causal_parent_id` speaks a
+# different dialect from the registry's own keys. These accessors are the ONE
+# place the two dialects meet; every alias map in the tree collapses onto them.
+
+def _drifting():
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    return {mid: normalize_node_id(mid) for mid in knowledge.MECHANISMS
+            if normalize_node_id(mid) != mid}
+
+
+def test_the_drift_set_is_exactly_the_nine_ids_the_sweep_measured():
+    """The blast radius, pinned. A normalize.py rule change or a registry
+    rename that grows this set has to be looked at, not discovered later."""
+    assert _drifting() == {
+        "paints_input_cost": "paint_input_cost",
+        "nbfc_funding_cost": "nbfc_financing_cost",
+        "housing_demand_rates": "housing_demand_rate",
+        "durables_financing_demand": "durable_financing_demand",
+        "corporate_capex_rates": "corporate_capex_rate",
+        "staples_volume_pressure": "staple_volume_pressure",
+        "electronics_import_cost": "electronic_import_cost",
+        "capital_goods_orders": "capital_good_order",
+        "freight_rate_spike": "freight_rate_up",
+    }
+
+
+def test_normalize_never_collides_two_mechanisms_onto_one_persisted_id():
+    """The alias map is only well-defined while the transform is injective
+    over the registry -- two mechanisms sharing one persisted id would make
+    `resolve_mechanism_id` pick arbitrarily."""
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    persisted = [normalize_node_id(mid) for mid in knowledge.MECHANISMS]
+    assert len(set(persisted)) == len(persisted)
+
+
+def test_resolve_mechanism_id_answers_in_either_dialect():
+    for raw, persisted in _drifting().items():
+        assert knowledge.resolve_mechanism_id(raw) == raw
+        assert knowledge.resolve_mechanism_id(persisted) == raw
+    # a stable id is its own answer in both dialects (they are one string)
+    assert knowledge.resolve_mechanism_id("aviation_fuel_cost") == "aviation_fuel_cost"
+
+
+def test_resolve_mechanism_id_owns_nothing_it_does_not_know():
+    assert knowledge.resolve_mechanism_id("not_a_mechanism_xyz") is None
+    assert knowledge.resolve_mechanism_id("") is None
+    assert knowledge.resolve_mechanism_id(None) is None
+
+
+def test_mechanism_meta_for_node_reads_the_persisted_dialect():
+    for raw, persisted in _drifting().items():
+        assert knowledge.mechanism_meta_for_node(persisted) == knowledge.mechanism_meta(raw)
+    assert knowledge.mechanism_meta_for_node("not_a_mechanism_xyz") is None
+
+
+def test_section_label_for_node_reads_the_persisted_dialect():
+    for raw, persisted in _drifting().items():
+        assert (knowledge.section_label_for_node("economic_node", persisted)
+                == knowledge.section_label_for("economic_node", raw))
+    # the registry does not own sector/company parents -- the caller keeps
+    # its own controlled OTHER label rather than borrowing a mechanism's
+    assert knowledge.section_label_for_node("sector", "paint_input_cost") is None
+    assert knowledge.section_label_for_node("company", "paint_input_cost") is None
+    # an id-only caller (parent_type "") is still served: pipeline and the
+    # publication gate both tolerate the bare id
+    assert (knowledge.section_label_for_node("", "paint_input_cost")
+            == knowledge.section_label_for("economic_node", "paints_input_cost"))
+
+
+def test_the_alias_map_is_derived_never_restated():
+    """Structural: the index is built FROM normalize_node_id, so a registry
+    rename cannot orphan a mechanism behind a hand-written table."""
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    for mid in knowledge.MECHANISMS:
+        assert knowledge.resolve_mechanism_id(normalize_node_id(mid)) == mid

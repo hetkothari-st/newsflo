@@ -28,6 +28,7 @@ here -- companies arrive only through the archetype->DB retrieval.
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.analysis.impact_graph.normalize import normalize_node_id
 from app.companies.integrity import DEMO_TICKERS
 from app.models import Company
 
@@ -509,6 +510,69 @@ def mechanism_meta(mechanism_id: str) -> dict | None:
         "distance": spec["distance"],
         "provenance": spec["provenance"],
     }
+
+
+def _mechanism_alias_map() -> dict[str, str]:
+    """persisted (normalized) node id -> raw MECHANISMS key.
+
+    Built FROM `normalize_node_id`, never restated, so a registry rename or a
+    `normalize.py` rule change cannot silently orphan a mechanism behind a
+    hand-written table. Cached on first call; MECHANISMS is a module-level
+    constant, so one build per process is correct."""
+    global _MECHANISM_ALIASES
+    if _MECHANISM_ALIASES is None:
+        _MECHANISM_ALIASES = {normalize_node_id(mid): mid for mid in MECHANISMS}
+    return _MECHANISM_ALIASES
+
+
+_MECHANISM_ALIASES: dict[str, str] | None = None
+
+#: Parent types the registry owns. "" is a caller that carries the bare id
+#: (older gate/pipeline callers do). "sector"/"company" are NOT here: a sector
+#: named "cement" must never borrow the cement mechanism's verdict.
+_MECHANISM_PARENT_TYPES = ("", "economic_node", "commodity", "policy")
+
+
+def resolve_mechanism_id(node_id: str | None) -> str | None:
+    """The raw registry id for a node id in EITHER dialect (a raw MECHANISMS
+    key, or the `normalize_node_id`-rewritten form production persists), or
+    None when the registry does not own it.
+
+    THE accessor every consumer of a persisted `causal_parent_id` must call.
+    Nine of the 42 registry keys change under the writer transform
+    ("paints_input_cost" is stored as "paint_input_cost"), so a direct
+    `MECHANISMS.get` on a persisted id misses exactly those nine and falls
+    through silently."""
+    key = str(node_id or "").strip()
+    if not key:
+        return None
+    if key in MECHANISMS:
+        return key
+    aliases = _mechanism_alias_map()
+    if key in aliases:
+        return aliases[key]
+    # last resort: a caller holding a not-yet-normalized spelling
+    # ("Paints Input Cost", "freight rates spiked") gets the same answer the
+    # writer would have produced for it.
+    return aliases.get(normalize_node_id(key))
+
+
+def mechanism_meta_for_node(node_id: str | None) -> dict | None:
+    """`mechanism_meta()` keyed by a node id in either dialect."""
+    resolved = resolve_mechanism_id(node_id)
+    return mechanism_meta(resolved) if resolved else None
+
+
+def section_label_for_node(parent_type: str | None, node_id: str | None) -> str | None:
+    """`section_label_for()` keyed by a node id in either dialect.
+
+    Returns None for parent types the registry does not own (sector/company)
+    and for unknown ids, so callers keep their own controlled OTHER label --
+    never the raw node id."""
+    if str(parent_type or "").strip().lower() not in _MECHANISM_PARENT_TYPES:
+        return None
+    meta = mechanism_meta_for_node(node_id)
+    return meta["section_label"] if meta is not None else None
 
 
 def section_label_for(parent_type: str, parent_id: str) -> str | None:
