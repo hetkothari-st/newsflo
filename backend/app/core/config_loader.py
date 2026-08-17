@@ -104,6 +104,24 @@ def load_sensitivity_policy(path: Path | None = None):
 
 
 @lru_cache(maxsize=4)
+def load_horizon_policy(path: Path | None = None):
+    """V5 PHASE 4 -- the headline-selection weights, from
+    `config/horizons.yaml`.
+
+    Parsed by `app.analysis.sensitivity.horizons` so that the engine which
+    evaluates the three horizons and the reducer which ranks them read ONE
+    file through ONE parser. The reducer itself still imports nothing that
+    touches a disk; it receives the frozen policy in its config.
+    """
+    from app.analysis.sensitivity.horizons import load_horizon_config
+    from app.core.reducer import HorizonPolicy
+
+    config = load_horizon_config(path)
+    return HorizonPolicy(materiality_weight=config.materiality_weight,
+                         tie_break=config.tie_break)
+
+
+@lru_cache(maxsize=4)
 def load_reducer_config(path: Path | None = None):
     """The `ReducerConfig` the deployed policy implies. Separate from
     `load_gate_config` so a caller that only wants to inspect the gate does
@@ -113,4 +131,5 @@ def load_reducer_config(path: Path | None = None):
     # `path` is the GATE policy's path; the sensitivity policy always comes
     # from its own deployed file (config/materiality.yaml).
     return ReducerConfig(gate_config=load_gate_config(path),
-                         sensitivity_policy=load_sensitivity_policy())
+                         sensitivity_policy=load_sensitivity_policy(),
+                         horizon_policy=load_horizon_policy())

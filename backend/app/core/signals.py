@@ -47,7 +47,9 @@ class SignalPayloadError(ValueError):
 # a guess).
 DIRECTIONS = ("POSITIVE", "NEGATIVE")
 MATERIALITY_BUCKETS = ("HIGH", "MEDIUM", "LOW", "NONE")
-HORIZONS = ("NEAR_TERM",)          # Phase 4 adds IMMEDIATE and STRUCTURAL
+# V5 PHASE 4 (spec §8). Three horizons, always, computed independently. The
+# order here is TIME order, not a ranking.
+HORIZONS = ("IMMEDIATE", "NEAR_TERM", "STRUCTURAL")
 BINDING_STATUSES = ("BOUND", "SECTOR_PROXY", "UNBOUND")
 EVIDENCE_GRADES = ("A", "B", "C", "D", "E")
 OBJECTION_SEVERITIES = ("BLOCKING", "MAJOR", "WARN")
@@ -88,6 +90,15 @@ _SCHEMAS: dict[str, dict[str, tuple[bool, Any]]] = {
         "delta_ebitda_pct_p50": (False, (int, float)),
         "exposure_stale": (False, bool),
         "sensitivity": (False, dict),
+        # --- V5 PHASE 4 (policy modifiers), both OPTIONAL -------------------
+        # Every policy modifier CONSIDERED for this company, with its status
+        # (APPLIED / UNKNOWN_STATE / UNRESOLVED / NOT_TRIGGERED), its type and
+        # the notification it comes from. Task 4.2 requires it to be surfaced,
+        # so it travels with the number rather than being looked up later.
+        "policy_modifiers": (False, list),
+        # Whether a `policy_state` reading this company's modifiers depend on
+        # is past its freshness window (§9.3 -- blocks PRIMARY).
+        "policy_state_stale": (False, bool),
     },
     SignalKind.MODIFIER: {
         "modifier_id": (True, str),

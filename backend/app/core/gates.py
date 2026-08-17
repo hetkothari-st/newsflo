@@ -67,6 +67,14 @@ class TierPolicy:
     min_evidence_grade: str | None = None
     # Section-level, read by app/discovery/coherence.py, not by this module.
     min_companies_per_section: int | None = None
+    # --- V5 PHASE 4, spec §9.3. ADDITIVE: a rule only when the tier names it.
+    #
+    # "If `policy_state` is stale past its horizon, affected companies cannot
+    # reach PRIMARY." A TIER rule, deliberately, not a hard block: a company
+    # whose regime reading has gone stale has not become unpublishable, it has
+    # become unpublishable AS A PRIMARY CALL. `None` = no rule (the behaviour
+    # of every config that predates Phase 4); False = refused; True = admitted.
+    allow_stale_policy_state: bool | None = None
     # What an ABSENT input means for the two A5.1 rules, stated per tier in
     # the YAML exactly like the four Phase 0 `unknown_*` keys. There is no
     # computed band and no parameter provenance on the V4-fed canonical path
@@ -132,6 +140,13 @@ class ImpactDraft:
     # Whether any parameter behind this claim came from a sector median
     # rather than the company's own disclosure (§4.2, A4.3).
     uses_sector_proxy: bool | None = None
+    # --- V5 PHASE 4, spec §9.3. False = every regime reading this company's
+    # modifiers depend on is inside its freshness window (which includes the
+    # case where it depends on none). There is no "unknown" third state here:
+    # `app.analysis.policy.state.stale_keys` answers only about states that
+    # EXIST, so an unregistered regime is not somebody's maintenance failure
+    # and does not block anything.
+    policy_state_stale: bool = False
 
 
 @dataclass(frozen=True)
@@ -324,6 +339,13 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
             "materiality_floor", floor_ok,
             f"{draft.delta_ebitda_pct_abs} floor={policy.materiality_floor_pct}%",
             unknown_escape=(floor_ok and draft.delta_ebitda_pct_abs is None)))
+
+    # --- V5 PHASE 4, §9.3 ---------------------------------------------------
+    if policy.allow_stale_policy_state is not None \
+            and not policy.allow_stale_policy_state:
+        rules.append(GateRule("policy_state_freshness",
+                              not draft.policy_state_stale,
+                              str(draft.policy_state_stale)))
 
     if policy.allow_sector_proxy is not None and not policy.allow_sector_proxy:
         proxy_ok = (policy.unknown_sector_proxy_passes

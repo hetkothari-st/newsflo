@@ -34,6 +34,10 @@ def _assert_close(actual: float, expected: float, label: str) -> None:
 COMPUTABLE = [c for c in cases() if "expected_delta_ebitda_inr" in c]
 UNCOMPUTABLE = [c for c in cases() if "expected_raises" in c]
 
+# Exposure kinds a LATER phase added to `CHANNEL_FOR_KIND`, whose worked
+# examples live with that phase rather than in this frozen corpus.
+PHASE_4_CHANNEL_KINDS = {"INVENTORY"}
+
 
 def test_the_corpus_has_twenty_examples_spanning_every_channel_type():
     raw = load_worked_examples()
@@ -127,7 +131,16 @@ def test_every_channel_type_refuses_to_run_with_no_parameters_at_all():
         with pytest.raises(InsufficientParameterData):
             compute_channel(exposure_from_case(case), shock_from_case(case), {},
                             horizon_days=int(case["shock"]["horizon_days"]))
-    assert seen == set(CHANNEL_FOR_KIND)
+    # V5 PHASE 4 added INVENTORY (the inventory-revaluation channel, spec §8)
+    # to `CHANNEL_FOR_KIND`. It is deliberately NOT in this corpus: these are
+    # the twenty Phase 2 examples hand-verified in
+    # `.superpowers/sdd/2026-08-17-v5-session0/phase2-worked-examples.md`, and
+    # adding an unverified case to a verified corpus would be worse than
+    # naming the exception here. Its own no-defaults guard lives with the
+    # phase that added it (`tests/phase4/test_horizon_vector.py`). A channel
+    # type covered by NEITHER corpus still fails this assertion, which is the
+    # property it exists for.
+    assert seen == set(CHANNEL_FOR_KIND) - PHASE_4_CHANNEL_KINDS
 
 
 def test_an_exposure_kind_with_no_channel_formula_is_uncomputable():

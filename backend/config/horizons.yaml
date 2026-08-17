@@ -1,0 +1,53 @@
+# V5 horizon vector policy (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §8,
+# docs/v5/05_PHASE_4_policy_horizon.md Task 4.3).
+#
+# THIS FILE IS POLICY, NOT DATA. It states three time windows and how a
+# headline is chosen among them. It carries no company, no coefficient and no
+# financial figure -- a test asserts the file has exactly these four keys.
+#
+# WHY THE WINDOWS ARE WHERE THEY ARE. §8 states them in words ("0-5 trading
+# days", "current + next quarter", "2-4 quarters") and every channel formula
+# needs them as a NUMBER OF DAYS, because that is the argument to the
+# pass-through curve. The translation is written down here rather than
+# derived in code:
+#
+#   IMMEDIATE   5 days     the upper end of "0-5 trading days"
+#   NEAR_TERM   90 days    one quarter forward, the midpoint of "current +
+#                          next quarter"
+#   STRUCTURAL  270 days   three quarters forward, the midpoint of "2-4
+#                          quarters"
+#
+# Changing a number here changes where every curve is sampled, and therefore
+# what publishes. It never changes what is true.
+
+version: horizons-v5.0.0
+
+horizons:
+  IMMEDIATE:
+    days: 5
+    window: "0-5 trading days"
+    dominated_by: "inventory revaluation, mark-to-market, hedge gains"
+  NEAR_TERM:
+    days: 90
+    window: "current + next quarter"
+    dominated_by: "margin transmission, pass-through lag, contract resets"
+  STRUCTURAL:
+    days: 270
+    window: "2-4 quarters"
+    dominated_by: "capex, competitive position, demand destruction"
+
+headline:
+  # §8: "the horizon with the largest |delta_ebitda_pct_p50| x
+  # materiality_weight, tie-broken toward NEAR_TERM".
+  tie_break: NEAR_TERM
+
+# The ORDINAL weight of a materiality bucket when choosing the headline. These
+# are not magnitudes and never become one: they exist so that a LOW-materiality
+# horizon with a large percentage cannot outrank a HIGH-materiality one on
+# arithmetic alone.
+materiality_weight:
+  HIGH: 3.0
+  MEDIUM: 2.0
+  LOW: 1.0
+  NO_MATERIAL_IMPACT: 0.0
+  NONE: 0.0

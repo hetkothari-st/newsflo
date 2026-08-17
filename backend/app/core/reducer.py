@@ -34,6 +34,7 @@ PHASE 0 SCOPE, and what is deliberately NOT done here:
     Nothing is guessed, ever.
 """
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 import hashlib
@@ -47,10 +48,21 @@ from app.core.signals import Signal, SignalKind
 
 REDUCER_VERSION = "r5.0.0"
 
-# Phase 0 uses a single horizon bucket. Phase 4 adds IMMEDIATE and
-# STRUCTURAL; the record shape already carries a horizon MAP so that
-# addition is not a schema change.
+# V5 PHASE 4 (spec §8). THREE horizons, computed independently, all three
+# persisted. The order is TIME order, not a ranking, and every canonical
+# record carries all three keys whether or not a horizon was evaluated -- an
+# absent key is exactly what a reader mistakes for agreement.
+IMMEDIATE = "IMMEDIATE"
 NEAR_TERM = "NEAR_TERM"
+STRUCTURAL = "STRUCTURAL"
+HORIZONS = (IMMEDIATE, NEAR_TERM, STRUCTURAL)
+
+# A horizon nobody evaluated. Stated once so the shape cannot drift between
+# the reducer, the writer and the renderer.
+UNEVALUATED_HORIZON: Mapping[str, Any] = MappingProxyType({
+    "direction": None, "materiality": None, "sign_consistency": None,
+    "delta_ebitda_pct_p50": None, "evaluated": False,
+})
 
 NET_POSITIVE = "POSITIVE"
 NET_NEGATIVE = "NEGATIVE"
@@ -79,10 +91,17 @@ class EventContext:
     decide what that means -- it is never silently treated as favourable.
     `exposure_stale` is False because Phase 0 has no exposure ledger at all;
     nothing exists that could be stale (Phase 1 supplies the real answer).
+
+    `policy_state_stale` (V5 Phase 4, spec §9.3) is False for the same
+    reason: a company whose modifiers depend on no tracked regime cannot have
+    a stale one. The sensitivity engine supplies the real answer and also puts
+    it on every CHANNEL payload, so a caller that forgets to thread it here
+    cannot un-block the company.
     """
     event_status: str | None = None            # CONFIRMED | OFFICIAL | RUMOUR
     shock_magnitude_confidence: float | None = None
     exposure_stale: bool = False
+    policy_state_stale: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +120,27 @@ class SensitivityPolicy:
 
 
 @dataclass(frozen=True)
+class HorizonPolicy:
+    """V5 PHASE 4. How a headline is chosen among the three horizons, loaded
+    from `config/horizons.yaml` by `app.core.config_loader`.
+
+    Every field is REQUIRED and there is deliberately no default: a weight
+    defaulted here would be a ranking nobody chose, and it would silently
+    disagree with the engine that produced the numbers being ranked.
+    """
+    materiality_weight: Mapping[str, float]
+    tie_break: str
+
+    def weight_for(self, bucket: str) -> float:
+        try:
+            return float(self.materiality_weight[str(bucket)])
+        except KeyError as exc:
+            raise ReducerInputError(
+                f"no headline weight is configured for materiality bucket "
+                f"{bucket!r}") from exc
+
+
+@dataclass(frozen=True)
 class ReducerConfig:
     gate_config: GateConfig
     event_context: EventContext = EventContext()
@@ -108,6 +148,10 @@ class ReducerConfig:
     # computed band is then REFUSED rather than judged against thresholds
     # invented here (see `_apply_sensitivity`).
     sensitivity_policy: "SensitivityPolicy | None" = None
+    # None means "no horizon policy configured". A signal set spanning more
+    # than one horizon is then REFUSED rather than ranked by weights invented
+    # here. A single-horizon set needs no ranking and does not require it.
+    horizon_policy: "HorizonPolicy | None" = None
     # Seeded RNG, per the phase file's "no randomness except seeded RNG
     # passed in via config". Nothing in Phase 0 draws from it; it exists so
     # a later phase cannot smuggle in an unseeded source.
@@ -137,6 +181,12 @@ class CompanyImpact:
     # Modifiers whose target channel does not exist in this signal set. They
     # changed nothing, and saying otherwise would misdescribe the record.
     policy_modifiers_unmatched: tuple[str, ...]
+    # V5 PHASE 4 (Task 4.4). Every policy modifier CONSIDERED, with its type,
+    # its status, the notification it comes from and the horizons at which it
+    # held that status -- the chips the UI renders. "We modelled the levy and
+    # could not size it" and "there is no levy" are different sentences and
+    # this is where they stop being the same silence.
+    policy_modifiers_detail: tuple[Mapping[str, Any], ...]
     materiality_bucket: str
     mechanism_id: str | None
 
@@ -181,28 +231,94 @@ def _payloads(signals: Sequence[Signal], kind: SignalKind) -> list[Mapping]:
     return [s.payload for s in signals if s.kind == kind]
 
 
-def _sensitivity_block(signals: Sequence[Signal]) -> Mapping[str, Any] | None:
-    """The one computed materiality block this company's channels carry.
+def _sensitivity_blocks(signals: Sequence[Signal]) -> dict[str, Mapping[str, Any]]:
+    """`{horizon: computed materiality block}`.
 
-    Every CHANNEL signal the sensitivity engine emits for a company carries
-    the SAME block (it is a company-level result), so seeing two different
-    ones means two engines disagreed about the same company in the same
-    event. That is refused rather than averaged: an average of two
+    Every CHANNEL signal the sensitivity engine emits for a company AT ONE
+    HORIZON carries the SAME block (it is a company-level result for that
+    horizon), so seeing two different ones for the same horizon means two
+    engines disagreed about the same company in the same event at the same
+    horizon. That is refused rather than averaged: an average of two
     disagreeing bands is a number neither engine computed.
+
+    Two different blocks at DIFFERENT horizons is not a disagreement -- it is
+    the entire point of §8, and collapsing them is the V4 defect.
     """
-    seen: dict[str, Mapping[str, Any]] = {}
+    seen: dict[str, dict[str, Mapping[str, Any]]] = {}
     for payload in _payloads(signals, SignalKind.CHANNEL):
         block = payload.get("sensitivity")
         if not block:
             continue
-        seen[_canonical(block)] = block
-    if not seen:
-        return None
-    if len(seen) > 1:
+        horizon = str(payload.get("horizon", NEAR_TERM))
+        seen.setdefault(horizon, {})[_canonical(block)] = block
+    out: dict[str, Mapping[str, Any]] = {}
+    for horizon, blocks in seen.items():
+        if len(blocks) > 1:
+            raise ReducerInputError(
+                f"two different sensitivity blocks for one company in one "
+                f"event at horizon {horizon}; the reducer will not average "
+                f"disagreeing bands")
+        out[horizon] = next(iter(blocks.values()))
+    return out
+
+
+def _fold_net_effect(evaluated: Mapping[str, Mapping[str, Any]]) -> str:
+    """Task 4.4: "conflicting material directions => MIXED".
+
+    A horizon with no material impact contributes no direction. A horizon
+    that is itself MIXED makes the whole record MIXED. Two horizons pointing
+    opposite ways make the whole record MIXED. Nothing is ever averaged into
+    a single direction, and MIXED is never collapsed back out of one
+    (invariants 8 and 9).
+
+    ONE evaluated horizon is not a fold. Its direction IS the record's net
+    effect, verbatim -- including UNCERTAIN on an immaterial band, which is a
+    statement about our knowledge and must not be rewritten into
+    NO_MATERIAL_IMPACT, a statement about the world. (Pinned by Phase 2's
+    `test_below_the_floor_without_material_magnitude_both_sides_is_uncertain_not_mixed`.)
+    """
+    if len(evaluated) == 1:
+        return str(next(iter(evaluated.values()))["direction"])
+    material = [entry for entry in evaluated.values()
+                if str(entry["materiality"]) not in (NET_NO_MATERIAL_IMPACT, "NONE")]
+    if not material:
+        return (NET_NO_MATERIAL_IMPACT if evaluated else NET_UNCERTAIN)
+    if any(str(entry["direction"]) == NET_MIXED for entry in material):
+        return NET_MIXED
+    signs = {str(entry["direction"]) for entry in material
+             if str(entry["direction"]) in (NET_POSITIVE, NET_NEGATIVE)}
+    if len(signs) > 1:
+        return NET_MIXED
+    if len(signs) == 1:
+        return signs.pop()
+    return NET_UNCERTAIN
+
+
+def _select_headline(evaluated: Mapping[str, Mapping[str, Any]],
+                     policy: "HorizonPolicy | None") -> str:
+    """§8: the horizon with the largest `|delta_ebitda_pct_p50| x
+    materiality_weight`, tie-broken toward NEAR_TERM."""
+    if not evaluated:
+        return NEAR_TERM
+    if len(evaluated) == 1:
+        return next(iter(evaluated))
+    if policy is None:
         raise ReducerInputError(
-            "two different sensitivity blocks for one company in one event; "
-            "the reducer will not average disagreeing bands")
-    return next(iter(seen.values()))
+            "this signal set spans more than one horizon and no horizon "
+            "policy is configured; the reducer will not invent the weights "
+            "it needs to choose a headline")
+    scored = {}
+    for horizon, entry in evaluated.items():
+        magnitude = entry.get("delta_ebitda_pct_p50")
+        scored[horizon] = (abs(float(magnitude)) if magnitude is not None else 0.0) \
+            * policy.weight_for(str(entry["materiality"]))
+    best = max(scored.values())
+    tied = [h for h, value in scored.items() if value == best]
+    if len(tied) == 1:
+        return tied[0]
+    if policy.tie_break in tied:
+        return policy.tie_break
+    return next(h for h in HORIZONS if h in tied)
 
 
 def _apply_sensitivity(block: Mapping[str, Any],
@@ -383,6 +499,32 @@ def reduce_company_impact(signals: Sequence[Signal],
         # in its own list instead (fix round 1).
         (applied if touched else unmatched).append(modifier_id)
 
+    # --- 3b. POLICY modifiers (V5 Phase 4) ---------------------------------
+    #
+    # These are a DIFFERENT thing from the MODIFIER signals above. A MODIFIER
+    # signal is an ordinal instruction (BLOCK / REVERSE) that acts on the
+    # reducer's own channel records; a POLICY modifier is a transfer function
+    # that already acted on the NUMBER, upstream in the sensitivity engine.
+    # The reducer's job here is only to carry the account of it into the
+    # record, which is why nothing below changes a direction or a bucket.
+    policy_detail: dict[tuple[str, str], dict] = {}
+    for payload in _payloads(ordered, SignalKind.CHANNEL):
+        horizon = str(payload.get("horizon", NEAR_TERM))
+        for entry in payload.get("policy_modifiers") or []:
+            key = (str(entry["modifier_id"]), str(entry.get("status", "APPLIED")))
+            record = policy_detail.setdefault(key, {
+                **{k: v for k, v in entry.items() if k != "horizons"},
+                "horizons": []})
+            if horizon not in record["horizons"]:
+                record["horizons"].append(horizon)
+    for record in policy_detail.values():
+        record["horizons"].sort(key=lambda h: HORIZONS.index(h)
+                                if h in HORIZONS else len(HORIZONS))
+    policy_modifiers_detail = tuple(
+        policy_detail[key] for key in sorted(policy_detail))
+    applied.extend(modifier_id for modifier_id, status in sorted(policy_detail)
+                   if status == "APPLIED")
+
     # --- 4. net effect -----------------------------------------------------
     material = [c for c in channels if c["material"]]
     positive_weight = sum(_MATERIALITY_WEIGHT[c["materiality"]]
@@ -414,15 +556,58 @@ def reduce_company_impact(signals: Sequence[Signal],
         materiality_bucket = "NO_MATERIAL_IMPACT"
 
     # --- 4b. a COMPUTED band supersedes the ordinal aggregation (Phase 2) --
-    sensitivity = _sensitivity_block(ordered)
-    if sensitivity is not None:
+    #         ...ONCE PER HORIZON (V5 Phase 4).
+    #
+    # Each horizon is judged by the same sign-consistency rule against its own
+    # band, and the three answers are kept. The record's `net_effect` folds
+    # them (conflicting material directions => MIXED) while the horizons
+    # themselves stay exactly as computed -- which is the difference between
+    # this and the V4 behaviour that produced three contradictory Oil India
+    # records from one event.
+    blocks = _sensitivity_blocks(ordered)
+    evaluated: dict[str, dict[str, Any]] = {}
+    if blocks:
         if config.sensitivity_policy is None:
             raise ReducerInputError(
                 "a computed sensitivity band arrived but no sensitivity "
                 "policy is configured; the reducer will not invent the "
                 "sign-consistency thresholds it needs to judge it")
-        net_effect, sign_consistency, materiality_bucket = _apply_sensitivity(
-            sensitivity, config.sensitivity_policy)
+        for horizon in sorted(blocks, key=lambda h: HORIZONS.index(h)
+                              if h in HORIZONS else len(HORIZONS)):
+            block = blocks[horizon]
+            direction, consistency, bucket = _apply_sensitivity(
+                block, config.sensitivity_policy)
+            evaluated[horizon] = {
+                "direction": direction, "materiality": bucket,
+                "sign_consistency": consistency,
+                "delta_ebitda_pct_p50": (block.get("delta_ebitda_pct") or {}).get("p50"),
+                "evaluated": True}
+    else:
+        # The V4-forwarded path: no computed band anywhere. The ordinal
+        # aggregation above is the only answer there is, and it is recorded
+        # against the horizon(s) the channels actually claim -- not against
+        # all three, which would assert two evaluations nobody performed.
+        for horizon in sorted({c["horizon"] for c in channels} or {NEAR_TERM},
+                              key=lambda h: HORIZONS.index(h)
+                              if h in HORIZONS else len(HORIZONS)):
+            evaluated[horizon] = {
+                "direction": net_effect, "materiality": materiality_bucket,
+                "sign_consistency": sign_consistency,
+                "delta_ebitda_pct_p50": None, "evaluated": True}
+
+    headline_horizon = _select_headline(evaluated, config.horizon_policy)
+    if blocks:
+        net_effect = _fold_net_effect(evaluated)
+        sign_consistency = float(evaluated[headline_horizon]["sign_consistency"])
+        materiality_bucket = str(evaluated[headline_horizon]["materiality"])
+    # The headline horizon's block is the one the record leads with, and the
+    # one the evidence cap and the gate's materiality floor read. The other
+    # two are never discarded -- they are in `direction_by_horizon`.
+    sensitivity = blocks.get(headline_horizon) if blocks else None
+
+    direction_by_horizon = {
+        horizon: evaluated.get(horizon, dict(UNEVALUATED_HORIZON))
+        for horizon in HORIZONS}
 
     mechanism_ids = sorted({str(c["mechanism_id"]) for c in material
                             if c.get("mechanism_id")})
@@ -516,12 +701,12 @@ def reduce_company_impact(signals: Sequence[Signal],
         isin=isins[0] if isins else None,
         analysis_version=analysis_version, reducer_version=REDUCER_VERSION,
         gate_config_version=config.gate_config.version,
-        direction_by_horizon={NEAR_TERM: {
-            "direction": net_effect, "materiality": materiality_bucket}},
-        headline_horizon=NEAR_TERM, net_effect=net_effect,
+        direction_by_horizon=direction_by_horizon,
+        headline_horizon=headline_horizon, net_effect=net_effect,
         sign_consistency=sign_consistency, channels=tuple(channels),
-        policy_modifiers_applied=tuple(applied),
+        policy_modifiers_applied=tuple(sorted(set(applied))),
         policy_modifiers_unmatched=tuple(unmatched),
+        policy_modifiers_detail=policy_modifiers_detail,
         materiality_bucket=materiality_bucket, mechanism_id=mechanism_id,
         evidence_grade=evidence_grade, weakest_link=weakest_link,
         claim_bindings=tuple(bindings), empirical_status=empirical_status,
@@ -536,6 +721,14 @@ def reduce_company_impact(signals: Sequence[Signal],
     # back a claim because a caller forgot to thread a flag.
     exposure_stale = bool(config.event_context.exposure_stale) or any(
         bool(p.get("exposure_stale"))
+        for p in _payloads(ordered, SignalKind.CHANNEL))
+
+    # V5 PHASE 4 / spec §9.3, by the same two routes and for the same reason:
+    # a company whose regime reading has gone stale must not reach PRIMARY,
+    # and a caller who forgets to thread the event context must not be able
+    # to un-block it.
+    policy_state_stale = bool(config.event_context.policy_state_stale) or any(
+        bool(p.get("policy_state_stale"))
         for p in _payloads(ordered, SignalKind.CHANNEL))
 
     if not entities or resolutions == {"UNRESOLVED"}:
@@ -574,6 +767,9 @@ def reduce_company_impact(signals: Sequence[Signal],
     optional_draft_fields = {
         "delta_ebitda_pct_abs": _band_magnitude(sensitivity),
         "uses_sector_proxy": _uses_sector_proxy(ordered),
+        # V5 PHASE 4: whether a tracked regime reading behind this company's
+        # modifiers is past its freshness window (§9.3).
+        "policy_state_stale": policy_state_stale,
     }
     for name, value in optional_draft_fields.items():
         if name in ImpactDraft.__dataclass_fields__:
@@ -612,9 +808,15 @@ def serialize_company_impact(impact: CompanyImpact) -> dict:
         "reducer_version": impact.reducer_version,
         "gate_config_version": impact.gate_config_version,
         "fundamental": {
+            # V5 PHASE 4: ALL THREE HORIZONS, ALWAYS, in time order. A horizon
+            # nobody evaluated is present and says so; it is never an absent
+            # key, because an absent key is what a reader mistakes for
+            # agreement with the headline. `headline_horizon` says which one
+            # the UI leads with -- it does not say which one is true.
             "direction_by_horizon": {
-                horizon: dict(value)
-                for horizon, value in impact.direction_by_horizon.items()},
+                horizon: dict(impact.direction_by_horizon.get(
+                    horizon, UNEVALUATED_HORIZON))
+                for horizon in HORIZONS},
             "headline_horizon": impact.headline_horizon,
             "net_effect": impact.net_effect,
             "sign_consistency": impact.sign_consistency,
@@ -623,6 +825,11 @@ def serialize_company_impact(impact: CompanyImpact) -> dict:
             "channels": [dict(c) for c in impact.channels],
             "policy_modifiers_applied": list(impact.policy_modifiers_applied),
             "policy_modifiers_unmatched": list(impact.policy_modifiers_unmatched),
+            # Task 4.4: rendered as visible chips with links to the source
+            # notification. Emitted whole -- an id with no type and no source
+            # is a chip nobody can check.
+            "policy_modifiers": [dict(entry)
+                                 for entry in impact.policy_modifiers_detail],
             # PHASE 2 (Task 2.5): the computed band, its bucket, its sign
             # consistency and its top drivers -- emitted whole or not at all,
             # because a p50 without its band is exactly what this phase

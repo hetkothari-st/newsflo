@@ -75,6 +75,17 @@ primary:
   # forbidden weakest-link list below says the same thing about EVIDENCE;
   # this says it about PARAMETERS, which is a different input.
   allow_sector_proxy: false
+  # V5 PHASE 4 / spec §9.3. A company whose tracked regime reading (a fuel
+  # price freeze, a levy rate) has gone stale past its own freshness window
+  # cannot make a PRIMARY call: the modifier that shaped its number was
+  # applied on a reading nobody has refreshed. It may still publish as a
+  # ripple, which is the weaker claim the weaker input supports.
+  #
+  # This is NOT fail-open like the two A5.1 keys above it: `policy_state` is
+  # empty in production, so no company depends on a stale reading and the
+  # rule changes no verdict today. The moment a state is registered and goes
+  # stale, it starts blocking -- which is the behaviour §9.3 asks for.
+  allow_stale_policy_state: false
   min_evidence_grade: C
   # DIRECT at distance 1, or DIRECT|INDIRECT at distance 2 with HIGH
   # materiality. REMOTE never publishes primary.
@@ -114,6 +125,10 @@ secondary_ripple:
   # structural consequence is already elsewhere: a proxy parameter caps
   # evidence at C and can never reach PRIMARY.
   allow_sector_proxy: true
+  # Permitted at the ripple tier, WITH the modifier chip visible (Task 4.4).
+  # A stale regime reading is a reason not to lead with a company; it is not
+  # a reason to pretend the mechanism does not exist.
+  allow_stale_policy_state: true
   min_evidence_grade: D
   # A5.1. Section-level, not company-level: it is read by
   # app/discovery/coherence.py, which decides whether a SECTION publishes.

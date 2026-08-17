@@ -62,6 +62,47 @@ class ReducerPrivilegeError(RuntimeError):
     """A process that can write `company_impact` when it must not."""
 
 
+class HorizonVectorError(ValueError):
+    """A record whose horizon vector is not a vector.
+
+    V5 PHASE 4 / spec §8. Three horizons are computed independently and all
+    three are persisted; a record carrying a computed band that names fewer
+    than three is a COLLAPSED vector, and a collapsed vector is exactly what
+    produced three contradictory Oil India representations. It is refused at
+    the write boundary rather than stored and explained later.
+    """
+
+
+def validate_horizon_vector(impact) -> None:
+    """The write-time check. Two separate assertions:
+
+      1. EVERY record names all three horizons. A record that names two is
+         missing one, not agreeing about it;
+      2. a record carrying a COMPUTED band must have EVALUATED all three. The
+         V4-forwarded path evaluates one and says so (`evaluated: false` on
+         the other two), which is honest; a sensitivity-fed record has no
+         such excuse, because the engine runs all three by construction.
+    """
+    from app.core.reducer import HORIZONS
+
+    horizons = set(impact.direction_by_horizon)
+    missing = [name for name in HORIZONS if name not in horizons]
+    if missing:
+        raise HorizonVectorError(
+            f"this record names {sorted(horizons)} and not {list(HORIZONS)}: "
+            f"{missing} is missing. All three horizons are persisted or none "
+            f"of them mean anything.")
+    if impact.sensitivity is None:
+        return
+    unevaluated = [name for name in HORIZONS
+                   if not impact.direction_by_horizon[name].get("evaluated")]
+    if unevaluated:
+        raise HorizonVectorError(
+            f"this record carries a computed band and did not evaluate "
+            f"{unevaluated}; a sensitivity-fed record evaluates all three "
+            f"horizons or it is a collapsed vector")
+
+
 def event_id_for_article(article_id: int) -> str:
     """V5 `event_id` in this repo's terms.
 
@@ -107,6 +148,7 @@ def assert_cannot_write_company_impact(session) -> None:
 
 
 def _row_from_impact(impact: CompanyImpact, reducer_run_seq: int) -> dict:
+    validate_horizon_vector(impact)
     return {
         "event_id": impact.event_id,
         "company_id": impact.company_id,
@@ -219,7 +261,9 @@ def record_company_impacts(session, *, article, entries, alert,
     The caller wraps this so a failure here can never break the existing
     persist path -- see app/pipeline.py.
     """
-    from app.core.config_loader import load_gate_config, load_sensitivity_policy
+    from app.core.config_loader import (
+        load_gate_config, load_horizon_policy, load_sensitivity_policy,
+    )
     from app.core.reducer import EventContext, ReducerConfig, reduce_company_impact
     from app.core.signal_adapters import signals_from_entry
 
@@ -248,11 +292,19 @@ def record_company_impacts(session, *, article, entries, alert,
             # hard-blocks on that (see `reduce_company_impact`). Until the
             # canonical path runs the engine, this stays False and the
             # abstention comes from having no channel at all.
-            exposure_stale=False),
+            exposure_stale=False,
+            # PHASE 4: same reasoning. This hook runs on the V4 path, which
+            # registers no policy modifier and therefore depends on no regime
+            # reading; the engine supplies the real flag when it runs.
+            policy_state_stale=False),
         # PHASE 2: the sign-consistency thresholds, so a computed band
         # arriving on this path is judged by the deployed policy rather than
         # refused. V4 signals carry no band and are unaffected.
-        sensitivity_policy=load_sensitivity_policy())
+        sensitivity_policy=load_sensitivity_policy(),
+        # PHASE 4: the headline-selection weights, so a multi-horizon signal
+        # set arriving on this path is ranked by the deployed policy rather
+        # than refused. V4 signals span one horizon and are unaffected.
+        horizon_policy=load_horizon_policy())
 
     entity_status_by_company = entity_status_by_company or {}
     isin_by_company = isin_by_company or {}
