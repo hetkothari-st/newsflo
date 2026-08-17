@@ -82,7 +82,7 @@
       "name": "Fixture Paints Ltd",
       "publication_tier": "SECONDARY_RIPPLE",
       "net_effect": "NEGATIVE",
-      "mechanism_id": "paints_input_cost",
+      "mechanism_id": "paint_input_cost",
       "horizon_bucket": "STRUCTURAL",
       "delta_ebitda_pct_p50": -0.9
     },
@@ -93,7 +93,7 @@
       "name": "Fixture Rejected Candidate Ltd",
       "publication_tier": "REJECTED",
       "net_effect": "NEGATIVE",
-      "mechanism_id": "paints_input_cost",
+      "mechanism_id": "paint_input_cost",
       "horizon_bucket": "NEAR_TERM",
       "delta_ebitda_pct_p50": null,
       "rejection_reason": "PRIMARY_FAILED_EVIDENCE"

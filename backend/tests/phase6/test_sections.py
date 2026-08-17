@@ -136,14 +136,14 @@ def test_the_zero_primary_state_renders_explicitly_with_the_rejected_count(
                        net_effect="NEGATIVE", mechanism_id="aviation_fuel_cost",
                        delta_ebitda_pct_p50=-1.0),
         helpers.impact(company_id=2, ticker="FIXB", publication_tier="SECONDARY_RIPPLE",
-                       net_effect="NEGATIVE", mechanism_id="paints_input_cost",
+                       net_effect="NEGATIVE", mechanism_id="paint_input_cost",
                        delta_ebitda_pct_p50=-0.5),
         helpers.impact(company_id=3, ticker="FIXC", publication_tier="SECONDARY_RIPPLE",
                        net_effect="NEGATIVE", mechanism_id="tyre_input_cost",
                        delta_ebitda_pct_p50=-0.5),
         *[helpers.impact(company_id=100 + n, ticker=f"FIXR{n}",
                          publication_tier="REJECTED", net_effect="NEGATIVE",
-                         mechanism_id="paints_input_cost",
+                         mechanism_id="paint_input_cost",
                          rejection_reason="PRIMARY_FAILED_EVIDENCE")
           for n in range(14)],
     )
@@ -207,7 +207,7 @@ def test_a_section_nobody_could_size_sorts_after_the_sized_ones_alphabetically(
                        net_effect="NEGATIVE", mechanism_id="aviation_fuel_cost",
                        delta_ebitda_pct_p50=-0.1),
         helpers.impact(company_id=2, ticker="FIXUNSIZEDA", publication_tier="PRIMARY",
-                       net_effect="NEGATIVE", mechanism_id="paints_input_cost",
+                       net_effect="NEGATIVE", mechanism_id="paint_input_cost",
                        delta_ebitda_pct_p50=None),
         helpers.impact(company_id=3, ticker="FIXUNSIZEDB", publication_tier="PRIMARY",
                        net_effect="NEGATIVE", mechanism_id="tyre_input_cost",
@@ -322,3 +322,135 @@ def test_the_serialized_record_and_the_section_key_agree(impacts, taxonomy):
         assert key.economic_effect == payload["fundamental"]["net_effect"]
         assert key.mechanism_id == payload["fundamental"]["mechanism_id"]
         assert key.horizon_bucket == payload["fundamental"]["headline_horizon"]
+
+
+# ---------------------------------------------------------------------------
+# the taxonomy speaks the PERSISTED dialect (node-id consolidation, P1)
+# ---------------------------------------------------------------------------
+#
+# `config/section_taxonomy.yaml` is keyed by mechanism_id, and the
+# mechanism_id that ARRIVES is whatever `signal_adapters` put on the CHANNEL
+# signal -- `entry["causal_parent_id"]`, i.e. `normalize_node_id(...)` output.
+# Nine of the 42 registry ids change under that transform, so a taxonomy
+# keyed in the RAW registry dialect renders those nine as
+# "UNCLASSIFIED MECHANISM (paint_input_cost)" -- a raw engine node id in a
+# section header, and nine singleton sections.
+
+def _emittable(mechanism_id: str) -> tuple[bool, str]:
+    """Can the V5 path actually carry this mechanism id?
+
+    Two producers write `company_impact.mechanism_id`:
+
+      * the V4 adapter (`app.core.signal_adapters`), which forwards
+        `causal_parent_id` -- ALWAYS `normalize_node_id` output;
+      * the Phase-2 sensitivity ledger, whose channel ids come from the
+        reviewed `mechanism_edge` vocabulary and are NOT node ids (a
+        separate domain -- see the sweep's C6/C7; it is not normalized and
+        must not be forced to be).
+
+    So the rule is about the REGISTRY-owned ids only: an id that names a
+    knowledge-registry mechanism must be spelled the way production
+    persists it. An id the registry does not own is free-form and passes.
+    """
+    from app.analysis.impact_graph.knowledge import resolve_mechanism_id
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    raw = resolve_mechanism_id(mechanism_id)
+    if raw is None:
+        return True, "not registry-owned"
+    persisted = normalize_node_id(raw)
+    if mechanism_id == persisted:
+        return True, "persisted dialect"
+    return False, (f"{mechanism_id!r} names registry mechanism {raw!r}, which "
+                   f"production persists as {persisted!r} -- the pipeline can "
+                   f"never emit {mechanism_id!r}, so a fixture keyed to it "
+                   f"tests nothing")
+
+
+def _mechanism_ids_in_fixtures() -> dict[str, set[str]]:
+    """Every mechanism id any V5 test fixture carries -> where it came from.
+
+    Both carriers are swept so a new fixture cannot reintroduce the defect:
+    `mechanism_id` / `expected_mechanism` values inside every JSON under
+    `tests/`, and the same keyword arguments written as literals in every
+    test module.
+    """
+    import json
+
+    tests_root = BACKEND / "tests"
+    keys = ("mechanism_id", "expected_mechanism")
+    found: dict[str, set[str]] = {}
+
+    def add(value, source):
+        if isinstance(value, str) and value:
+            found.setdefault(value, set()).add(source)
+
+    for path in sorted(tests_root.rglob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:                                   # pragma: no cover
+            continue
+        stack = [payload]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key in keys:
+                        add(value, str(path.relative_to(BACKEND)))
+                    stack.append(value)
+            elif isinstance(node, list):
+                stack.extend(node)
+
+    for path in sorted(tests_root.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.keyword) and node.arg in keys
+                    and isinstance(node.value, ast.Constant)):
+                add(node.value.value, str(path.relative_to(BACKEND)))
+    return found
+
+
+def test_every_registry_mechanism_has_a_taxonomy_label_in_the_PERSISTED_dialect(
+        taxonomy):
+    """Mirrors `tests/test_sections_structural.py::test_all_42_mechanisms_
+    have_labels`, which is the assertion the legacy ripple taxonomy already
+    carries and the V5 taxonomy was missing."""
+    from app.analysis.impact_graph.knowledge import MECHANISMS
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    missing = sorted(m for m in MECHANISMS
+                     if normalize_node_id(m) not in taxonomy.labels)
+    assert not missing, f"unlabelled after normalize: {missing}"
+
+
+def test_every_taxonomy_key_is_a_mechanism_id_the_pipeline_can_emit(taxonomy):
+    """A key nothing can ever arrive under is dead vocabulary: it never
+    renders, and the mechanism it was written for renders UNCLASSIFIED."""
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    unreachable = []
+    for key in taxonomy.labels:
+        ok, why = _emittable(key)
+        if not ok:
+            unreachable.append(why)
+        elif normalize_node_id(key) != key:
+            unreachable.append(
+                f"{key!r} is not normalize-idempotent, so no causal_parent_id "
+                f"can ever equal it (it would be persisted as "
+                f"{normalize_node_id(key)!r})")
+    assert not unreachable, "\n".join(unreachable)
+
+
+def test_no_v5_fixture_is_keyed_to_a_mechanism_id_nothing_can_emit():
+    """The structural fix for the class of defect this whole sweep is about:
+    a fixture that exercises the section taxonomy with `paints_input_cost`
+    validates NOTHING, because the id the pipeline persists is
+    `paint_input_cost` and the two take different code paths."""
+    broken = []
+    for mechanism_id, sources in sorted(_mechanism_ids_in_fixtures().items()):
+        ok, why = _emittable(mechanism_id)
+        if not ok:
+            broken.append(f"{why}  [{', '.join(sorted(sources))}]")
+    assert not broken, "\n".join(broken)

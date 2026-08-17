@@ -289,7 +289,7 @@ def test_the_console_renders_the_zero_primary_state_when_nothing_publishes(
         "'Fixture Sector', 'INDIA', 'OTHER', 'NORMAL')"))
     persist_company_impact(session, helpers.impact(
         company_id=6201, ticker="FIXZP", publication_tier="REJECTED",
-        net_effect="NEGATIVE", mechanism_id="paints_input_cost",
+        net_effect="NEGATIVE", mechanism_id="paint_input_cost",
         rejection_reason="PRIMARY_FAILED_EVIDENCE", event_id="article:6002"),
         reducer_run_seq=1)
     session.commit()

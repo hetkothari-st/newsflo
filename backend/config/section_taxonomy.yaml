@@ -28,12 +28,28 @@
 # curated crude/rate/fx/tariff families it already reasons in, plus
 # `integrated_energy`, which is the mechanism a reviewer authors for a
 # company whose crude exposure runs in BOTH directions inside one listed
-# entity. A mechanism id with no entry here is NOT an error and NOT
+# entity.
+#
+# THEY ARE KEYED IN THE PERSISTED DIALECT, NOT THE REGISTRY'S OWN (v5.1.0).
+# `mechanism_id` arrives here as `causal_parent_id`, which the impact-graph
+# engine writes through `normalize_node_id` -- and nine of the 42
+# `knowledge.MECHANISMS` keys change under that transform
+# ("paints_input_cost" is persisted as "paint_input_cost",
+# "capital_goods_orders" as "capital_good_order", "freight_rate_spike" as
+# "freight_rate_up"). Keyed in the registry dialect, those nine rendered as
+# "UNCLASSIFIED MECHANISM (paint_input_cost)" -- a raw engine node id in a
+# section header -- and each fragmented into its own singleton section.
+# The labels are unchanged; only the keys moved dialect.
+# `tests/phase6/test_sections.py` pins both halves: every registry mechanism
+# has a label AFTER normalize, and every key here is one the pipeline can
+# actually emit.
+#
+# A mechanism id with no entry here is NOT an error and NOT
 # invented prose — it renders through `unknown_label`, keyed on the id
 # itself, and keeps its own section (its key is distinct, so folding it into
 # a neighbouring section would misplace a company).
 
-version: section-taxonomy-v5.0.0
+version: section-taxonomy-v5.1.0
 
 # `<effect><separator><mechanism label>` — e.g. "MIXED — INTEGRATED ENERGY".
 separator: " — "
@@ -76,7 +92,7 @@ labels:
   integrated_energy: INTEGRATED ENERGY
   lubricant_base_oil_cost: LUBRICANTS
   petrochemical_feedstock: PETROCHEMICALS
-  paints_input_cost: PAINTS & CHEMICALS
+  paint_input_cost: PAINTS & CHEMICALS
   tyre_input_cost: TYRES & RUBBER
   aviation_fuel_cost: AVIATION
   road_freight_fuel_cost: LOGISTICS & FREIGHT
@@ -90,15 +106,15 @@ labels:
 
   # --- rates --------------------------------------------------------------
   bank_nim_repricing: BANK MARGINS
-  nbfc_funding_cost: NBFC FUNDING COST
-  housing_demand_rates: HOUSING DEMAND
-  durables_financing_demand: CONSUMER DURABLES FINANCE
+  nbfc_financing_cost: NBFC FUNDING COST
+  housing_demand_rate: HOUSING DEMAND
+  durable_financing_demand: CONSUMER DURABLES FINANCE
   auto_financing_demand: AUTO FINANCE
-  corporate_capex_rates: CORPORATE CAPEX
+  corporate_capex_rate: CORPORATE CAPEX
   rate_expectation_shift: RATE EXPECTATIONS
 
   # --- consumption --------------------------------------------------------
-  staples_volume_pressure: STAPLES VOLUMES
+  staple_volume_pressure: STAPLES VOLUMES
   discretionary_demand_squeeze: DISCRETIONARY DEMAND
   rural_income_agri: RURAL INCOME
   rural_fmcg_demand: RURAL FMCG
@@ -110,15 +126,15 @@ labels:
   pharma_export_realization: PHARMA EXPORT REALISATION
   textile_export_competitiveness: TEXTILE EXPORTS
   import_cost_inflation: IMPORTED INPUT COSTS
-  electronics_import_cost: ELECTRONICS IMPORTS
+  electronic_import_cost: ELECTRONICS IMPORTS
   domestic_producer_protection: DOMESTIC PRODUCER PROTECTION
   downstream_input_cost_tariff: TARIFFED INPUT COSTS
-  freight_rate_spike: FREIGHT RATES
+  freight_rate_up: FREIGHT RATES
 
   # --- infrastructure and capex ------------------------------------------
   cement_demand_infra: CEMENT DEMAND
   epc_order_book: EPC ORDER BOOKS
   steel_demand_infra: STEEL DEMAND
-  capital_goods_orders: CAPITAL GOODS ORDERS
+  capital_good_order: CAPITAL GOODS ORDERS
   infra_logistics_volume: INFRASTRUCTURE LOGISTICS
   defense_procurement_sentiment: DEFENCE PROCUREMENT
