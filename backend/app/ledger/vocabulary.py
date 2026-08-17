@@ -17,6 +17,11 @@ EXPOSURE_KINDS = (
     "INPUT_COST", "REVENUE_REALIZATION", "VOLUME_DEMAND", "FX_TRANSACTION",
     "FX_TRANSLATION", "INTEREST_RATE", "REGULATORY", "LOGISTICS_ENERGY",
     "CUSTOMER_CONCENTRATION",
+    # V5 PHASE 4 / spec §8: a commodity inventory position, which is revalued
+    # by a price move and dominates the IMMEDIATE horizon for processors. A
+    # KIND, not a claim -- the position itself still lives in a reviewed
+    # `company_exposure` row backed by a filing.
+    "INVENTORY",
 )
 BASE_KINDS = ("COGS", "REVENUE", "EBITDA", "TOTAL_COST", "DEBT", "OPEX")
 MEASUREMENTS = ("FILED", "DISCLOSED_CALL", "ESTIMATED", "MODELLED")

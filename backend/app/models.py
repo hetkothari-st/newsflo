@@ -2254,6 +2254,72 @@ class CoverageGap(Base):
                          server_default=text("CURRENT_TIMESTAMP"))
 
 
+class PolicyModifier(Base):
+    """V5 PHASE 4 / spec §9 -- a regulatory or contractual transfer function.
+    SHIPS EMPTY, AND STAYS EMPTY until an owner signs an entry.
+
+    `config/policy_modifiers.yaml` scaffolds the minimum India set (SAED, APM,
+    the retail fuel revision state, excise and VAT, export and import duties,
+    PLI, MSP, sugar quotas, telecom AGR, banking risk weights) with STRUCTURE
+    ONLY: every parameter value is null and every owner is the placeholder
+    `OWNER-REQUIRED`. `app/analysis/policy/registry.materialise` writes ACTIVE
+    entries only, so there is no code path by which a scaffold row reaches
+    this table.
+
+    Producing a windfall levy threshold or an administered gas ceiling from a
+    model's memory is precisely what the master context's fabrication guard
+    forbids, and a wrong one would be INVISIBLE -- it would make the output
+    look more sophisticated, not less. DATA_GAPS.md §8 names an owner per
+    entry.
+
+    `owner` and `review_interval_days` are NOT NULL for the same reason
+    `company_exposure.reviewed_by` is: a policy parameter is a claim about
+    today, and a claim about today needs somebody who keeps it true.
+    """
+    __tablename__ = "policy_modifier"
+
+    modifier_id = Column(String, primary_key=True)
+    applies_to_tag = Column(String, nullable=False)
+    jurisdiction = Column(String, nullable=False)
+    # THRESHOLD_CAPTURE | HARD_CAP | STATE_DEPENDENT | SUBSIDY_SHARE |
+    # FORMULA_PRICING | REGIONAL_MULTIPLIER
+    modifier_type = Column(String, nullable=False)
+    # jsonb in the spec; TEXT holding JSON here, like every other V5 table on
+    # SQLite. The keys each type requires are declared in
+    # app/analysis/policy/transfer.REQUIRED_PARAMETERS.
+    parameters = Column(Text, nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    source_url = Column(String, nullable=False)
+    owner = Column(String, nullable=False)          # a named human
+    review_interval_days = Column(Integer, nullable=False)
+    last_reviewed_at = Column(Date, nullable=False)
+
+
+class PolicyState(Base):
+    """V5 PHASE 4 / spec §9.3 -- a tracked regime variable. SHIPS EMPTY.
+
+    Whether retail fuel price revisions are currently permitted; the current
+    SAED rate. Each is a READING somebody has to take, with a freshness window
+    and an owner, and nobody has taken one -- so this table is empty and every
+    STATE_DEPENDENT modifier resolves as UNKNOWN, which widens the band and
+    caps evidence at C rather than assuming a regime. That is the degradation
+    the phase file asks for, and it is the reason an empty table here is
+    correct rather than merely unfinished.
+
+    A row past `freshness_days` blocks PRIMARY for the companies whose
+    modifiers depend on it (`config/gates.yaml: allow_stale_policy_state`).
+    """
+    __tablename__ = "policy_state"
+
+    state_key = Column(String, primary_key=True)    # 'retail_fuel_revision_active'
+    state_value = Column(Text, nullable=False)      # JSON, e.g. {"state": "FROZEN"}
+    as_of = Column(Date, nullable=False)
+    freshness_days = Column(Integer, nullable=False)
+    source_url = Column(String, nullable=False)
+    owner = Column(String, nullable=False)
+
+
 # ---------------------------------------------------------------------------
 # V5 Phase 3 vocabulary guard + exposure index, SQLite
 # ---------------------------------------------------------------------------

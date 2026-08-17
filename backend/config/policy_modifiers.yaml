@@ -1,0 +1,371 @@
+# V5 POLICY MODIFIER REGISTRY
+# (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §9, docs/v5/05_PHASE_4_policy_horizon.md
+#  Task 4.1)
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE ADDING A NUMBER
+# ---------------------------------------------------------------------------
+# THIS FILE IS STRUCTURE, NOT DATA. Every entry below says WHAT a regime is,
+# WHICH exposure it acts on, WHICH transfer function it is and WHICH
+# parameters it needs. Not one of them says what those parameters ARE.
+#
+# That is deliberate and it is the single most important property of this
+# file. A windfall levy threshold, an administered gas ceiling, an export
+# duty rate or a subsidy split is a CLAIM ABOUT THE WORLD on a specific date.
+# Writing one here from memory would be invisible: the output would look MORE
+# credible, not less, and the error would surface as a confidently wrong
+# impact call months later. The phase file's own DO NOT is explicit --
+# "Do not populate modifier parameters (levy rates, thresholds, ceilings) from
+# your own knowledge. Scaffold the entry, leave parameters null, log the gap,
+# name the owner."
+#
+# HOW THE REFUSAL IS ENFORCED (not by this comment):
+#   * every `owner` is the placeholder OWNER-REQUIRED;
+#   * every parameter value is null;
+#   * `app/analysis/policy/registry.modifier_from_mapping` loads any entry
+#     missing an owner, a parameter, a source URL, an effective date or a
+#     review cadence with status SCAFFOLD;
+#   * `PolicyRegistry.active_for` never returns a SCAFFOLD entry, and
+#     `materialise` never writes one, so `policy_modifier` ships EMPTY.
+#
+# TO ACTIVATE AN ENTRY (the whole workflow):
+#   1. find the notification. Put its URL in `source_url`.
+#   2. fill EVERY name under `parameters._required` with the value that
+#      notification states. Delete nothing from `_required`.
+#   3. put your own name in `owner` (e.g. `human:naman`), set
+#      `review_interval_days` to how often that regime actually changes, and
+#      `last_reviewed_at` to today.
+#   4. set `effective_from` to the date the notification takes force.
+#   5. run the loader. The entry becomes ACTIVE and starts modifying numbers.
+#
+# DATES. `effective_from` is filled in ONLY where the date a public regime
+# came into force is structural, uncontroversial knowledge, and every such
+# date carries a `date_basis` naming the act it refers to. Everywhere else it
+# is null and the owner supplies it. A date is not a financial parameter --
+# but a date I am not sure of is still a fabrication.
+#
+# TAGS. `applies_to_tag` must be a tag in `config/exposure_tags.yaml`. Several
+# regimes below act on an exposure the vocabulary does not yet express (a
+# steel producer's realisation, a PLI incentive, a bank's risk weight); those
+# carry `applies_to_tag: null` and a `pending_tag` naming the leaf the
+# vocabulary needs. They are scaffolded rather than dropped because the gap is
+# the point: the registry says what the system cannot yet model.
+#
+# GAPS: DATA_GAPS.md §8 lists every entry here, what it is missing and who
+# must supply it.
+
+version: policy-modifiers-v5.0.0
+
+modifiers:
+
+  # --- upstream / oil and gas -----------------------------------------------
+
+  - id: IN_SAED_WINDFALL_LEVY_CRUDE
+    applies_to_tag: revenue:crude_realization
+    jurisdiction: IN
+    type: THRESHOLD_CAPTURE
+    effective_from: 2022-07-01
+    date_basis: >
+      the date the Special Additional Excise Duty on domestically produced
+      crude was first notified. A public structural fact about when a regime
+      began, not a rate.
+    effective_to: null
+    parameters:
+      _required: [threshold_level, capture_fraction_above]
+      threshold_level: null
+      capture_fraction_above: null
+    source_url: null
+    source_hint: >
+      CBIC notification (Department of Revenue, Ministry of Finance), revised
+      fortnightly while in force.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      Above the threshold, upstream realisation upside is largely transferred
+      to the exchequer. Publishing "upstream POSITIVE, HIGH" on rising crude
+      without this is the credibility failure spec §9 opens with.
+
+  - id: IN_SAED_WINDFALL_LEVY_PRODUCT_EXPORT
+    applies_to_tag: revenue:refining_gross_margin
+    jurisdiction: IN
+    type: THRESHOLD_CAPTURE
+    effective_from: 2022-07-01
+    date_basis: >
+      the same notification introduced the export levy on petrol, diesel and
+      ATF alongside the crude levy.
+    effective_to: null
+    parameters:
+      _required: [threshold_level, capture_fraction_above]
+      threshold_level: null
+      capture_fraction_above: null
+    source_url: null
+    source_hint: CBIC notification (Department of Revenue).
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      Acts on the export slice of refining margin. Whether a given refiner's
+      margin exposure is export-weighted is a LEDGER question
+      (company_exposure), not a registry one.
+
+  - id: IN_APM_GAS_CEILING
+    applies_to_tag: revenue:gas_realization_apm
+    jurisdiction: IN
+    type: HARD_CAP
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [cap_level]
+      cap_level: null
+    source_url: null
+    source_hint: >
+      Petroleum Planning and Analysis Cell / Ministry of Petroleum and Natural
+      Gas administered price notification.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      Administered gas realisation is capped, so a rise in the market
+      reference does not pass through above the ceiling.
+
+  - id: IN_RETAIL_FUEL_REVISION_STATE
+    applies_to_tag: revenue:marketing_margin_retail_fuel
+    jurisdiction: IN
+    type: STATE_DEPENDENT
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [state_key, when]
+      state_key: null
+      when: null
+    source_url: null
+    source_hint: >
+      There is no notification for this one. Whether retail price revisions
+      are currently being made is an OBSERVED state, and `policy_state` is
+      where the observation lives -- with a freshness window and an owner.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      Freeze windows collapse marketing-margin pass-through. While the state
+      is unknown the channel widens and caps at C rather than assuming either
+      regime -- which is what the engine does today, since policy_state is
+      empty.
+
+  - id: IN_FUEL_EXCISE_AND_STATE_VAT
+    applies_to_tag: revenue:marketing_margin_retail_fuel
+    jurisdiction: IN
+    type: SUBSIDY_SHARE
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [retained_fraction]
+      retained_fraction: null
+    source_url: null
+    source_hint: >
+      CBIC excise notification plus the relevant state VAT notification. The
+      split between exchequer, consumer and marketer is what `retained_
+      fraction` has to express, and it is a judgement somebody must make and
+      own.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+
+  - id: IN_ATF_STATE_VAT
+    applies_to_tag: input:atf
+    jurisdiction: IN
+    type: REGIONAL_MULTIPLIER
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [region_multipliers]
+      region_multipliers: null
+    source_url: null
+    source_hint: State VAT notifications, per state.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      ATF VAT varies by state, so the effect on an airline depends on its
+      route and uplift mix. The MIX is a company fact and comes from the
+      caller, never from this file; the MULTIPLIERS are the policy.
+
+  # --- trade policy ---------------------------------------------------------
+
+  - id: IN_EXPORT_DUTY_STEEL
+    applies_to_tag: null
+    pending_tag: revenue:steel_realization
+    jurisdiction: IN
+    type: SUBSIDY_SHARE
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [retained_fraction]
+      retained_fraction: null
+    source_url: null
+    source_hint: CBIC / DGFT notification.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      An export duty acts on a PRODUCER'S realisation. The vocabulary has
+      `input:steel_flat` and `input:steel_long` (the buyer side) and no
+      producer-side realisation leaf, so this entry is parked with the leaf it
+      needs named rather than mis-attached to the buyer side.
+
+  - id: IN_EXPORT_DUTY_RICE
+    applies_to_tag: null
+    pending_tag: revenue:rice_realization
+    jurisdiction: IN
+    type: SUBSIDY_SHARE
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [retained_fraction]
+      retained_fraction: null
+    source_url: null
+    source_hint: CBIC / DGFT notification.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+
+  - id: IN_EXPORT_DUTY_SUGAR
+    applies_to_tag: null
+    pending_tag: revenue:sugar_realization
+    jurisdiction: IN
+    type: SUBSIDY_SHARE
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [retained_fraction]
+      retained_fraction: null
+    source_url: null
+    source_hint: CBIC / DGFT notification.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+
+  - id: IN_SUGAR_EXPORT_QUOTA
+    applies_to_tag: null
+    pending_tag: revenue:sugar_realization
+    jurisdiction: IN
+    type: HARD_CAP
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [cap_level]
+      cap_level: null
+    source_url: null
+    source_hint: >
+      Department of Food and Public Distribution export release order.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      A quota caps the exportable quantity, so realisation upside on a global
+      price rise is capped rather than proportional.
+
+  - id: IN_IMPORT_DUTY_EDIBLE_OIL
+    applies_to_tag: input:palm_oil
+    jurisdiction: IN
+    type: FORMULA_PRICING
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [administered_delta_pct]
+      administered_delta_pct: null
+    source_url: null
+    source_hint: CBIC customs notification; DGFT tariff value notification.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      Landed cost is an administered function of the reference price and the
+      duty, so a move in the international price is not the move a buyer sees.
+
+  # --- industrial and sectoral policy ---------------------------------------
+
+  - id: IN_PLI_SCHEME
+    applies_to_tag: null
+    pending_tag: revenue:pli_incentive
+    jurisdiction: IN
+    type: SUBSIDY_SHARE
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [retained_fraction]
+      retained_fraction: null
+    source_url: null
+    source_hint: >
+      The scheme guideline of the specific PLI (each sector's is separate) and
+      the company's own disclosure of accrual.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      Every PLI is a different scheme with different rates, caps and
+      qualifying criteria. One registry entry cannot cover them all; this is
+      the placeholder for the FIRST one somebody models, and the id should be
+      split per scheme at that point.
+
+  - id: IN_MSP_ANNOUNCEMENT
+    applies_to_tag: input:wheat
+    jurisdiction: IN
+    type: FORMULA_PRICING
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [administered_delta_pct]
+      administered_delta_pct: null
+    source_url: null
+    source_hint: >
+      Cabinet Committee on Economic Affairs MSP announcement for the relevant
+      crop year.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      MSP puts an administered floor under a procurement price, so a
+      processor's input cost does not follow the market move one for one.
+
+  - id: IN_TELECOM_AGR_SPECTRUM
+    applies_to_tag: null
+    pending_tag: regulatory:telecom_agr_dues
+    jurisdiction: IN
+    type: STATE_DEPENDENT
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [state_key, when]
+      state_key: null
+      when: null
+    source_url: null
+    source_hint: >
+      Department of Telecommunications order; Supreme Court order on AGR
+      dues. Whether a moratorium or an equity-conversion option is in force is
+      a STATE, which is why this is state-dependent.
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+
+  - id: IN_BANKING_RISK_WEIGHTS
+    applies_to_tag: null
+    pending_tag: regulatory:bank_risk_weight
+    jurisdiction: IN
+    type: FORMULA_PRICING
+    effective_from: null
+    effective_to: null
+    parameters:
+      _required: [administered_delta_pct]
+      administered_delta_pct: null
+    source_url: null
+    source_hint: RBI circular (Department of Regulation).
+    owner: OWNER-REQUIRED
+    review_interval_days: null
+    last_reviewed_at: null
+    note: >
+      A risk-weight change moves the capital charge on a category of lending,
+      which is an administered function rather than a market one. It acts on
+      capital, not on EBITDA -- the same P&L-line problem the interest-rate
+      channel already records in DATA_GAPS.md §6.
