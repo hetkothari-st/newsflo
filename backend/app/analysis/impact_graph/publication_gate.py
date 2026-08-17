@@ -444,9 +444,15 @@ def derive_directness(candidate) -> str:
         # Local import: the registry pulls in SQLAlchemy models, and this
         # module's purity contract (no DB at module scope, no import cycle
         # with app.market / app.pipeline) is worth one deferred import.
-        from app.analysis.impact_graph.knowledge import mechanism_meta
+        # `mechanism_meta_for_node`, NOT `mechanism_meta`: the id on the row
+        # is the PERSISTED one (`normalize_node_id(mechanism_id)`), and 9 of
+        # the 42 registry keys change under that transform. A raw-keyed
+        # lookup missed exactly those nine and dropped them, silently, to
+        # the distance fallback below -- i.e. to the "DIRECT/INDIRECT is a
+        # synonym for d1/d2" this whole function exists to refuse.
+        from app.analysis.impact_graph.knowledge import mechanism_meta_for_node
 
-        meta = mechanism_meta(parent_id)
+        meta = mechanism_meta_for_node(parent_id)
         if meta is not None and meta.get("directness") in DIRECTNESS_VALUES:
             return meta["directness"]
 

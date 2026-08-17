@@ -232,10 +232,42 @@ def test_directness_is_not_derived_from_distance_when_the_registry_knows():
 
 
 def test_directness_registry_marks_a_derived_channel_indirect():
+    """MUTATION-PROOF (was degenerate): the previous version asserted
+    paints_input_cost@d2 -> INDIRECT and vehicle_financier_stress@d3 ->
+    REMOTE, which are EXACTLY what the distance fallback returns. Deleting
+    derive_directness's registry lookup entirely left it green.
+
+    Both pairs below are ones where the registry and the fallback DISAGREE,
+    and both ids are in the dialect production actually persists -- so this
+    test dies if either the registry lookup or its alias resolution is
+    removed."""
+    # registry INDIRECT, distance fallback would say DIRECT
     assert derive_directness(_candidate(
-        causal_parent_id="paints_input_cost", causal_distance=2)) == "INDIRECT"
+        causal_parent_id="paint_input_cost", causal_distance=1)) == "INDIRECT"
+    # registry DIRECT, distance fallback would say REMOTE
     assert derive_directness(_candidate(
-        causal_parent_id="vehicle_financier_stress", causal_distance=3)) == "REMOTE"
+        causal_parent_id="nbfc_financing_cost", causal_distance=3)) == "DIRECT"
+
+
+def test_directness_resolves_a_PERSISTED_mechanism_id_not_just_the_raw_one():
+    """The 9 registry ids `normalize_node_id` rewrites are the ones
+    production actually persists as `causal_parent_id`; every one must
+    resolve to the REGISTRY verdict, not to distance.
+
+    Swept over EVERY mechanism at EVERY distance, so no assertion here can
+    pass by coinciding with the fallback: a mechanism's registry directness
+    disagrees with the distance fallback at two of the three distances,
+    always."""
+    from app.analysis.impact_graph.knowledge import MECHANISMS
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    for raw, spec in MECHANISMS.items():
+        persisted = normalize_node_id(raw)
+        for distance in (1, 2, 3):
+            assert derive_directness(_candidate(
+                causal_parent_id=persisted,
+                causal_distance=distance)) == spec["directness"], (
+                    f"{persisted} (registry {raw}) @ d{distance}")
 
 
 def test_explicit_directness_outranks_the_registry():
