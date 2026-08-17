@@ -394,6 +394,81 @@ which is invariant 13 defeated by process rather than by code.
 
 ---
 
+## 4A. THE MIXED-PER-SECTION RULE
+
+Required by the owner's decision to withhold the 110 Specialty Chemicals names.
+**Section-level, deterministic, no magnitude.**
+
+`MIXED` is honest (invariant 9) and it is uninformative in bulk: a section listing 110
+companies as "affected in both directions" tells a reader nothing they could act on,
+and it is precisely the population the filing route scores **0%** on
+(`MEASUREMENTS` §9.3). The rule must suppress bulk MIXED without ever collapsing an
+individual MIXED into a direction.
+
+```yaml
+# config/gates.yaml, secondary_ripple / qualitative tier
+mixed_section_policy:
+  max_mixed_companies_per_section: 5
+  # Above the cap the SECTION still publishes -- as a mechanism-level statement
+  # with a COUNT and no company list. It is never silently dropped.
+  overflow_render: COUNT_ONLY
+  # A MIXED company whose two channels are BOTH filing-cited (grade C) is a
+  # measured finding, not a construction artefact. Those are never suppressed
+  # and are exempt from the cap.
+  exempt_evidence_grades: [A, B, C]
+```
+
+Three properties this has to have, and why:
+
+1. **It caps the COMPANY LIST, never the section.** A suppressed section would delete
+   a true mechanism-level statement — *"crude moves both sides of specialty
+   chemicals"* is worth saying. `COUNT_ONLY` renders *"SPECIALTY CHEMICALS — mixed
+   (110 companies)"* with the list behind the review console. Compare §15's
+   zero-primary state, which is rendered from counts for the same reason.
+2. **Grade C is exempt, and that is the whole discrimination.** A company is MIXED
+   *by construction* when it sits at a node carrying two opposite edges and nobody
+   read its filing (grade D). It is MIXED *by finding* when its own filing discloses
+   both legs — Gandhar, Panama Petro and Savita in `USDINR_FEED_SPEC.md` §2, each with
+   one sentence naming import payables **and** export receivables. **Those three are
+   the most interesting rows in that feed and must never be capped away.**
+3. **It never collapses a MIXED into a direction** (invariant 9) and never converts it
+   to `NO_MATERIAL_IMPACT` (D11). Suppression is a *display* decision recorded on the
+   record; the record keeps saying MIXED.
+
+**5 is a starting value, not a measured one.** The only anchor is A5.2's
+`COHERENT_SECTION_SIZE = 3` — the point at which a section "stands on its own" — and 5
+sits just above it. It should be tuned once a real section distribution exists, and
+until then it is policy in `gates.yaml`, changeable without code.
+
+---
+
+## 4B. DEFERRED FALSIFIER — the diversification rate
+
+**Not run, on the owner's instruction. Recorded as the open falsifier for
+`MEMBERSHIP_CLAIM_ASSESSMENT.md` §5.3(2).**
+
+**The question:** of the 336 companies membership-only would publish, how many carry
+material revenue outside the isubgroup that placed them at their node? A single BSE
+label on a conglomerate asserts an exposure for a company whose named business may be
+a small share of it.
+
+**Why it cannot be run now:** it needs segment revenue. `company_segment` (migration
+0012) has **0 rows**, and `DEFECTS-001 D1` records that it is one of the four ledger
+tables with **no reviewed write path** — so it cannot be populated compliantly today
+even if the data were to hand.
+
+**Status if it comes back high:** §5.3(2) moves from *"partly mitigable"* to fatal for
+the diversified subset, and membership-only would need a size test (revenue share of
+the named segment) that is itself a magnitude — which would drag the sized layer back
+into a design built to avoid it. **This is the single largest open risk to the
+membership-only plan.**
+
+**Cheapest partial proxy, if one is wanted before D1 is fixed:** exclude the
+`Diversified` isubgroup (13 companies) and any company whose name or filing declares
+multiple reportable segments. That is a floor on the problem, not a measurement of it.
+
+---
+
 ## 5. The completeness test
 
 `test_no_orphan_mechanism_family`, asserting over live config + DB:

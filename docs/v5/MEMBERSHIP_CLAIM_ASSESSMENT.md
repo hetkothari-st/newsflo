@@ -374,6 +374,133 @@ finished before anything ships.
 
 ---
 
+## 7. CONTRADICTION RATE — measured (supersedes §6's falsifier 2)
+
+Script: `backend/scripts/probes/contradiction_rate.py`
+Output: `backend/scripts/probes/_contradiction_2026-08-17.txt`
+
+**Denominator: 33.** Of the 52-report corpus, 33 companies sit at a crude node that
+would publish them, 10 are Specialty Chemicals (withheld, MIXED by construction), and
+9 sit in isubgroups no crude node claims (Personal Care 4, Diversified FMCG 2,
+Packaged Foods 2, Commodity Chemicals 1) — which is itself a small validation: the
+roster's `fmcg_distribution` family, which scored 0% on its core leaf in §9.3, is
+also the family no node claims.
+
+### 7.1 The headline, and it is not the one I expected
+
+| kind of contradiction | n | rate | does it make the published claim FALSE? |
+|---|---|---|---|
+| **direction-inverting** — node says consumer, company is a net producer | **0** | **0%** | would be fatal |
+| **attenuating** — company is backward-integrated into the input | **6** | **18%** | **no** — it makes the effect smaller, not wrong |
+| **disclaiming** — company states the exposure is low or absent | **2** | **6%** | **yes** |
+| union, distinct companies | 8 | 24% | |
+
+**Not one of the 33 had its SIGN wrong.** The failure I named as most dangerous in
+§4.1 of the design report — publishing a producer under a consumer edge — did not
+occur once. `official_isubgroup` membership plus a directional edge got the direction
+right **33 of 33**.
+
+**And that is the claim the requirement makes.** The design publishes direction and
+refuses magnitude, so the 18% attenuation class does not make a published statement
+false — a backward-integrated paint maker still buys resin, just less of it. Under a
+design that published magnitude it would be six wrong numbers; under this one it is
+six correct directions.
+
+**So the rate that matters — published claims that would be FALSE — is 2 of 33 = 6%.**
+
+By your rule: **low. Membership-only publishes, with the caveat labelled** — and §7.3
+specifies the field that labels it.
+
+### 7.2 Every instance
+
+**DISCLAIMING (2) — these are the ones that would publish a false claim:**
+
+* **GOODYEAR** (`tyre_makers`) p100 — *"The company has limited exposure to foreign
+  exchange risk due to low reliance on imported raw materials and thus the company
+  does not hedge for the foreign currency exposure…"*
+* **DELHIVERY** (`logistics_operators`) p67 — *"The Company considers commodity price
+  risk and currency risk to be low and does not hedge these risks."*
+  Note: Delhivery is asset-light, so this is arguably a **tag** error rather than a
+  magnitude disclaim — it belongs at `bought_in_freight`, not `freight_diesel`. Either
+  way the node's claim as stated is contradicted by the filing.
+
+**ATTENUATING (6) — backward integration, sign unchanged:**
+
+| company | node | excerpt |
+|---|---|---|
+| **POLYPLEX** | packaging_film_makers | *"The Company produces its own film grade PET resin."* |
+| **UFLEX** | packaging_film_makers | *"our PET resin manufacturing operations, with the upgraded Panipat facility now capable of producing 480 TPD bottle-grade virgin PET chips"* |
+| **JINDALPOLY** | packaging_film_makers | *"The company started manufacturing polyester chips for captive use in 1993."* |
+| **BERGEPAINT** | paint_makers | *"we enhanced in-house resin manufacturing capabilities through strategic capacity additions"* |
+| **ASIANPAINT** | paint_makers | *"Our VAM-VAE … emulsion manufacturing project at Dahej, Gujarat, has also progressed well."* |
+| **BALKRISIND** | tyre_makers | *"Our carbon black and specialty materials business is evolving … from a backward integration initiative into a key pillar"* |
+
+Two marginal (MRF — *"Trading in Rubber and Rubber Chemicals"*; SIRCA — *"deepen our
+manufacturing integration"*), which would take the attenuating rate to 24%.
+
+**Concentration is the actionable part: `packaging_film_makers` is 3 of 6 — 50%
+backward-integrated.** That is a property of the node, not of the companies, and it
+argues that node should carry `BOTH` edges like Specialty Chemicals rather than a pure
+consumer edge.
+
+### 7.3 Does the output distinguish a member we read from one we didn't?
+
+**No. And the fix is one column.**
+
+`evidence_grade` C vs D distinguishes *filing-cited* from *membership-only*. But D
+conflates three different states:
+
+1. no filing on disk — **we never looked**;
+2. filing read, silent on this leaf — **we looked and it said nothing**;
+3. filing read, disclaims — **we looked and it said no** (should not publish at all).
+
+**That is D11 arriving at member level**: absence of measurement and measured absence
+wearing the same label. A reader cannot tell Goodyear (read, contradicted) from a
+company whose annual report nobody has downloaded.
+
+**Minimum field — one column, four values:**
+
+```
+member_evidence:  NOT_EXAMINED        no filing on disk           -> publish, grade D, caveat shown
+                  EXAMINED_SILENT     read; no statement on leaf  -> publish, grade D, NO caveat
+                  EXAMINED_CONFIRMS   A+ excerpt found            -> publish, grade C, cite it
+                  EXAMINED_CONTRADICTS  disclaimer found          -> DO NOT PUBLISH, cite why
+```
+
+`EXAMINED_SILENT` is the load-bearing value and the easiest to leave out. It is
+strictly stronger evidence than `NOT_EXAMINED` — we opened the document and the
+company did not disclaim — and separating them is exactly what stops the D11
+conflation from reappearing here.
+
+This closes §5.3's indefensible case. The claim was never that we had read every
+member; it was that the output made no distinction. **With this column the reader can
+see which members were read, and the Goodyear case becomes an exclusion with a
+citation rather than a silent falsehood.**
+
+### 7.4 Limits of this measurement
+
+* **6% is a FLOOR on disclaimers, not an estimate.** The sweep finds what its patterns
+  catch. A disclaimer phrased outside them is invisible.
+* **n=2.** Better than n=1 and still small. The rate is stable enough to choose a
+  design; it is not stable enough to quote.
+* **One methodological finding worth carrying forward: a disclaimer is phrased
+  GENERICALLY and an affirmation SPECIFICALLY.** Goodyear says *"imported raw
+  materials"*, never "carbon black". The first run anchored both directions on leaf
+  terms and found **0 of the 2 real disclaimers**. Any future extractor must anchor
+  the two directions differently or it will systematically under-find the only class
+  that makes a claim false.
+* **`"does not hedge"` is not `"is not exposed"` — they point opposite ways.** JK
+  Tyre's *"The Company does not have any exposure hedged through commodity
+  derivatives"* surfaced as a disclaimer candidate and is the opposite: an unhedged
+  company is **more** exposed. It is an `UNMITIGATED` signal, and it is the same SEBI
+  LODR Reg 34(3) sentence shape that produced the CEAT `hedge_ratio = 0.0` FILED rows.
+* **A literal `\x08` byte in the pattern silently broke the first repaired run** and
+  produced a false negative on Goodyear. Same class as the CEAT glyph split: an
+  invisible character defeating a match, failing toward "nothing found". Recorded
+  because it is the second time this corpus has produced that failure mode.
+
+---
+
 ## 6. What would falsify this
 
 Stated because three architectural arguments have been wrong today, and this is a
