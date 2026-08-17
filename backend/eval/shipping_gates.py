@@ -290,8 +290,12 @@ def render_report(report: GateReport,
     for outcome in report.outcomes:
         mark = {PASS: "PASS  ", FAIL: "FAIL  ", REFUSED: "REFUSE"}[outcome.status]
         value = "unmeasured" if outcome.value is None else outcome.value
-        lines.append(f"{mark} {outcome.name}: {value} "
-                     f"({outcome.comparison} {outcome.threshold})".rstrip())
+        # The no-regression rule is a COMPARISON against a stored baseline,
+        # not a threshold, so it carries neither -- and printing "( None)"
+        # after it would read as a bar nobody set.
+        bar = (f" ({outcome.comparison} {outcome.threshold})"
+               if outcome.comparison else "")
+        lines.append(f"{mark} {outcome.name}: {value}{bar}")
         if outcome.reason:
             lines.append(f"        {outcome.reason}")
     lines.append("")
@@ -305,8 +309,10 @@ def render_report(report: GateReport,
         if not breakdown:
             lines.append(
                 f"  NOT REPORTED. This run supplied no {title.lower()} "
-                f"breakdown, so these gates are aggregate-only -- which hides "
-                f"exactly what a per-stratum table exists to show.")
+                f"breakdown, so these gates are aggregate-only -- which is "
+                f"exactly what a {title.lower()} table exists to prevent "
+                f"(Task 7.2: an aggregate number hides that you are excellent "
+                f"on crude and useless on policy).")
             continue
         for key in sorted(breakdown):
             body = ", ".join(f"{name}={_render_value(value)}"

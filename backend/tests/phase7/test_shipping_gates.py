@@ -402,4 +402,6 @@ def test_rendering_without_a_breakdown_says_so(passing):
     from eval.shipping_gates import render_report
 
     text = render_report(_report(passing), per_stratum=None)
-    assert "per-stratum" in text.lower()
+    assert "NOT REPORTED" in text
+    assert "aggregate-only" in text
+    assert "per stratum" in text.lower() and "per sector" in text.lower()
