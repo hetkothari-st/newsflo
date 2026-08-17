@@ -298,3 +298,142 @@ def test_narrow_single_call_stays_candidate_grounded(db_session):
     })
     result = analyze_article_v3(router, "t", "c", session=db_session)
     assert [c.ticker for c in result.companies] == ["GROUND.NS"]
+
+
+# --- substring ontologies vs the canonical node vocabulary (P5) ------------
+#
+# `EXPOSURE_SECTOR_HINTS` and `_CHANNEL_NODE_HINTS` are matched as SUBSTRINGS
+# against `f"{node_id} {label}"` -- a two-half haystack. The node-id half is
+# canonical (post-`normalize_node_id`); the label half is the raw human
+# string the model wrote. A few keys are rewritten by the transform and can
+# therefore never appear in the node-id half at all.
+#
+# They are NOT deleted, and the measurement says why: every one of them is
+# still reachable through the LABEL half (a "Rupee depreciation" headline
+# puts "rupee" in the haystack even though the node id says "currency"), so
+# deleting them would lose real matches. What the tests below guarantee is
+# that nothing is ORPHANED: a key the node-id half cannot reach must have a
+# sibling that can, covering at least the same sectors / the same channel.
+
+def _reachable_in_a_canonical_node_id(key: str) -> bool:
+    """Conservative: True when the transform leaves the key intact.
+
+    Deliberately conservative rather than exact. A fragment key like
+    "purchas" IS reachable (it is a prefix of the canonical token
+    "purchase") but normalizes to "purcha" on its own, so it reads as
+    unreachable here. That costs nothing: an under-reported key still has
+    to clear the sibling clause below, which is the property that actually
+    matters. Over-reporting -- claiming a rewritten key is reachable --
+    would be the unsound direction, and this cannot do it.
+    """
+    core = key.strip("_")
+    return bool(core) and normalize_node_id(core) == core
+
+
+def test_the_exposure_hints_unreachable_in_a_node_id_are_exactly_these_five():
+    """Pinned so a NEW rewritten key is a visible decision, not a silent
+    one. Each maps to a phrase rule in normalize.py."""
+    from app.analysis.impact_graph.exposure import EXPOSURE_SECTOR_HINTS
+
+    unreachable = {key: normalize_node_id(key) for key in EXPOSURE_SECTOR_HINTS
+                   if not _reachable_in_a_canonical_node_id(key)}
+    assert unreachable == {
+        "oil_price": "crude_price",
+        "repo_rate": "interest_rate",
+        "borrowing_cost": "financing_cost",
+        "consumer_spending": "consumer_demand",
+        "rupee": "currency",
+    }
+
+
+def test_no_exposure_hint_key_is_orphaned_by_the_node_id_transform():
+    """A key the node-id half cannot reach must have a sibling that can, and
+    that sibling must hint at least the same sectors -- otherwise the
+    node-id half silently loses a candidate pool."""
+    from app.analysis.impact_graph.exposure import EXPOSURE_SECTOR_HINTS
+
+    orphaned = []
+    for key, sectors in EXPOSURE_SECTOR_HINTS.items():
+        if _reachable_in_a_canonical_node_id(key):
+            continue
+        rewritten = normalize_node_id(key.strip("_"))
+        covered = any(
+            other != key
+            and _reachable_in_a_canonical_node_id(other)
+            and (other in rewritten or rewritten in other)
+            and set(sectors) <= set(hinted)
+            for other, hinted in EXPOSURE_SECTOR_HINTS.items())
+        if not covered:
+            orphaned.append(f"{key!r} -> {rewritten!r}: no reachable sibling "
+                            f"covers sectors {sorted(sectors)}")
+    assert not orphaned, "\n".join(orphaned)
+
+
+def test_the_orphan_guard_fires_on_a_synthetic_dead_exposure_key():
+    """Non-vacuity. The assertion above passes on today's table; this proves
+    it would not pass on a table with a genuinely dead key."""
+    from app.analysis.impact_graph.exposure import EXPOSURE_SECTOR_HINTS
+
+    # "lending_rates" normalizes to "interest_rate", and no reachable key
+    # hints "defense" -- so nothing covers it.
+    table = dict(EXPOSURE_SECTOR_HINTS, lending_rates=["defense"])
+    orphaned = []
+    for key, sectors in table.items():
+        if _reachable_in_a_canonical_node_id(key):
+            continue
+        rewritten = normalize_node_id(key.strip("_"))
+        covered = any(
+            other != key
+            and _reachable_in_a_canonical_node_id(other)
+            and (other in rewritten or rewritten in other)
+            and set(sectors) <= set(hinted)
+            for other, hinted in table.items())
+        if not covered:
+            orphaned.append(key)
+    assert orphaned == ["lending_rates"]
+
+
+def test_no_channel_hint_token_is_orphaned_by_the_node_id_transform():
+    """Same property for the coverage matrix: a channel whose ONLY hints are
+    rewritten tokens would read as permanently uncovered, and the engine
+    would pay Gemini to re-ask about it on every article."""
+    from app.analysis.impact_graph.engine import _CHANNEL_NODE_HINTS
+
+    orphaned = []
+    for channel, hints in _CHANNEL_NODE_HINTS.items():
+        if not any(_reachable_in_a_canonical_node_id(hint) for hint in hints):
+            orphaned.append(f"{channel}: every hint {hints} is rewritten by "
+                            f"normalize_node_id")
+    assert not orphaned, "\n".join(orphaned)
+
+
+def test_the_five_label_only_keys_are_load_bearing_and_must_not_be_deleted():
+    """The measurement behind the decision NOT to delete them.
+
+    The node id is `normalize_node_id(shock_id or label)` -- and when the
+    engine supplies a `shock_id`, the node id can carry NONE of the concept
+    the human label carries. In that shape the sibling key does not fire and
+    the rewritten key is the ONLY thing matching: dropping it returns an
+    empty sector pool, not the same pool by another route.
+
+    Deliberately NOT written as `sectors_for_node(normalize_node_id(label),
+    label)`: there the normalize-image sibling ("crude" for "oil_price",
+    "currency" for "rupee") is already in the node-id half and the
+    assertion passes with the label half deleted -- a degenerate test of
+    exactly the kind this sweep exists to remove.
+    """
+    from app.analysis.impact_graph.exposure import sectors_for_node
+
+    # node id from a shock_id that carries none of the concept
+    assert sectors_for_node("banking_stress", "Rupee depreciation") == [
+        "it", "pharma", "oil_gas", "metals", "textiles"]
+    assert sectors_for_node("supply_disruption", "Oil price rise") == [
+        "oil_gas", "chemicals", "railways_transport"]
+    assert sectors_for_node("policy_shift", "Repo rate hike") == [
+        "banking", "construction_realestate", "auto"]
+    assert sectors_for_node("market_stress", "Borrowing cost climbs") == [
+        "banking", "infra", "construction_realestate"]
+    assert sectors_for_node("festive_season", "Consumer spending slows") == [
+        "fmcg", "consumer_durables", "auto", "media_entertainment"]
+    # and the control: the same node ids with a label carrying nothing
+    assert sectors_for_node("banking_stress", "Quarterly update") == []

@@ -24,12 +24,23 @@ from sqlalchemy.orm import Session
 from app.companies.integrity import DEMO_TICKERS
 from app.models import Company
 
-# Keyword -> sectors ontology. Keys are matched as substrings against the
-# NORMALIZED node id (snake_case, post-normalize.py), so "crude_price_rise",
-# "rising_crude_oil_price" and "crude_supply_disruption" all hit "crude".
-# Sector slugs must exist in app.analysis.schemas.SECTORS. Deliberately
-# curated, not exhaustive: a wrong hint costs prompt tokens, a missing hint
-# only falls back to the sector-node path that exists anyway.
+# Keyword -> sectors ontology. Keys are matched as substrings against a
+# TWO-HALF haystack (see `sectors_for_node`): the canonical node id
+# (snake_case, post-normalize.py) AND the raw human label. So
+# "crude_price_rise", "rising_crude_oil_price" and "crude_supply_disruption"
+# all hit "crude". Sector slugs must exist in app.analysis.schemas.SECTORS.
+# Deliberately curated, not exhaustive: a wrong hint costs prompt tokens, a
+# missing hint only falls back to the sector-node path that exists anyway.
+#
+# FIVE KEYS ARE REACHABLE THROUGH THE LABEL HALF ONLY -- "oil_price",
+# "repo_rate", "borrowing_cost", "consumer_spending" and "rupee" are all
+# rewritten by normalize.py's phrase rules, so no canonical node id can ever
+# contain them. They are kept, not deleted: a "Rupee depreciation" headline
+# still puts "rupee" in the haystack even though its node id says
+# "currency", so deleting them would lose real matches (measured). What is
+# guaranteed instead is that none of them is ORPHANED -- each has a sibling
+# key reachable in the node-id half hinting at least the same sectors. Pinned
+# by tests/test_impact_graph_optimization.py.
 EXPOSURE_SECTOR_HINTS: dict[str, list[str]] = {
     # commodity / input-cost exposure
     "crude": ["oil_gas", "chemicals", "auto", "railways_transport", "agriculture"],

@@ -1893,6 +1893,16 @@ def _expand_frontier(router: StageRouter, session, facts: EventFacts,
 # (cost-opt spec P13). A channel counts as COVERED when any graph node's id
 # or label carries one of its tokens -- code decides coverage; Gemini is
 # asked only about the channels code could not find.
+#
+# The haystack has TWO halves (see `_coverage_matrix`): the canonical node
+# id and the raw label. Four tokens -- "consumption", "purchas", "rupee",
+# "fx" -- are rewritten by normalize.py and so reach only through the label
+# half; each is kept because it still matches real headline wording, and
+# each shares its channel with a token that IS reachable in a node id
+# ("demand"/"spending", "currency"/"exchange"). That no-orphan property is
+# pinned by tests/test_impact_graph_optimization.py -- a channel whose every
+# hint was rewritten would read as permanently uncovered and would buy a
+# Gemini re-ask on every article.
 _CHANNEL_NODE_HINTS: dict[str, list[str]] = {
     "demand": ["demand", "consumption", "spending", "purchas"],
     "supply": ["supply", "production", "output", "capacity"],
