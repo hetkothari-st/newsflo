@@ -437,3 +437,65 @@ def test_an_aggregate_only_report_is_impossible():
     assert "per_stratum" in fields and "per_sector" in fields
     with pytest.raises(TypeError):
         MetricReport(aggregate={})
+
+
+# ---------------------------------------------------------------------------
+# mechanism_accuracy compares NODE IDS, so it normalizes like the writer does
+# ---------------------------------------------------------------------------
+
+def test_mechanism_accuracy_scores_a_label_written_in_the_REGISTRY_dialect():
+    """`expected_mechanism` is what a human labeler typed -- and a labeler
+    reads `knowledge.MECHANISMS`, so they type "paints_input_cost".
+    `published_mechanism` is `company_impact.mechanism_id`, a normalized node
+    id: "paint_input_cost". An upper-cased exact compare scored that as a
+    MISS, on 9 of the 42 mechanisms, in a metric that feeds
+    `eval/shipping_gates.py`."""
+    from eval.metrics import mechanism_accuracy
+
+    rate = mechanism_accuracy([
+        pair(company_ref="A", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_mechanism="paints_input_cost",
+             published_mechanism="paint_input_cost"),
+        pair(company_ref="B", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_mechanism="capital_goods_orders",
+             published_mechanism="capital_good_order"),
+        pair(company_ref="C", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_mechanism="freight_rate_spike",
+             published_mechanism="freight_rate_up"),
+    ])
+    assert (rate.numerator, rate.denominator) == (3, 3)
+
+
+def test_mechanism_accuracy_still_scores_two_different_mechanisms_as_a_miss():
+    """The anti-vacuity half: normalizing both sides must not make every
+    comparison succeed."""
+    from eval.metrics import mechanism_accuracy
+
+    rate = mechanism_accuracy([
+        pair(company_ref="A", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_mechanism="paints_input_cost",
+             published_mechanism="aviation_fuel_cost"),
+        pair(company_ref="B", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_mechanism="upstream_realization",
+             published_mechanism="refiner_marketing_margin"),
+    ])
+    assert (rate.numerator, rate.denominator) == (0, 2)
+
+
+def test_the_other_attribute_metrics_do_not_normalize_as_node_ids():
+    """The comparator for tier / materiality / directness / evidence /
+    section stays an ENUM case-fold. Running those through
+    `normalize_node_id` would be the same defect in the other direction: it
+    singularizes, drops noise words and hoists DIRECTION words, so
+    "HIGHER" -- a direction word with nothing left beside it -- collapses to
+    the placeholder id "node", and "HIGH" does not. A controlled vocabulary
+    is not a node id."""
+    from eval.metrics import materiality_accuracy
+
+    rate = materiality_accuracy([
+        pair(company_ref="A", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_materiality="high", published_materiality="HIGH"),
+        pair(company_ref="B", expected_tier="PRIMARY", published_tier="PRIMARY",
+             expected_materiality="HIGH", published_materiality="HIGHER"),
+    ])
+    assert (rate.numerator, rate.denominator) == (1, 2)

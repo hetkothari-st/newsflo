@@ -209,14 +209,23 @@ def economic_effect_accuracy(pairs: Sequence[ScoredPair]) -> Rate:
 
 
 def _attribute_accuracy(pairs: Sequence[ScoredPair], expected_field: str,
-                        published_field: str) -> Rate:
+                        published_field: str,
+                        comparable: Callable[[Any], str | None] | None = None) -> Rate:
     """Counts ONLY pairs whose label states the attribute.
 
     A label that says nothing about a mechanism is not evidence that the
     published mechanism is right, and it is not evidence that it is wrong.
     It is silence, and silence belongs in neither the numerator nor the
     denominator.
+
+    `comparable` is how the two sides are brought into one vocabulary before
+    the compare. It defaults to `_enum_token` -- a plain case-fold, correct
+    for the controlled vocabularies (tier, materiality, directness, evidence
+    grade, section). `mechanism_accuracy` overrides it, because a mechanism
+    id is not an enum member; it is a NODE ID with a canonical writer
+    transform.
     """
+    to_token = comparable or _enum_token
     hit = total = 0
     for pair in pairs:
         if pair.expected_tier is None:
@@ -225,19 +234,49 @@ def _attribute_accuracy(pairs: Sequence[ScoredPair], expected_field: str,
         if expected is None or expected == "":
             continue
         total += 1
-        if _canonical(expected) == _canonical(getattr(pair, published_field)):
+        if to_token(expected) == to_token(getattr(pair, published_field)):
             hit += 1
     return Rate(hit, total)
 
 
-def _canonical(value: Any) -> str | None:
+def _enum_token(value: Any) -> str | None:
+    """Case-fold for a CONTROLLED VOCABULARY member -- a tier, a materiality
+    bucket, a directness, an evidence grade, a section key.
+
+    Deliberately NOT a node-id normalization, and named so nobody reaches
+    for it as one: `normalize_node_id` singularizes, drops noise words and
+    hoists direction words, so it would fold "HIGHER" down to the
+    placeholder id "node". An enum is not a node id.
+    """
     if value is None:
         return None
     return str(value).strip().upper()
 
 
+def _mechanism_token(value: Any) -> str | None:
+    """Comparator for `mechanism_accuracy`, and the reason it needs its own.
+
+    `expected_mechanism` is what a human labeler typed, and a labeler reads
+    the knowledge registry, so they write "paints_input_cost".
+    `published_mechanism` is `company_impact.mechanism_id`, which the impact
+    graph persists through `normalize_node_id`: "paint_input_cost". A
+    case-folded exact compare scored that as a MISS on 9 of the 42
+    mechanisms -- silently, in a metric `eval/shipping_gates.py` reads.
+
+    Both sides go through the engine's OWN transform (the same one
+    `knowledge.resolve_mechanism_id` is built from), so the two dialects
+    land on one token. Two genuinely different mechanisms still differ.
+    """
+    if value is None:
+        return None
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    return normalize_node_id(str(value)).upper()
+
+
 def mechanism_accuracy(pairs: Sequence[ScoredPair]) -> Rate:
-    return _attribute_accuracy(pairs, "expected_mechanism", "published_mechanism")
+    return _attribute_accuracy(pairs, "expected_mechanism", "published_mechanism",
+                               comparable=_mechanism_token)
 
 
 def materiality_accuracy(pairs: Sequence[ScoredPair]) -> Rate:
