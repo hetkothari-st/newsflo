@@ -432,46 +432,36 @@ def sanitize_company_claim(text: str, has_specific_evidence: bool,
 # --- curated registry resolution -------------------------------------------
 
 _MECHANISM_PARENT_TYPES = ("", "economic_node", "commodity", "policy")
-_MECHANISM_ALIASES: dict[str, str] | None = None
-
-
-def _mechanism_alias_map() -> dict[str, str]:
-    """normalized node id -> registry mechanism id. The archetype path
-    persists `normalize_node_id(mechanism_id)` as the candidate's
-    causal_parent_id, which singularizes a handful of ids ("paints_input_
-    cost" lands as "paint_input_cost"), so a direct MECHANISMS lookup
-    misses exactly those. Mirrors app.pipeline._mechanism_alias_map; kept
-    local because importing app.pipeline from here would invert the
-    existing (pipeline -> evidence) dependency direction."""
-    global _MECHANISM_ALIASES
-    if _MECHANISM_ALIASES is None:
-        from app.analysis.impact_graph.knowledge import MECHANISMS
-        from app.analysis.impact_graph.normalize import normalize_node_id
-
-        _MECHANISM_ALIASES = {normalize_node_id(mid): mid for mid in MECHANISMS}
-    return _MECHANISM_ALIASES
 
 
 def _candidate_mechanism_ids(parent_type, parent_id, discovery_source) -> list[str]:
     """Registry ids to try for one row, best first: the causal parent it
     actually hangs off, then the archetype tag that discovered it. A
     sector/company parent is NEVER looked up as a mechanism (a sector named
-    "cement" must not borrow the cement mechanism)."""
+    "cement" must not borrow the cement mechanism).
+
+    The persisted `causal_parent_id` is `normalize_node_id(mechanism_id)`,
+    which rewrites 9 of the 42 registry keys, so each candidate is offered
+    both as-written and as `knowledge.resolve_mechanism_id` resolves it.
+    That resolution used to be a local copy of the same comprehension
+    `app.pipeline` carried; it now lives in `knowledge` alone."""
+    from app.analysis.impact_graph.knowledge import resolve_mechanism_id
+
     ids: list[str] = []
+
+    def offer(value: str | None) -> None:
+        for candidate in (value, resolve_mechanism_id(value)):
+            if candidate and candidate not in ids:
+                ids.append(candidate)
+
     node_id = str(parent_id or "").strip()
     if node_id and str(parent_type or "").strip().lower() in _MECHANISM_PARENT_TYPES:
-        ids.append(node_id)
-        aliased = _mechanism_alias_map().get(node_id)
-        if aliased:
-            ids.append(aliased)
+        offer(node_id)
     tag = str(discovery_source or "").strip()
     if tag.lower().startswith("archetype:"):
         tagged = tag.split(":", 1)[1].strip()
         if tagged:
-            ids.append(tagged)
-            aliased = _mechanism_alias_map().get(tagged)
-            if aliased:
-                ids.append(aliased)
+            offer(tagged)
     return ids
 
 

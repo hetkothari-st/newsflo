@@ -248,47 +248,24 @@ _EVIDENCE_SOURCE_BY_CLASS = {
 }
 
 
-def _mechanism_alias_map() -> dict[str, str]:
-    """normalized node id -> registry mechanism id.
-
-    The archetype path persists `normalize_node_id(mechanism_id)` as the
-    company's `causal_parent_id` (app.analysis.impact_graph.engine), and
-    that normalization SINGULARIZES a handful of ids -- "paints_input_cost"
-    lands as "paint_input_cost", "nbfc_funding_cost" as
-    "nbfc_financing_cost". Looking the persisted id up in MECHANISMS
-    directly therefore misses exactly those mechanisms and silently drops
-    them to the distance fallback / "OTHER" relation. Built once, lazily
-    (importing the registry at module scope would pull SQLAlchemy models
-    into every importer of this module)."""
-    global _MECHANISM_ALIASES
-    if _MECHANISM_ALIASES is None:
-        from app.analysis.impact_graph.knowledge import MECHANISMS
-        from app.analysis.impact_graph.normalize import normalize_node_id
-
-        _MECHANISM_ALIASES = {normalize_node_id(mid): mid for mid in MECHANISMS}
-    return _MECHANISM_ALIASES
-
-
-_MECHANISM_ALIASES: dict[str, str] | None = None
-
-
 def _registry_meta(parent_type: str | None, parent_id: str | None) -> dict | None:
     """The knowledge registry's entry for a candidate's causal parent, or
     None. Sector/company parents are NOT mechanisms and are never looked up
     as one (a sector named "cement" must not borrow the cement mechanism's
-    relation)."""
+    relation).
+
+    `mechanism_meta_for_node` is the ONE accessor that speaks both id
+    dialects; the local alias map this function used to carry was one of
+    four copies of the same comprehension. Lazy import: the registry pulls
+    SQLAlchemy models in, and every importer of this module should not."""
     node_id = str(parent_id or "").strip()
     if not node_id:
         return None
     if str(parent_type or "").strip().lower() not in _MECHANISM_PARENT_TYPES:
         return None
-    from app.analysis.impact_graph.knowledge import mechanism_meta
+    from app.analysis.impact_graph.knowledge import mechanism_meta_for_node
 
-    meta = mechanism_meta(node_id)
-    if meta is not None:
-        return meta
-    aliased = _mechanism_alias_map().get(node_id)
-    return mechanism_meta(aliased) if aliased else None
+    return mechanism_meta_for_node(node_id)
 
 
 def _edge_relation(parent_type: str | None, parent_id: str | None) -> str:
@@ -1717,8 +1694,8 @@ def _gate_candidates(session: Session, result) -> list[tuple[str, str, list, obj
             # candidate fell through to the distance fallback §11 forbids.
             causal_parent_type=company.parent_type or "",
             causal_parent_id=company.parent_id or "",
-            # Registry directness, resolved through the normalized-node-id
-            # aliases the gate cannot see (see _mechanism_alias_map). Empty
+            # Registry directness, resolved through knowledge's canonical
+            # raw/persisted alias resolution (see _registry_meta). Empty
             # when the registry does not know this parent -- derive_directness
             # then runs its own registry lookup and, failing that, the
             # distance fallback.

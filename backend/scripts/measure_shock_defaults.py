@@ -217,34 +217,34 @@ def load_node_normalizer():
         if backend_root not in sys.path:
             sys.path.insert(0, backend_root)
         from app.analysis.impact_graph.normalize import (  # noqa: PLC0415
-            normalize_node_id,
+            normalize_node_id, snake_node_id,
         )
-        return normalize_node_id, "app.analysis.impact_graph.normalize"
+        return normalize_node_id, snake_node_id, "app.analysis.impact_graph.normalize"
     except Exception:  # noqa: BLE001 -- an audit tool must still produce numbers
-        return (lambda value: value), "FALLBACK identity (engine normalizer unavailable)"
+        identity = (lambda value: value)
+        return identity, identity, "FALLBACK identity (engine normalizer unavailable)"
 
 
 #: Resolved once; `node_ids_for_shock` is called per shock.
-_NORMALIZE_NODE_ID, NODE_NORMALIZER_SOURCE = load_node_normalizer()
+_NORMALIZE_NODE_ID, _SNAKE_NODE_ID, NODE_NORMALIZER_SOURCE = load_node_normalizer()
 
 
 def node_ids_for_shock(shock: dict, stage: str) -> set[str]:
     """Every spelling of the node id this shock can be STORED under.
 
-    Both call sites read `shock_id or label`; `_build_graph`
-    (initial_shocks) additionally pre-snakes it with
-    ``.strip().lower().replace(" ", "_")``; and `_register_edge` then
-    normalizes whatever either produced (see `load_node_normalizer`). All
-    spellings are returned so the join matches the persisted id AND still
-    matches a legacy row written before the normalizer existed.
+    Both call sites read `shock_id or label`, and `_register_edge`
+    normalizes whatever they produced (see `load_node_normalizer`). Rows
+    written before the normalizer existed can also carry the raw string or
+    the pre-normalize SNAKE spelling `_build_graph` used to apply, so all
+    three are returned: the join matches the persisted id AND the legacy
+    ones. `stage` is kept in the signature because callers pass it and the
+    audit report groups on it; it no longer changes the spelling set --
+    `normalize_node_id` splits on every non-alphanumeric, so
+    `normalize(snake(x)) == normalize(x)` and the two call sites were never
+    actually landing anywhere different.
     """
     base = str(shock.get("shock_id") or shock.get("label") or "shock")
-    snake = base.strip().lower().replace(" ", "_")
-    ids = {base, snake, _NORMALIZE_NODE_ID(snake)}
-    if stage != "initial_shocks":
-        # narrow_graph does not pre-snake -- _register_edge normalizes the
-        # raw string itself, which can land somewhere else again.
-        ids.add(_NORMALIZE_NODE_ID(base))
+    ids = {base, _SNAKE_NODE_ID(base), _NORMALIZE_NODE_ID(base)}
     return {node_id for node_id in ids if node_id}
 
 
@@ -438,8 +438,8 @@ def reachable_from_nodes(conn: sqlite3.Connection, alert_id: int, seeds: set[str
 
     def _spellings(label) -> set[str]:
         raw = str(label)
-        snake = raw.strip().lower().replace(" ", "_")
-        return {value for value in (raw, snake, _NORMALIZE_NODE_ID(snake)) if value}
+        return {value for value in (raw, _SNAKE_NODE_ID(raw),
+                                    _NORMALIZE_NODE_ID(raw)) if value}
 
     adjacency: dict[str, set[str]] = {}
     for edge in edges:

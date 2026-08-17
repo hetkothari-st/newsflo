@@ -15,8 +15,9 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.analysis.impact_graph.knowledge import MECHANISMS, section_label_for
-from app.analysis.impact_graph.normalize import normalize_node_id
+from app.analysis.impact_graph.knowledge import (
+    MECHANISMS, resolve_mechanism_id, section_label_for_node,
+)
 from app.analysis.impact_graph.publication_gate import (
     TIER_MACRO_CONTEXT, TIER_PRIMARY, is_displayable_tier, is_gated,
     is_secondary_tier, materiality_grade,
@@ -165,30 +166,15 @@ OTHER_LABEL = "other verified mechanisms"
 # registry ids change under that rewrite ("paints_input_cost" ->
 # "paint_input_cost", "capital_goods_orders" -> "capital_good_order", ...).
 # A direct `section_label_for(parent_type, parent_id)` therefore MISSES those
-# nine on real rows and would silently drop them to the legacy table, so the
-# normalized index is consulted second. Values still come from
-# `section_label_for` itself -- this module never restates a label.
-_REGISTRY_LABEL_BY_NORMALIZED_ID = {
-    normalize_node_id(mechanism_id): section_label_for("economic_node", mechanism_id)
-    for mechanism_id in MECHANISMS
-}
-# Curated per-mechanism explanation (§14): deterministic, human-written, and
-# true of EVERY member of a section built on that mechanism -- unlike a
-# single company's LLM rationale, which is only ever true of that company.
-_REGISTRY_NOTE_BY_NORMALIZED_ID = {
-    normalize_node_id(mechanism_id): spec["mechanism"]
-    for mechanism_id, spec in MECHANISMS.items()
-}
-# Each mechanism's CANONICAL trigger effect, indexed the same way. The
-# registry writes every sentence for one direction of its trigger variable
-# (`crude_price_up`); `knowledge.oriented_mechanisms` flips the EFFECT for
-# an inverted event but never rewrites the prose. Serving the note without
-# checking this publishes "margins compress quickly" over a section of
-# POSITIVE-effect rows -- see _registry_note.
-_REGISTRY_EFFECT_BY_NORMALIZED_ID = {
-    normalize_node_id(mechanism_id): spec["effect"]
-    for mechanism_id, spec in MECHANISMS.items()
-}
+# nine on real rows and would silently drop them to the legacy table.
+#
+# This module used to carry three by-normalized-id indexes of its own to
+# bridge that. It no longer does: `knowledge.resolve_mechanism_id` /
+# `section_label_for_node` are the ONE place the two dialects meet, and every
+# consumer in the tree now reads them (node-id consolidation, P2). Values
+# still come from `section_label_for` / MECHANISMS themselves -- this module
+# never restates a label or a sentence.
+#
 # Parent types ripple_layers resolves ITSELF (T1's ownership split): "sector"
 # through _SECTOR_LABELS, "company" through a "linked to <name>" rule. Every
 # other parent type is registry-owned.
@@ -202,11 +188,9 @@ def _registry_label(parent_type: str | None, parent_id: str) -> str | None:
     the raw id)."""
     if parent_type in _LOCALLY_OWNED_PARENT_TYPES:
         return None
-    # Direct T1 call first: correct for a raw, un-normalized mechanism id.
-    label = section_label_for(parent_type or "", parent_id)
-    if label is not None:
-        return label
-    return _REGISTRY_LABEL_BY_NORMALIZED_ID.get(parent_id)
+    # One call, both dialects: `section_label_for_node` answers for a raw
+    # registry id AND for the normalized id production persists.
+    return section_label_for_node(parent_type or "", parent_id)
 
 
 def _registry_note(parent_type: str | None, parent_id: str,
@@ -234,14 +218,12 @@ def _registry_note(parent_type: str | None, parent_id: str,
     heterogeneous) -- no single effect to check against means no borrow."""
     if parent_type in _LOCALLY_OWNED_PARENT_TYPES:
         return None
-    spec = MECHANISMS.get(parent_id)          # raw, un-normalized id
-    if spec is not None:
-        note, canonical = spec["mechanism"], spec["effect"]
-    else:
-        note = _REGISTRY_NOTE_BY_NORMALIZED_ID.get(parent_id)
-        canonical = _REGISTRY_EFFECT_BY_NORMALIZED_ID.get(parent_id)
-    if note is None:
+    # Either dialect: `resolve_mechanism_id` answers for a raw registry id
+    # AND for the normalized id production persists.
+    spec = MECHANISMS.get(resolve_mechanism_id(parent_id) or "")
+    if spec is None:
         return None
+    note, canonical = spec["mechanism"], spec["effect"]
     if canonical == "mixed" or canonical == section_effect:
         return note
     logger.info(

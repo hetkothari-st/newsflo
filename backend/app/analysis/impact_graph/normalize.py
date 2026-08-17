@@ -59,6 +59,20 @@ def _singular(token: str) -> str:
     return token
 
 
+def snake_node_id(raw: str) -> str:
+    """The PRE-normalize snake spelling: lowercase, spaces to underscores,
+    and nothing else.
+
+    This is NOT a node id and no writer produces one any more. It exists so
+    the audit scripts that join against HISTORICAL `impact_edges` rows --
+    written before `normalize_node_id` was applied at the choke point -- can
+    name that legacy spelling without restating the expression inline. One
+    place, so `tests/test_node_id_single_source.py` can ban every other
+    copy of it.
+    """
+    return (raw or "").strip().lower().replace(" ", "_")
+
+
 def normalize_node_id(raw: str) -> str:
     """Canonical snake_case node id. Deterministic and idempotent."""
     tokens = [t for t in re.split(r"[^a-z0-9]+", (raw or "").strip().lower()) if t]

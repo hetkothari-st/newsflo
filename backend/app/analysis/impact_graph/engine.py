@@ -1682,7 +1682,12 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
         _audit_shock_defaults("initial_shocks", shock, article_id)
         edge = GraphEdge(
             parent_type="event", parent_id=EVENT_NODE_ID, child_type="economic_node",
-            child_id=str(shock.get("shock_id") or shock.get("label", "shock")).strip().lower().replace(" ", "_"),
+            # Handed over RAW: `_register_edge` normalizes every non
+            # company/sector child id, and `normalize_node_id` splits on
+            # every non-alphanumeric, so pre-snaking here was a fourth
+            # spelling of "snake this" that changed nothing (node-id
+            # consolidation: normalize(snake(x)) == normalize(x)).
+            child_id=str(shock.get("shock_id") or shock.get("label", "shock")),
             direction=shock.get("direction", "neutral"), mechanism=shock.get("mechanism", ""),
             causal_distance=1, impact_strength=shock.get("impact_strength", 0.5),
             confidence=shock.get("confidence", 0.0), materiality=shock.get("materiality", 0.5),
