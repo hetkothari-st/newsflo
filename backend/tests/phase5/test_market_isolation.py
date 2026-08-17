@@ -54,17 +54,41 @@ def test_the_price_history_protocols_live_outside_app_market():
 
 def test_no_v5_package_reads_a_market_field_by_name():
     """The fields `app/market/*` writes onto a V4 row. Reading one by name
-    would be the same violation as importing the module."""
+    would be the same violation as importing the module.
+
+    ONE EXEMPTION, and it is the point of Task 5.5 rather than a hole in it:
+    `divergence.py` is the boundary module whose entire job is to RECORD a
+    market disagreement. It never reads the number -- the caller passes it in
+    as a float -- and it never lets it reach a verdict, which the byte-identity
+    test below is what proves. Every other V5 module must not name the field
+    at all.
+    """
     from tests.phase5.conftest import code_lines
 
     banned = ("excess_move_pct", "return_1m", "return_3m", "price_at_analysis",
               "reaction_direction", "volume_z")
+    exempt = {"divergence.py"}
     for package in V5_PACKAGES.values():
         for path in sorted(package.glob("*.py")):
+            if path.name in exempt:
+                continue
             for number, line in code_lines(path):
                 for needle in banned:
                     assert needle not in line, (
                         f"{path.relative_to(BACKEND)}:{number} reads {needle}")
+
+
+def test_the_exempt_divergence_module_still_takes_the_move_as_an_argument():
+    """The exemption above is only safe because the number ARRIVES; it is
+    never fetched. `divergence.py` imports nothing from app.market (asserted
+    package-wide above) and `queue_market_divergence` takes the excess move as
+    a parameter."""
+    import inspect
+
+    from app.analysis.empirical.divergence import queue_market_divergence
+
+    parameters = inspect.signature(queue_market_divergence).parameters
+    assert "excess_move_pct" in parameters
 
 
 # --- divergence is a monitoring signal, never a correction ------------------

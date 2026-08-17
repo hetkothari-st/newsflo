@@ -98,10 +98,17 @@ def test_a_migrated_database_ships_the_phase5_tables_empty(tmp_path):
 @pytest.mark.parametrize("name", ["empirical.yaml", "calibration.yaml",
                                   "surprise.yaml"])
 def test_the_deployed_config_carries_policy_and_no_company_fact(name):
+    import re
+
     raw = yaml.safe_load((BACKEND / "config" / name).read_text(encoding="utf-8"))
     flattened = json.dumps(raw).lower()
-    for needle in ("isin", "ticker", "company_id", "median_car", "nse", "bse"):
+    for needle in ("isin", "ticker", "company_id", "median_car"):
         assert needle not in flattened, f"{name} carries {needle}"
+    # Word-boundary, because "consensus" contains "nse" and a naive substring
+    # check would have made this test a liar in one direction and useless in
+    # the other.
+    for needle in ("nse", "bse"):
+        assert not re.search(rf"\b{needle}\b", flattened), f"{name} carries {needle}"
     assert "version" in raw
 
 

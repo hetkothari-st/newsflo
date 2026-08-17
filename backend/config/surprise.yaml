@@ -1,0 +1,55 @@
+# V5 surprise engine policy -- Axis C (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §14,
+# docs/v5/06_PHASE_5_empirical_calibration.md Task 5.4).
+#
+# THIS FILE IS POLICY, NOT DATA. Weights and thresholds the owner chooses for
+# "is this actually news?". It carries no company fact and no consensus number
+# -- there is no consensus feed in this repo (DATA_GAPS §9), and inventing one
+# would put a fabricated "surprise" on the feed's ranking.
+#
+# AXIS C NEVER TOUCHES DIRECTION OR MATERIALITY. Nothing configured here can:
+# `app/analysis/{sensitivity,policy}` and `app/core` import nothing from
+# `app/analysis/surprise`, ast-asserted.
+
+version: surprise-v5.0.0
+
+novelty:
+  # 1 - max cosine similarity to events in the prior 7 days, over token
+  # counts. DETERMINISTIC BY CONSTRUCTION: no embedding, no model, no network.
+  # An embedding would be a score nobody can reproduce, on a hop nobody
+  # budgeted, for a number that only ranks a feed.
+  min_token_length: 4
+  window_days: 7
+
+dissemination:
+  # EARLY | SPREADING | SATURATED, from source count x time since first seen
+  # (§14). Either axis alone can advance the stage: twenty outlets in five
+  # minutes is saturated, and so is one outlet nine hours ago.
+  spreading_min_sources: 3
+  spreading_min_minutes: 30
+  saturated_min_sources: 8
+  saturated_min_minutes: 180
+
+information_value:
+  # A config-weighted composite, RENORMALISED over the components that are
+  # actually known. A missing consensus must not silently score as zero
+  # surprise -- absent is not "no news".
+  weights:
+    novelty: 0.50
+    consensus_gap: 0.25
+    forward_curve: 0.15
+    dissemination: 0.10
+  # |consensus gap| in sigmas at which the consensus component saturates.
+  consensus_sigma_cap: 3.0
+
+already_priced:
+  # Fraction of the move already in futures/forwards before the event, above
+  # which the ALREADY_PRICED objection is raised -- at WARN (§12.1), so it is
+  # visible and publishes anyway.
+  forward_curve_min: 0.60
+
+slo:
+  # §14: "p95 <= 90 seconds from first ingest to published impact" for events
+  # matching a cached shock template. Instrumented here as a target the
+  # payload can be measured against; the p95 DASHBOARD is deferred (there is
+  # no metrics stack in this repo -- DATA_GAPS §9).
+  latency_p95_target_ms: 90000
