@@ -190,6 +190,16 @@ def test_supply_links_refresh_isolates_a_poisoned_doc(monkeypatch, tmp_path, db_
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
     monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+    # KB-001. The line above patches `scheduler.build_client`, which the master
+    # and universe jobs DO call (scheduler.py:108, :162) -- so it stays. The
+    # supply-links job does not: it calls build_extraction_client(), resolved
+    # at call time through app.companies.supply_links.llm, a binding the patch
+    # above never touches. Unpatched it builds a REAL client and raises
+    # "RotatingClient requires at least one API key" wherever no key is
+    # configured -- which is every worktree, since backend/.env is gitignored.
+    monkeypatch.setattr(
+        "app.companies.supply_links.llm.build_extraction_client",
+        lambda *a, **kw: object())
 
     poisoned = Company(ticker="POISON.NS", name="Poison Ltd", sector="other", index_tier="OTHER")
     healthy = Company(ticker="HEALTHY.NS", name="Healthy Ltd", sector="other", index_tier="OTHER")
@@ -305,6 +315,16 @@ def test_supply_links_refresh_circuit_breaker_stops_after_consecutive_llm_failur
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
     monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+    # KB-001. The line above patches `scheduler.build_client`, which the master
+    # and universe jobs DO call (scheduler.py:108, :162) -- so it stays. The
+    # supply-links job does not: it calls build_extraction_client(), resolved
+    # at call time through app.companies.supply_links.llm, a binding the patch
+    # above never touches. Unpatched it builds a REAL client and raises
+    # "RotatingClient requires at least one API key" wherever no key is
+    # configured -- which is every worktree, since backend/.env is gitignored.
+    monkeypatch.setattr(
+        "app.companies.supply_links.llm.build_extraction_client",
+        lambda *a, **kw: object())
 
     for i in range(6):
         company = Company(ticker=f"FAIL{i}.NS", name=f"Fail {i} Ltd", sector="other", index_tier="OTHER")
@@ -345,6 +365,16 @@ def test_supply_links_refresh_unparsable_news_date_never_stamped_today(monkeypat
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
     monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+    # KB-001. The line above patches `scheduler.build_client`, which the master
+    # and universe jobs DO call (scheduler.py:108, :162) -- so it stays. The
+    # supply-links job does not: it calls build_extraction_client(), resolved
+    # at call time through app.companies.supply_links.llm, a binding the patch
+    # above never touches. Unpatched it builds a REAL client and raises
+    # "RotatingClient requires at least one API key" wherever no key is
+    # configured -- which is every worktree, since backend/.env is gitignored.
+    monkeypatch.setattr(
+        "app.companies.supply_links.llm.build_extraction_client",
+        lambda *a, **kw: object())
 
     company = Company(ticker="STALE.NS", name="Stale Ltd", sector="other", index_tier="OTHER")
     db_session.add(company)
@@ -390,6 +420,16 @@ def test_supply_links_refresh_unreadable_url_sidecar_stays_pending(monkeypatch, 
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
     monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+    # KB-001. The line above patches `scheduler.build_client`, which the master
+    # and universe jobs DO call (scheduler.py:108, :162) -- so it stays. The
+    # supply-links job does not: it calls build_extraction_client(), resolved
+    # at call time through app.companies.supply_links.llm, a binding the patch
+    # above never touches. Unpatched it builds a REAL client and raises
+    # "RotatingClient requires at least one API key" wherever no key is
+    # configured -- which is every worktree, since backend/.env is gitignored.
+    monkeypatch.setattr(
+        "app.companies.supply_links.llm.build_extraction_client",
+        lambda *a, **kw: object())
 
     company = Company(ticker="NOURL.NS", name="No URL Ltd", sector="other", index_tier="OTHER")
     db_session.add(company)
@@ -430,6 +470,16 @@ def test_supply_links_refresh_corrupt_meta_sidecar_stays_pending_not_unmatched(
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler.supply_snapshot, "DEFAULT_ROOT", str(tmp_path))
     monkeypatch.setattr(scheduler, "build_client", lambda *a, **kw: object())
+    # KB-001. The line above patches `scheduler.build_client`, which the master
+    # and universe jobs DO call (scheduler.py:108, :162) -- so it stays. The
+    # supply-links job does not: it calls build_extraction_client(), resolved
+    # at call time through app.companies.supply_links.llm, a binding the patch
+    # above never touches. Unpatched it builds a REAL client and raises
+    # "RotatingClient requires at least one API key" wherever no key is
+    # configured -- which is every worktree, since backend/.env is gitignored.
+    monkeypatch.setattr(
+        "app.companies.supply_links.llm.build_extraction_client",
+        lambda *a, **kw: object())
 
     pdf_path = _write_supply_doc(tmp_path, "952", meta="{not valid json")
 

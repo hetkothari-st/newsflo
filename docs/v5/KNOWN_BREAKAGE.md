@@ -15,7 +15,7 @@ count is stated. Quote it as `N passed / K known-broken`, never as `N passed`.
 
 | # | tests | since | owner |
 |---|---|---|---|
-| KB-001 | `test_scheduler_universe.py` ×2, supply-links refresh | ≤ 2026-08-17 | **none** — see the 2026-08-17 correction; NOT permanently red |
+| ~~KB-001~~ | `test_scheduler_universe.py` ×2, supply-links refresh | ≤ 2026-08-17 | **CLOSED 2026-08-17** — fixed and armed, see the closing note |
 
 ---
 
@@ -213,3 +213,62 @@ rather than assumed:
 
 That gap is real whether the tests are fixed or deleted, and it is the part
 that would actually have caught this.
+
+
+---
+
+## KB-001 — CLOSED 2026-08-17. Fixed, not deleted; hermeticity armed.
+
+The tests were **fixed**, per the corrected recommendation above. They were not
+deleted: they exercise their subject wherever a key is configured, so deleting
+them would have discarded working coverage of poisoned-document isolation and
+the consecutive-LLM-failure circuit breaker.
+
+### The fix
+
+`scheduler.build_client` **stays patched** — the master and universe jobs
+genuinely call it (`scheduler.py:108`, `:162`). What was missing is the binding
+the supply-links job actually resolves:
+
+```python
+monkeypatch.setattr(
+    "app.companies.supply_links.llm.build_extraction_client",
+    lambda *a, **kw: object())
+```
+
+`_run_supply_links_refresh` imports `build_extraction_client` **inside the
+function** (`scheduler.py:450`), so the import happens at call time and picks up
+the patched attribute. Applied at all **five** patch sites in the file, not the
+two that failed — the other three were latent, passing only because they never
+reached client construction.
+
+### Armed (SESSION_PROTOCOL §7.3)
+
+The fix's entire claim is hermeticity, so hermeticity was observed rather than
+asserted. `backend/.env` was moved aside and every key blanked in the
+environment:
+
+| configuration | before the fix | after |
+|---|---|---|
+| `.env` present (main tree) | 15 passed | **15 passed** |
+| **no `.env`, all keys blank** | **2 failed / 13 passed** | **15 passed** |
+
+`.env` restored and verified byte-identical (`cmp`) afterwards.
+
+### What remains open — the gap, deliberately not closed by this fix
+
+> `_run_supply_links_refresh` still swallows a client-**construction** failure
+> and a mid-run **provider** failure identically. Both surface as
+> `Supply links refresh failed` and an empty result. A missing API key and a
+> provider outage are not the same operational event, and nothing in the log or
+> in any assertion distinguishes them.
+
+That is what let this defect sit unnoticed across six measurements: the failure
+mode was indistinguishable from the success path's absence. **It survives the
+fix and is not a test problem** — it is a scheduler observability problem, and
+it is filed here so closing KB-001 does not read as the whole thing being
+resolved.
+
+`SESSION_PROTOCOL.md` §1's `.env` warning stays: these two tests no longer
+diverge between trees, but the general hazard — a gitignored config file
+changing suite results between the main tree and a worktree — is unchanged.
