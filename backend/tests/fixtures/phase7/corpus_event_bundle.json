@@ -10,82 +10,172 @@
     "shock_magnitude_confidence": 0.9,
     "exposure_stale": false
   },
-  "sectors": {"9801": "fixture_energy", "9802": "fixture_materials"},
-  "sub_sectors": {"9801": "fixture_refining", "9802": "fixture_paints"},
+  "sectors": {
+    "9801": "fixture_energy",
+    "9802": "fixture_materials"
+  },
+  "sub_sectors": {
+    "9801": "fixture_refining",
+    "9802": "fixture_paints"
+  },
   "signals": [
     {
       "_fixture": true,
-      "stage": "ENTITY", "kind": "ENTITY_RESOLUTION", "company_id": 9801,
+      "stage": "ENTITY",
+      "kind": "ENTITY_RESOLUTION",
+      "company_id": 9801,
       "created_by": "fixture:entity_resolver",
-      "payload": {"_fixture": true, "ticker": "FIXA.NS", "isin": "INFIXTURE9801",
-                  "resolution": "RESOLVED", "entity_status": "ACTIVE"}
+      "payload": {
+        "_fixture": true,
+        "ticker": "FIXA.NS",
+        "isin": "INFIXTURE9801",
+        "resolution": "RESOLVED",
+        "entity_status": "ACTIVE"
+      }
     },
     {
       "_fixture": true,
-      "stage": "DISCOVERY", "kind": "DISCOVERY", "company_id": 9801,
+      "stage": "DISCOVERY",
+      "kind": "DISCOVERY",
+      "company_id": 9801,
       "created_by": "fixture:engine",
-      "payload": {"_fixture": true, "discovery_source": "MENTION",
-                  "directness": "DIRECT", "graph_distance": 1}
+      "payload": {
+        "_fixture": true,
+        "discovery_source": "MENTION",
+        "directness": "DIRECT",
+        "graph_distance": 1
+      }
     },
     {
       "_fixture": true,
-      "stage": "SENSITIVITY", "kind": "CHANNEL", "company_id": 9801,
+      "stage": "SENSITIVITY",
+      "kind": "CHANNEL",
+      "company_id": 9801,
       "created_by": "fixture:sensitivity_engine",
-      "payload": {"_fixture": true, "channel_id": "fixture_input_cost",
-                  "mechanism_id": "fixture_mechanism_a", "horizon": "NEAR_TERM",
-                  "direction": "NEGATIVE", "materiality": "HIGH", "weight": 1.0,
-                  "evidence_ids": ["ev_fixture_corpus_1"]}
+      "payload": {
+        "_fixture": true,
+        "channel_id": "fixture_input_cost",
+        "mechanism_id": "fixture_mechanism_a",
+        "horizon": "NEAR_TERM",
+        "direction": "NEGATIVE",
+        "materiality": "HIGH",
+        "weight": 1.0,
+        "evidence_ids": [
+          "ev_fixture_corpus_1"
+        ]
+      }
     },
     {
       "_fixture": true,
-      "stage": "EVIDENCE", "kind": "EVIDENCE_BINDING", "company_id": 9801,
+      "stage": "EVIDENCE",
+      "kind": "EVIDENCE_BINDING",
+      "company_id": 9801,
       "created_by": "fixture:evidence_classifier",
-      "payload": {"_fixture": true, "claim_id": "cl_fixture_corpus_cost",
-                  "claim_type": "COST_EXPOSURE", "binding_status": "BOUND",
-                  "evidence_grade": "A", "evidence_ids": ["ev_fixture_corpus_1"]}
+      "payload": {
+        "_fixture": true,
+        "claim_id": "cl_fixture_corpus_cost",
+        "claim_type": "COST_EXPOSURE",
+        "binding_status": "BOUND",
+        "evidence_grade": "A",
+        "evidence_ids": [
+          "ev_fixture_corpus_1"
+        ]
+      }
     },
     {
       "_fixture": true,
-      "stage": "EMPIRICAL", "kind": "EMPIRICAL_CHECK", "company_id": 9801,
+      "stage": "EMPIRICAL",
+      "kind": "EMPIRICAL_CHECK",
+      "company_id": 9801,
       "created_by": "fixture:empirical",
-      "payload": {"_fixture": true, "status": "NO_DATA"}
+      "payload": {
+        "_fixture": true,
+        "status": "NO_DATA"
+      }
     },
     {
       "_fixture": true,
-      "stage": "ENTITY", "kind": "ENTITY_RESOLUTION", "company_id": 9802,
+      "stage": "ENTITY",
+      "kind": "ENTITY_RESOLUTION",
+      "company_id": 9802,
       "created_by": "fixture:entity_resolver",
-      "payload": {"_fixture": true, "ticker": "FIXB.NS", "isin": "INFIXTURE9802",
-                  "resolution": "RESOLVED", "entity_status": "ACTIVE"}
+      "payload": {
+        "_fixture": true,
+        "ticker": "FIXB.NS",
+        "isin": "INFIXTURE9802",
+        "resolution": "RESOLVED",
+        "entity_status": "ACTIVE"
+      }
     },
     {
       "_fixture": true,
-      "stage": "DISCOVERY", "kind": "DISCOVERY", "company_id": 9802,
+      "stage": "DISCOVERY",
+      "kind": "DISCOVERY",
+      "company_id": 9802,
       "created_by": "fixture:engine",
-      "payload": {"_fixture": true, "discovery_source": "MECHANISM",
-                  "directness": "INDIRECT", "graph_distance": 2}
+      "payload": {
+        "_fixture": true,
+        "discovery_source": "MECHANISM",
+        "directness": "INDIRECT",
+        "graph_distance": 2
+      }
     },
     {
       "_fixture": true,
-      "stage": "SENSITIVITY", "kind": "CHANNEL", "company_id": 9802,
+      "stage": "SENSITIVITY",
+      "kind": "CHANNEL",
+      "company_id": 9802,
       "created_by": "fixture:sensitivity_engine",
-      "payload": {"_fixture": true, "channel_id": "fixture_input_cost",
-                  "mechanism_id": "fixture_mechanism_ripple", "horizon": "NEAR_TERM",
-                  "direction": "NEGATIVE", "materiality": "MEDIUM", "weight": 1.0,
-                  "evidence_ids": []}
+      "payload": {
+        "_fixture": true,
+        "channel_id": "fixture_input_cost",
+        "mechanism_id": "fixture_mechanism_ripple",
+        "horizon": "NEAR_TERM",
+        "direction": "NEGATIVE",
+        "materiality": "MEDIUM",
+        "weight": 1.0,
+        "evidence_ids": []
+      }
     },
     {
       "_fixture": true,
-      "stage": "EVIDENCE", "kind": "EVIDENCE_BINDING", "company_id": 9802,
+      "stage": "EVIDENCE",
+      "kind": "EVIDENCE_BINDING",
+      "company_id": 9802,
       "created_by": "fixture:evidence_classifier",
-      "payload": {"_fixture": true, "claim_id": "cl_fixture_corpus_proxy",
-                  "claim_type": "COST_EXPOSURE", "binding_status": "SECTOR_PROXY",
-                  "evidence_grade": "C", "evidence_ids": []}
+      "payload": {
+        "_fixture": true,
+        "claim_id": "cl_fixture_corpus_proxy",
+        "claim_type": "COST_EXPOSURE",
+        "binding_status": "SECTOR_PROXY",
+        "evidence_grade": "C",
+        "evidence_ids": []
+      }
     },
     {
       "_fixture": true,
-      "stage": "EMPIRICAL", "kind": "EMPIRICAL_CHECK", "company_id": 9802,
+      "stage": "EMPIRICAL",
+      "kind": "EMPIRICAL_CHECK",
+      "company_id": 9802,
       "created_by": "fixture:empirical",
-      "payload": {"_fixture": true, "status": "NO_DATA"}
+      "payload": {
+        "_fixture": true,
+        "status": "NO_DATA"
+      }
+    },
+    {
+      "_fixture": true,
+      "stage": "VERIFIER",
+      "kind": "OBJECTION",
+      "company_id": 9801,
+      "created_by": "fixture:verifier",
+      "payload": {
+        "_fixture": true,
+        "objection_id": "ob_fixture_corpus_1",
+        "type": "ALREADY_PRICED",
+        "severity": "WARN",
+        "sustained": false
+      }
     }
   ]
 }

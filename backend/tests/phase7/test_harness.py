@@ -229,13 +229,18 @@ def test_the_two_scorers_stay_separate():
     """Session 0's V4 scorer and the V5 harness share the CORPUS and nothing
     else. The harness reuses exactly two pure helpers (kappa and the numeral
     tokenizer) and reimplements neither."""
-    import inspect
+    from pathlib import Path
 
-    import eval.harness as harness
+    from tests.phase7.conftest import BACKEND, code_lines
 
-    source = inspect.getsource(harness)
-    assert "score_corpus" not in source
-    assert "alert_companies" not in source
+    # EXECUTABLE lines only: the module docstring explains the relationship
+    # between the two scorers and naturally names the V4 table, and a
+    # docstring must not be what makes a scan fail any more than it may be
+    # what makes one pass.
+    executable = "\n".join(
+        line for _, line in code_lines(Path(BACKEND) / "eval" / "harness.py"))
+    assert "score_corpus" not in executable
+    assert "alert_companies" not in executable
 
 
 def test_the_v5_path_never_writes_a_row(phase7_engine, commodity_output):

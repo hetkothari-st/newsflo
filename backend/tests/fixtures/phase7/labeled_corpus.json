@@ -8,26 +8,68 @@
       "article_ref": "9000001",
       "notes": "fixture: a crude shock the two labelers agreed about",
       "labels": [
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXA", "expected_tier": "PRIMARY",
-         "expected_direction": "bearish", "expected_mechanism": "fixture_mechanism_a",
-         "expected_materiality": "HIGH", "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXA", "expected_tier": "PRIMARY",
-         "expected_direction": "bearish", "expected_mechanism": "fixture_mechanism_a",
-         "expected_materiality": "HIGH", "rationale": "fixture"},
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXB",
-         "expected_tier": "SECONDARY_RIPPLE", "expected_direction": "bearish",
-         "expected_mechanism": "fixture_mechanism_ripple", "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXB",
-         "expected_tier": "SECONDARY_RIPPLE", "expected_direction": "bearish",
-         "expected_mechanism": "fixture_mechanism_ripple", "rationale": "fixture"},
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXC", "expected_tier": "ABSENT",
-         "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXC", "expected_tier": "ABSENT",
-         "rationale": "fixture"}
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXA",
+          "expected_tier": "PRIMARY",
+          "expected_direction": "bearish",
+          "expected_mechanism": "fixture_mechanism_a",
+          "expected_materiality": "HIGH",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXA",
+          "expected_tier": "PRIMARY",
+          "expected_direction": "bearish",
+          "expected_mechanism": "fixture_mechanism_a",
+          "expected_materiality": "HIGH",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXB",
+          "expected_tier": "SECONDARY_RIPPLE",
+          "expected_direction": "bearish",
+          "expected_mechanism": "fixture_mechanism_ripple",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXB",
+          "expected_tier": "SECONDARY_RIPPLE",
+          "expected_direction": "bearish",
+          "expected_mechanism": "fixture_mechanism_ripple",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXC",
+          "expected_tier": "ABSENT",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXC",
+          "expected_tier": "ABSENT",
+          "rationale": "fixture"
+        }
       ],
       "event_labels": [
-        {"labeler": "fixture-labeler-a", "ripple_families": ["fixture_refining", "fixture_paints"]},
-        {"labeler": "fixture-labeler-b", "ripple_families": ["fixture_refining", "fixture_paints"]}
+        {
+          "labeler": "fixture-labeler-a",
+          "ripple_families": [
+            "fixture_refining",
+            "fixture_paints"
+          ]
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "ripple_families": [
+            "fixture_refining",
+            "fixture_paints"
+          ]
+        }
       ]
     },
     {
@@ -36,19 +78,38 @@
       "article_ref": "9000002",
       "notes": "fixture: the two labelers disagreed and the adjudicator recorded DISPUTED",
       "labels": [
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXD", "expected_tier": "PRIMARY",
-         "expected_direction": "bullish", "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXD",
-         "expected_tier": "SECONDARY_RIPPLE", "expected_direction": "bullish",
-         "rationale": "fixture"}
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXD",
+          "expected_tier": "PRIMARY",
+          "expected_direction": "bullish",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXD",
+          "expected_tier": "SECONDARY_RIPPLE",
+          "expected_direction": "bullish",
+          "rationale": "fixture"
+        }
       ],
       "adjudications": [
-        {"company_ref": "FIXD", "resolution": "DISPUTED", "resolved_by": "fixture-adjudicator",
-         "resolved_note": "fixture: honest ambiguity, excluded from precision denominators"}
+        {
+          "company_ref": "FIXD",
+          "resolution": "DISPUTED",
+          "resolved_by": "fixture-adjudicator",
+          "resolved_note": "fixture: honest ambiguity, excluded from precision denominators"
+        }
       ],
       "event_labels": [
-        {"labeler": "fixture-labeler-a", "ripple_families": []},
-        {"labeler": "fixture-labeler-b", "ripple_families": []}
+        {
+          "labeler": "fixture-labeler-a",
+          "ripple_families": []
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "ripple_families": []
+        }
       ]
     },
     {
@@ -57,14 +118,30 @@
       "article_ref": "9000003",
       "notes": "fixture: both labelers named companies and marked them ABSENT",
       "labels": [
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXA", "expected_tier": "ABSENT",
-         "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXA", "expected_tier": "ABSENT",
-         "rationale": "fixture"},
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXB", "expected_tier": "ABSENT",
-         "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXB", "expected_tier": "ABSENT",
-         "rationale": "fixture"}
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXA",
+          "expected_tier": "ABSENT",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXA",
+          "expected_tier": "ABSENT",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXB",
+          "expected_tier": "ABSENT",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXB",
+          "expected_tier": "ABSENT",
+          "rationale": "fixture"
+        }
       ]
     },
     {
@@ -73,10 +150,16 @@
       "article_ref": "9000004",
       "notes": "fixture: a correct null label names NO company -- the event-level row is what records that the labeler did the work",
       "event_labels": [
-        {"labeler": "fixture-labeler-a", "ripple_families": [],
-         "rationale": "fixture: nothing material here"},
-        {"labeler": "fixture-labeler-b", "ripple_families": [],
-         "rationale": "fixture: nothing material here"}
+        {
+          "labeler": "fixture-labeler-a",
+          "ripple_families": [],
+          "rationale": "fixture: nothing material here"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "ripple_families": [],
+          "rationale": "fixture: nothing material here"
+        }
       ]
     },
     {
@@ -85,8 +168,13 @@
       "article_ref": "9000005",
       "notes": "fixture: ONE labeler only. Must be reported as under-labeled and excluded -- the single-labeler prohibition (Task 7.1 DO NOT #2).",
       "labels": [
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXE", "expected_tier": "PRIMARY",
-         "expected_direction": "bullish", "rationale": "fixture"}
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXE",
+          "expected_tier": "PRIMARY",
+          "expected_direction": "bullish",
+          "rationale": "fixture"
+        }
       ]
     },
     {
@@ -95,29 +183,81 @@
       "article_ref": "9000006",
       "notes": "fixture: both labelers agreed on a company action",
       "labels": [
-        {"labeler": "fixture-labeler-a", "company_ref": "FIXE", "expected_tier": "PRIMARY",
-         "expected_direction": "bullish", "expected_mechanism": "fixture_mechanism_order",
-         "expected_materiality": "MEDIUM", "rationale": "fixture"},
-        {"labeler": "fixture-labeler-b", "company_ref": "FIXE", "expected_tier": "PRIMARY",
-         "expected_direction": "bullish", "expected_mechanism": "fixture_mechanism_order",
-         "expected_materiality": "MEDIUM", "rationale": "fixture"}
+        {
+          "labeler": "fixture-labeler-a",
+          "company_ref": "FIXE",
+          "expected_tier": "PRIMARY",
+          "expected_direction": "bullish",
+          "expected_mechanism": "fixture_mechanism_order",
+          "expected_materiality": "MEDIUM",
+          "rationale": "fixture"
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "company_ref": "FIXE",
+          "expected_tier": "PRIMARY",
+          "expected_direction": "bullish",
+          "expected_mechanism": "fixture_mechanism_order",
+          "expected_materiality": "MEDIUM",
+          "rationale": "fixture"
+        }
       ],
       "event_labels": [
-        {"labeler": "fixture-labeler-a", "ripple_families": ["fixture_capital_goods"]},
-        {"labeler": "fixture-labeler-b", "ripple_families": ["fixture_capital_goods"]}
+        {
+          "labeler": "fixture-labeler-a",
+          "ripple_families": [
+            "fixture_capital_goods"
+          ]
+        },
+        {
+          "labeler": "fixture-labeler-b",
+          "ripple_families": [
+            "fixture_capital_goods"
+          ]
+        }
       ]
     }
   ],
   "companies": [
-    {"id": 9801, "name": "Fixture Alpha Ltd", "ticker": "FIXA.NS", "sector": "fixture_energy",
-     "sub_sector": "fixture_refining"},
-    {"id": 9802, "name": "Fixture Beta Ltd", "ticker": "FIXB.NS", "sector": "fixture_materials",
-     "sub_sector": "fixture_paints"},
-    {"id": 9803, "name": "Fixture Gamma Ltd", "ticker": "FIXC.NS", "sector": "fixture_consumer",
-     "sub_sector": "fixture_staples"},
-    {"id": 9804, "name": "Fixture Delta Ltd", "ticker": "FIXD.NS", "sector": "fixture_financials",
-     "sub_sector": "fixture_banks"},
-    {"id": 9805, "name": "Fixture Epsilon Ltd", "ticker": "FIXE.NS",
-     "sector": "fixture_industrials", "sub_sector": "fixture_capital_goods"}
+    {
+      "id": 9801,
+      "name": "Fixture Alpha Ltd",
+      "ticker": "FIXA.NS",
+      "sector": "fixture_energy",
+      "sub_sector": "fixture_refining",
+      "_fixture": true
+    },
+    {
+      "id": 9802,
+      "name": "Fixture Beta Ltd",
+      "ticker": "FIXB.NS",
+      "sector": "fixture_materials",
+      "sub_sector": "fixture_paints",
+      "_fixture": true
+    },
+    {
+      "id": 9803,
+      "name": "Fixture Gamma Ltd",
+      "ticker": "FIXC.NS",
+      "sector": "fixture_consumer",
+      "sub_sector": "fixture_staples",
+      "_fixture": true
+    },
+    {
+      "id": 9804,
+      "name": "Fixture Delta Ltd",
+      "ticker": "FIXD.NS",
+      "sector": "fixture_financials",
+      "sub_sector": "fixture_banks",
+      "_fixture": true
+    },
+    {
+      "id": 9805,
+      "name": "Fixture Epsilon Ltd",
+      "ticker": "FIXE.NS",
+      "sector": "fixture_industrials",
+      "sub_sector": "fixture_capital_goods",
+      "_fixture": true
+    }
   ]
 }

@@ -208,7 +208,10 @@ def test_a_missing_metric_is_refused_not_passed(passing):
     metrics["primary_precision"] = None
     report = _report(metrics)
     refused = {o.name for o in report.refusals}
-    assert refused == {"primary_precision"}
+    assert "primary_precision" in refused
+    # the no-regression rule watches primary_precision too, so it becomes
+    # unevaluable in the same breath -- and says so rather than passing
+    assert refused == {"primary_precision", "no_regression"}
     assert report.failures == ()
     assert report.exit_code != 0, "a gate nobody could evaluate is not a green gate"
 
@@ -347,12 +350,27 @@ def test_the_cli_exits_three_on_a_hard_zero(tmp_path, passing, sets):
     assert main(["--metrics", str(path), "--no-baseline"]) == 3
 
 
-def test_the_cli_exits_zero_when_everything_passes(tmp_path, passing):
+def test_the_cli_cannot_exit_zero_while_the_baseline_is_absent(tmp_path, passing):
+    """The deployed reality, stated as a test: a perfect metric set still
+    blocks, because the no-regression rule has nothing to compare against and
+    refuses rather than waving it through."""
     from eval.shipping_gates import main
 
     path = tmp_path / "metrics.json"
     path.write_text(json.dumps({"metrics": passing}), encoding="utf-8")
-    assert main(["--metrics", str(path), "--no-baseline"]) == 0
+    assert main(["--metrics", str(path), "--no-baseline"]) == 1
+
+
+def test_the_cli_exits_zero_when_everything_passes(tmp_path, passing, sets):
+    from eval.shipping_gates import main
+
+    baseline = {k: v for k, v in sets["baselines"]["worse_than_us"].items()
+                if not k.startswith("_")}
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({"metrics": passing}), encoding="utf-8")
+    assert main(["--metrics", str(path), "--baseline", str(baseline_path)]) == 0
 
 
 def test_the_cli_refuses_an_absent_metrics_file(tmp_path):

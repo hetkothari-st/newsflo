@@ -169,13 +169,15 @@ def seed_companies(engine, companies) -> None:
     """Minimal `companies` rows so the harness can resolve a label's ticker
     and report per SECTOR. Fixture tickers only (`FIX...`)."""
     with engine.begin() as conn:
-        for company in companies:
+        for entry in companies:
+            company = {k: v for k, v in entry.items() if not k.startswith("_")}
             assert str(company["ticker"]).startswith("FIX"), (
                 "phase 7 fixtures use FIX* tickers only -- a real ticker in a "
                 "fixture is the fabrication the master context forbids")
             conn.execute(sa.text(
-                "INSERT INTO companies (id, name, ticker, sector, sub_sector) "
-                "VALUES (:id, :name, :ticker, :sector, :sub_sector)"), company)
+                "INSERT INTO companies (id, name, ticker, sector, sub_sector, "
+                "index_tier) VALUES (:id, :name, :ticker, :sector, "
+                ":sub_sector, 'fixture_tier')"), company)
 
 
 # ---------------------------------------------------------------------------

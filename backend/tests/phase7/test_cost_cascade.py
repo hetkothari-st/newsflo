@@ -144,11 +144,11 @@ def test_a_publishable_ripple_is_small_model_work_not_frontier(gate_config):
 # ---------------------------------------------------------------------------
 
 def test_the_falsifier_prompt_puts_the_static_prefix_before_the_dynamic_suffix():
-    from app.analysis.falsifier.config import load_falsifier_policy
+    from app.analysis.falsifier.config import load_falsifier_config
     from app.analysis.falsifier.prompts import build_prompt_parts
     from eval.prompt_audit import check_prompt_order
 
-    policy = load_falsifier_policy()
+    policy = load_falsifier_config()
     check_prompt_order(
         lambda record: build_prompt_parts(record, policy.checklist,
                                           tuple(policy.severities)),
@@ -170,10 +170,10 @@ def test_the_entailment_judge_prompt_puts_the_static_prefix_first():
 
 
 def test_the_static_prefix_carries_the_rules_and_the_dynamic_suffix_the_event():
-    from app.analysis.falsifier.config import load_falsifier_policy
+    from app.analysis.falsifier.config import load_falsifier_config
     from app.analysis.falsifier.prompts import build_prompt_parts
 
-    policy = load_falsifier_policy()
+    policy = load_falsifier_config()
     static, dynamic = build_prompt_parts(
         json.dumps({"company": "FIXA"}), policy.checklist,
         tuple(policy.severities))
@@ -206,10 +206,10 @@ def test_the_order_check_catches_a_prefix_that_is_not_actually_static():
 def test_splitting_the_falsifier_prompt_did_not_change_a_byte_of_it():
     """The split is a refactor for cacheability, not a prompt change: a
     changed prompt is a changed model behaviour nobody measured."""
-    from app.analysis.falsifier.config import load_falsifier_policy
+    from app.analysis.falsifier.config import load_falsifier_config
     from app.analysis.falsifier.prompts import build_prompt, build_prompt_parts
 
-    policy = load_falsifier_policy()
+    policy = load_falsifier_config()
     record = json.dumps({"company": "FIXA"})
     static, dynamic = build_prompt_parts(record, policy.checklist,
                                          tuple(policy.severities))

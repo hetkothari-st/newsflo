@@ -115,27 +115,37 @@ def test_coverage_gap_depth_counts_open_gaps(phase7_engine):
         assert coverage_gap_depth(conn).value == 1
 
 
-def test_exposure_staleness_p90_is_hand_checked(phase7_engine):
-    """Ten fixture rows aged 1..10 days. The p90 of that set is 10 by the
-    nearest-rank definition the function documents."""
+def test_exposure_staleness_p90_is_hand_checked(phase7_engine, phase7_session):
+    """Ten fixture rows aged 1..10 days.
+
+    The percentile is Phase 1's (`app.ledger.coverage._percentile`, imported
+    rather than restated): index = round(0.90 * (n - 1)) = round(8.1) = 8,
+    the ninth smallest, which is 9 days. Reusing that definition is the
+    point -- two definitions of p90 in one repo would eventually disagree,
+    and the disagreement would surface as a phantom alert.
+    """
+    from app.ledger.review import review_session
     from eval.monitoring import exposure_staleness_p90
 
-    with phase7_engine.begin() as conn:
+    # Phase 1's guard: the ledger is writable only inside a review session,
+    # so even a fixture row goes in the way a reviewer's approval does.
+    with review_session(phase7_session):
         for age in range(1, 11):
-            conn.execute(sa.text(
+            phase7_session.execute(sa.text(
                 "INSERT INTO company_exposure (exposure_id, company_id, "
                 "exposure_kind, exposure_tag, share_of_base, base_kind, "
                 "base_value_inr, measurement, source_type, source_url, "
                 "as_of_date, freshness_days, confidence, created_by, "
                 "reviewed_by, created_at) VALUES "
-                "(:id, 9801, 'INPUT', 'fixture_tag', 0.1, 'COGS', 1.0, "
+                "(:id, 9801, 'INPUT', 'input:crude_direct', 0.1, 'COGS', 1.0, "
                 "'DISCLOSED', 'ANNUAL_REPORT', 'https://fixture.invalid', "
                 ":as_of, 365, 0.9, 'fixture', 'fixture-reviewer', :now)"),
                 {"id": f"e{age}", "as_of": FIXTURE_TODAY - timedelta(days=age),
                  "now": FIXTURE_NOW})
+    phase7_session.commit()
     with phase7_engine.connect() as conn:
         signal = exposure_staleness_p90(conn, as_of=FIXTURE_TODAY)
-    assert signal.value == 10
+    assert signal.value == 9
     assert signal.unit == "days"
 
 
