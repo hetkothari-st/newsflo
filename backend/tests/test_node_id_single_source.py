@@ -60,7 +60,19 @@ EXEMPT = {
     BACKEND / "app" / "analysis" / "impact_graph" / "knowledge.py",
 }
 
-_ALIAS_MAP = re.compile(r"\{\s*normalize_node_id\s*\(|normalize_node_id\s*\([^)]*\)\s*:")
+# A dict literal keyed by the transform. The first alternative catches the
+# multi-line form, where the `:` sits on a later line than the `{`.
+#
+# THE NEGATIVE LOOKAHEAD IS LOAD-BEARING. Without it this also matches an
+# f-string PLACEHOLDER -- `f"{k} -> {normalize_node_id(k)}"` -- which is a
+# print, not an alias map. Measured 2026-08-17: it fired on
+# `scripts/probes/mechanism_family_closure.py:118`, a probe that prints the
+# transform's output, and `scripts` is in SCAN_ROOTS by design so the false
+# positive was reachable by any new script. A dict key is `...):` ; a
+# placeholder is `...)}` -- that difference is the whole discriminator.
+_ALIAS_MAP = re.compile(
+    r"\{\s*normalize_node_id\s*\((?![^)]*\)\s*\})"
+    r"|normalize_node_id\s*\([^)]*\)\s*:")
 _SNAKE = re.compile(r"\.lower\(\)\s*\.replace\(\s*[\"'] [\"']\s*,\s*[\"']_[\"']\s*\)")
 #: an f-string carrying TWO OR MORE placeholders -- a haystack, not an id
 _HAYSTACK = re.compile(r"f[\"'][^\"']*\{[^\"']*\{")
@@ -176,3 +188,36 @@ def test_the_guard_does_not_fire_on_the_legitimate_shapes(detector, source,
     path = tmp_path / "legitimate.py"
     path.write_text(source, encoding="utf-8")
     assert not detector(path), f"{detector.__name__} false positive"
+
+
+def test_the_alias_map_detector_is_armed_and_does_not_fire_on_f_strings():
+    """Guards the guard (SESSION_PROTOCOL 7.3).
+
+    `_ALIAS_MAP` fired on `scripts/probes/mechanism_family_closure.py:118` --
+    `print(f"  {k} -> {normalize_node_id(k)}")` -- which prints the transform
+    rather than building a map over it. `scripts` is in SCAN_ROOTS by design,
+    so any new script that merely PRINTS a node id would have failed this
+    suite, and the obvious "fix" is to weaken the detector until it stops
+    complaining.
+
+    So both directions are pinned: the four shapes that ARE alias maps must
+    still match, and the shapes that merely mention the transform must not.
+    A detector that stops firing is worth nothing; one that fires on a print
+    trains people to disable it.
+    """
+    must_match = (
+        "ALIASES = {normalize_node_id(k): v for k in keys}",
+        "    normalize_node_id(key): label,",
+        "ALIASES = {normalize_node_id(",          # multi-line dict opener
+        "m = { normalize_node_id(k) : v }",
+    )
+    must_not_match = (
+        'print(f"       {k} -> {normalize_node_id(k)}")',
+        'f"{normalize_node_id(x)}"',
+        "if normalize_node_id(k) not in labels:",
+        "missing = sorted(k for k in M if normalize_node_id(k) not in labels)",
+    )
+    for line in must_match:
+        assert _ALIAS_MAP.search(line), f"detector went blind to: {line!r}"
+    for line in must_not_match:
+        assert not _ALIAS_MAP.search(line), f"detector fires on a non-map: {line!r}"
