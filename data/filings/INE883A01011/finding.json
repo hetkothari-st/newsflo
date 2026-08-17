@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE883A01011",
+    "family": "tyres",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "Note 19 (p124 standalone, p199 consolidated) is opening stock / purchases / closing stock only. The SEBI LODR commodity table (p71) quantifies exactly one commodity - Natural Rubber, ₹4710.25 crores, 249350 MT - which is the NON-crude input; the crude-linked basket is not quantified anywhere. A crude share cannot be derived by subtraction because the residual also contains steel cord, bead wire and zinc oxide."
+  }
+]

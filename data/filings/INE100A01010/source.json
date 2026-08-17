@@ -1,0 +1,13 @@
+{
+  "isin": "INE100A01010",
+  "ticker": "ATUL.NS",
+  "name": "Atul Limited.",
+  "family": "specialty_chemicals",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29866_ATUL_2025_2026_U_14177964_17072026184203.pdf",
+  "retrieved_at": "2026-08-17T06:28:00+00:00",
+  "sha256": "69316674b7230a9acefbd15e99465f3f2562fa791dfcec3436d5fdbb6f37366e",
+  "bytes": 14177964
+}

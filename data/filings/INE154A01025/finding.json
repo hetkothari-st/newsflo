@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE154A01025",
+    "family": "fmcg_distribution",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "The P&L (p159 standalone, p255 consolidated) carries 'Cost of materials consumed 25939.49' as one line and the note adds no commodity split. ITC's crude exposure would sit in packaging and freight, neither of which is separately disclosed against the materials base. Checked p159, p255."
+  }
+]

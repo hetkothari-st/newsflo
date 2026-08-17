@@ -1,0 +1,13 @@
+{
+  "isin": "INE445C01015",
+  "ticker": "XPROINDIA.NS",
+  "name": "Xpro India Ltd.",
+  "family": "packaging_films",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29432_XPROINDIA_2025_2026_A_3925267_23062026143521.pdf",
+  "retrieved_at": "2026-08-17T06:30:14+00:00",
+  "sha256": "4d58a71c77e9d1a32a91609b9fa91a4001f44fbc9b10d408d26c139052f75acc",
+  "bytes": 3925267
+}

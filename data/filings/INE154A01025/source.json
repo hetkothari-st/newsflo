@@ -1,0 +1,13 @@
+{
+  "isin": "INE154A01025",
+  "ticker": "ITC.NS",
+  "name": "ITC Ltd",
+  "family": "fmcg_distribution",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29459_ITC_2025_2026_A_14678177_26062026165422.pdf",
+  "retrieved_at": "2026-08-17T06:32:16+00:00",
+  "sha256": "f807cf9c18f670f59fca3f275de3e71277090df0223fe26d5d2cccc25d8f31e0",
+  "bytes": 14678177
+}

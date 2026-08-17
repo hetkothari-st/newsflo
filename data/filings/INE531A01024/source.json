@@ -1,0 +1,13 @@
+{
+  "isin": "INE531A01024",
+  "ticker": "KANSAINER.NS",
+  "name": "Kansai Nerolac Paints",
+  "family": "paints",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29384_KANSAINER_2025_2026_A_16838966_11062026200548.pdf",
+  "retrieved_at": "2026-08-17T06:26:52+00:00",
+  "sha256": "18db45cba17b2342528ef6d610ce5f4fd789e27b87273f5bb6920a42d3e8348a",
+  "bytes": 16838966
+}

@@ -73,7 +73,7 @@ fail-closed for `PRIMARY`, permissive for `SECONDARY_RIPPLE`.
 | Input | Gate rule | Today | Supplied by |
 |---|---|---|---|
 | `empirical_status` | PRIMARY requires `AGREE` or `NO_DATA` | the V4 adapter emits the literal truth, `NO_DATA` — there is no empirical calibration table | Phase 5 |
-| `adv_20d_inr` (liquidity) | `min_adv_inr` | `min_adv_inr: null`, so the rule is not evaluated at all | Phase 1/2 (liquidity feed) |
+| `adv_20d_inr` (liquidity) | `min_adv_inr` | `min_adv_inr: null`, so the rule is not evaluated at all — **see §12, this is a PRIMARY cutover blocker, not a background gap** | repo owner (liquidity feed) |
 | `shock_magnitude_confidence` | `< 0.5` ⇒ macro-only ⇒ company REJECTED | never supplied; unknown does not block | Phase 2 (sensitivity engine) |
 | `exposure_stale` | any STALE exposure ⇒ REJECTED | hard-coded `False` **because no exposure ledger exists** — nothing can be stale | Phase 1 |
 
@@ -111,12 +111,48 @@ not start on an empty Tier 1 ledger.**
 | | |
 |---|---|
 | **Tables** | `company_exposure`, `company_segment`, `company_financials`, `pass_through_curve`, `company_modifier` (migration 0012) |
-| **Rows today** | 0 in all five. Shipped empty deliberately. |
+| **Rows today** | **`company_exposure`: 11** (imported 2026-08-17, see below). `company_segment`, `company_financials`, `pass_through_curve`, `company_modifier`: **0**. |
 | **What is needed** | Spec §4.3 bootstrapping order. **Tier 1 first: Nifty 200 + all F&O names.** Per company: Ind AS 108 segment revenue/EBITDA, raw-material-consumed breakup, forex earnings & expenditure note, borrowings note (fixed vs floating), power & fuel line, employee cost. |
 | **Where it comes from** | The companies' own filings — annual reports and quarterly results (PDF/XBRL) from BSE/NSE. Not derivable from anything already in this repo, and **not generatable by a model**: a `share_of_base` we produced from our own knowledge is precisely the fabrication the master context forbids. |
 | **Who must supply it** | **The repo owner (user)**, as the acquirer of the documents and the reviewer of every proposal. The pipeline can propose; only a human can approve. Rough shape: Tier 1 is ~250 companies × ~6 disclosures. |
 | **Tooling ready** | `app/ingest/filings/` (acquire → pypdf/XBRL → LLM propose → verbatim gate → `exposure_proposal`), `backend/tools/ledger_ui.py` (review console, port 8601 — APPROVE / EDIT+APPROVE / REJECT, bulk approve for deterministic extractors only), `backend/scripts/flag_stale_exposures.py` (nightly staleness), `/ledger/coverage` and `/ledger/metrics` for progress. |
 | **Blocked until closed** | Phase 2 (sensitivity/materiality) and Phase 3 (tag index) are meaningless on an empty ledger. Today the system correctly abstains: with no exposure rows there are no channels, so every company reduces to `NO_MATERIAL_IMPACT` and the gate rejects (`test_staleness.py::test_the_pipeline_with_an_empty_ledger_abstains_and_publishes_nothing`). |
+
+### The first eleven rows — imported 2026-08-17
+
+The crude ripple bootstrap (§14) produced eleven rows and they are now IN
+`company_exposure`, approved through `app.ledger.review.approve_proposal`
+with `reviewed_by = 'ST269 (repo owner)'`. `test_every_ledger_table_ships_
+empty` still holds where it is asserted — on a freshly migrated database —
+because no migration writes these; they arrived through the review path.
+
+| | |
+|---|---|
+| Rows | 11, across 9 companies, all `exposure_kind = INPUT_COST` |
+| Tags | `input:base_oil` 1 · `input:bought_in_freight` 4 · `input:crude_derivative_petchem` 2 · `input:crude_derivative_rubber` 1 · `input:freight_diesel` 2 · `input:intermediated_air_capacity` 1 |
+| `measurement` | **ESTIMATED on every row.** Not one share is stated in a filing; each is a ratio computed from two disclosed figures. |
+| Evidence grade | capped at **D** via `materiality.yaml → exposure_measurement_grade_cap`. PRIMARY admits `[A, B, C]`, so **none of these rows can lead a publication**; SECONDARY_RIPPLE admits D. |
+| Already STALE | **3 of 11** — Blue Dart, CONCOR and Delhivery cite FY2025 reports (504 days old against the 400-day INPUT_COST policy) because no FY2026 report was filed at acquisition time. Stale exposures are excluded from PRIMARY by the gate regardless. |
+
+**What these rows do NOT yet do: anything.** Verified by running
+`analyse_company` against CEAT with a crude shock on the live database — the
+channel is `UNCOMPUTABLE / MISSING_ROW(pass_through)` and the engine abstains,
+because `pass_through_curve` is still empty. An exposure without a
+pass-through curve cannot be sized. **The binding constraint has moved from
+"no exposure rows" to "no pass-through curves", and the curves are the harder
+half**: a share is arithmetic over two printed figures, a pass-through is a
+behavioural parameter that has to come from an earnings call, a regulator, or
+a fitted estimate nobody has fitted.
+
+**Markers are documentation, not enforcement.** Three rows carry a marker in
+the proposal's `raw_payload` (`FLOOR` on both CEAT rows and on Blue Dart,
+`UPPER_BOUND` on Mahindra Logistics), reachable from
+`company_exposure.proposal_id`. **Nothing in Phase 2 reads them.**
+`company_exposure` has no free-text column and none was added: a SQLite
+`batch_alter_table` on a triggered table silently drops its triggers (0008's
+warning). So the honest statement is that the enforced protection on these
+rows is grade D and nothing else, and a reader who wants to know that CEAT's
+0.2278 is a floor must join to the proposal.
 
 ### Sub-gaps recorded with it
 
@@ -562,6 +598,31 @@ names the measurement that does not yet exist.
   `tests/phase5/test_empirical_check.py`. Nothing structural.
 * **Owner: repo owner** (spec amendment), after Phase 7's corpus.
 
+**PROPOSED SPEC AMENDMENT 2 — an econometric exposure route
+(`measurement = 'ECONOMETRIC'`).**
+
+Raised 2026-08-17 out of the crude bootstrap's coverage failure (§14). Full
+§7.2 form, both sides of the argument, and the identification problems:
+`docs/v5/amendments/AMENDMENT-002-econometric-exposure.md`.
+
+* *Summary:* estimate exposure by regressing a company's quarterly
+  gross-margin ratio on the relevant commodity price; the coefficient is the
+  net elasticity after pass-through and hedging, the standard error is the
+  band.
+* *Recommendation: REJECT AS PROPOSED.* `ROOT CAUSE AXIS = data`, and §7.2
+  rejects on that alone. Three substantive objections behind the procedural
+  one: it needs a LARGER dataset than the one that just failed
+  (`company_financials` has 0 rows); putting a net elasticity in
+  `share_of_base` silently double-discounts pass-through inside the §5.1
+  formula; and fitting exposures from history collapses Phase 5's
+  independence as a cross-check.
+* *Redirect, which is the part worth acting on:* the same machinery aimed at
+  `pass_through_curve` rather than `company_exposure`. That table's
+  `basis = ESTIMATED` and its `curve_needs_review` CHECK already exist, so it
+  needs no amendment — and pass-through, not exposure share, is now the
+  binding constraint (see §5, "The first eleven rows").
+* **Owner: repo owner** (disposition). **Nothing is implemented.**
+
 ---
 
 ## 10. Phase 6 — the adversary has never argued with a real record, and nobody has ever labelled one — OPEN
@@ -871,6 +932,190 @@ reasonably rule the other way. **Owner: repo owner** (a ruling, not data).
 
 ---
 
+## 12. The PRIMARY liquidity gate is unenforced — OPEN, **blocker on PRIMARY cutover**
+
+`backend/config/gates.yaml` sets `primary.min_adv_inr: null` and
+`primary.unknown_liquidity_passes: true`. Together those mean the spec's
+PRIMARY liquidity rule **is not evaluated for any company, ever**. Not
+"evaluated leniently" — not walked at all. Every company in the universe
+clears the liquidity bar today, including a ₹28cr shell that trades a few
+thousand rupees a day.
+
+This was recorded in §3 as one row in a table of four unwired gate inputs,
+alongside three whose owner is "a later V5 phase". That framing is wrong for
+this one and it is promoted here for two reasons:
+
+1. **It is acquisition work, not phase work.** Phases 2 and 5 do not produce
+   an ADV series as a by-product of anything. Somebody has to obtain a daily
+   traded-value feed.
+2. **It is the only one of the four whose absence lets a *wrong company* be
+   published rather than a *weakly-evidenced claim*.** A PRIMARY call on an
+   illiquid microcap is unactionable regardless of how good the exposure
+   evidence behind it is.
+
+| | |
+|---|---|
+| **Config** | `backend/config/gates.yaml` → `primary.min_adv_inr` (null), `primary.unknown_liquidity_passes` (true) |
+| **Interface** | the gate already accepts `adv_20d_inr`; nothing supplies it |
+| **What is needed** | 20-day average traded value in INR per listed company, refreshed daily, for the whole universe — plus a threshold value for `min_adv_inr`, which is a policy decision, not a measurement |
+| **Where it comes from** | exchange bhavcopy (NSE + BSE) aggregated to a rolling 20-day mean of `close × volume`, or a licensed EOD feed. `market_moves.avg_traded_value` is NOT this: 48 alert-scoped rows, no universe coverage, no schedule |
+| **Who must supply it** | **repo owner** — the feed and the threshold |
+| **Blocks** | PRIMARY cutover. Both keys must be set (a real `min_adv_inr`, `unknown_liquidity_passes: false`) in the same change that serves V5 — see item 5 of the cutover checklist |
+
+**Consequence for work done before it closes:** any company-selection step
+that was supposed to filter on ADV cannot, and must say so. The Phase 1
+ripple-exposure bootstrap substituted a **disclosed market-cap floor of
+₹1,500cr** as an owner-approved proxy. A market-cap floor is not a liquidity
+filter — a large-cap can be tightly held and thinly traded, and the proxy has
+no bearing on the gate at runtime. It is a sampling convenience for one
+manual exercise and must not be read as this gap being partially closed.
+
+---
+
+## 13. City gas distribution has no mechanism and no policy modifier — OPEN
+
+CGD (IGL, MGL, Adani Total Gas, Gujarat Gas, IRM Energy) was **deliberately
+excluded** from the Phase 1 crude ripple-exposure bootstrap rather than
+sourced badly. It is not an INPUT_COST ripple family and modelling it as one
+would produce a confidently wrong sign.
+
+**Why the input-cost framing fails for CGD:**
+
+* **The sign is plausibly positive, not negative.** A crude rise raises petrol
+  and diesel pump prices, which widens CNG's discount to the liquid fuels it
+  substitutes for and improves conversion economics. The dominant first-order
+  channel is *volume demand*, not input cost.
+* **The input side is a regime, not a price.** Gas procurement mixes
+  administered domestic allocation (APM, priority-allocated to CNG and
+  domestic PNG at an administered ceiling) with Brent-indexed and Henry
+  Hub-indexed imported LNG. The crude sensitivity of the input therefore
+  depends on the allocation mix at that moment and on where the APM ceiling
+  sits — both regime variables, neither a company exposure.
+* **Both effects are regime-dependent and can reverse.** An allocation cut
+  moves a company from mostly-administered to mostly-indexed input in one
+  announcement, without any change in the company.
+
+Recording a `share_of_base` against `input:*` for these companies would encode
+a mechanism the business does not have. Recording a sector-average one would
+be fabrication on top of that.
+
+**What must be authored instead — two separate artefacts, neither of which
+exists:**
+
+| Artefact | Where | What it needs | Owner |
+|---|---|---|---|
+| A `VOLUME_DEMAND` mechanism edge, crude → CGD volumes, with the substitution channel named | `mechanism_edge` (§7) and a leaf in `config/exposure_tags.yaml` — the current 25-tag vocabulary has no volume/substitution leaf, so this is a **vocabulary change first** | domain judgement, then the edge; **repo owner** |
+| A Phase 4 policy modifier for the APM allocation and ceiling regime | `backend/config/policy_modifiers.yaml` — `IN_APM_GAS_CEILING` exists as a `HARD_CAP` scaffold on `revenue:gas_realization_apm`, which is the **producer** side (ONGC/OIL realisation). The CGD **buyer** side — allocation share and the administered input price — has no entry at all | **repo owner** |
+
+Until both exist, a crude shock produces nothing for CGD companies, which is
+the correct output. **Do not proxy this family from the tyres/paints
+input-cost template because the machinery happens to accept a number.**
+
+---
+
+## 14. Annual reports do not carry the raw-material breakup the ledger needs — MEASURED 2026-08-17
+
+Gap §5 says the exposure ledger's `share_of_base` values come from "the
+companies' own filings — annual reports and quarterly results (PDF/XBRL) from
+BSE/NSE", listing "raw-material-consumed breakup" as one of the six
+per-company disclosures to extract. **That assumption has now been tested and
+it is mostly false.**
+
+A crude-shock bootstrap run over **52 listed companies in 6 ripple families**
+acquired the latest annual report for every one of them from NSE or BSE — 52
+of 52 PDFs, no acquisition failures — and found a commodity-level breakup of
+cost of materials consumed in **two** of them.
+
+| | |
+|---|---|
+| Companies attempted | 52 (paints 6, tyres 7, specialty chemicals incl. adhesives 10, packaging films 8, logistics 7, FMCG 8) |
+| Annual reports acquired | 52 / 52, exchange-hosted primary PDFs |
+| Companies with a usable input-cost share | **10** (12 rows) |
+| Of which from a materials-consumed breakup | **2** — CEAT and Savita Oil |
+| Of which from an expense-line ratio (logistics) | 7 |
+| Of which from the SEBI LODR commodity table | 1 (HUL, with a basis mismatch) |
+| Unsourced | 42, of which 26 `AGGREGATED_SINGLE_LINE` |
+
+**Why, structurally.** Schedule III to the Companies Act 2013 requires "Cost
+of materials consumed" as one line. The Schedule VI-era requirement to
+disclose consumption by class of raw material, and the imported/indigenous
+split, are gone. What remains in a modern Indian annual report is a
+roll-forward — opening stock, purchases, closing stock — sometimes split
+"raw" versus "packing". A company that itemises rubber, carbon black and
+fabric is doing so **voluntarily**, and almost none do.
+
+**The consequence for the ledger:** the acquisition-and-extraction pipeline
+built in Phase 1 works — it acquired, parsed, proposed and verbatim-gated
+without a single fabricated row — and the *documents it is pointed at do not
+contain the data*. Scaling the same approach to Tier 1 (Nifty 200 + F&O,
+~250 companies) should be expected to yield a **single-digit percentage** of
+companies with a filing-sourced INPUT_COST share, not a majority.
+
+**Sources that did work, and should be tried first next time:**
+
+1. **Named component lines inside the materials note**, where a company
+   volunteers them (CEAT's "Details of raw materials consumed"; Savita Oil's
+   "Base oils / Process chemicals, solvents, Waxes"). Rare, and the highest
+   quality when present — the material type *is* the line item.
+2. **Schedule III expense lines** for service businesses — fuel, freight,
+   line-haul. This is why logistics returned 7 of 7 while every
+   manufacturing family returned nearly nothing: the ratio is against
+   TOTAL_COST, not COGS, and those lines are mandatory.
+3. **The SEBI LODR commodity table** in the Corporate Governance Report
+   (materiality-of-commodities disclosure). Present in 6 of 52 filings and
+   quantified in 3. Two of those three quantified only a *non-crude*
+   commodity (MRF: natural rubber; Godrej CP: soap base / palm). Note the
+   basis: it reports commodity **exposure** (purchase orders / hedged
+   position), not consumption, so it does not divide cleanly into a
+   materials-consumed denominator.
+
+**Sources that did NOT work, recorded so nobody re-runs them:** the BRSR
+materials tables (tonnage and recycled-content percentages, never value by
+commodity); MD&A and Board's Report commentary (names the crude basket
+qualitatively — Apollo Tyres is the clearest example — and attaches no
+figure); "value of imported and indigenous raw materials consumed" (found in
+zero of 52 filings).
+
+**What this means for closing §5.** A filing-only route will not populate the
+ledger. Either the scope changes (accept `TOTAL_COST`-based expense-line
+exposures for service sectors, as this run's logistics rows do), or the
+source changes (earnings-call transcripts and analyst-day decks, where
+managements do give raw-material basket splits — a different acquisition
+problem with weaker provenance), or the ledger accepts far thinner coverage
+than Tier 1 implies. **Owner: repo owner — this is a scope decision, not an
+engineering one.**
+
+### Sub-gap: three missing vocabulary leaves — CLOSED 2026-08-17
+
+`config/exposure_tags.yaml` could not express three of the exposures this run
+found. Closed by a reviewed edit to that file plus **migration 0016**, which
+re-syncs `valid_exposure_tag` from the config (0013's loader does not re-run
+on a database already at head, so the file would have said the tag was legal
+while the trigger refused it).
+
+| leaf | why the vocabulary needed it |
+|---|---|
+| `input:base_oil` | the entire input cost of the lubricants family, and the single best-disclosed exposure in the run (Savita Oil, note 18 names "Base oils" as a line: 86.1% of cost of materials consumed) |
+| `input:bought_in_freight` | an asset-light 3PL does not burn diesel; it buys capacity from an operator who does. Tagging that `input:freight_diesel` would let a freight bill — wages, tolls, tyres, margin and some diesel — be read as a fuel cost with a fuel cost's elasticity |
+| `input:intermediated_air_capacity` | the air twin: chartered aircraft and purchased belly space, ATF-linked through fuel surcharges. Distinct from `input:atf`, which is an airline buying the fuel itself |
+
+The intermediated pair is the substantive addition. It encodes a distinction
+the ledger previously could not make — **who is exposed to the commodity, and
+who is exposed to somebody else's exposure to it** — and every row carrying
+one of those two tags states in `computed_from` that its crude elasticity is
+materially below the raw ratio. The pass-through curve that would quantify
+"materially below" does not exist for any of them (see §5).
+
+**Still missing, and now visible because of the run:** nothing in the schema
+records that `input:bought_in_freight` is a derived exposure of
+`input:freight_diesel` rather than an independent one. Two companies at
+different points of the same chain look like two independent exposures to the
+same shock, which is exactly the double-count `mechanism_edge` and
+`graph_distance` exist to prevent — and `mechanism_edge` is empty (§7).
+**Owner: repo owner.**
+
+---
+
 ## V5 SERVING CUTOVER CHECKLIST
 
 **Do not serve the V5 canonical path until every item here is done.** These
@@ -946,6 +1191,24 @@ numbers. Expect them to be bad; the point is that they will be *specific*.
 `PROPOSED-PENDING-OWNER-SIGN-OFF` with `signed_off_by: null`. Until a domain
 expert signs it, every recall figure is relative to the implementer's guess
 at what should have surfaced.
+
+### 5. Wire the liquidity feed and close the liquidity gate — `config/gates.yaml`
+
+| Key | Deployed | Must become |
+|---|---|---|
+| `primary.min_adv_inr` | `null` (rule never walked) | a real INR threshold |
+| `primary.unknown_liquidity_passes` | `true` | `false` |
+
+Both together, in one change, with an `adv_20d_inr` actually supplied to the
+gate — see **§12**. Setting the threshold while leaving
+`unknown_liquidity_passes: true` closes nothing: every company would arrive
+with `adv_20d_inr = None` and pass on the unknown escape instead of on the
+rule. Setting `unknown_liquidity_passes: false` without a feed rejects the
+entire universe from PRIMARY.
+
+This is the only cutover item whose prerequisite is **data acquisition rather
+than a code change**, so it has the longest lead time of anything on this
+list. **Owner: repo owner.**
 
 ---
 

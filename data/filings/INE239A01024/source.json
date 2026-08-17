@@ -1,0 +1,13 @@
+{
+  "isin": "INE239A01024",
+  "ticker": "NESTLEIND.NS",
+  "name": "Nestle India Ltd.",
+  "family": "fmcg_distribution",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29352_NESTLEIND_2025_2026_A_19722134_05062026154628.pdf",
+  "retrieved_at": "2026-08-17T06:32:21+00:00",
+  "sha256": "07b4c191fe120dde26d0561f7d82fc47382871a1163dea4bc4d0bb1e14bc6b1e",
+  "bytes": 19722134
+}

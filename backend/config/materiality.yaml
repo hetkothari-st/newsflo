@@ -65,6 +65,29 @@ evidence_grade_cap:
   SECTOR_PROXY: C
   MODELLED: D
 
+# The best evidence grade a channel may claim given how the EXPOSURE ROW
+# itself was measured -- a separate axis from the parameter caps above.
+#
+# WHY THIS EXISTS. Until now a channel's grade came only from its
+# PARAMETERS (pass-through, hedge ratio). An exposure row could say
+# measurement = ESTIMATED and, if every parameter above it happened to be
+# FILED, the channel carried no cap at all and was eligible for PRIMARY. The
+# weakest link was not being read. A share_of_base that nobody found in a
+# filing must not be able to lead a publication however well-sourced the
+# multipliers on top of it are.
+#
+# FILED and DISCLOSED_CALL are deliberately ABSENT rather than mapped to a
+# high grade: absent means "this axis caps nothing", which is the honest
+# statement for a row read straight off a filing page, and it means adding
+# this key changes no existing verdict.
+#
+# ESTIMATED -> D is what puts the crude-bootstrap rows below PRIMARY:
+# gates.yaml gives primary `evidence_grades: [A, B, C]` and
+# secondary_ripple `[A, B, C, D]`.
+exposure_measurement_grade_cap:
+  ESTIMATED: D
+  MODELLED: D
+
 # Phase 4 hook (policy modifier registry). When a modifier's state is
 # UNKNOWN the parameter is not wrong, it is less known -- so the band widens
 # by this multiplier. Phase 4 supplies the modifier states; the multiplier is

@@ -3,3 +3,13 @@
 .vite/
 .playwright-mcp/
 api_keys.txt
+
+# Ripple-exposure bootstrap: acquired annual-report PDFs and their extracted
+# text layer. 670MB+ of exchange-hosted primary documents. The provenance
+# (source.json: url, retrieval timestamp, sha256) and the findings ARE
+# tracked; re-acquire the bytes with
+#   python backend/scripts/ripple_bootstrap/acquire.py
+data/filings/*/*.pdf
+data/filings/*/pages.json.gz
+data/filings/_acquire_log.json
+backend/scripts/ripple_bootstrap/_sweep_*.txt

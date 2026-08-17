@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE769A01020",
+    "family": "specialty_chemicals",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "Note 29 (p178) does split the base four ways - 'Consumption of Raw Materials 3,950.31 / Consumption of Packing Materials 50.64 / Consumption of Fuel 309.91 / Consumption of Stores & Spares 72.36' - but the raw-material line, which is where the benzene and toluene derivatives sit, is a single aggregate. 'Consumption of Fuel' is not identified as crude versus coal or briquette and is not assumed to be either. The BRSR materials table (p62) is tonnage, not value, and not by commodity."
+  }
+]

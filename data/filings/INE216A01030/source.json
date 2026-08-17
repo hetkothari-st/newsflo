@@ -1,0 +1,13 @@
+{
+  "isin": "INE216A01030",
+  "ticker": "BRITANNIA.NS",
+  "name": "Britannia Industries Ltd.",
+  "family": "fmcg_distribution",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_27040_BRITANNIA_2024_2025_A_19072025234802.pdf",
+  "retrieved_at": "2026-08-17T06:32:25+00:00",
+  "sha256": "baf9bb7dd681f6d9fdd1f7809c7f26bbd120620d4c69a9dd18fddc6a2916c3a4",
+  "bytes": 18316477
+}

@@ -1,0 +1,13 @@
+{
+  "isin": "INE688A01022",
+  "ticker": "TCI.NS",
+  "name": "Transport Corporation of India Ltd",
+  "family": "logistics",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29848_TCI_2025_2026_U_9742506_17072026131440.pdf",
+  "retrieved_at": "2026-08-17T06:31:05+00:00",
+  "sha256": "5e4906b56a2502324b4ffa9cef5874e177db27b87b8fe0aecdeb9817940b5c66",
+  "bytes": 9742506
+}

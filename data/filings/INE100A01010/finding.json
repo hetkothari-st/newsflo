@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE100A01010",
+    "family": "specialty_chemicals",
+    "unsourced": "NOTE_BODY_NOT_IN_TEXT_LAYER",
+    "reason": "The P&L (p183) shows 'Cost of materials consumed 23 3,007.16'. Note 23 at p215 renders as a heading with no table body in the PDF text layer, so no components could be read - and none may be assumed. Checked p183, p215, p255, p290."
+  }
+]

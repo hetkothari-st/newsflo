@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE259A01022",
+    "family": "fmcg_distribution",
+    "unsourced": "NOTE_BODY_NOT_IN_TEXT_LAYER",
+    "reason": "The only text-layer hits for 'cost of material consumed' (p57, p232, p251) are cross-references - e.g. p251 'obsolete inventory, which is included as a part of cost of material consumed'. The note table itself did not extract, so no components could be read."
+  }
+]

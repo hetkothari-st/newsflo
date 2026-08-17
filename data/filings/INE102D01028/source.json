@@ -1,0 +1,13 @@
+{
+  "isin": "INE102D01028",
+  "ticker": "GODREJCP.NS",
+  "name": "Godrej Consumer Products Ltd.",
+  "family": "fmcg_distribution",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_26977_GODREJCP_2024_2025_A_16072025185902.pdf",
+  "retrieved_at": "2026-08-17T06:32:30+00:00",
+  "sha256": "426a7334ab438f9b9d47cdbc0718f2aea0701f7749904e123340078d5546c96f",
+  "bytes": 18390396
+}

@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE548C01032",
+    "family": "fmcg_distribution",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "The note (p281 standalone, p378 consolidated) is an opening/purchases/closing roll-forward with no components. Checked p237, p281, p331, p378."
+  }
+]

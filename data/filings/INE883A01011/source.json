@@ -1,0 +1,13 @@
+{
+  "isin": "INE883A01011",
+  "ticker": "MRF.NS",
+  "name": "M.R.F. Ltd.",
+  "family": "tyres",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29789_MRF_2025_2026_A_5753728_14072026182847.pdf",
+  "retrieved_at": "2026-08-17T06:27:06+00:00",
+  "sha256": "712276e34c1ac45fea5b59cd1cd248f38ebfdbf91707f55da929f420a757f6e4",
+  "bytes": 5753728
+}

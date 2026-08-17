@@ -1,0 +1,13 @@
+{
+  "isin": "INE111A01025",
+  "ticker": "CONCOR.NS",
+  "name": "Container Corporation Of India Ltd.",
+  "family": "logistics",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_28074_CONCOR_2024_2025_A_9631203_01092025184652.pdf",
+  "retrieved_at": "2026-08-17T06:30:50+00:00",
+  "sha256": "d3b29e6443f89225bbe5818aa03032b7f8afc4f4a3456c996e6336779bae4cfb",
+  "bytes": 9631203
+}

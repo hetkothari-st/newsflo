@@ -1,0 +1,13 @@
+{
+  "isin": "INE197D01010",
+  "ticker": "JINDALPOLY.NS",
+  "name": "JINDAL POLY FILMS LIMITED",
+  "family": "packaging_films",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_28989_JINDALPOLY_2024_2025_A_2212229_08092025233919.pdf",
+  "retrieved_at": "2026-08-17T06:29:54+00:00",
+  "sha256": "853a1c420a64259580b0eb7b56016a3ea5e6f82c06f0615ec8df3dc5c6d7920a",
+  "bytes": 2212229
+}

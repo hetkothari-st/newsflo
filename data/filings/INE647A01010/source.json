@@ -1,0 +1,13 @@
+{
+  "isin": "INE647A01010",
+  "ticker": "SRF.NS",
+  "name": "SRF Ltd.",
+  "family": "packaging_films",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29359_SRF_2025_2026_A_20352537_06062026134821.pdf",
+  "retrieved_at": "2026-08-17T06:29:25+00:00",
+  "sha256": "288e5562ff561b52cfdb6f846345b9814b4c5cbb51366fe57ef94f11d58795b5",
+  "bytes": 20352537
+}

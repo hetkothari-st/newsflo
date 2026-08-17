@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE030A01027",
+    "family": "fmcg_distribution",
+    "unsourced": "MEASUREMENT_BASIS_MISMATCH",
+    "reason": "REJECTED FROM SOURCED on owner ruling 2026-08-17. A share of 0.2201 was computable and is not defensible. Numerator: the SEBI LODR commodity table in the Corporate Governance Report (p123) carries a single row 'Brent / Benzene' at Rs 4,122 crores against a stated total commodity exposure of Rs 14,299 crores. Denominator: Ind AS note 27 (p160), total cost of materials consumed Rs 18,726 crores. THE TWO ARE DIFFERENT MEASURES. The LODR figure is an EXPOSURE on a purchase / hedged-position basis (the same row records 54% hedged through commodity derivatives); note 27 is CONSUMPTION, an inventory roll-forward. Nothing in the filing reconciles them, so the ratio has no defined meaning: its numerator and denominator do not measure the same thing over the same population. SECOND, INDEPENDENT DEFECT: the numerator row merges Brent and Benzene into one number. Both are crude-linked, but they are different price series with different spreads - benzene is a petrochemical whose margin over naphtha moves on its own - so even a well-based version of this row could not be attributed to a crude shock without splitting a figure the filing does not split. Neither defect is fixable from this document. Vegetable Oil (CPO) 1,078 and Tea 3,080 on the same table are excluded as not crude-linked."
+  }
+]

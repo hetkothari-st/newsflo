@@ -68,6 +68,29 @@ families:
       atf:                        # aviation turbine fuel -> airlines
       fuel_furnace_pet_coke:      # furnace oil, pet coke -> cement, ceramics, glass
       freight_diesel:             # diesel-linked freight -> logistics, FMCG distribution, e-commerce
+      # -------------------------------------------------------------------
+      # REVIEWED ADDITION, owner-approved. Three leaves the crude bootstrap
+      # found real, filing-sourced exposures for and could not name. Added by
+      # review of THIS FILE plus migration 0014, per the header's rule --
+      # never as a side effect of a data run.
+      # -------------------------------------------------------------------
+      base_oil:                   # lubricant base stock -> lubricant blenders
+      # INTERMEDIATED, and the distinction is the point. `freight_diesel` is
+      # a company BURNING diesel it bought: the price moves, the cost moves,
+      # promptly and roughly one-for-one. `bought_in_freight` is a company
+      # buying transport CAPACITY from an operator who burns the diesel. The
+      # bill it pays contains driver wages, tolls, tyres, financing and the
+      # operator's margin, so a crude move reaches it lagged, diluted and
+      # only to the extent the operator has pricing power. A share_of_base on
+      # this tag is a share of the FREIGHT BILL, never a fuel share, and its
+      # crude elasticity is materially below one.
+      bought_in_freight:          # bought-in road/rail capacity -> asset-light 3PL, e-commerce
+      # The air twin of the above: chartered aircraft and purchased belly
+      # space, whose price carries an ATF component through fuel surcharges.
+      # Kept separate from `atf` (which is an airline buying the fuel) and
+      # from `bought_in_freight` (road diesel, a different price series and a
+      # different pass-through convention).
+      intermediated_air_capacity: # chartered aircraft, commercial airlift -> express logistics
     metals:
       steel_flat:                 # flat steel -> autos, appliances, capital goods
       steel_long:                 # long steel -> construction, infrastructure

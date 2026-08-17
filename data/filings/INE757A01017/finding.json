@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE757A01017",
+    "family": "packaging_films",
+    "unsourced": "NOTE_BODY_NOT_IN_TEXT_LAYER",
+    "reason": "The P&L (p78 standalone, p122 consolidated) carries 'Cost of materials consumed 2,288.36' but no note table with components could be located in the text layer. The 'Other expenses' note (p100) separately shows 'Stores, spare parts and packing materials consumed 144.33' and 'Power and fuel 219.12', neither of which is the raw-material breakup this exercise needs."
+  }
+]

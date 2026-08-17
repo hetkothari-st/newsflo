@@ -1,0 +1,13 @@
+{
+  "isin": "INE757A01017",
+  "ticker": "COSMOFIRST.NS",
+  "name": "Cosmo First Limited",
+  "family": "packaging_films",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29695_COSMOFIRST_2025_2026_A_15274449_10072026122105.pdf",
+  "retrieved_at": "2026-08-17T06:30:08+00:00",
+  "sha256": "25e4b0fcf152c08b28c7e30a600621cb0c3a2b54f4326aa34f7cd4461e17038e",
+  "bytes": 15274449
+}

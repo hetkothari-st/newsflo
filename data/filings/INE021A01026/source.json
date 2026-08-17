@@ -1,0 +1,13 @@
+{
+  "isin": "INE021A01026",
+  "ticker": "ASIANPAINT.NS",
+  "name": "Asian Paints Ltd.",
+  "family": "paints",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29385_ASIANPAINT_2025_2026_A_26278926_12062026160918.pdf",
+  "retrieved_at": "2026-08-17T06:26:44+00:00",
+  "sha256": "b7977d2419ed2e211d0ad53270165cc4205cafff7982b6b74fed6502fa25aacb",
+  "bytes": 26278926
+}

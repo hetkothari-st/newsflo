@@ -1,0 +1,28 @@
+[
+  {
+    "isin": "INE688A01022",
+    "family": "logistics",
+    "exposure_tag": "input:bought_in_freight",
+    "base_kind": "TOTAL_COST",
+    "source_page": "188",
+    "verbatim_excerpt": "COST OF RENDERING OF SERVICES C in Mn Particulars For the Year Ended 31st March 2026 For the Year Ended 31st March 2025 Freight 23,738.74 22,586.97 Voyage Expenses 3,046.22 3,165.29 Vehicles' Trip Expenses 2,790.68 2,595.28",
+    "numerator": [
+      {
+        "label": "Freight",
+        "value": "23,738.74"
+      }
+    ],
+    "denominator": {
+      "label": "Total Expenses",
+      "value": "38,729.68",
+      "page": "157"
+    },
+    "denominator_excerpt": "Employee Benefits Expense 29 2,667.74 2,394.82 Finance Costs 30 177.61 149.73 Depreciation and Amortization Expense 31 1,112.79 1,060.08 Other Expenses 32 1,660.96 1,439.45 Total Expenses 38,729.68 36,206.99",
+    "computed_from": "HYBRID, reported on its bought-in leg (INDIRECT). Standalone note 28, Rs in millions. Numerator is the 'Freight' line only. TCI also discloses two further crude-linked lines this row deliberately EXCLUDES because they are a different channel: 'Vehicles' Trip Expenses' 2,790.68 (own-fleet diesel, DIRECT) and 'Voyage Expenses' 3,046.22 (ship bunker fuel). Adding all three would give 29,575.64 and mix three transmission speeds in one number. INTERMEDIATION NOTE (input:bought_in_freight): the numerator is a bought-in FREIGHT BILL, not a fuel bill - it contains driver wages, tolls, tyres, financing and the operator's margin as well as diesel. The crude elasticity of this share is therefore materially BELOW the raw ratio: a 10% crude move does not move this line by 10%. The share states how much of total cost is exposed to the freight market; how much of the freight market is crude is a pass-through question this row does not answer and must not be read as answering.",
+    "unit": "MILLION",
+    "unit_multiplier": 1000000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  }
+]

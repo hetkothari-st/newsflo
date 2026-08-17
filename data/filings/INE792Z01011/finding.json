@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE792Z01011",
+    "family": "paints",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "Note 32 (p119) is headed 'Raw and Packing material consumed' - raw and packing are merged into one line, so even the raw/packing split other paint companies give is unavailable here. Checked p109, p119, p142."
+  }
+]

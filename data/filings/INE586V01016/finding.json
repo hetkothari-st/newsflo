@@ -1,0 +1,28 @@
+[
+  {
+    "isin": "INE586V01016",
+    "family": "logistics",
+    "exposure_tag": "input:bought_in_freight",
+    "base_kind": "TOTAL_COST",
+    "source_page": "286",
+    "verbatim_excerpt": "Network freight charges 797.95 781.65 GPS communication charges 0.90 0.85 Crane operating expenses 2.31 2.51 Payments to labour board 16.64 16.38 Air freight charges 45.23 39.91 Ship freight charges 2.58 2.42 Rail freight charges 14.29 12.51",
+    "numerator": [
+      {
+        "label": "Network freight charges",
+        "value": "797.95"
+      }
+    ],
+    "denominator": {
+      "label": "Total Expenses",
+      "value": "1,131.65",
+      "page": "255"
+    },
+    "denominator_excerpt": "Operating expenses 28 886.96 862.13 Employee benefits expense 29 140.47 137.02 Finance costs 30 1.87 1.25 Depreciation and amortization expense 31 25.39 21.86 Other expenses 32 76.96 78.74 Total Expenses 1,131.65 1,101.00",
+    "computed_from": "ASSET-LIGHT 3PL (bought-in road freight, INDIRECT). Standalone note 28, Rs in crores. Numerator is 'Network freight charges' - the bought-in road leg. Air freight 45.23, ship freight 2.58 and rail freight 14.29 are separate modes with separate fuel pass-throughs and are excluded. INTERMEDIATION NOTE (input:bought_in_freight): the numerator is a bought-in FREIGHT BILL, not a fuel bill - it contains driver wages, tolls, tyres, financing and the operator's margin as well as diesel. The crude elasticity of this share is therefore materially BELOW the raw ratio: a 10% crude move does not move this line by 10%. The share states how much of total cost is exposed to the freight market; how much of the freight market is crude is a pass-through question this row does not answer and must not be read as answering.",
+    "unit": "CRORE",
+    "unit_multiplier": 10000000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  }
+]

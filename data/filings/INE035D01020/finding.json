@@ -1,0 +1,50 @@
+[
+  {
+    "isin": "INE035D01020",
+    "family": "lubricants",
+    "exposure_tag": "input:base_oil",
+    "base_kind": "COGS",
+    "source_page": "231",
+    "verbatim_excerpt": "18 C OST OF MATERIALS CONSUMED ` in Lakhs Particulars 2025-2026 2024-2025 Base oils 307,960.79 272,685.09 Process chemicals / solvents / Waxes 25,375.64 22,648.90 Packing materials 18,213.01 16,396.52 Others 6,192.16 4,260.85 357,741.60 315,991.36",
+    "numerator": [
+      {
+        "label": "Base oils",
+        "value": "307,960.79"
+      }
+    ],
+    "denominator": {
+      "label": "Total cost of materials consumed",
+      "value": "357,741.60"
+    },
+    "computed_from": "Consolidated note 18, FY2025-26 column, Rs in lakhs. The single cleanest disclosure in this run: the material type IS the line item. Packing materials (18,213.01) and Others (6,192.16) excluded. VOCABULARY GAP: 'input:base_oil' is NOT a leaf in config/exposure_tags.yaml and the DB triggers will reject it - the vocabulary must gain the leaf before this row can be imported.",
+    "unit": "LAKH",
+    "unit_multiplier": 100000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  },
+  {
+    "isin": "INE035D01020",
+    "family": "lubricants",
+    "exposure_tag": "input:crude_derivative_petchem",
+    "base_kind": "COGS",
+    "source_page": "231",
+    "verbatim_excerpt": "18 C OST OF MATERIALS CONSUMED ` in Lakhs Particulars 2025-2026 2024-2025 Base oils 307,960.79 272,685.09 Process chemicals / solvents / Waxes 25,375.64 22,648.90 Packing materials 18,213.01 16,396.52 Others 6,192.16 4,260.85 357,741.60 315,991.36",
+    "numerator": [
+      {
+        "label": "Process chemicals / solvents / Waxes",
+        "value": "25,375.64"
+      }
+    ],
+    "denominator": {
+      "label": "Total cost of materials consumed",
+      "value": "357,741.60"
+    },
+    "computed_from": "Consolidated note 18, FY2025-26 column. Solvents and waxes are named crude derivatives in the shock definition; 'process chemicals' is bundled with them by the filing and cannot be separated, so the row is slightly wider than a pure solvent exposure.",
+    "unit": "LAKH",
+    "unit_multiplier": 100000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  }
+]

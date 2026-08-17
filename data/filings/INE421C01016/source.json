@@ -1,0 +1,13 @@
+{
+  "isin": "INE421C01016",
+  "ticker": "TVSSRICHAK.NS",
+  "name": "TVS Srichakra Ltd.",
+  "family": "tyres",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_27675_TVSSRICHAK_2024_2025_A_3356738_25082025203453.pdf",
+  "retrieved_at": "2026-08-17T06:27:23+00:00",
+  "sha256": "e202ca5ced8f39f874718171f3abf05bc5d44afa5cb844a144fb32a13384004d",
+  "bytes": 3356738
+}

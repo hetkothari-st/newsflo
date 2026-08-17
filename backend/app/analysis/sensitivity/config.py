@@ -40,7 +40,10 @@ class MaterialityConfig:
     top_drivers: int
     band_width: Mapping[str, float]           # source -> relative half width
     distribution: Mapping[str, str]           # source -> distribution name
-    evidence_grade_cap: Mapping[str, str]     # source -> best allowed grade
+    evidence_grade_cap: Mapping[str, str]     # param source -> best allowed grade
+    # exposure_row measurement -> best allowed grade. A separate axis from
+    # the parameter caps: FILED/DISCLOSED_CALL are absent, meaning uncapped.
+    exposure_measurement_grade_cap: Mapping[str, str]
     unknown_modifier_band_multiplier: float
     param_bounds: Mapping[str, tuple[float, float]]
 
@@ -94,6 +97,9 @@ def load_materiality_config(path: Path | None = None) -> MaterialityConfig:
             distribution={str(k): str(v) for k, v in raw["distribution"].items()},
             evidence_grade_cap={str(k): str(v)
                                 for k, v in raw["evidence_grade_cap"].items()},
+            exposure_measurement_grade_cap={
+                str(k): str(v) for k, v in
+                (raw.get("exposure_measurement_grade_cap") or {}).items()},
             unknown_modifier_band_multiplier=float(
                 raw["unknown_modifier_state"]["band_width_multiplier"]),
             param_bounds={str(k): (float(v[0]), float(v[1]))

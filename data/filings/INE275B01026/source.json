@@ -1,0 +1,13 @@
+{
+  "isin": "INE275B01026",
+  "ticker": "HUHTAMAKI.NS",
+  "name": "HUHTAMAKI INDIA LIMITED",
+  "family": "packaging_films",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29244_HUHTAMAKI_2025_2025_A_8937530_10042026132301.pdf",
+  "retrieved_at": "2026-08-17T06:30:20+00:00",
+  "sha256": "a210ea0ace94a8c8760b771e2799fc9d83f8e3de0687c14e5399066be3a73893",
+  "bytes": 8937530
+}

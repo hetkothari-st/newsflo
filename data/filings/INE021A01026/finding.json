@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE021A01026",
+    "family": "paints",
+    "unsourced": "NO_BREAKUP_DISCLOSED",
+    "reason": "Note 24A (p209) splits cost of materials consumed into 'Raw Materials Consumed' and 'Packing Materials Consumed' only, each as an opening/purchases/closing roll-forward, with no split by material type. The SEBI LODR commodity table (p154) is filled 'Not Applicable' and the narrative states most significant raw materials 'are not commodities, per se'. Checked p154, p185, p209, p262."
+  }
+]

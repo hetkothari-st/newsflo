@@ -1,0 +1,13 @@
+{
+  "isin": "INE305C01029",
+  "ticker": "PANAMAPET.NS",
+  "name": "Panama Petrochem Ltd.",
+  "family": "lubricants",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_30030_PANAMAPET_2025_2026_A_6622925_28072026122831.pdf",
+  "retrieved_at": "2026-08-17T06:31:43+00:00",
+  "sha256": "f98e5ed16ad2bd91717bc4fe1d1dc1ff2967cfe2998ef611d195fdde7dee5c49",
+  "bytes": 6622925
+}

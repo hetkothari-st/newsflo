@@ -1,0 +1,13 @@
+{
+  "isin": "INE172A01027",
+  "ticker": "CASTROLIND.NS",
+  "name": "Castrol India Ltd",
+  "family": "lubricants",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29232_CASTROLIND_2025_2025_A_22779924_25022026150122.pdf",
+  "retrieved_at": "2026-08-17T06:31:32+00:00",
+  "sha256": "94ee8b24e803379e4b0b561931465c1bbcce2db367cae617ba6c557d86f1a0b4",
+  "bytes": 22779924
+}

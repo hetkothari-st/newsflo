@@ -1,0 +1,28 @@
+[
+  {
+    "isin": "INE111A01025",
+    "family": "logistics",
+    "exposure_tag": "input:freight_diesel",
+    "base_kind": "TOTAL_COST",
+    "source_page": "280",
+    "verbatim_excerpt": "(i) Handling & Other Operating expenses include ₹113.77 crore (2023-24: ₹112.92 crore) & ₹23.21 crore (2023- 24: ₹23.96 crore) towards power & fuel and consumption of stores & spares respectively.",
+    "numerator": [
+      {
+        "label": "power & fuel (within Handling & Other Operating expenses)",
+        "value": "113.77"
+      }
+    ],
+    "denominator": {
+      "label": "Total expenses (IV)",
+      "value": "7,597.15",
+      "page": "237"
+    },
+    "denominator_excerpt": "Employee benefits expense 31 488.85 462.82 Depreciation and amortisation expense 32 562.84 600.88 Finance cost 33 69.49 65.33 Other expenses 34 303.64 258.44 Total expenses (IV) 7,597.15",
+    "computed_from": "DIRECT fuel, standalone FY2024-25, Rs in crores. A deliberately SMALL number and the useful part of it: CONCOR's dominant cost is 'Terminal and other service charges' 6,172.33, most of which is rail haulage paid to Indian Railways at administered rates rather than a diesel-indexed price. Power & fuel is the only line the filing identifies as fuel. Read this row as evidence that CONCOR is NOT materially crude-exposed on the cost side, not as an incomplete measurement of a large exposure.",
+    "unit": "CRORE",
+    "unit_multiplier": 10000000.0,
+    "as_of_date": "2025-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  }
+]

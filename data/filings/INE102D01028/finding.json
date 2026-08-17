@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE102D01028",
+    "family": "fmcg_distribution",
+    "unsourced": "PARTIAL_ONLY_NON_CRUDE_QUANTIFIED",
+    "reason": "The LODR commodity table (p373) quantifies exactly one commodity: 'Soap Base Materials 1,412' crore, 1,45,968 MT, and the accompanying text attributes the exposure to 'imported palm oil derivatives' - agri-linked, not crude-linked. The materials note (p404, p494) carries no commodity split. Nothing crude is quantified."
+  }
+]

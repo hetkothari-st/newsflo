@@ -1,0 +1,13 @@
+{
+  "isin": "INE516A01017",
+  "ticker": "UFLEX.NS",
+  "name": "Uflex Limited",
+  "family": "packaging_films",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29573_UFLEX_2025_2026_A_24208815_04072026190505.pdf",
+  "retrieved_at": "2026-08-17T06:29:52+00:00",
+  "sha256": "54572c1e3e076b6eda4ba3ee92b6f14a1955a791a2224432be09dd75baff5de4",
+  "bytes": 24208815
+}

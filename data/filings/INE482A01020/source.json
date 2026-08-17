@@ -1,0 +1,13 @@
+{
+  "isin": "INE482A01020",
+  "ticker": "CEATLTD.NS",
+  "name": "Ceat Ltd.",
+  "family": "tyres",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29958_CEATLTD_2025_2026_A_20312897_23072026115614.pdf",
+  "retrieved_at": "2026-08-17T06:27:17+00:00",
+  "sha256": "c4433bd6207acace180192d3d028fdd070d00e7b43075cae1950c5a2e05c1310",
+  "bytes": 20312897
+}

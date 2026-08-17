@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE573A01042",
+    "family": "tyres",
+    "unsourced": "PARTIAL_ONLY_NON_CRUDE_QUANTIFIED",
+    "reason": "The Corporate Governance Report (p94) quantifies only natural rubber: 'Natural Rubber is considered a material commodity, as its consumption constitutes more than 30% out of overall cost of raw material consumed... consumed 1,12,618 MT rubber, valuing ₹2,152 Crores'. That is the non-crude input. The commodity-risk note (p141) lists synthetic rubber, carbon black, fabric and crude oil by name with no values, and the P&L note (p121) is a single line. A crude share by subtraction would also sweep in steel and bead wire."
+  }
+]

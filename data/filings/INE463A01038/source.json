@@ -1,0 +1,13 @@
+{
+  "isin": "INE463A01038",
+  "ticker": "BERGEPAINT.NS",
+  "name": "Berger Paints India Ltd",
+  "family": "paints",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29940_BERGEPAINT_2025_2026_A_11187068_21072026184258.pdf",
+  "retrieved_at": "2026-08-17T06:26:48+00:00",
+  "sha256": "ba66de35e07649c9c851cc46d5e71573d94c4d4cbaaf88bf9e9859bc4094a203",
+  "bytes": 11187068
+}

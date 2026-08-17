@@ -122,6 +122,12 @@ class ExposureView:
     segment_ownership_fraction: float
     evidence_ids: tuple[str, ...] = ()
     ownership_basis: str = OWNERSHIP_SELF_CONSOLIDATED
+    # `company_exposure.measurement` -- FILED | DISCLOSED_CALL | ESTIMATED |
+    # MODELLED. Carried so the channel's evidence grade can be capped by how
+    # the SHARE was measured, not only by how its parameters were. None means
+    # the caller did not say, which caps nothing: a missing measurement must
+    # not silently downgrade a filing-sourced row.
+    measurement: str | None = None
 
 
 @dataclass(frozen=True)
@@ -370,8 +376,13 @@ def _build(channel_type: str, exposure: ExposureView, shock: Shock,
         mechanism_id=shock.mechanism_id,
         params=used,
         constants=constants,
+        # Weakest link across BOTH axes: how each parameter was sourced, and
+        # how the exposure row's own share_of_base was measured.
         grade_cap=_weakest_cap(
-            config.evidence_grade_cap.get(dist.source) for dist in used.values()),
+            [config.evidence_grade_cap.get(dist.source)
+             for dist in used.values()]
+            + [config.exposure_measurement_grade_cap.get(
+                str(exposure.measurement)) if exposure.measurement else None]),
         materiality_base=MATERIALITY_BASE_FOR_TYPE[channel_type],
         segment_ownership_fraction=float(exposure.segment_ownership_fraction),
         ownership_basis=str(exposure.ownership_basis),

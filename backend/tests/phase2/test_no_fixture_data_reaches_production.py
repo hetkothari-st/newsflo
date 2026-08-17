@@ -118,6 +118,10 @@ def test_the_materiality_config_is_policy_not_data():
         assert bounds == [0.0, 1.0], f"{name}: {bounds} is not a domain bound"
     numeric_sections = {"buckets", "sign_consistency", "monte_carlo",
                         "band_width", "distribution", "evidence_grade_cap",
+                        # grade caps keyed by company_exposure.measurement --
+                        # a policy statement about what an unfiled share may
+                        # claim, carrying letters, not values.
+                        "exposure_measurement_grade_cap",
                         "unknown_modifier_state", "param_bounds", "version"}
     assert set(raw) == numeric_sections, (
         f"unreviewed section in materiality.yaml: {set(raw) - numeric_sections}")

@@ -1,0 +1,13 @@
+{
+  "isin": "INE09VQ01012",
+  "ticker": "INDIGOPNTS.NS",
+  "name": "Indigo Paints Limited",
+  "family": "paints",
+  "filename": "FY2025_annual_report.pdf",
+  "fy": 2025,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_27361_INDIGOPNTS_2024_2025_A_08082025183036.pdf",
+  "retrieved_at": "2026-08-17T06:26:59+00:00",
+  "sha256": "5ae25ff73dd148ba972b381913781332f6b03f5846a1bf3b31378b1a559c3553",
+  "bytes": 10494998
+}

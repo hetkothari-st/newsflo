@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE288B01029",
+    "family": "specialty_chemicals",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "Note 28 is referenced from the P&L (p342) as a single 'Cost of Materials Consumed 1,544.01'; the note itself carries no commodity split. Phenol, acetone and cumene are named in the business narrative with no cost values. Checked p342, p371, p392, p406, p437."
+  }
+]

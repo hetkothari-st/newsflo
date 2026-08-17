@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE635Q01029",
+    "family": "lubricants",
+    "unsourced": "NO_BREAKUP_DISCLOSED",
+    "reason": "The note (p216 standalone, p294 consolidated) splits 'Cost of Raw Materials Consumed 1,64,335.16' from 'Cost of Packing Materials Consumed' but does not itemise base oil or additives inside the raw line. The LODR commodity table (p150) reads 'Total exposure of the listed entity to commodities: Nil' and 'NOT APPLICABLE', while the narrative on the same page calls the company 'a sizable user of imported Base oil' - the disclosure contradicts itself and quantifies neither side."
+  }
+]

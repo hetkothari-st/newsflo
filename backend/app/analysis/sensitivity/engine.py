@@ -276,7 +276,11 @@ def analyse_company(session, *, company_id: int, shocks: Sequence[Shock],
                                             if ownership_supplied else 1.0),
                 evidence_ids=(exposure_id,),
                 ownership_basis=(OWNERSHIP_SUPPLIED if ownership_supplied
-                                 else OWNERSHIP_SELF_CONSOLIDATED))
+                                 else OWNERSHIP_SELF_CONSOLIDATED),
+                # Carried so the channel's grade is capped by how the share
+                # itself was measured, not only by its parameters.
+                measurement=(str(row["measurement"])
+                             if row.get("measurement") else None))
             days = int(horizon_days if horizon_days is not None
                        else shock.horizon_days)
             try:

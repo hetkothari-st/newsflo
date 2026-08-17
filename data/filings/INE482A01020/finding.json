@@ -1,0 +1,58 @@
+[
+  {
+    "isin": "INE482A01020",
+    "family": "tyres",
+    "exposure_tag": "input:crude_derivative_rubber",
+    "base_kind": "COGS",
+    "source_page": "119",
+    "verbatim_excerpt": "Details of raw materials consumed (₹ in lakhs) Particulars 2025-26 2024-25 Rubber 4,91,060 3,94,454 Fabrics 75,633 61,717 Carbon black 1,43,495 1,32,291 Chemicals 66,050 53,404 Others 1,43,474 1,90,017 Total 9,19,712 8,31,883",
+    "numerator": [
+      {
+        "label": "Carbon black",
+        "value": "1,43,495"
+      },
+      {
+        "label": "Chemicals",
+        "value": "66,050"
+      }
+    ],
+    "denominator": {
+      "label": "Total raw materials consumed",
+      "value": "9,19,712"
+    },
+    "computed_from": "Standalone note 29 'Details of raw materials consumed', FY2025-26 column, Rs in lakhs. Numerator = Carbon black 1,43,495 + Chemicals 66,050 (rubber chemicals). LOWER BOUND: the 'Rubber' line (4,91,060, 53% of the base) merges natural rubber, which is not crude-linked, with synthetic rubber, which is, and the filing does not split them; 'Others' (1,43,474) is unnamed. Both are therefore excluded rather than apportioned. Fabrics is carried as a separate petchem row.",
+    "unit": "LAKH",
+    "unit_multiplier": 100000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": [
+      "FLOOR"
+    ]
+  },
+  {
+    "isin": "INE482A01020",
+    "family": "tyres",
+    "exposure_tag": "input:crude_derivative_petchem",
+    "base_kind": "COGS",
+    "source_page": "119",
+    "verbatim_excerpt": "Details of raw materials consumed (₹ in lakhs) Particulars 2025-26 2024-25 Rubber 4,91,060 3,94,454 Fabrics 75,633 61,717 Carbon black 1,43,495 1,32,291 Chemicals 66,050 53,404 Others 1,43,474 1,90,017 Total 9,19,712 8,31,883",
+    "numerator": [
+      {
+        "label": "Fabrics",
+        "value": "75,633"
+      }
+    ],
+    "denominator": {
+      "label": "Total raw materials consumed",
+      "value": "9,19,712"
+    },
+    "computed_from": "Standalone note 29, FY2025-26 column, Rs in lakhs. Tyre 'Fabrics' is nylon/polyester tyre cord, a polymer rather than a rubber input, so it is tagged petchem and kept separate from the carbon-black + chemicals row rather than summed into one tag.",
+    "unit": "LAKH",
+    "unit_multiplier": 100000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": [
+      "FLOOR"
+    ]
+  }
+]

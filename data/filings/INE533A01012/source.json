@@ -1,0 +1,13 @@
+{
+  "isin": "INE533A01012",
+  "ticker": "GOODYEAR.NS",
+  "name": "Goodyear India Ltd.",
+  "family": "tyres",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "BSE",
+  "source_url": "https://www.bseindia.com/xml-data/corpfiling/AttachHis/28224425-0e28-4457-89d0-06c97a5b9b17.pdf",
+  "retrieved_at": "2026-08-17T06:27:26+00:00",
+  "sha256": "02b103e9a225be25d683ed182f91bbd255f880f087da06fdc31c52d1b830e991",
+  "bytes": 4466265
+}

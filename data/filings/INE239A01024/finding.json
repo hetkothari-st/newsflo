@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE239A01024",
+    "family": "fmcg_distribution",
+    "unsourced": "NOTE_BODY_NOT_IN_TEXT_LAYER",
+    "reason": "Note 26 'COST OF MATERIALS CONSUMED' appears as a heading at p84 (standalone) and p142 (consolidated) with no table body in the PDF text layer, so no component values could be read. The P&L total is 98,140.4. Not sourced, and not assumed."
+  }
+]

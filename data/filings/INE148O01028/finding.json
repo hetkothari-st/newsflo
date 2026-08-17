@@ -1,0 +1,28 @@
+[
+  {
+    "isin": "INE148O01028",
+    "family": "logistics",
+    "exposure_tag": "input:bought_in_freight",
+    "base_kind": "TOTAL_COST",
+    "source_page": "145",
+    "verbatim_excerpt": "Freight, handling and servicing costs Particulars March 31, 2025 March 31, 2024 Line haul expenses 28,875.11 26,836.40 Contractual manpower expenses 11,574.11 9,950.34 Vehicle rental expenses 17,567.71 16,029.60",
+    "numerator": [
+      {
+        "label": "Line haul expenses",
+        "value": "28,875.11"
+      }
+    ],
+    "denominator": {
+      "label": "Total Expenses (II)",
+      "value": "92,167.73",
+      "page": "127"
+    },
+    "denominator_excerpt": "Employee benefits expense 24 13,759.04 14,367.70 Finance costs 27 1,257.87 885.20 Depreciation and amortisation expense 26 5,349.08 7,215.50 Other expenses 25 6,453.89 6,073.78 Total Expenses (II) 92,167.73 88,249.67",
+    "computed_from": "ASSET-LIGHT 3PL (bought-in freight, INDIRECT). Consolidated note 23, FY2024-25, Rs in millions. Numerator is 'Line haul expenses', the bought-in long-haul transport line. Diesel is inside a supplier's price here, not a purchase by the company, so pass-through is lagged and partial. 'Vehicle rental expenses' 17,567.71 excluded (rental of capacity, fuel treatment not stated); 'Power, fuel & water charges' 2,129.66 excluded because water is bundled into it. INTERMEDIATION NOTE (input:bought_in_freight): the numerator is a bought-in FREIGHT BILL, not a fuel bill - it contains driver wages, tolls, tyres, financing and the operator's margin as well as diesel. The crude elasticity of this share is therefore materially BELOW the raw ratio: a 10% crude move does not move this line by 10%. The share states how much of total cost is exposed to the freight market; how much of the freight market is crude is a pass-through question this row does not answer and must not be read as answering.",
+    "unit": "MILLION",
+    "unit_multiplier": 1000000.0,
+    "as_of_date": "2025-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  }
+]

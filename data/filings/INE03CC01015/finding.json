@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE03CC01015",
+    "family": "specialty_chemicals",
+    "unsourced": "AGGREGATED_SINGLE_LINE",
+    "reason": "Note (p136 standalone, p217 consolidated) reads 'Raw and process materials consumed 9,164.32' - one line, and it merges raw with process materials. Checked p100, p136, p138, p165, p178, p217."
+  }
+]

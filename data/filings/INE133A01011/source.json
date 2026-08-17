@@ -1,0 +1,13 @@
+{
+  "isin": "INE133A01011",
+  "ticker": "JSWDULUX.NS",
+  "name": "JSW Dulux Limited",
+  "family": "paints",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29397_JSWDULUX_2025_2026_A_11807934_16062026155518.pdf",
+  "retrieved_at": "2026-08-17T06:26:55+00:00",
+  "sha256": "d8cc2220ebe6e5b369c2c31c63ef26937f2b4161d3ab102aac0328d133db1de3",
+  "bytes": 11807934
+}

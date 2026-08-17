@@ -1,0 +1,13 @@
+{
+  "isin": "INE548C01032",
+  "ticker": "EMAMILTD.NS",
+  "name": "Emami Ltd",
+  "family": "fmcg_distribution",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_30078_EMAMILTD_2025_2026_A_25947475_30072026190250.pdf",
+  "retrieved_at": "2026-08-17T06:32:46+00:00",
+  "sha256": "fa990a30bd19fc66289007cfc8c7e0249bcd1c4343bc88613a477d35739e19c8",
+  "bytes": 25947475
+}

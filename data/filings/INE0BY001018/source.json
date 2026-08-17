@@ -1,0 +1,13 @@
+{
+  "isin": "INE0BY001018",
+  "ticker": "JUBLINGREA.NS",
+  "name": "Jubilant Ingrevia Limited",
+  "family": "specialty_chemicals",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_30130_JUBLINGREA_2025_2026_A_9148569_01082026174958.pdf",
+  "retrieved_at": "2026-08-17T06:28:54+00:00",
+  "sha256": "c45a7c5f29065cc683ce77d015241d7d13e2063e08b0db48573933bd3299dd3f",
+  "bytes": 9148569
+}

@@ -1,0 +1,13 @@
+{
+  "isin": "INE030A01027",
+  "ticker": "HINDUNILVR.NS",
+  "name": "Hindustan Unilever Ltd.",
+  "family": "fmcg_distribution",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29330_HINDUNILVR_2025_2026_A_21643813_02062026215058.pdf",
+  "retrieved_at": "2026-08-17T06:32:13+00:00",
+  "sha256": "ab3842889a4dbfe697fa2bbed89d3b8bc622e7a13b052841b4908b92be719054",
+  "bytes": 21643813
+}

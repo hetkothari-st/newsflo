@@ -1,0 +1,13 @@
+{
+  "isin": "INE792Z01011",
+  "ticker": "SIRCA.NS",
+  "name": "Sirca Paints India Limited",
+  "family": "paints",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29917_SIRCA_2025_2026_A_17067018_20072026210055.pdf",
+  "retrieved_at": "2026-08-17T06:27:03+00:00",
+  "sha256": "ed5a3130130cd09ef00778fb2cc73f9328bb4736373c336a189e6fdaa31317a3",
+  "bytes": 17067018
+}

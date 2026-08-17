@@ -1,0 +1,13 @@
+{
+  "isin": "INE586V01016",
+  "ticker": "TCIEXP.NS",
+  "name": "TCI Express Limited",
+  "family": "logistics",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29818_TCIEXP_2025_2026_A_16652002_15072026220127.pdf",
+  "retrieved_at": "2026-08-17T06:31:25+00:00",
+  "sha256": "cc24e18153388aba522434868db5ce99b4e751e2f6ad3770e5e9e110d5302aef",
+  "bytes": 16652002
+}

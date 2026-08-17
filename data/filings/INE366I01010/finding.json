@@ -1,0 +1,28 @@
+[
+  {
+    "isin": "INE366I01010",
+    "family": "logistics",
+    "exposure_tag": "input:freight_diesel",
+    "base_kind": "TOTAL_COST",
+    "source_page": "210",
+    "verbatim_excerpt": "Freight, handling and servicing cost Year ended Year ended 31 March 2026 31 March 2025 Lorry hire 15,571 17,662 Diesel cost 80,821 87,055 Vehicle running, repairs and maintenance (net) 17,376 15,592",
+    "numerator": [
+      {
+        "label": "Diesel cost",
+        "value": "80,821"
+      }
+    ],
+    "denominator": {
+      "label": "Total expenses",
+      "value": "292,690",
+      "page": "171"
+    },
+    "denominator_excerpt": "Employee benefits expense 23 58,739 54,517 Finance costs 24 9,498 9,483 Depreciation and amortisation expense 25 26,103 25,363 Other expenses 26 6,102 4,345 Total expenses 292,690 293,522",
+    "computed_from": "FLEET-OWNING (direct diesel). Standalone note 22, Rs in lakhs. Numerator is the company's own 'Diesel cost' line - a fuel purchase, not bought-in freight. Denominator is total expenses from the standalone P&L (p171). Excluded from the numerator though also crude-linked: 'Tyres and flaps' 6,676 and 'Lorry hire' 15,571 (bought-in capacity, a different channel).",
+    "unit": "LAKH",
+    "unit_multiplier": 100000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": []
+  }
+]

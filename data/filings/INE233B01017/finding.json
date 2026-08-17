@@ -1,0 +1,34 @@
+[
+  {
+    "isin": "INE233B01017",
+    "family": "logistics",
+    "exposure_tag": "input:intermediated_air_capacity",
+    "base_kind": "TOTAL_COST",
+    "source_page": "200",
+    "verbatim_excerpt": "FREIGHT, HANDLING AND SERVICING COSTS Aircraft charter costs 1,24,447 1,09,418 Domestic network operating costs 2,07,498 1,84,469 International servicing charges 18,929 20,077 Commercial airlift charges 25,488 25,603",
+    "numerator": [
+      {
+        "label": "Aircraft charter costs",
+        "value": "1,24,447"
+      },
+      {
+        "label": "Commercial airlift charges",
+        "value": "25,488"
+      }
+    ],
+    "denominator": {
+      "label": "Total Expenses",
+      "value": "5,46,260",
+      "page": "178"
+    },
+    "denominator_excerpt": "Handling and Servicing Costs 27 4,04,051 3,63,659 Employee Benefits Expenses 28 73,741 70,781 Finance Costs 29 2,879 1,927 Depreciation and Amortisation Expense 30 20,921 18,725 Other Expenses 31 44,668 40,596 Total Expenses 5,46,260 4,95,688",
+    "computed_from": "ASSET-LIGHT (bought-in air capacity, INDIRECT), standalone note 27, Rs in lakhs, FY2024-25. Numerator = the two air-capacity lines. LOWER BOUND and the weakest logistics row: the largest line, 'Domestic network operating costs' 2,07,498, is a black box that certainly contains diesel line-haul and equally certainly contains manpower, and the filing gives no split - it is excluded rather than apportioned. TAG CHOICE (input:intermediated_air_capacity, NOT input:atf): Blue Dart does not buy ATF. It buys air capacity from operators who do, so fuel reaches it through charter rates and fuel surcharges - lagged, contractual and diluted. The filing states the COST; that its price tracks ATF is mechanism, not disclosure. The separate tag is what records that difference instead of letting a charter bill be read as a fuel purchase.",
+    "unit": "LAKH",
+    "unit_multiplier": 100000.0,
+    "as_of_date": "2025-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": [
+      "FLOOR"
+    ]
+  }
+]

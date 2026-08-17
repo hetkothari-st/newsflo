@@ -1,0 +1,13 @@
+{
+  "isin": "INE438A01022",
+  "ticker": "APOLLOTYRE.NS",
+  "name": "Apollo Tyres Ltd",
+  "family": "tyres",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29578_APOLLOTYRE_2025_2026_A_11077364_06072026125039.pdf",
+  "retrieved_at": "2026-08-17T06:27:12+00:00",
+  "sha256": "d9c78174f61cc4c4d6076881de2b37733bb06189241686bd899f1159ea69cb2b",
+  "bytes": 11077364
+}

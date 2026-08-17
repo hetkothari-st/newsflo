@@ -1,0 +1,13 @@
+{
+  "isin": "INE259A01022",
+  "ticker": "COLPAL.NS",
+  "name": "Colgate-Palmolive (India) Ltd.",
+  "family": "fmcg_distribution",
+  "filename": "FY2026_annual_report.pdf",
+  "fy": 2026,
+  "exchange": "NSE",
+  "source_url": "https://nsearchives.nseindia.com/annual_reports/AR_29569_COLPAL_2025_2026_A_20106700_04072026151914.pdf",
+  "retrieved_at": "2026-08-17T06:32:40+00:00",
+  "sha256": "d6380f06c492739c83688abce44e3fafa6c145185e40eb2ea401f0c9386879e4",
+  "bytes": 20106700
+}

@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE463A01038",
+    "family": "paints",
+    "unsourced": "NO_BREAKUP_DISCLOSED",
+    "reason": "Note 36 (p178) gives Raw materials Consumed and Packing material Consumed as roll-forwards only. The LODR commodity table (p142) is filled 'NIL' with the statement 'No commodity is considered to be material'. Checked p142, p152, p178."
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "isin": "INE035D01020",
+  "ticker": "SOTL.NS",
+  "name": "Savita Oil Technologies Limited",
+  "family": "lubricants",
+  "filename": "FY2026_annual_report_bse.pdf",
+  "fy": 2026,
+  "exchange": "BSE",
+  "source_url": "https://www.bseindia.com/xml-data/corpfiling/AttachHis/f5ce05d8-6169-4cc8-beee-4eb4f4d08175.pdf",
+  "retrieved_at": "2026-08-17T06:45:03+00:00",
+  "sha256": "7809056754943a7f43343793eb8d8e0de50aa19a716e8b4a843f1799d4698240",
+  "bytes": 7979181,
+  "note": "NSE copy of the same FY2026 report is a malformed PDF (pypdf: Cannot find Root object); re-acquired from BSE"
+}

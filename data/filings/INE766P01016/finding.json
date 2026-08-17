@@ -1,0 +1,30 @@
+[
+  {
+    "isin": "INE766P01016",
+    "family": "logistics",
+    "exposure_tag": "input:bought_in_freight",
+    "base_kind": "TOTAL_COST",
+    "source_page": "127",
+    "verbatim_excerpt": "24. Operating Expenses (` Crores) Particulars Year ended 31 March 2026 Year ended 31 March 2025 Freight & Other Related Expenses 3,960.37 3,510.01 Labour & Other Related Expenses 740.32 627.04",
+    "numerator": [
+      {
+        "label": "Freight & Other Related Expenses",
+        "value": "3,960.37"
+      }
+    ],
+    "denominator": {
+      "label": "Total Expenses",
+      "value": "5,620.52",
+      "page": "111"
+    },
+    "denominator_excerpt": "(b) Employee benefits expense 25 325.01 292.81 (c) Finance costs 26 59.13 54.31 (d) Depreciation and amortisation expense 27 242.35 196.05 (e) Other expenses 28 130.47 120.05 Total Expenses 5,620.52",
+    "computed_from": "ASSET-LIGHT 3PL (bought-in freight, INDIRECT). Standalone note 24, Rs in crores. The line is named 'Freight & Other Related Expenses', so an unquantified 'other related' component is inside the numerator - this share is an upper bound on bought-in freight. The company's own direct fuel line, 'Power & Fuel' 32.56, is two orders of magnitude smaller and is excluded. INTERMEDIATION NOTE (input:bought_in_freight): the numerator is a bought-in FREIGHT BILL, not a fuel bill - it contains driver wages, tolls, tyres, financing and the operator's margin as well as diesel. The crude elasticity of this share is therefore materially BELOW the raw ratio: a 10% crude move does not move this line by 10%. The share states how much of total cost is exposed to the freight market; how much of the freight market is crude is a pass-through question this row does not answer and must not be read as answering.",
+    "unit": "CRORE",
+    "unit_multiplier": 10000000.0,
+    "as_of_date": "2026-03-31",
+    "exposure_kind": "INPUT_COST",
+    "markers": [
+      "UPPER_BOUND"
+    ]
+  }
+]

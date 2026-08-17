@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE09VQ01012",
+    "family": "paints",
+    "unsourced": "NOTE_NOT_IN_TEXT_LAYER",
+    "reason": "No 'cost of materials consumed' note could be located in this PDF's text layer at all (FY2025 report, 254 pages). The MD&A (p28) names 'crude-based derivatives like binders and solvents, along with titanium dioxide' but attaches no values. Nothing computable, and the absence is an extraction limitation as much as a disclosure one."
+  }
+]

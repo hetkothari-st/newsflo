@@ -1,0 +1,8 @@
+[
+  {
+    "isin": "INE305C01029",
+    "family": "lubricants",
+    "unsourced": "NO_BREAKUP_DISCLOSED",
+    "reason": "Note (p141 standalone, p197 consolidated) splits raw material consumed from packing material consumed, both as roll-forwards; base oil is not a line. The commodity-risk note (p156) names base oil and crude volatility without values. Checked p111, p141, p156, p167, p197."
+  }
+]
