@@ -384,6 +384,20 @@ def test_no_llm_confidence_reaches_the_canonical_record():
     assert "calibrated_p" not in list(_keys(payload))
 
 
+def test_the_ledgers_llm_extraction_confidence_never_reaches_the_engine():
+    """The one LLM-sourced confidence that still exists in this repo is
+    `company_exposure.confidence`, written from an extractor's
+    `extraction_confidence` at review time. It is a REVIEW-QUEUE TRIAGE score
+    (`app/ledger/review.py` ranks proposals by market cap x (1 - confidence))
+    and it must never become an input to a number. The sensitivity engine
+    does not read the column."""
+    sensitivity = BACKEND / "app" / "analysis" / "sensitivity"
+    for path in sorted(sensitivity.glob("*.py")):
+        for number, line in code_lines(path):
+            assert "confidence" not in line.lower() or "sign_consistency" in line, (
+                f"{path.name}:{number} reads a confidence: {line.strip()}")
+
+
 def test_the_signal_bus_has_no_confidence_carrying_payload_key():
     from app.core.signals import _SCHEMAS
 
