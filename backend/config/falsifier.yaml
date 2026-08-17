@@ -1,0 +1,138 @@
+# V5 FALSIFICATION STAGE — POLICY
+# (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §12, docs/v5/07_PHASE_6_falsification_sections.md
+#  Task 6.1)
+#
+# THIS FILE IS POLICY, NOT DATA. Every entry is either a WORD this system may
+# use for an objection, the SEVERITY we assign that word, or a QUESTION we
+# insist on being able to answer. There is no company here and no financial
+# figure of any kind — a test asserts as much.
+#
+# WHY THE SEVERITY IS OURS AND NOT THE MODEL'S. The adversary names the
+# objection; it does not get to grade it. A model that calls its own
+# ENTITY_WRONG a WARN would be downgrading a blocking objection by wording,
+# which is precisely the failure §12 exists to remove. `engine.py` reads the
+# severity from this table and ignores anything the response claims.
+
+version: falsifier-v5.0.0
+
+# ---------------------------------------------------------------------------
+# §12.1 — the objection taxonomy, verbatim, with the phase file's default
+# severities. This table is a SUBSET of app/core/signals.OBJECTION_TYPES (the
+# closed vocabulary): EMPIRICAL_CONFLICT is raised by the empirical stage and
+# NOT_INDEPENDENTLY_VERIFIED by the V4 verifier, so neither is something the
+# falsifier may claim.
+# ---------------------------------------------------------------------------
+severities:
+  ENTITY_WRONG: BLOCKING
+  MECHANISM_INVALID: BLOCKING
+  EXPOSURE_NOT_IN_LISTCO: BLOCKING
+  OFFSET_IGNORED: MAJOR
+  REGIME_MODIFIER_MISSING: MAJOR
+  MAGNITUDE_IMMATERIAL: MAJOR
+  HORIZON_MISMATCH: MAJOR
+  EVIDENCE_STALE: MAJOR
+  ALREADY_PRICED: WARN
+  BASE_RATE_VIOLATION: WARN
+  SECOND_ORDER_OVERREACH: WARN
+
+# ---------------------------------------------------------------------------
+# §12.2 — the mandatory analyst checklist. All ten, answered in structured
+# form with the record set in context. UNANSWERABLE ⇒ OBJECTION.
+#
+# `objection_type` is the burden each question governs — the objection that
+# stands when nobody can answer it. The mapping is written HERE, in the open,
+# rather than buried in the engine, because it is a judgement and a reviewer
+# is entitled to argue with it. The reasoning for each is on the line above.
+#
+# An "answer" with no citation is NOT an answer (engine.py). That is the same
+# discipline §12.3 applies to rebuttals, applied to the questions that
+# produce the objections: an assertion nobody can trace is the thing this
+# whole phase exists to stop treating as knowledge.
+# ---------------------------------------------------------------------------
+checklist:
+  # No named segment and no share ⇒ nobody has sized the exposure, so its
+  # materiality is an assertion rather than a measurement.
+  - question: 1
+    objection_type: MAGNITUDE_IMMATERIAL
+    text: >-
+      Which exact business line or segment is exposed, and what share of
+      consolidated EBITDA is it?
+  # No named P&L or balance-sheet line ⇒ there is no mechanism, only a mood.
+  - question: 2
+    objection_type: MECHANISM_INVALID
+    text: >-
+      Which P&L or balance-sheet line moves, and in which direction?
+  # No lag and no evidence for one ⇒ the horizon the claim is filed under is
+  # unsupported.
+  - question: 3
+    objection_type: HORIZON_MISMATCH
+    text: >-
+      What is the transmission lag, and what evidence sets it?
+  # Unable to say what blunts the effect ⇒ a regime, contract or hedge that
+  # dampens it may simply be missing from the model.
+  - question: 4
+    objection_type: REGIME_MODIFIER_MISSING
+    text: >-
+      What contractual, hedging, formula-pricing or regulatory mechanism
+      blunts this?
+  # Unable to place the exposure inside the listed entity ⇒ it may sit in an
+  # unlisted, JV or associate arm, which is the classic false positive.
+  - question: 5
+    objection_type: EXPOSURE_NOT_IN_LISTCO
+    text: >-
+      Is the exposure inside the listed entity, or in an unlisted, JV or
+      associate arm?
+  - question: 6
+    objection_type: OFFSET_IGNORED
+    text: >-
+      Is there an offsetting channel of comparable magnitude in the opposite
+      direction?
+  - question: 7
+    objection_type: ALREADY_PRICED
+    text: >-
+      Was this event already visible in forward curves, consensus estimates
+      or prior reporting?
+  - question: 8
+    objection_type: HORIZON_MISMATCH
+    text: >-
+      Does the direction hold at all three horizons? If not, which dominates
+      and why?
+  # Unable to say whether the dominant parameter is a sector median ⇒ the
+  # claim may be a base rate wearing a company's name.
+  - question: 9
+    objection_type: BASE_RATE_VIOLATION
+    text: >-
+      Is any parameter driving more than half of the result sourced from a
+      sector proxy rather than the company?
+  # A counterfactual nobody can answer ⇒ the causal chain is longer than the
+  # claim admits.
+  - question: 10
+    objection_type: SECOND_ORDER_OVERREACH
+    text: >-
+      If this event were reversed, would the claimed effect substantially
+      reverse?
+
+# ---------------------------------------------------------------------------
+# §12.4 — MODEL DISCIPLINE.
+#
+# `prompt_lineage` is the falsifier's own, and it is deliberately unlike any
+# generator lineage: correlated generator/checker error is the standard
+# failure mode of LLM self-verification, and a shared prompt is the cheapest
+# way to produce it. A run whose generator declares this same lineage records
+# SAME_PROMPT_LINEAGE_AS_GENERATOR as a limitation rather than failing —
+# suppressing the adversary entirely would be worse than running a correlated
+# one, provided the correlation is on the record.
+#
+# `provider` / `model_id` are NULL because nobody has signed off a second
+# provider for this workload and its cost. NOT a default, and not a guess:
+# with both null the falsifier runs on the GENERATOR'S model and records
+# SAME_MODEL_AS_GENERATOR as a limitation, which is exactly what the eval
+# harness needs to split precision by cross-model vs same-model (§12.4).
+# Setting `model_id` without `provider` is refused by `validate_policy`.
+#
+# OWNER-REQUIRED: the cross-model provider and its budget.
+# ---------------------------------------------------------------------------
+model_discipline:
+  prompt_lineage: falsifier-adversary-v1
+  provider: null
+  model_id: null

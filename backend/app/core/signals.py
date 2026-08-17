@@ -36,6 +36,11 @@ class SignalKind(StrEnum):
     EMPIRICAL_CHECK = "EMPIRICAL_CHECK"
     ENTITY_RESOLUTION = "ENTITY_RESOLUTION"
     DISCOVERY = "DISCOVERY"
+    # V5 PHASE 6 (spec §12.3). The ANSWER to an objection, and the only thing
+    # that can stop one being sustained. A widening of §7.1's list, for the
+    # same reason ENTITY_RESOLUTION and DISCOVERY were: the sustaining rule
+    # needs a signal to read, and every existing payload stays valid.
+    REBUTTAL = "REBUTTAL"
 
 
 class SignalPayloadError(ValueError):
@@ -141,6 +146,40 @@ _SCHEMAS: dict[str, dict[str, tuple[bool, Any]]] = {
         "type": (True, Vocab(OBJECTION_TYPES)),
         "severity": (True, Vocab(OBJECTION_SEVERITIES)),
         "sustained": (True, bool),
+        # --- V5 PHASE 6 (spec §12.4), all OPTIONAL -------------------------
+        # WHO raised it and with what. §12.4 requires provider/model to be
+        # recorded on both sides so the eval harness can report precision
+        # separately for same-model and cross-model runs -- correlated
+        # generator/checker error is the standard failure mode of LLM
+        # self-verification, and it is INVISIBLE unless these fields exist.
+        #
+        # Deliberately NOT here: the adversary's prose. An objection is a
+        # typed record, exactly as a rebuttal is; free-form argument is not
+        # admissible in either direction (§12.3).
+        "raised_by": (False, (str, type(None))),
+        "provider": (False, (str, type(None))),
+        "model_id": (False, (str, type(None))),
+        "prompt_lineage": (False, (str, type(None))),
+        # Which of §12.2's ten questions went unanswered, when that is what
+        # raised it. None for an objection the adversary raised directly.
+        "checklist_question": (False, (int, type(None))),
+    },
+    SignalKind.REBUTTAL: {
+        "rebuttal_id": (True, str),
+        # The objection this answers. Required: a rebuttal that names no
+        # objection is a comment.
+        "objection_id": (True, str),
+        # §12.3: "cites a specific record field or evidence id". AT LEAST ONE
+        # of these must be present and non-empty for the rebuttal to COUNT --
+        # enforced in the reducer's fold step, not here, because a rebuttal
+        # that cites nothing must remain CONSTRUCTIBLE and visibly ineffective
+        # rather than un-loggable. A silently refused rebuttal would look, to
+        # the stage that emitted it, exactly like a successful one.
+        "cites_record_field": (False, (str, type(None))),
+        "cites_evidence_id": (False, (str, type(None))),
+        # Allowed, and never load-bearing. A human reading the ledger wants
+        # the sentence; the RULE reads only the citation.
+        "note": (False, (str, type(None))),
     },
     SignalKind.EMPIRICAL_CHECK: {
         "status": (True, Vocab(EMPIRICAL_STATUSES)),

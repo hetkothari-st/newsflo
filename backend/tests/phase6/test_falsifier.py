@@ -70,9 +70,13 @@ def answered(*, unanswerable: tuple[int, ...] = ()) -> dict:
 def falsifier_for(policy, response: str, *, model_id: str | None = None):
     from app.analysis.falsifier.engine import Falsifier
 
+    # A model id needs its provider -- `validate_policy` refuses half a
+    # routing decision, so a test cannot configure one either.
     return Falsifier(
         client=ScriptedClient(response),
-        policy=replace(policy, model_id=model_id) if model_id else policy,
+        policy=(replace(policy, model_id=model_id,
+                        provider=FIXTURE_FALSIFIER_PROVIDER)
+                if model_id else policy),
         generator_provider=FIXTURE_GENERATOR_PROVIDER,
         generator_model_id=FIXTURE_GENERATOR_MODEL,
         generator_prompt_lineage=FIXTURE_GENERATOR_LINEAGE)

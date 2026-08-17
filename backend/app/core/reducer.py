@@ -667,12 +667,58 @@ def reduce_company_impact(signals: Sequence[Signal],
         if proxy_param and current_status != "UNBOUND":
             weakest_link = f"{proxy_param}:SECTOR_PROXY"
 
-    # --- 6. objections -----------------------------------------------------
-    objections = sorted(
-        ({"objection_id": str(p["objection_id"]), "type": str(p["type"]),
-          "severity": str(p["severity"]), "sustained": bool(p["sustained"])}
-         for p in _payloads(ordered, SignalKind.OBJECTION)),
-        key=lambda o: o["objection_id"])
+    # --- 6. objections, and the rebuttals that answer them ------------------
+    #
+    # V5 PHASE 6 / spec §12.3. THE BURDEN OF PROOF SITS ON PUBLICATION: an
+    # objection is sustained unless a rebuttal signal exists that cites a
+    # specific record FIELD or EVIDENCE ID. Two rules make that real, and
+    # both are structural rather than instructed:
+    #
+    #   * a rebuttal citing nothing is not a rebuttal (free-form argument is
+    #     inadmissible -- the phase file's second DO NOT). The signal is
+    #     still constructible and still logged; it simply counts for nothing;
+    #   * a rebuttal from the SAME STAGE that raised the objection is not a
+    #     rebuttal (the falsifier may not answer itself -- the first DO NOT).
+    #     Stated as a general rule rather than a special case for the
+    #     falsifier: any stage marking its own homework is the same defect.
+    #
+    # A signal set with no REBUTTAL in it reduces exactly as it did before
+    # Phase 6, which is every signal set in production today.
+    rebuttals_by_objection: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+    for candidate in ordered:
+        if candidate.kind != SignalKind.REBUTTAL:
+            continue
+        payload = candidate.payload
+        if not (payload.get("cites_record_field") or payload.get("cites_evidence_id")):
+            continue
+        rebuttals_by_objection.setdefault(
+            str(payload["objection_id"]), []).append((candidate.stage, payload))
+
+    objections = []
+    for signal in ordered:
+        if signal.kind != SignalKind.OBJECTION:
+            continue
+        payload = signal.payload
+        objection_id = str(payload["objection_id"])
+        answered = [rebuttal for stage, rebuttal
+                    in rebuttals_by_objection.get(objection_id, ())
+                    if stage != signal.stage]
+        entry = {
+            "objection_id": objection_id, "type": str(payload["type"]),
+            "severity": str(payload["severity"]),
+            "sustained": bool(payload["sustained"]) and not answered,
+            "rebutted_by": sorted(str(r["rebuttal_id"]) for r in answered),
+        }
+        # §12.4's provenance travels with the objection when the raising
+        # stage recorded it. Absent keys stay absent rather than becoming
+        # nulls -- "the stage did not say" and "the stage said nothing" are
+        # the same fact here, and inventing a key for it adds no information.
+        for key in ("raised_by", "provider", "model_id", "prompt_lineage",
+                    "checklist_question"):
+            if payload.get(key) is not None:
+                entry[key] = payload[key]
+        objections.append(entry)
+    objections.sort(key=lambda o: o["objection_id"])
 
     empirical = _payloads(ordered, SignalKind.EMPIRICAL_CHECK)
     empirical_status = str(empirical[0]["status"]) if empirical else None
