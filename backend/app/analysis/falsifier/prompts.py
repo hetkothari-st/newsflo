@@ -12,9 +12,21 @@ from config), never asks for a number, and never asks for an argument. It
 asks for ten structured answers, each with a citation into the record set it
 was handed, plus typed objections drawn from a closed list. Everything it
 returns that is not one of those is discarded by `engine.py`.
+
+STATIC PREFIX THEN DYNAMIC SUFFIX (V5 Phase 7, spec section 18). The template
+below is split in two so the property can be CHECKED rather than promised:
+`_STATIC` holds the persona, the rules, the questions, the closed objection
+taxonomy and the response schema -- all of which come from
+`config/falsifier.yaml` and are identical for every candidate -- and
+`_DYNAMIC` holds the record set, which is different every time. Placing the
+record set first would destroy the provider's prefix cache and nothing would
+fail; `eval/prompt_audit.py` is what makes that visible.
+
+The split is a REFACTOR, not a prompt change: `_STATIC + _DYNAMIC` is
+byte-identical to the template that shipped in Phase 6, and a test pins that.
 """
 
-CHECKLIST_PROMPT = """You are the ADVERSARY on a research desk.
+_STATIC = """You are the ADVERSARY on a research desk.
 
 A colleague has produced the record below, claiming that one listed company
 is materially affected by one event. Your job is NOT to agree with it. Your
@@ -47,13 +59,27 @@ Return JSON and nothing else:
   "objections": [{{"type": "...", "question": 1}}]}}
 
 RECORD SET
-{record_set}
 """
+
+_DYNAMIC = """{record_set}
+"""
+
+#: The whole prompt, kept as one name for anything that reads the template.
+CHECKLIST_PROMPT = _STATIC + _DYNAMIC
+
+
+def build_prompt_parts(record_set_json: str, questions,
+                       objection_types) -> tuple[str, str]:
+    """(cacheable static prefix, dynamic suffix). Concatenating them in this
+    order is the prompt; concatenating them in the other order is a bill."""
+    numbered = "\n".join(f"{q.question}. {q.text}" for q in questions)
+    types = "\n".join(f"  {name}" for name in objection_types)
+    static = _STATIC.format(question_count=len(questions), questions=numbered,
+                            objection_types=types)
+    return static, _DYNAMIC.format(record_set=record_set_json)
 
 
 def build_prompt(record_set_json: str, questions, objection_types) -> str:
-    numbered = "\n".join(f"{q.question}. {q.text}" for q in questions)
-    types = "\n".join(f"  {name}" for name in objection_types)
-    return CHECKLIST_PROMPT.format(
-        question_count=len(questions), questions=numbered,
-        objection_types=types, record_set=record_set_json)
+    static, dynamic = build_prompt_parts(record_set_json, questions,
+                                         objection_types)
+    return static + dynamic
