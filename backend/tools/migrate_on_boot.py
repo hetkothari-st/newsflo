@@ -38,6 +38,12 @@ still installed on SQLite (see `check_gated_row_triggers`) -- the one thing
 a future migration can silently destroy without any test or runtime path
 noticing.
 
+Before the upgrade it asserts the alembic revision graph still has exactly
+ONE head (see `check_single_head`). That one is about the script directory
+rather than the database, which is why it runs first: a graph forked by two
+sessions authoring migrations in parallel makes every upgrade path below
+fail, with a message that names no revision.
+
 Exits non-zero and logs loudly on any failure -- a container that cannot
 migrate must NOT come up serving a half-migrated schema. Run it before
 uvicorn (see the repo Dockerfile's CMD).
@@ -373,6 +379,90 @@ def _assert_ripple_guard(url: str, scheme: str) -> None:
     raise RippleGuardMissing(message)
 
 
+# ---------------------------------------------------------------------------
+# Migration-graph backstop -- ADDITIVE again, and the first of these five that
+# polices the SCRIPT DIRECTORY rather than the database.
+# ---------------------------------------------------------------------------
+# Two sessions adding a migration in parallel both write `down_revision =
+# '00NN'`, and the revision graph forks: two heads, neither wrong on its own.
+# `alembic upgrade head` then refuses ("Multiple head revisions are present")
+# with a message that names no revision, and the four checks below never run
+# because the upgrade never completed. Worse, a fork can reach a reviewer
+# unnoticed -- nothing in the suite reads the graph, and every migration test
+# that upgrades a throwaway database fails identically and unhelpfully.
+#
+# This check reads the graph itself, so it can say WHICH heads exist, and it
+# runs BEFORE the upgrade (unlike the four trigger backstops, which can only
+# be true of a database that is already at head).
+ALEMBIC_DIR = BACKEND_DIR / "alembic"
+
+
+class MultipleMigrationHeads(RuntimeError):
+    """The alembic revision graph has forked (or has no head at all)."""
+
+
+def migration_heads(script_location: "str | Path | None" = None) -> tuple[str, ...]:
+    """Every head revision in the alembic script directory, sorted.
+
+    Reads `alembic.script.ScriptDirectory` directly rather than shelling out
+    to `alembic heads`: no subprocess, no config file, and usable against any
+    directory -- which is what lets the self-test point it at a synthetic
+    fork built in a tmp dir.
+    """
+    from alembic.script import ScriptDirectory
+
+    location = Path(script_location) if script_location else ALEMBIC_DIR
+    return tuple(sorted(ScriptDirectory(str(location)).get_heads()))
+
+
+def check_single_head(
+        script_location: "str | Path | None" = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Same `(status, names)` contract as the four checks above, with status
+    in {"ok", "multiple_heads", "no_head"}. `names` is always every head
+    found, so a caller can report them whether or not it failed."""
+    heads = migration_heads(script_location)
+    if len(heads) == 1:
+        return "ok", heads
+    return ("no_head" if not heads else "multiple_heads"), heads
+
+
+def _assert_single_head(script_location: "str | Path | None" = None) -> None:
+    """Fail the boot on a forked revision graph, naming the heads.
+
+    Loud and early on purpose: the alternative is `alembic upgrade head`
+    failing with a message that names nothing, on a container that then
+    restart-loops.
+    """
+    status, heads = check_single_head(script_location)
+    if status == "ok":
+        logger.info("[migrate] alembic revision graph has a single head (%s)",
+                    heads[0])
+        return
+
+    if status == "no_head":
+        message = (
+            "[migrate] FATAL: the alembic script directory reports NO head "
+            "revision. Either the versions directory is empty or every "
+            "revision is referenced as somebody's down_revision (a cycle); "
+            "refusing to start against a schema history that cannot be "
+            "resolved.")
+    else:
+        message = (
+            "[migrate] FATAL: the alembic revision graph has FORKED -- "
+            + str(len(heads)) + " head revisions are present: "
+            + ", ".join(heads)
+            + ". Two migrations were almost certainly authored in parallel "
+            "against the same down_revision. `alembic upgrade head` cannot "
+            "resolve this and will refuse; fix it by re-pointing one "
+            "revision's down_revision at the other (or by adding a merge "
+            "revision), NOT by stamping. Refusing to start with an "
+            "unresolvable schema history.")
+    logger.error(message)
+    print(message, file=sys.stderr)
+    raise MultipleMigrationHeads(message)
+
+
 def _database_url() -> str:
     """Same resolution order as every other entrypoint (app/db.py,
     alembic/env.py): DATABASE_URL wins, else settings' own default."""
@@ -445,6 +535,11 @@ def migrate_on_boot(url: str | None = None) -> str:
     url = url or _database_url()
     # Never log the URL itself: a Postgres DSN carries the password.
     scheme = url.split("://", 1)[0]
+    # Pre-upgrade graph assertion. Deliberately BEFORE the alembic run: a
+    # forked graph makes every upgrade path below fail anyway, and it fails
+    # naming nothing. This names the heads. Additive; the four post-upgrade
+    # trigger backstops are untouched.
+    _assert_single_head()
     tables = _table_names(url)
 
     if "alembic_version" in tables:
