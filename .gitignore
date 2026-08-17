@@ -4,6 +4,15 @@
 .playwright-mcp/
 api_keys.txt
 
+# The root dev SQLite DB. backend/.gitignore already covers the canonical
+# backend/newsflo.db; a second copy accumulates here and showed up untracked in
+# every `git status`, which is the noise that makes a real stray file easy to
+# miss. Anchored to the root and named exactly, NOT a bare `*.db`: a blanket
+# rule would silently ignore a database somebody later means to track, and
+# SESSION_PROTOCOL.md section 7's "never stage a *.db" is the rule that covers
+# the general case.
+/newsflo.db
+
 # Ripple-exposure bootstrap: acquired annual-report PDFs and their extracted
 # text layer. 670MB+ of exchange-hosted primary documents. The provenance
 # (source.json: url, retrieval timestamp, sha256) and the findings ARE
