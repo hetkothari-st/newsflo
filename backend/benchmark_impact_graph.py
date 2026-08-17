@@ -34,21 +34,36 @@ import sys
 import time
 from pathlib import Path
 
+from app.analysis.impact_graph.normalize import normalize_node_id
 from app.db import SessionLocal
 
 
-def _norm(name: str) -> str:
-    return name.lower().replace(" ", "_")
-
-
 def _path_recall(expected_paths, edges) -> float:
+    """Fraction of labelled causal paths whose steps appear in the produced
+    edge set, scored in the vocabulary the engine actually PERSISTS.
+
+    Both sides go through `normalize_node_id` -- the engine's own write-time
+    transform -- rather than through a local `.lower().replace(" ", "_")`.
+    That partial reimplementation saw only the pre-snake and none of the
+    phrase-merge / singular / direction rules, so a fixture step written as
+    "lending_rates" (persisted `interest_rate`) or "consumer_spending"
+    (persisted `consumer_demand`) never matched, in either substring
+    direction, and understated recall on exactly the rate-change and
+    consumption chains.
+
+    `normalize.py` imports only `re`, so this stays inside the benchmark's
+    no-side-effect contract. No identity fallback here on purpose: unlike
+    `scripts/measure_shock_defaults.py`, this file already imports `app.*`
+    freely, so an ImportError should be LOUD.
+    """
     if not expected_paths:
         return 1.0
-    edge_pairs = {( _norm(e["parent_id"]), _norm(e["child_id"]) ) for e in edges}
+    edge_pairs = {(normalize_node_id(e["parent_id"]), normalize_node_id(e["child_id"]))
+                  for e in edges}
     nodes = {n for pair in edge_pairs for n in pair}
 
     def node_present(label: str) -> bool:
-        label = _norm(label)
+        label = normalize_node_id(label)
         return any(label in n or n in label for n in nodes)
 
     hits = 0
