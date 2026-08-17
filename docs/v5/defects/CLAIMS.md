@@ -8,6 +8,24 @@ worktree copy may be stale, BEFORE creating any `DEFECTS-NNN-*.md`.
 Established 2026-08-17, after `DEFECTS-003` was written by one session while
 another was independently working the register. Nothing collided, by timing.
 
+> ### THIS LEDGER SHIPPED WITH THE COLLISION IT EXISTS TO PREVENT
+>
+> The first version of this file recorded `DEFECTS-003` as holding **D11–D13**
+> and listed **D14 as the next unclaimed number**. `DEFECTS-003` contains
+> **D14** (`_prior` returns `0.0` for a candidate with no `share_of_base`).
+> A session reading this ledger would have minted D14 and overwritten live
+> work — the exact failure the ledger was written to stop.
+>
+> Nothing was miscounted upstream: `DEFECTS-003`'s own header states its
+> claimed range as `D11`–`D14`, and that it had already shifted every id up by
+> one after colliding with `DEFECTS-002` on D10. **The error was transcription
+> into this file**, made while reading the source that says otherwise.
+>
+> **So: read the D-range off the defect FILE, and treat this table as an index
+> that can be stale.** A ledger is a copy of a fact, and §7.4 applies to it
+> like anything else — the file is authoritative, this is the pointer. If they
+> disagree, the file wins and this table is wrong.
+
 ## Namespace 1 — the FILE number (`DEFECTS-NNN`)
 
 | file | topic | raised by | status |
@@ -28,14 +46,16 @@ range of D-numbers, and this is where the next collision comes from.
 |---|---|---|
 | D1–D9 | `DEFECTS-001` | priority order D5, D1, D2, D3, D4, D6, D7, D9, D8 |
 | D10 | `DEFECTS-002` | the writer-side twin of D1–D9's **D2** |
-| D11–D13 | `DEFECTS-003` | |
-| **D14** | — | **next unclaimed D-number** |
+| D11–D14 | `DEFECTS-003` | D11.1 is a sub-item of D11, not a separate claim |
+| **D15** | — | **next unclaimed D-number** |
 
 A session raising a new defect claims **both**: a `DEFECTS-NNN` file number if
 it is starting a file, and a `DN` range from the row above. Take the D-range
 from this table, never from the highest number in the file you happen to be
 editing — `DEFECTS-002`'s highest is D10 and `DEFECTS-003`'s is D13, so a
 session reading only the former would mint D11 and overwrite live work.
+That is not hypothetical: this table itself got the range wrong once, see the
+header.
 
 ## Rules
 

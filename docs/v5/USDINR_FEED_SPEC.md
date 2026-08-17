@@ -2,6 +2,20 @@
 
 **Status:** DESIGN ONLY. Nothing implemented, no row written, `mechanism_edge`
 untouched.
+
+> ### SUPERSEDED FOR IMPLEMENTATION — read `BUILD-001-usdinr-feed.md`
+> *Pointer added 2026-08-17 by the merge-integration session.*
+>
+> `BUILD-001` declares itself superseding this document for implementation
+> purposes, and the two **disagree on the company count**: this spec says
+> **15 publish**; `BUILD-001` §4.2 says **20**. BUILD-001 is later and is
+> authoritative. This document remains the reasoning — the leaf-to-sign
+> mapping, the Goodyear exclusion argument and the natural-hedge MIXED case
+> are all still current and are not restated there.
+>
+> Recorded rather than reconciled: editing the count here would make one of
+> the two numbers unattributable, and per `SESSION_PROTOCOL.md` §7.4 the fix
+> for a duplicated status is a pointer with a date, not a second edit.
 **Question answered:** could a rupee story render this week, with **no acquisition**?
 **Answer: yes for 15 companies, and the direction is determinable per company.**
 

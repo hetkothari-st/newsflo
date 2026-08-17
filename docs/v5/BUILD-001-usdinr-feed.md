@@ -703,3 +703,171 @@ probe's coarse mapping rather than the ledger, and Delhivery is rendered as an
 
 **One human judgement per story. Everything downstream deterministic. No magnitude
 anywhere.**
+
+---
+
+# APPENDIX — OWNER RULINGS AND IMPLEMENTER CORRECTIONS, 2026-08-17
+
+**Appended by the merge-integration session. Nothing above is edited.** B wrote
+this document against a tree it could not read; three of its premises moved
+under it. Each is corrected here rather than in place, so the original stays
+legible and the correction stays attributable.
+
+## A1 · A FOURTH LAYER: the edges must be APPROVED, not merely authored
+
+**Owner ruling. Not negotiable, and no exemption will be added to make the
+build easier.**
+
+§4.1 says the three edges *"must be authored"*. Since `f536c884`, **authoring
+is no longer sufficient**:
+
+* `traverse._SELECT` and `traverse.usable()` both require
+  `review_status = 'APPROVED'` **and** `reviewed_by IS NOT NULL`, for **every**
+  derivation. The `AUTHORED` exemption was deleted, not narrowed (defect D10).
+* `authored_edges.load_authored_edges` writes `review_status = 'PENDING'` and
+  `reviewed_by = NULL` **always**, by design — running the loader is explicitly
+  **not** the approval act.
+
+So loading the manifest yields **edges that are inert on the walk and visible in
+`edge_review.pending_edges`**, and the feed renders **nothing** until each is
+approved. Layer 3 becomes:
+
+```
+3.  author the edges  -> config/mechanism_edges_authored.yaml, derivation: AUTHORED
+3b. LOAD them         -> load_authored_edges(strict=False)      [inert + queued]
+3c. APPROVE each one  -> edge_review.approve_edge(edge_id, reviewed_by="human:<name>")
+                         SEPARATE ACTS, by the repo owner, one per edge
+```
+
+**`derivation: AUTHORED` must stay explicit in the manifest** (§4.1 already
+writes it). The loader now defaults an undeclared entry to `MODEL_PROPOSED`;
+these are human-authored and should say so. The label is provenance and changes
+nothing about walkability — approval does.
+
+**Handover procedure:** the owner reads each edge's `mechanism:` text and its
+`source_url` before approving. Identical to the two crude→tyres rows
+(`ed030571…`, `ca78e5c5…`), which are sitting in exactly this state now.
+
+## A2 · BRITANNIA — publish the figure. Do not build a suppression rule
+
+**Owner ruling, reversing the direction §5.2 implies.** §5.2 says Britannia's
+*"(2% to 3% of total sales)"* **must not be rendered**. The mechanism that would
+need — a render-time filter — **is not to be built.** Three reasons; the third
+decides it:
+
+1. **It breaks the verbatim gate.** Deleting the parenthetical leaves a string
+   that is not a contiguous substring of the filing, so containment fails. The
+   only legal trim is a shorter true span (`"The Company has export sales"`),
+   which discards the entire informative content.
+2. **Suppression asserts something falser than the number does.** Trimmed, a
+   2–3% export exposure is typographically identical to a 60% one. The tier's
+   honest claim is *"exposed, direction known, magnitude unknown"* — but here
+   the magnitude **is** known, disclosed by the company. Hiding it converts
+   "we did not size this" into "we did not size this, and we will not tell you
+   the company already did".
+3. **That figure is the only signal a reviewer has that Britannia is a marginal
+   inclusion.** Trimming deletes the evidence that would reveal the problem —
+   the §7.3 disease, one layer up.
+
+**The architecture is the defence, exactly as §B.5 item 1 says:** the
+qualitative exposure row has **no magnitude field**, so the number cannot be
+ranked on, bucketed, aggregated or weighted. It is a quoted disclosure
+attributed to Britannia, not a system estimate. "The sized tier by the back
+door" requires the number to be **consumed**, not displayed.
+
+**Implementation consequence:** no magnitude column; excerpt stored and rendered
+whole; figure visible. If Britannia reads weak to an analyst, that is the system
+working.
+
+## A3 · `fx:usd_debt_share` IS DROPPED from this build
+
+**Owner ruling.** 3 usable of 15 pairs, and one of those three (ASIANPAINT) is a
+**JPY** ECB filed against a leaf named USD. Fixing it costs a vocabulary change
+plus a `valid_exposure_tag` resync migration (**a claim — `0018` is
+unclaimed**), for the weakest leg in the feed.
+
+**Ship the two working legs**: `fx:usd_cost_share` (NEGATIVE) and
+`fx:usd_revenue_share` (POSITIVE). §4.1 drops from three edges and three labels
+to **two and two**; `FOREIGN CURRENCY DEBT` is not authored.
+
+**Recorded as a leaf-vocabulary failure — the third instance**, of exactly the
+class `PATCH-001`'s own rule was written to catch: *name the leaf in the buyer's
+vocabulary, and sweep before authoring*. `steel_flat` and `steel_long` were the
+first two. `usd_debt_share` fails differently — not wrong granularity but
+**wrong currency scope**: a leaf naming one currency for a disclosure class that
+is inherently multi-currency. A rename to `fx:foreign_debt_share` is the likely
+fix and is out of scope here.
+
+## A4 · ITEM 1 — THREE DEFECTS IN THE SPECIFIED CODE, found by tracing
+
+§1.3's snippet does not work as written. All three live in the reducer, and all
+three are invisible without reading `_MATERIALITY_WEIGHT`, `_MATERIALITY_RANK`
+and both `material` filters together.
+
+### A4.1 `_MATERIALITY_WEIGHT` is not named, and omitting it is a CRASH
+
+§1.3 adds `NOT_SIZED` to `_MATERIALITY_RANK` only. But `reducer.py:530–533`
+sums `_MATERIALITY_WEIGHT[c["materiality"]]` over `material`, and
+`reducer.py:469` defines `material` as `materiality != "NONE"` — so a
+`NOT_SIZED` channel **is** material and reaches that dict.
+
+**`KeyError` on the first qualitative company.** Not a wrong answer: a crash.
+
+### A4.2 …and weighting it `0.0` is worse than the crash
+
+With `_MATERIALITY_WEIGHT["NOT_SIZED"] = 0.0`, `positive_weight` and
+`negative_weight` are both `0`, so the fold at `reducer.py:536–545` falls past
+`elif positive_weight` into **`else: net_effect = NET_NEGATIVE`**.
+
+**Every qualitative company publishes NEGATIVE regardless of its actual
+direction** — including the POSITIVE export names this feed exists to surface —
+and `sign_consistency` becomes `0.0`, which fails `min_sign_consistency: 0.60`
+and kills the tier anyway. Wrong answer *and* dead feed, from one missing dict
+entry.
+
+**It needs a non-zero weight.** `1.0` makes direction fold by **channel count
+per side**, which is the correct semantics for a tier with no magnitudes: every
+unsized channel is one vote.
+
+### A4.3 the bucket assignment still yields `NO_MATERIAL_IMPACT`
+
+§1.3's branch:
+
+```python
+if not channels:                    materiality_bucket = NOT_SIZED
+elif materiality_bucket == "NONE":  materiality_bucket = "NO_MATERIAL_IMPACT"
+```
+
+A qualitative company **does** emit a CHANNEL (§1.3 says so), so `not channels`
+is False. With `_MATERIALITY_RANK["NOT_SIZED"] = 0` the max-loop never lifts the
+bucket above its `"NONE"` seed, so control reaches the `elif` and lands on
+**`NO_MATERIAL_IMPACT` — the exact defect D11 exists to remove.**
+
+The branch must test for `NOT_SIZED` explicitly rather than infer it from
+"no channels".
+
+**B's two stated couplings are both real and both still apply** — the `NONE`
+spelling killing `mechanism_id` via invariant 7, and `weight_for` raising on a
+bucket absent from `horizons.yaml`. These three are *in addition*, which makes
+**five** couplings on a change described as three lines.
+
+## A5 · STALE REFERENCES CORRECTED
+
+| in this document | reality on master |
+|---|---|
+| §D.3 "a live noise bug this audit exposes" — `_industry_of` keying on `sub_sector OR sector` | **ALREADY FIXED** in `4d408bc7`, with a fall-through B did not propose (`official_isubgroup` → `sub_sector` → `sector`; the first alone strands 652 companies on `_extend_peer_closure`'s falsy-industry skip). Same key applied to `exposure_coverage` in migration `0017`. **Do not fix again.** |
+| §6.2 B "Delhivery retag… **No ledger row exists**, so the correction is free today" | **FALSE, and the patch is a no-op.** Delhivery HAS a `company_exposure` row and it **already carries `input:bought_in_freight`**, the target tag. The `input:freight_diesel` rows belong to **CONCOR.NS** and **VRLLOG.NS** — the migration risk is live for those two, not for Delhivery. |
+| §6.1 PATCH-001 steel — "both leaves have ZERO rows" | **HOLDS.** Re-verified: `input:steel_flat` and `input:steel_long` each have 0 `company_exposure` and 0 `mechanism_edge` rows. Still a free rename — but it needs a `valid_exposure_tag` resync migration, so it needs a claim. |
+
+## A6 · MIGRATION CLAIMS THIS BUILD NEEDS AND DOES NOT HAVE
+
+`docs/v5/MIGRATION_CLAIMS.md` shows **`0018` UNCLAIMED**, and §2 forbids a
+session minting one.
+
+| item | migration | status |
+|---|---|---|
+| **2** — `member_evidence` | a new qualitative exposure table | **BLOCKED on a claim** |
+| **6.1** — PATCH-001 steel | `valid_exposure_tag` resync (precedent `0016`) | **BLOCKED on a claim** |
+| A3, if `fx:usd_debt_share` is ever renamed | `valid_exposure_tag` resync | out of scope |
+
+**Items 1 and 3 need no migration and are unblocked.**
