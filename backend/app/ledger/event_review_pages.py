@@ -101,14 +101,24 @@ def _objections(entries: Sequence[Mapping[str, Any]]) -> str:
             f"{_esc(r.get('cites_record_field') or r.get('cites_evidence_id'))}"
             f"</div>" for r in (entry.get("rebuttals") or ()))
         state = "sustained" if entry.get("sustained") else "not sustained"
+        # WHICH QUESTION RAISED IT (review round 1, M-1). "The adversary
+        # judged this immaterial" and "nobody could answer question 1" are
+        # different findings that share one objection type, and only this
+        # column separates them -- which is exactly the evidence an owner
+        # needs to rule on the Q1/Q9 mapping (DATA_GAPS §10.7).
+        question = entry.get("checklist_question")
+        raised = ("<span class='meta'>raised directly</span>" if question is None
+                  else f"unanswered question {_esc(question)}")
         rows.append(
             f"<tr><td><code>{_esc(entry.get('type'))}</code></td>"
             f"<td>{_esc(entry.get('severity'))}</td>"
+            f"<td>{raised}</td>"
             f"<td>{state}{answered}</td>"
             f"<td class='meta'>{_esc(entry.get('raised_by'))} "
             f"{_esc(entry.get('model_id'))}</td></tr>")
-    return ("<table><tr><th>type</th><th>severity</th><th>resolution</th>"
-            "<th>raised by</th></tr>" + "".join(rows) + "</table>")
+    return ("<table><tr><th>type</th><th>severity</th><th>why</th>"
+            "<th>resolution</th><th>raised by</th></tr>"
+            + "".join(rows) + "</table>")
 
 
 def _channels(entries: Sequence[Mapping[str, Any]]) -> str:
@@ -197,7 +207,8 @@ def _label_form(event_id: str, view: Mapping[str, Any]) -> str:
 <form method='post' action='/event/label'>
  <input type='hidden' name='event_id' value='{_esc(event_id)}'>
  <input type='hidden' name='company_ref' value='{_esc(view['ticker'])}'>
- <label>label <select name='label'>{_options(REVIEW_LABELS)}</select></label>
+ <label>label
+  <select name='label'>{_options(REVIEW_LABELS, blank=True)}</select></label>
  <label>expected tier <select name='expected_tier'>{tiers}</select></label>
  <label>expected direction
   <select name='expected_direction'>{_options(DIRECTIONS, blank=True)}</select></label>

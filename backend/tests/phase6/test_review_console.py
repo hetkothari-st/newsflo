@@ -89,7 +89,7 @@ def seeded(phase6_engine):
             objections=([{"objection_id": "falsifier:q6:OFFSET_IGNORED",
                           "type": "OFFSET_IGNORED", "severity": "MAJOR",
                           "sustained": True, "rebutted_by": [],
-                          "raised_by": "falsifier"}]
+                          "raised_by": "falsifier", "checklist_question": 6}]
                         if row["ticker"] == "FIXINT" else []))
         persist_company_impact(session, record, reducer_run_seq=1)
 
@@ -256,6 +256,25 @@ def test_objections_are_shown_with_their_resolution(client):
     body = client.get(f"/event?event_id={EVENT_ID}").text
     assert "OFFSET_IGNORED" in body
     assert "sustained" in body.lower()
+
+
+def test_an_objection_shows_which_checklist_question_raised_it(client):
+    """REVIEW ROUND 1, M-1. `checklist_question` is what separates "the
+    adversary judged this immaterial" from "nobody could answer question 1",
+    and those are different findings -- the distinction the owner needs in
+    front of them to rule on the Q1/Q9 mapping (DATA_GAPS section 10.7)."""
+    body = client.get(f"/event?event_id={EVENT_ID}").text
+    assert "unanswered question 6" in body
+
+
+def test_the_label_select_opens_on_no_choice(client):
+    """REVIEW ROUND 1, M-6. Without a blank default the first entry
+    (CORRECT) is pre-selected, so a mis-click records agreement -- the one
+    direction of error a corpus must not have a bias toward."""
+    body = client.get(f"/event?event_id={EVENT_ID}").text
+    marker = "<select name='label'>"
+    assert marker in body
+    assert body.split(marker, 1)[1].startswith("<option value=''>")
 
 
 def test_the_console_renders_the_zero_primary_state_when_nothing_publishes(

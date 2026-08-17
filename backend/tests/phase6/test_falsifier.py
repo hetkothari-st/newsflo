@@ -268,6 +268,39 @@ def test_a_free_text_only_rebuttal_leaves_the_objection_sustained():
     assert impact.publication_tier == "REJECTED"
 
 
+def test_a_whitespace_only_citation_is_not_a_citation():
+    """REVIEW ROUND 1, I-1. The mirror of the free-text test, and the one
+    that actually bit: the reducer's citation check was truthiness-only, so
+    `"   "` is truthy, un-sustained a BLOCKING objection and published the
+    draft PRIMARY. The checklist parser had stripped since Phase 6; the
+    load-bearing side had not."""
+    impact = reduce_with([
+        blocking_objection_signal(),
+        rebuttal_signal({"rebuttal_id": "fixture-reb-7",
+                         "objection_id": "falsifier:ENTITY_WRONG",
+                         "cites_record_field": "   "}),
+    ])
+
+    entry = next(o for o in impact.objections
+                 if o["objection_id"] == "falsifier:ENTITY_WRONG")
+    assert entry["sustained"] is True
+    assert entry["rebutted_by"] == []
+    assert impact.publication_tier == "REJECTED"
+
+
+def test_a_whitespace_only_evidence_citation_is_not_a_citation():
+    impact = reduce_with([
+        blocking_objection_signal(),
+        rebuttal_signal({"rebuttal_id": "fixture-reb-8",
+                         "objection_id": "falsifier:ENTITY_WRONG",
+                         "cites_evidence_id": "\t\n "}, stage="EVIDENCE"),
+    ])
+    entry = next(o for o in impact.objections
+                 if o["objection_id"] == "falsifier:ENTITY_WRONG")
+    assert entry["sustained"] is True
+    assert impact.publication_tier == "REJECTED"
+
+
 def test_a_rebuttal_from_the_objecting_stage_is_not_a_rebuttal():
     """DO NOT: "Do not let the falsifier rebut itself." Even a
     perfectly-cited rebuttal from the stage that raised the objection is
@@ -310,22 +343,35 @@ def test_a_rebuttal_signal_must_name_the_objection_it_answers():
 # rebuttal emission -- the stages that hold the cited data
 # ---------------------------------------------------------------------------
 
+OFFSET_OBJECTION = {"objection_id": "falsifier:q6:OFFSET_IGNORED",
+                    "type": "OFFSET_IGNORED", "severity": "MAJOR",
+                    "sustained": True}
+
+
+def offset_record(net_effect: str | None, *channels) -> dict:
+    return {"fundamental": {"net_effect": net_effect,
+                            "channels": [dict(c) for c in channels]},
+            "evidence": {"claim_bindings": []}}
+
+
+def offset_rebuttals(record):
+    from app.analysis.rebuttal import rebuttals_for
+
+    return rebuttals_for([OFFSET_OBJECTION], record, event_id=FIXTURE_EVENT_ID,
+                         company_id=FIXTURE_COMPANY_ID,
+                         analysis_version=FIXTURE_ANALYSIS_VERSION,
+                         created_at=FIXTURE_NOW)
+
+
 def test_an_offset_objection_is_rebutted_by_the_offsetting_channel():
     """The sensitivity stage HOLDS the offsetting channel, so it is the stage
     that can cite one. The rebuttal names the channel_id."""
-    from app.analysis.rebuttal import rebuttals_for
-
-    objection = {"objection_id": "falsifier:q6:OFFSET_IGNORED",
-                 "type": "OFFSET_IGNORED", "severity": "MAJOR", "sustained": True}
-    record = {"fundamental": {"channels": [
+    signals = offset_rebuttals(offset_record(
+        "NEGATIVE",
         {"channel_id": "fixture-cost", "direction": "NEGATIVE", "material": True},
-        {"channel_id": "fixture-realization", "direction": "POSITIVE", "material": True},
-    ]}, "evidence": {"claim_bindings": []}}
+        {"channel_id": "fixture-realization", "direction": "POSITIVE",
+         "material": True}))
 
-    signals = rebuttals_for([objection], record, event_id=FIXTURE_EVENT_ID,
-                            company_id=FIXTURE_COMPANY_ID,
-                            analysis_version=FIXTURE_ANALYSIS_VERSION,
-                            created_at=FIXTURE_NOW)
     assert len(signals) == 1
     payload = dict(signals[0].payload)
     assert payload["objection_id"] == "falsifier:q6:OFFSET_IGNORED"
@@ -333,21 +379,67 @@ def test_an_offset_objection_is_rebutted_by_the_offsetting_channel():
     assert signals[0].stage == "SENSITIVITY"
 
 
+def test_the_offset_rebuttal_cites_the_channel_opposite_to_the_headline():
+    """REVIEW ROUND 1, M-3. The offset is the channel pointing AGAINST the
+    claim, so a POSITIVE record must be rebutted with its NEGATIVE channel.
+    Citing the first POSITIVE channel regardless of the headline named the
+    wrong one about half the time -- and a rebuttal that cites a channel
+    AGREEING with the claim is not a rebuttal, it is a restatement."""
+    signals = offset_rebuttals(offset_record(
+        "POSITIVE",
+        {"channel_id": "fixture-cost", "direction": "NEGATIVE", "material": True},
+        {"channel_id": "fixture-realization", "direction": "POSITIVE",
+         "material": True}))
+
+    assert len(signals) == 1
+    assert "fixture-cost" in dict(signals[0].payload)["cites_record_field"]
+
+
+def test_the_offset_rebuttal_ignores_an_immaterial_opposing_channel():
+    assert offset_rebuttals(offset_record(
+        "NEGATIVE",
+        {"channel_id": "fixture-cost", "direction": "NEGATIVE", "material": True},
+        {"channel_id": "fixture-realization", "direction": "POSITIVE",
+         "material": False})) == ()
+
+
+def test_a_record_claiming_no_direction_cannot_rebut_an_offset_objection():
+    """MIXED and UNCERTAIN make no directional claim, so there is no
+    direction for an offset to oppose. The objection stands -- which is the
+    default this whole rule exists to preserve."""
+    for net_effect in ("MIXED", "UNCERTAIN", None):
+        assert offset_rebuttals(offset_record(
+            net_effect,
+            {"channel_id": "fixture-cost", "direction": "NEGATIVE", "material": True},
+            {"channel_id": "fixture-realization", "direction": "POSITIVE",
+             "material": True})) == (), net_effect
+
+
+def test_the_headline_horizons_direction_wins_over_the_folded_net_effect():
+    """§8: the record leads with a HORIZON. When the fold produced MIXED but
+    the headline horizon itself points one way, that is the claim an offset
+    opposes."""
+    record = offset_record(
+        "MIXED",
+        {"channel_id": "fixture-cost", "direction": "NEGATIVE", "material": True},
+        {"channel_id": "fixture-realization", "direction": "POSITIVE",
+         "material": True})
+    record["fundamental"]["headline_horizon"] = "NEAR_TERM"
+    record["fundamental"]["direction_by_horizon"] = {
+        "NEAR_TERM": {"direction": "POSITIVE", "evaluated": True}}
+
+    signals = offset_rebuttals(record)
+    assert len(signals) == 1
+    assert "fixture-cost" in dict(signals[0].payload)["cites_record_field"]
+
+
 def test_no_offsetting_channel_means_no_rebuttal():
     """Nothing is manufactured to clear an objection. One-sided channels
     leave the objection standing."""
-    from app.analysis.rebuttal import rebuttals_for
-
-    objection = {"objection_id": "falsifier:q6:OFFSET_IGNORED",
-                 "type": "OFFSET_IGNORED", "severity": "MAJOR", "sustained": True}
-    record = {"fundamental": {"channels": [
-        {"channel_id": "fixture-cost", "direction": "NEGATIVE", "material": True}]},
-        "evidence": {"claim_bindings": []}}
-
-    assert rebuttals_for([objection], record, event_id=FIXTURE_EVENT_ID,
-                         company_id=FIXTURE_COMPANY_ID,
-                         analysis_version=FIXTURE_ANALYSIS_VERSION,
-                         created_at=FIXTURE_NOW) == ()
+    assert offset_rebuttals(offset_record(
+        "NEGATIVE",
+        {"channel_id": "fixture-cost", "direction": "NEGATIVE",
+         "material": True})) == ()
 
 
 def test_an_evidence_stale_objection_is_rebutted_by_a_bound_claim_evidence_id():
@@ -503,7 +595,9 @@ def test_the_falsifier_calls_exactly_one_client_method():
                     and isinstance(node.func.value, ast.Attribute)
                     and node.func.value.attr == "client"):
                 calls.add(node.func.attr)
-    assert calls <= {"generate"}, calls
+    # REVIEW ROUND 1, M-4: `<=` also passed on the empty set, so a package
+    # that stopped calling the client at all would have satisfied it.
+    assert calls == {"generate"}, calls
 
 
 def test_the_objection_taxonomy_is_exactly_the_spec_table(policy):

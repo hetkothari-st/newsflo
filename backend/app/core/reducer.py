@@ -682,6 +682,16 @@ def reduce_company_impact(signals: Sequence[Signal],
     #     Stated as a general rule rather than a special case for the
     #     falsifier: any stage marking its own homework is the same defect.
     #
+    #     CAVEAT, stated because it is load-bearing (review round 1, M-5):
+    #     `Signal.stage` is FREE TEXT, not a closed vocabulary, so this rule
+    #     is only as strong as the stage strings the emitters agree on. A
+    #     falsifier that wrote `stage="SENSITIVITY"` on a rebuttal would slip
+    #     past it. That is why the structural guard is the ast test
+    #     (`tests/phase6/test_falsifier.py::test_no_rebuttal_signal_is_ever_
+    #     emitted_by_the_falsifier_package`): the package cannot emit a
+    #     rebuttal AT ALL, whatever stage it might claim. This check is the
+    #     second line, and it is the general one.
+    #
     # A signal set with no REBUTTAL in it reduces exactly as it did before
     # Phase 6, which is every signal set in production today.
     rebuttals_by_objection: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
@@ -689,7 +699,14 @@ def reduce_company_impact(signals: Sequence[Signal],
         if candidate.kind != SignalKind.REBUTTAL:
             continue
         payload = candidate.payload
-        if not (payload.get("cites_record_field") or payload.get("cites_evidence_id")):
+        # STRIPPED, not merely truthy (review round 1, I-1). `"   "` is a
+        # truthy string and an empty citation: before this, a rebuttal citing
+        # whitespace un-sustained a BLOCKING objection and the draft
+        # published PRIMARY. The checklist parser had stripped since Phase 6;
+        # this side -- the load-bearing one -- had not.
+        cited = any(str(payload.get(key) or "").strip()
+                    for key in ("cites_record_field", "cites_evidence_id"))
+        if not cited:
             continue
         rebuttals_by_objection.setdefault(
             str(payload["objection_id"]), []).append((candidate.stage, payload))

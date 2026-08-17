@@ -17,7 +17,8 @@ EVERY RULE BELOW CITES A DATUM THE STAGE ALREADY HOLDS. Not one of them
 computes, infers or supplies anything:
 
   OFFSET_IGNORED          <- SENSITIVITY holds the channel list, so it can
-                             name the offsetting channel_id (or find none).
+                             name the channel opposing the record's own
+                             claim (or find none).
   REGIME_MODIFIER_MISSING <- SENSITIVITY holds the policy modifiers that
                              were APPLIED, so it can name the modifier_id.
   EXPOSURE_NOT_IN_LISTCO  <- SENSITIVITY holds the ledger exposure_id behind
@@ -53,26 +54,50 @@ def _claim_bindings(record: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
     return (record.get("evidence") or {}).get("claim_bindings") or ()
 
 
-def _net_effect(record: Mapping[str, Any]) -> str | None:
-    value = (record.get("fundamental") or {}).get("net_effect")
-    return str(value) if value else None
+def _headline_direction(record: Mapping[str, Any]) -> str | None:
+    """The DIRECTION this record actually claims, or None when it claims
+    none.
+
+    The headline horizon wins over the folded net effect (§8: the record
+    leads with a horizon). A fold can be MIXED while the horizon the record
+    leads with points one way, and it is the horizon's claim that an offset
+    opposes. MIXED, UNCERTAIN and NO_MATERIAL_IMPACT are not directions and
+    resolve to None (invariants 8 and 9).
+    """
+    fundamental = record.get("fundamental") or {}
+    horizons = fundamental.get("direction_by_horizon") or {}
+    headline = (horizons.get(str(fundamental.get("headline_horizon"))) or {})
+    for value in (headline.get("direction"), fundamental.get("net_effect")):
+        if str(value) in OPPOSITE:
+            return str(value)
+    return None
 
 
 def _rebut_offset_ignored(record: Mapping[str, Any]) -> tuple[str, str] | None:
-    """A material channel pointing the OTHER WAY is the offset the objection
-    says was ignored. Deterministic pick: the first by channel_id, so a
-    replay cites the same channel."""
-    directions = {str(c.get("direction")) for c in _channels(record)
-                  if c.get("material")}
-    if not directions & set(OPPOSITE):
-        return None
-    # Both signs present => an offset exists and can be named.
-    if len(directions & set(OPPOSITE)) < 2:
+    """The material channel pointing AGAINST the record's own claim is the
+    offset the objection says was ignored.
+
+    FIX ROUND 1 (M-3). This used to cite the first POSITIVE material channel
+    whenever both signs were present, which named the right channel only when
+    the record's claim happened to be NEGATIVE -- about half the time. A
+    citation pointing at a channel that AGREES with the claim is not a
+    rebuttal, it is a restatement, and it would have cleared a MAJOR
+    objection on the strength of it.
+
+    A record claiming NO direction cannot rebut this objection at all: there
+    is nothing for an offset to be an offset TO, so the objection stands,
+    which is the default the whole rule exists to preserve.
+
+    Deterministic pick: the first opposing channel by channel_id, so a replay
+    cites the same one.
+    """
+    claimed = _headline_direction(record)
+    if claimed is None:
         return None
     opposing = sorted(
-        (str(c.get("channel_id")) for c in _channels(record)
-         if c.get("material") and str(c.get("direction")) == "POSITIVE"))
-    if not opposing:                                    # pragma: no cover
+        str(c.get("channel_id")) for c in _channels(record)
+        if c.get("material") and str(c.get("direction")) == OPPOSITE[claimed])
+    if not opposing:
         return None
     return STAGE_SENSITIVITY, f"fundamental.channels[{opposing[0]}].direction"
 
