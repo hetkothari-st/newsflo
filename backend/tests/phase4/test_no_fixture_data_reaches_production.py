@@ -180,10 +180,17 @@ def test_the_transfer_layer_hardcodes_no_parameter_value(name):
 
 def test_the_registry_names_an_owner_for_every_missing_parameter():
     """DoD: "`DATA_GAPS.md` lists every modifier awaiting real parameter
-    values and names its owner"."""
+    values and names its owner".
+
+    DATA_GAPS.md became an index over `DATA_GAPS/` on 2026-08-17; §8 (the
+    policy registry) is `DATA_GAPS/phase4-policy-registry.md`. The assertion
+    is unchanged in strength -- every awaiting modifier must still be named
+    in the file that records the gap, not merely somewhere in the repo."""
     from app.analysis.policy.registry import load_registry
 
-    gaps = (BACKEND.parent / "DATA_GAPS.md").read_text(encoding="utf-8")
+    gaps_file = BACKEND.parent / "DATA_GAPS" / "phase4-policy-registry.md"
+    gaps = gaps_file.read_text(encoding="utf-8")
     for entry in load_registry().awaiting_parameters():
         assert entry.modifier_id in gaps, (
-            f"{entry.modifier_id} awaits parameters and is not in DATA_GAPS.md")
+            f"{entry.modifier_id} awaits parameters and is not in "
+            f"DATA_GAPS/{gaps_file.name}")

@@ -333,12 +333,21 @@ def test_the_reducer_carries_the_escape_flag_into_the_gate_trace():
 
 def test_the_cutover_checklist_exists_and_names_both_flags():
     """I3(3). The instruction to flip these two flags must live in a place
-    somebody reads BEFORE cutover, not in a paragraph of prose."""
-    data_gaps = (BACKEND.parent / "DATA_GAPS.md").read_text(encoding="utf-8")
-    assert "V5 SERVING CUTOVER CHECKLIST" in data_gaps
-    checklist = data_gaps.split("V5 SERVING CUTOVER CHECKLIST", 1)[1]
-    assert "unknown_materiality_delta_passes" in checklist
-    assert "unknown_sector_proxy_passes" in checklist
+    somebody reads BEFORE cutover, not in a paragraph of prose.
+
+    DATA_GAPS.md became an index over `DATA_GAPS/` on 2026-08-17, so the
+    checklist is its own file. Both halves are still asserted: the checklist
+    names the flags, AND the index still points a reader at it -- an
+    unreachable checklist is the same failure as an absent one."""
+    checklist_path = BACKEND.parent / "DATA_GAPS" / "cutover-checklist.md"
+    checklist = checklist_path.read_text(encoding="utf-8")
+    assert "V5 SERVING CUTOVER CHECKLIST" in checklist
+    body = checklist.split("V5 SERVING CUTOVER CHECKLIST", 1)[1]
+    assert "unknown_materiality_delta_passes" in body
+    assert "unknown_sector_proxy_passes" in body
+
+    index = (BACKEND.parent / "DATA_GAPS.md").read_text(encoding="utf-8")
+    assert "DATA_GAPS/cutover-checklist.md" in index
 
 
 def test_the_gates_yaml_philosophy_comment_admits_the_fail_open_keys():

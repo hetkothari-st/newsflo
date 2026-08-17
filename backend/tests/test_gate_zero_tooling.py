@@ -1191,11 +1191,23 @@ def test_M6_labeler_is_urlencoded_in_redirects(ui_client):
 
 def test_M7_data_gaps_states_the_contract_corpus_size():
     """Controller ruling: EXECUTION_CONTRACT §2 verbatim wins -- 40 events
-    total (30 real crude + 10 null), not 40 crude + 10 null."""
-    md = (REPO_ROOT / "DATA_GAPS.md").read_text(encoding="utf-8")
-    assert "10 null" in md
-    assert "40 crude" not in md
-    assert "50 labeled events" not in md
+    total (30 real crude + 10 null), not 40 crude + 10 null.
+
+    DATA_GAPS.md became an index over `DATA_GAPS/` on 2026-08-17. The
+    positive assertion repoints to §1's file; the two NEGATIVE assertions
+    sweep the index and EVERY topic file, because a wrong corpus size
+    anywhere in the directory is the error this pins -- splitting the
+    document must not give it a place to hide."""
+    corpus = (REPO_ROOT / "DATA_GAPS" / "gate-zero-corpus.md").read_text(
+        encoding="utf-8")
+    assert "10 null" in corpus
+
+    everywhere = "\n".join(
+        [(REPO_ROOT / "DATA_GAPS.md").read_text(encoding="utf-8")]
+        + [path.read_text(encoding="utf-8")
+           for path in sorted((REPO_ROOT / "DATA_GAPS").glob("*.md"))])
+    assert "40 crude" not in everywhere
+    assert "50 labeled events" not in everywhere
 
 
 def test_I1_headline_family_recall_discloses_excluded_families(family_corpus, tmp_path):
