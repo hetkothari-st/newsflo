@@ -174,6 +174,32 @@ def _skip(stage: str, reason: str, **context) -> None:
                 " ".join(f"{k}={v}" for k, v in context.items()))
 
 
+#: Shock fields the engine reads with a SILENT numeric default. Neither
+#: `impact_strength` nor `materiality` is in SCHEMA_SHOCKS' required list, so
+#: an omitting model response is indistinguishable, downstream, from one that
+#: deliberately claimed 0.5. `confidence` IS required by the schema -- it is
+#: audited here as a control: a fire on it means the schema was not enforced.
+_SHOCK_DEFAULTED_FIELDS = ("impact_strength", "materiality", "confidence")
+
+
+def _audit_shock_defaults(stage: str, shock: dict, article_id: int | None) -> None:
+    """Log-only instrumentation (2026-08-17): record when a shock omits a
+    field the parse below silently defaults. ZERO behaviour change -- the
+    caller's values and flow are untouched; this only makes the silent
+    default visible in the logs so its real-world fire rate can be measured.
+
+    One line per shock (never per field) to keep this off the log-spam path.
+    """
+    missing = [f for f in _SHOCK_DEFAULTED_FIELDS if f not in shock]
+    if not missing:
+        return
+    logger.warning(
+        "impact-graph shock_default_fired stage=%s article=%s shock=%s fields=%s",
+        stage, article_id,
+        shock.get("shock_id") or shock.get("label") or "<unlabelled>",
+        ",".join(missing))
+
+
 def _passes(distance: int, materiality: float, confidence: float) -> bool:
     """FINAL-prune gate: the distance-scaled thresholds. Applied after the
     completeness audit, never during discovery (architecture upgrade
@@ -1420,6 +1446,7 @@ def _narrow_single_call(router: StageRouter, session, facts: EventFacts,
         max_output_tokens=4096,
     )
     for shock in raw.get("shocks", []):
+        _audit_shock_defaults("narrow_graph", shock, article_id)
         edge = GraphEdge(
             parent_type="event", parent_id=EVENT_NODE_ID, child_type="economic_node",
             child_id=str(shock.get("shock_id") or shock.get("label", "shock")),
@@ -1652,6 +1679,7 @@ def _build_graph(router: StageRouter, session, facts: EventFacts,
     )
     frontier: list[_Node] = []
     for shock in raw_shocks.get("shocks", []):
+        _audit_shock_defaults("initial_shocks", shock, article_id)
         edge = GraphEdge(
             parent_type="event", parent_id=EVENT_NODE_ID, child_type="economic_node",
             child_id=str(shock.get("shock_id") or shock.get("label", "shock")).strip().lower().replace(" ", "_"),
