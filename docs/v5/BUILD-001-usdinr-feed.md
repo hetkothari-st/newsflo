@@ -659,16 +659,25 @@ measured evidence** — each `include` carries a filing citation, making these
 `EXAMINED_CONFIRMS` findings rather than classification judgements.
 **Blocked on the Packaging sub-split** (that isubgroup also holds glass and paper).
 
-**B · Delhivery retag**, `input:freight_diesel` → `input:bought_in_freight`. Its
-*"commodity price risk is low"* disclosure is **exactly what the vocabulary's own
-comment predicts an intermediated buyer would say** — so it contradicts the **tag**,
-not the economics. **`DISCLOSED_IMMATERIAL` travels with it** and is not superseded by
-the retag. **No ledger row exists, so the correction is free today** and becomes a
-review-path migration once one does.
+**B · Delhivery — CORRECTED 2026-08-17. This is a NODE correction, not a ledger one.**
+The original text claimed no ledger row existed. **It does, and it is already at
+`input:bought_in_freight`** (company_id 216, share 0.313, `reviewed_by ST269`). What
+was wrong was `NODE_FOR_ISUBGROUP` in `contradiction_rate.py`, which collapsed the
+whole `Logistics Solution Provider` isubgroup onto one node asserting diesel. **The
+ledger was ahead of the design**, and it already carries the correct tag for all six
+corpus logistics companies (`bought_in_freight`: DELHIVERY, TCIEXP, TCI, MAHLOG;
+`freight_diesel`: VRLLOG 0.276, CONCOR 0.015 — VRL's figure matching the
+ripple-bootstrap handover independently). **Nothing to migrate.** Delhivery's
+*"commodity price risk is low"* is what the intermediated tag PREDICTS, so it
+corroborates rather than contradicts: reclassified `EXAMINED_CONFIRMS` with a
+low-sensitivity qualifier, **not** `EXAMINED_CONTRADICTS`. **Goodyear is now the only
+`EXAMINED_CONTRADICTS` in the corpus, and the contradiction rate is 1 of 33 (3%), not
+2 of 33.** Full record in `PATCH-002` §B.
 
 **If skipped:** (A) three companies publish against their own filings — the §5.3
-indefensible case, now with names. (B) Delhivery publishes a diesel-burn exposure it
-does not have.
+indefensible case, now with names. (B) the logistics NODES are authored against the
+probe's coarse mapping rather than the ledger, and Delhivery is rendered as an
+`EXAMINED_CONTRADICTS` exclusion when its filing in fact corroborates its tag.
 
 ---
 

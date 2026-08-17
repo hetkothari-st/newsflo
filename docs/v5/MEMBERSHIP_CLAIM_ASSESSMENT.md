@@ -72,7 +72,7 @@ not a knowability problem.
 | Civil Construction | 125 | only road builders buy bitumen |
 | Packaging | 75 | glass / paper / film are three different nodes |
 | Commodity Chemicals | 72 | chlor-alkali, soda ash, fertiliser, phthalics |
-| Logistics Solution Provider | 58 | four modes → four different leaves |
+| Logistics Solution Provider | 58 | four modes → four different leaves. **UPDATE 2026-08-17: the split is CONFIRMED BY DATA and 6 members are already assigned in `company_exposure` — `bought_in_freight`: DELHIVERY, TCIEXP, TCI, MAHLOG; `freight_diesel`: VRLLOG (0.276), CONCOR (0.015). Cheaper than this row assumed: what remains is authoring the nodes, not the tags.** |
 | Rubber | 11 | producers, plantation and consumer in one group |
 | Road Assets — Toll/Annuity | 7 | operator, not builder |
 | **total** | **484** | |
@@ -388,12 +388,22 @@ also the family no node claims.
 
 ### 7.1 The headline, and it is not the one I expected
 
+> **CORRECTED 2026-08-17. The disclaiming rate is 1 of 33, not 2.** Delhivery was
+> scored as a contradiction against a node this probe invented
+> (`NODE_FOR_ISUBGROUP` in `contradiction_rate.py` collapsed the whole
+> `Logistics Solution Provider` isubgroup onto one node asserting diesel). **The
+> ledger already carries Delhivery at `input:bought_in_freight`** — an intermediated
+> tag, for which *"commodity price risk … low"* is what the vocabulary's own comment
+> **predicts**, not what contradicts it. Against the tag the ledger actually holds,
+> the disclosure **corroborates**. See `PATCH-002` §B. **Goodyear is the only real
+> contradiction in the corpus.**
+
 | kind of contradiction | n | rate | does it make the published claim FALSE? |
 |---|---|---|---|
 | **direction-inverting** — node says consumer, company is a net producer | **0** | **0%** | would be fatal |
 | **attenuating** — company is backward-integrated into the input | **6** | **18%** | **no** — it makes the effect smaller, not wrong |
-| **disclaiming** — company states the exposure is low or absent | **2** | **6%** | **yes** |
-| union, distinct companies | 8 | 24% | |
+| **disclaiming** — company states the exposure is low or absent | **1** | **3%** | **yes** |
+| union, distinct companies | 7 | 21% | |
 
 **Not one of the 33 had its SIGN wrong.** The failure I named as most dangerous in
 §4.1 of the design report — publishing a producer under a consumer edge — did not
@@ -406,23 +416,27 @@ false — a backward-integrated paint maker still buys resin, just less of it. U
 design that published magnitude it would be six wrong numbers; under this one it is
 six correct directions.
 
-**So the rate that matters — published claims that would be FALSE — is 2 of 33 = 6%.**
+**So the rate that matters — published claims that would be FALSE — is 1 of 33 = 3%.**
 
 By your rule: **low. Membership-only publishes, with the caveat labelled** — and §7.3
 specifies the field that labels it.
 
 ### 7.2 Every instance
 
-**DISCLAIMING (2) — these are the ones that would publish a false claim:**
+**DISCLAIMING (1) — the one that would publish a false claim:**
 
 * **GOODYEAR** (`tyre_makers`) p100 — *"The company has limited exposure to foreign
   exchange risk due to low reliance on imported raw materials and thus the company
   does not hedge for the foreign currency exposure…"*
-* **DELHIVERY** (`logistics_operators`) p67 — *"The Company considers commodity price
-  risk and currency risk to be low and does not hedge these risks."*
-  Note: Delhivery is asset-light, so this is arguably a **tag** error rather than a
-  magnitude disclaim — it belongs at `bought_in_freight`, not `freight_diesel`. Either
-  way the node's claim as stated is contradicted by the filing.
+**WITHDRAWN — DELHIVERY is not a contradiction.** p67 — *"The Company considers
+commodity price risk and currency risk to be low and does not hedge these risks."*
+The ledger carries Delhivery at `input:bought_in_freight`, an **intermediated** tag
+whose own vocabulary comment says a crude move reaches such a buyer *"lagged, diluted
+and only to the extent the operator has pricing power."* **A low-commodity-sensitivity
+disclosure is what that tag predicts.** It was scored as a contradiction only against
+`logistics_operators`, a node this probe invented and which was coarser than data that
+already existed. Reclassified `EXAMINED_CONFIRMS` with a low-sensitivity qualifier.
+See `PATCH-002` §B.
 
 **ATTENUATING (6) — backward integration, sign unchanged:**
 
@@ -479,10 +493,18 @@ citation rather than a silent falsehood.**
 
 ### 7.4 Limits of this measurement
 
-* **6% is a FLOOR on disclaimers, not an estimate.** The sweep finds what its patterns
+* **3% is a FLOOR on disclaimers, not an estimate.** The sweep finds what its patterns
   catch. A disclaimer phrased outside them is invisible.
-* **n=2.** Better than n=1 and still small. The rate is stable enough to choose a
-  design; it is not stable enough to quote.
+* **n=1, back where it started.** The Delhivery withdrawal returns this measurement to
+  a single instance. It is enough to choose a design — the direction-inverting rate of
+  **0 of 33** is the load-bearing number and is unaffected — and it is **not** enough
+  to quote as a rate.
+* **A node mapping must be checked against existing ledger rows before it is used to
+  score anything.** `contradiction_rate.py` never queried `company_exposure` for the
+  tags it tested; it asserted them from `NODE_FOR_ISUBGROUP` and measured against its
+  own assertion. That is the same failure class as the leaf-vocabulary one — a
+  structure authored from a name rather than checked against data — and `PATCH-001`'s
+  Rule 2 should be read as covering **nodes as well as leaves**.
 * **One methodological finding worth carrying forward: a disclaimer is phrased
   GENERICALLY and an affirmation SPECIFICALLY.** Goodyear says *"imported raw
   materials"*, never "carbon black". The first run anchored both directions on leaf
