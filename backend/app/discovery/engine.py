@@ -210,7 +210,16 @@ def _prior(share_of_base: float | None, confidence: float | None,
     if share_of_base is None:
         return 0.0
     distance = max(1, int(graph_distance or 1))
-    return float(share_of_base) * float(confidence or 1.0) / distance
+    # A missing confidence is not a measured 1.0 -- `or` would treat both
+    # `None` and a legitimate `0.0` as "no confidence" and silently promote
+    # the unmeasured candidate to full confidence, ranking it ABOVE rows this
+    # system actually scored. Rank missing-LAST instead: an absent input must
+    # never outrank a measured one when the pool overflows and something has
+    # to be evicted first. A true `0.0` confidence is not missing and keeps
+    # its `0.0`.
+    if confidence is None:
+        return 0.0
+    return float(share_of_base) * float(confidence) / distance
 
 
 # --- the engine -------------------------------------------------------------

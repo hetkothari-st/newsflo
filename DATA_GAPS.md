@@ -679,6 +679,14 @@ which asserts smallness where the honest statement is "unsized") and Q9
 (unknown parameter provenance → `BASE_RATE_VIOLATION`). Both are the closest
 members of a closed vocabulary rather than exact fits.
 
+The Phase 6 reviewer's ordering, recorded here: Q9 is the first of the two to
+fix once the falsifier is wired live, because its mapping does double duty —
+`BASE_RATE_VIOLATION` is WARN severity (§12.1), so an unanswered Q9 clears the
+PRIMARY objection gate on its own, and the same unsourced-parameter question
+also stacks on the fail-open `primary.unknown_sector_proxy_passes` key in the
+**V5 SERVING CUTOVER CHECKLIST** (item 2) — two independent passes for the
+same unmeasured provenance until both are addressed.
+
 *What is needed:* an owner's ruling, or a §7.2 amendment adding an
 `UNSIZED` / `PROVENANCE_UNKNOWN` type to §12.1. **Owner: repo owner.**
 

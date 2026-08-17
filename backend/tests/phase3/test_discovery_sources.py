@@ -277,6 +277,50 @@ def test_the_pool_is_ranked_by_the_expected_materiality_prior(
     assert priors == sorted(priors, reverse=True)
 
 
+def test_a_missing_confidence_is_evicted_before_a_measured_one():
+    """Regression: `_prior` used `confidence or 1.0`, so a `None` confidence
+    ranked as full confidence -- an unmeasured candidate could outrank, and
+    survive over, a candidate this system actually scored -- and the same
+    `or` silently promoted a legitimate `0.0` confidence to `1.0` too. The
+    fix ranks a missing confidence LAST (prior 0.0): under pool overflow, the
+    row with no measured confidence is the one evicted, never the one with a
+    measured (even low) confidence. A true `0.0` confidence is not "missing"
+    and is never defaulted up to `1.0`."""
+    from app.discovery.engine import Candidate, CandidatePool, _prior
+
+    # _prior itself: None ranks as badly as share_of_base being absent.
+    assert _prior(share_of_base=0.20, confidence=None, graph_distance=1) == 0.0
+    assert _prior(share_of_base=0.20, confidence=0.4, graph_distance=1) > 0.0
+    # A measured 0.0 confidence is NOT defaulted to 1.0 (the `or` bug) --
+    # it contributes its own (zero) weight, not full confidence.
+    assert _prior(share_of_base=0.20, confidence=0.0, graph_distance=1) == 0.0
+    assert (_prior(share_of_base=0.20, confidence=0.0, graph_distance=1)
+            != _prior(share_of_base=0.20, confidence=1.0, graph_distance=1))
+
+    # Under pool overflow, the None-confidence candidate is evicted first,
+    # ahead of the one with a measured (low) confidence.
+    pool = CandidatePool(max_size=1)
+    missing_confidence = Candidate(
+        company_id=1, discovery_source="MECHANISM", via_tag=TAG_PETCHEM,
+        mechanism_id="e", graph_distance=2, shock_id="s",
+        share_of_base=0.20,
+        expected_materiality_prior=_prior(share_of_base=0.20, confidence=None,
+                                          graph_distance=2))
+    measured_confidence = Candidate(
+        company_id=2, discovery_source="MECHANISM", via_tag=TAG_PETCHEM,
+        mechanism_id="e", graph_distance=2, shock_id="s",
+        share_of_base=0.20,
+        expected_materiality_prior=_prior(share_of_base=0.20, confidence=0.4,
+                                          graph_distance=2))
+    pool.add(missing_confidence)
+    pool.add(measured_confidence)
+    assert pool.size == 1
+    survivor = pool.candidates[0]
+    assert survivor.company_id == measured_confidence.company_id, (
+        "the candidate with no measured confidence must be evicted first, "
+        "not the one with a measured confidence")
+
+
 def test_discovery_is_deterministic(ripple_session, crude_universe):
     from app.discovery.engine import discover
 
