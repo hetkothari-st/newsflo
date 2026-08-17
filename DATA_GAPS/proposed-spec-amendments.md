@@ -66,4 +66,46 @@ Raised 2026-08-17 out of the crude bootstrap's coverage failure (§14). Full
   `basis = ESTIMATED` and its `curve_needs_review` CHECK already exist, so it
   needs no amendment — and pass-through, not exposure share, is now the
   binding constraint (see §5, "The first eleven rows").
-* **Owner: repo owner** (disposition). **Nothing is implemented.**
+### DISPOSED 2026-08-17 — REJECTED AS PROPOSED
+
+Recorded as **[`ADR-001`](../docs/v5/decisions/ADR-001-econometric-exposure.md)**,
+which supersedes the amendment document. Root cause axis `data`.
+
+* **The decisive objection is the third, not the first.** Fitting exposures
+  from history makes Phase 5's cross-check non-independent: checker and
+  checked estimated from overlapping data by similar means, so
+  `empirical_status` trends to **AGREE by construction**, and the system loses
+  its only mechanism for noticing that its fundamental story is contradicted
+  by what actually happened. It deletes a control while appearing to add
+  coverage. Compounded by addendum **§A3.2**, which forbids publishing a
+  discovered correlation before a named mechanism exists — and
+  `mechanism_edge` is empty (§7), so such a row could not legally publish at
+  the only tier it would be eligible for.
+* **A correction the amendment got wrong**, carried into the ADR: its §6
+  compared an econometric estimate against "a filed figure". There are **zero
+  `FILED` rows** in `company_exposure` — all eleven are `ESTIMATED`. The real
+  comparison is an estimate from two printed accounting figures against an
+  estimate from a fitted coefficient.
+* **Cost avoided revised to 11–15 person-weeks** (from 9–12): the only
+  quarterly source wired into this repo returns five quarters, so the
+  acquisition block is larger than the amendment assumed.
+* **Spec defect to fix regardless of this decision — Phase 2 ticket.**
+  `share_of_base` must never hold a net elasticity, enforced by a **DB CHECK,
+  not a docstring**. §5.1 discounts by `(1 - pass_through)(1 - hedge_ratio)`
+  after the share, so any net value placed there is double-discounted —
+  silently, and toward smaller, more plausible-looking numbers. A
+  net-sensitivity class, if ever admitted, takes a separate column and a
+  separate channel formula.
+* **Redirect status: DEFERRED-PENDING-BACKTEST — and the back-test has run.**
+  [`AMENDMENT-002-BACKTEST`](../docs/v5/amendments/AMENDMENT-002-BACKTEST.md).
+  It **fails on its own nominated test case.** Savita Oil — 86.1% base oil, a
+  near pure-play, the easiest case available — returns a *significant*
+  coefficient of the **wrong sign** (+0.274, p=0.007, against −0.70 predicted
+  by the filed share), implied pass-through 1.47, and the sign **flips**
+  between the 10-quarter and 28-quarter windows. Both companies' levels
+  results vanish under first-differencing (R² 0.001 and 0.016), and the
+  distributed-lag profiles are non-monotone and sign-alternating, so no
+  §4.2-shaped curve can be read off them. The regression route to curves is
+  **closed at the history depth available**; the alternatives are in
+  [`CURVE_BOOTSTRAP.md`](../docs/v5/CURVE_BOOTSTRAP.md).
+* **Owner: repo owner** (disposition, now made). **Nothing is implemented.**
