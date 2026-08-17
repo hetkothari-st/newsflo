@@ -28,6 +28,24 @@ git worktree add .worktrees/<session-name> -b wt/<session-name> master
   `C:\Users\ST269\Desktop\newsflo\backend\.venv\Scripts\python.exe -m pytest`
   from your worktree's `backend/`. Proven working; do not build per-worktree
   venvs without a reason.
+- **`backend/.env` does not follow either, and this one changes test results.**
+  It is gitignored and carries `GROQ_API_KEY` among others, so a worktree runs
+  the suite **unconfigured** while the main tree runs it configured. Measured
+  2026-08-17 at the same commit: main tree **3981 passed / 0 failed**, worktree
+  **3979 passed / 2 failed** — 3981 collected in both. The two
+  `test_scheduler_universe.py` supply-links tests construct a real client (they
+  never call it — `extract_profile` is stubbed) and die at construction when no
+  key exists.
+
+  **This interacts badly with §4.** A number is reportable only from a
+  worktree, so every reportable number is measured in the environment *least*
+  like production, and a test that depends on ambient configuration diverges
+  silently between the two. Nothing guarantees this stays at two tests.
+
+  Until those tests are made hermetic (`docs/v5/KNOWN_BREAKAGE.md` KB-001),
+  **state which tree a number came from whenever it is quoted.** Copying
+  `backend/.env` into a worktree is a legitimate way to reproduce a main-tree
+  result — but say that you did, because it changes what the number means.
 - `ENABLE_SCHEDULER=false` in the environment of every test run, always.
 
 ## 2. Migration numbers are claimed at dispatch
@@ -249,6 +267,42 @@ were.
 **stopped failing that you expected to fail** — not only at what broke. A test
 that goes green across a semantic change has either been fixed or been
 hollowed, and the two are indistinguishable from the summary line.
+
+## 7.4 Analysis may be duplicated. STATUS may not.
+
+Copy an argument, a measurement or a table into three documents and nothing
+breaks — they are claims about the world, and if the world was one way when
+each was written, all three stay true. **Status is not like that.** It is
+single-valued and it *moves*, so a second copy is a contradiction waiting for
+one of them to be updated.
+
+**The rule, either form:**
+
+- **Status lives in exactly one place, and every other mention points at it**
+  ("disposition: see ADR-001"), or
+- **every copy carries the pointer AND the date it was written**, so a reader
+  can tell which one is authoritative and how stale the others are.
+
+What is forbidden is a bare status with no pointer and no date. That is the
+form that cannot be checked and cannot be found.
+
+**Two instances on 2026-08-17, in opposite directions:**
+
+- `AMENDMENT-002`'s SUPERSEDED banner said the `pass_through_curve` redirect
+  was *"DEFERRED, not rejected"* while `ADR-001` — merged in the same commit —
+  carried a section headed *"The redirect — REJECTED"*. Neither was wrong when
+  written; the ADR moved and the banner did not, because they had different
+  authors (§7.1). Fixed in `f62ec22b`.
+- `DATA_GAPS/proposed-spec-amendments.md` ended *"Owner: repo owner
+  (disposition)"* — i.e. still open — after the disposition had been made and
+  recorded in `ADR-001`. Nearly discarded as a duplicate, because its
+  *analysis* genuinely was duplicated; the status was not. Fixed in `3008d6e5`.
+
+The second is the instructive one: a document can be 95% redundant and still
+be the only place carrying a fact, and the redundant 95% is what makes it look
+safe to delete. **When deciding whether a document is duplicated, separate its
+claims from its status and check them separately** — the claims are usually
+elsewhere and the status usually is not.
 
 ## 8. What this replaces
 

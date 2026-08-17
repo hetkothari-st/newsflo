@@ -15,7 +15,7 @@ count is stated. Quote it as `N passed / K known-broken`, never as `N passed`.
 
 | # | tests | since | owner |
 |---|---|---|---|
-| KB-001 | `test_scheduler_universe.py` ×2, supply-links refresh | ≤ 2026-08-17 | **none** |
+| KB-001 | `test_scheduler_universe.py` ×2, supply-links refresh | ≤ 2026-08-17 | **none** — see the 2026-08-17 correction; NOT permanently red |
 
 ---
 
@@ -122,3 +122,94 @@ No fix, no skip marker, no `xfail`. Marking them `xfail` would be worse than
 leaving them red: it would retire two test names that currently assert nothing,
 while making the suite green and the loss invisible. They stay red and
 documented until someone owns them.
+
+---
+
+## KB-001 — CORRECTION, 2026-08-17: environment-dependent, not permanently red
+
+**The root cause above is right about the mechanism and wrong about the
+consequence.** Correcting it in place would hide the error, so it is corrected
+here.
+
+### What the earlier entry got wrong
+
+It states, unconditionally, that *"neither test is testing what it names"* and
+that *"both die at client construction, before the behaviour under test
+begins"*. **That is true only where no API key is configured.** Both tests
+pass on `master` in the main tree.
+
+Measured at the same commit (`02a70365`), same suite, 3981 collected in both:
+
+| tree | result |
+|---|---|
+| main tree (`backend/.env` present) | **3981 passed · 0 failed · 10 skipped** — both orderings |
+| `.worktrees/merge-integration` (no `.env`) | **3979 passed · 2 failed · 10 skipped** — both orderings |
+
+`backend/.env` is gitignored, so it **does not follow into a worktree**
+(SESSION_PROTOCOL §1). It carries a non-empty `GROQ_API_KEY`.
+
+- **No key:** `build_extraction_client()` → `RotatingClient` raises
+  `ValueError("RotatingClient requires at least one API key")` → the job
+  catches and logs → the assertions see an empty list → red.
+- **Key present:** the client constructs; `extract_profile` is monkeypatched to
+  a lambda that ignores it, so **nothing is ever sent to a provider**; the test
+  proceeds and genuinely exercises poisoned-doc isolation and the LLM-failure
+  circuit breaker → green.
+
+**No API calls are made in either case.** That was checked, not assumed —
+`supply_extract.extract_profile` and `supply_loader.apply_extraction` are both
+stubbed by the tests.
+
+The unchanged part: the monkeypatch on `scheduler.build_client` **is** aimed at
+a symbol `_run_supply_links_refresh` never calls, and therefore never applies.
+The live path resolves `build_client` through
+`app/companies/supply_links/llm.py`. That is a real defect. It is just not the
+defect of "these tests never test anything".
+
+### The six red measurements proved something narrower than claimed
+
+All six came from worktrees. They are six measurements of *the same
+unconfigured environment*, not six independent confirmations that the tests are
+vacuous. Repetition in one environment is not evidence about another.
+
+### Recommendation: FIX, do not delete
+
+The proposal to delete rests on *"a test that has never exercised its subject
+is not coverage being lost."* The principle is right; **the premise does not
+hold here.** These tests exercise their subject wherever `.env` exists —
+including the tree `master` lives in. Deleting them discards working coverage
+of two real behaviours: poisoned-document isolation, and the consecutive-LLM-
+failure circuit breaker.
+
+The fix is one line per test — patch the binding the call site actually
+resolves:
+
+```python
+monkeypatch.setattr(
+    "app.companies.supply_links.llm.build_client", lambda *a, **kw: object())
+```
+
+That makes them **hermetic**: green in a worktree and in the main tree,
+dependent on no ambient key, and no longer silently sensitive to whether a
+provider is configured. It also removes the `.env` divergence in
+SESSION_PROTOCOL §1 for these two tests.
+
+**Then arm the fix (§7.3):** remove the key from the environment, confirm the
+tests still pass, and record that in the commit. A hermeticity fix whose
+hermeticity was never observed is the same assumption §7.3 is about.
+
+### The gap to file even if they are fixed
+
+Whichever way this goes, one thing is genuinely untested and should be recorded
+rather than assumed:
+
+> **`_run_supply_links_refresh` swallows a client-CONSTRUCTION failure and a
+> mid-run provider failure identically.** Both surface as `Supply links refresh
+> failed` and an empty result. A missing API key and a provider outage are not
+> the same operational event, and nothing distinguishes them in the log or in
+> any assertion. That is what let this defect sit unnoticed across six
+> measurements — the failure mode was indistinguishable from the success path's
+> absence.
+
+That gap is real whether the tests are fixed or deleted, and it is the part
+that would actually have caught this.
