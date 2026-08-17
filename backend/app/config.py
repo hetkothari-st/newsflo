@@ -766,17 +766,66 @@ GEMINI_THINKING_BUDGETS = {
     "high": int(os.environ.get("GEMINI_THINKING_HIGH_BUDGET", "1024")),
 }
 
-# --- Event-size triage (cost-target work, 2026-08-11) --------------------
-# Deterministic, ZERO-cost triage: the facts stage already classifies
-# event_type; broad macro types get the deep graph, everything else (most
-# pulse items -- single-company earnings, deals, product news) gets a
-# small one. Same set the legacy cascade used for fan-out gating.
+# --- Broad-event vocabulary: ONE definition, TWO questions (2026-08-17) ---
+# Until this consolidation there were two hand-maintained frozensets --
+# `app.analysis.cascade.BROAD_EVENT_TYPES` (10) and this one (11) -- and the
+# comment here claimed they were "the same set the legacy cascade used". They
+# were not: they had already drifted by `geopolitics`, and nothing in the
+# codebase would have caught a second drift.
+#
+# THE TWO CONSUMERS ASK DIFFERENT QUESTIONS, so they are allowed to differ.
+# What they are not allowed to do is differ SILENTLY, so the base set is
+# stated once, the delta is named, and a test pins both.
+#
+#   BROAD_FANOUT_EVENT_TYPES  gates the legacy cascade's sector-wide FAN-OUT
+#                             (app.analysis.cascade). A PRECISION control:
+#                             adding a type here INVENTS companies -- it
+#                             asserts every prominent constituent of a sector
+#                             is exposed.
+#
+#   IMPACT_BROAD_EVENT_TYPES  gates the impact graph's TOKEN BUDGET
+#                             (app.analysis.impact_graph.engine, event-size
+#                             triage, 2026-08-11). A COST control: adding a
+#                             type here spends more; it can never invent a
+#                             company.
+#
+# WHY `geopolitics` IS IN ONE AND NOT THE OTHER, and why that is deliberate
+# rather than the drift being fixed by making them equal:
+#
+#   * it was already in schemas.EVENT_TYPES on 2026-07-27, three weeks before
+#     the fan-out gate was written (2026-08-03), and the author left it out.
+#     A conflict headline reaches a sector THROUGH a mechanism -- crude,
+#     freight, supply routes -- which the graph is supposed to show. Fanning
+#     out every constituent of "auto" on a war headline is exactly the noise
+#     the fan-out gate exists to stop;
+#   * it earns the deep graph on cost grounds all the same. `geopolitical_
+#     conflict` is the most common mechanism in the stored corpus (57 of the
+#     153 alerts that carry one, measured 2026-08-17), and triaging it as
+#     `narrow` would cap it at depth 2 / 4 expansions / 6k output tokens.
+#
+# Setting the IMPACT_BROAD_EVENT_TYPES env var replaces the impact set
+# outright and does NOT reach the fan-out set. That asymmetry is intended: an
+# impact-graph cost knob must not be able to widen what the cascade invents.
+BROAD_MACRO_EVENT_TYPES = frozenset({
+    "repo_rate_change", "inflation", "macro_data", "fiscal_policy",
+    "monsoon_weather", "crude_oil", "commodity_price", "currency_move",
+    "global_rates", "trade_policy",
+})
+
+#: Consumed by app.analysis.cascade. Not env-overridable, by design.
+BROAD_FANOUT_EVENT_TYPES = BROAD_MACRO_EVENT_TYPES
+
+#: The declared, deliberate delta. Named so a reader sees a decision rather
+#: than an inconsistency, and so a test can assert it has not grown by
+#: accident.
+IMPACT_BROAD_EXTRA_EVENT_TYPES = frozenset({"geopolitics"})
+
+_IMPACT_BROAD_DEFAULT = ",".join(
+    sorted(BROAD_MACRO_EVENT_TYPES | IMPACT_BROAD_EXTRA_EVENT_TYPES))
+
 IMPACT_BROAD_EVENT_TYPES = frozenset(
     s.strip() for s in os.environ.get(
-        "IMPACT_BROAD_EVENT_TYPES",
-        "repo_rate_change,inflation,macro_data,fiscal_policy,monsoon_weather,"
-        "crude_oil,commodity_price,currency_move,global_rates,trade_policy,"
-        "geopolitics",
+        "IMPACT_BROAD_EVENT_TYPES", _IMPACT_BROAD_DEFAULT,
     ).split(",") if s.strip()
 )
 

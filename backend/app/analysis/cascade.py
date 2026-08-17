@@ -61,6 +61,10 @@ from app.analysis.schemas import (
     AnalysisOutput, CompanyMention, FactsResult, SectorFinding,
 )
 from app.analysis.verification import verify_companies
+# The sector fan-out gate. Defined ONCE in app/config.py alongside the
+# impact-graph triage set it used to be silently out of step with; see the
+# comment at the old definition site below and the rationale in config.py.
+from app.config import BROAD_FANOUT_EVENT_TYPES as BROAD_EVENT_TYPES
 from app.companies.candidates import (
     MAX_CANDIDATES_PER_PROMPT, candidate_companies, candidate_tickers, format_candidates,
 )
@@ -1507,11 +1511,14 @@ def _generate_edges(client, facts: str, event_type: str | None, companies: list[
 # win. For those, sector-wide fan-out asserts an exposure that does not
 # exist, which is most of what made alerts balloon to 35 companies. A narrow
 # story's companies come from the analyzed stages alone.
-BROAD_EVENT_TYPES = frozenset({
-    "repo_rate_change", "inflation", "macro_data", "fiscal_policy",
-    "monsoon_weather", "crude_oil", "commodity_price", "currency_move",
-    "global_rates", "trade_policy",
-})
+#
+# THE SET ITSELF NOW LIVES IN app/config.py (2026-08-17) and is imported at
+# the top of this module. It used to be restated here, `config.
+# IMPACT_BROAD_EVENT_TYPES` restated it too, and the two had already drifted
+# by `geopolitics` -- with a comment in config.py asserting they were the
+# same set. One base, one named delta, one test. The value this module sees
+# is unchanged; see config.py for why the fan-out set excludes `geopolitics`
+# and the triage set does not.
 
 
 def _sector_fanout_mentions(
