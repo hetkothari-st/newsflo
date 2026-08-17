@@ -26,15 +26,29 @@ THREE RULES THIS MODULE DOES NOT BEND:
     measure integrity blocks the release (exit 1) without claiming integrity
     was breached (exit 3). Conflating them would train everyone to ignore
     exit 3.
+
+DELEGATED GATES ARE RUN, NOT NAMED (review round 1, I-1). Two gates --
+reducer determinism over 10,000 permutations, and market/fundamental
+isolation -- are properties already proven by Phase 0's suites. Naming the
+suite and stopping there left both gates permanently REFUSED with the reason
+"was not measured", which was false twice over: the properties hold today,
+and they cost seconds to prove. So the evaluator RUNS the named node id in a
+pytest subprocess (`ENABLE_SCHEDULER=false`, like the suite itself) and turns
+its exit code into 1.0 or 0.0. `--skip-delegated` opts out and produces a
+DISTINCT status, `DELEGATED_NOT_RUN`, which names the suite that was skipped
+and still blocks. It never says "not measured": that reason belongs to
+metrics nobody can compute, and these are not those.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 BACKEND = Path(__file__).resolve().parents[1]
 GATES_PATH = BACKEND / "config" / "shipping_gates.yaml"
@@ -54,11 +68,26 @@ NO_REGRESSION_METRICS = ("primary_precision", "ripple_family_recall")
 NO_REGRESSION_GATE = "no_regression"
 
 PASS, FAIL, REFUSED = "PASS", "FAIL", "REFUSED"
+#: A delegated gate nobody asked to run. NOT `REFUSED`: refused means the
+#: metric cannot be computed, and this one can -- in about a second.
+DELEGATED_NOT_RUN = "DELEGATED_NOT_RUN"
 
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_CANNOT_RUN = 2
 EXIT_HARD_ZERO = 3
+
+#: A delegated suite is a local pytest run. Generous, because the reducer
+#: determinism gate really does reduce 10,000 permutations.
+DELEGATED_TIMEOUT_SECONDS = 900
+
+#: How a delegated suite's PASS/FAIL is expressed as a gate value. Not
+#: thresholds -- the threshold is `== 1.0` and lives in
+#: `config/shipping_gates.yaml` like every other one. These are the two
+#: points of a boolean domain, named so they cannot be read as a bar someone
+#: chose.
+SUITE_PASSED = 1.0
+SUITE_FAILED = 0.0
 
 
 class GateConfigError(ValueError):
@@ -67,16 +96,19 @@ class GateConfigError(ValueError):
 
 @dataclass(frozen=True)
 class DelegatedSuite:
-    """A gate answered by an existing test rather than by a metric.
+    """A gate answered by RUNNING an existing test rather than by a metric.
 
     Reducer determinism over 10,000 permutations and market/fundamental
-    isolation are already proven by Phase 0's suites. Recomputing them here
-    would be a second implementation of the same property that could drift
-    from the first; NAMING the suite keeps one answer and makes the
-    delegation visible instead of implicit.
+    isolation are already proven by Phase 0's suites. Reimplementing either
+    here would be a second version of the same property, free to drift from
+    the first; running the original keeps one answer.
     """
     path: str
     test_name: str
+
+    @property
+    def node_id(self) -> str:
+        return f"{self.path}::{self.test_name}"
 
 
 @dataclass(frozen=True)
@@ -114,6 +146,13 @@ class GateReport:
         return tuple(o for o in self.outcomes if o.status == REFUSED)
 
     @property
+    def not_run(self) -> tuple[GateOutcome, ...]:
+        """Delegated gates nobody asked to run. Separate from `refusals`
+        because the fix is different: a refusal needs data that does not
+        exist, and this needs a flag dropped."""
+        return tuple(o for o in self.outcomes if o.status == DELEGATED_NOT_RUN)
+
+    @property
     def hard_violations(self) -> tuple[GateOutcome, ...]:
         return tuple(o for o in self.failures if o.hard)
 
@@ -121,7 +160,7 @@ class GateReport:
     def exit_code(self) -> int:
         if self.hard_violations:
             return EXIT_HARD_ZERO
-        if self.failures or self.refusals:
+        if self.failures or self.refusals or self.not_run:
             return EXIT_FAILED
         return EXIT_OK
 
@@ -179,9 +218,63 @@ def _no_regression_metrics(path: Path | str | None = None) -> tuple[str, ...]:
     return tuple(raw.get("no_regression") or NO_REGRESSION_METRICS)
 
 
-#: gate name -> the suite that answers it.
-DELEGATED_SUITES: dict[str, DelegatedSuite] = {
-    spec.name: spec.delegated for spec in load_gate_specs() if spec.delegated}
+def delegated_suites(path: Path | str | None = None) -> dict[str, DelegatedSuite]:
+    """gate name -> the suite that answers it.
+
+    A FUNCTION, not a module constant (review round 1, M-2). Reading the
+    config at import time meant a `GateConfigError` -- a relaxed hard zero,
+    say -- surfaced as an ImportError from inside somebody's `import`, where
+    `main` could not catch it and return the documented exit 2. A module that
+    raises on import cannot report an exit code at all.
+    """
+    return {spec.name: spec.delegated
+            for spec in load_gate_specs(path) if spec.delegated}
+
+
+# ---------------------------------------------------------------------------
+# running a delegated suite
+# ---------------------------------------------------------------------------
+
+def delegated_environment() -> dict[str, str]:
+    """The environment a delegated pytest run gets.
+
+    `ENABLE_SCHEDULER=false` is not optional: `app/main.py` starts a real
+    BackgroundScheduler at import time when it is true, and half the suite
+    imports `app.main`. A gate check that woke a live feed poller would be a
+    measurement with side effects.
+    """
+    env = dict(os.environ)
+    env["ENABLE_SCHEDULER"] = "false"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+def run_delegated_suite(suite: DelegatedSuite, *,
+                        backend: Path | None = None) -> tuple[float, str]:
+    """Run one delegated node id. -> (1.0 | 0.0, detail).
+
+    Exit code IS the answer: pytest exits 0 only when the named test passed.
+    A missing file, a renamed test and a genuine regression all exit
+    non-zero, and all three mean the same thing here -- the property is not
+    currently proven -- so all three produce 0.0 rather than a refusal. A
+    gate whose evidence has gone missing is not a gate in an unknown state.
+    """
+    root = Path(backend or BACKEND)
+    command = [sys.executable, "-m", "pytest", suite.node_id, "-q",
+               "--no-header", "-p", "no:cacheprovider"]
+    try:
+        completed = subprocess.run(
+            command, cwd=str(root), env=delegated_environment(),
+            capture_output=True, text=True,
+            timeout=DELEGATED_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return SUITE_FAILED, (f"{suite.node_id} did not finish within "
+                     f"{DELEGATED_TIMEOUT_SECONDS}s")
+    if completed.returncode == 0:
+        return SUITE_PASSED, f"{suite.node_id} passed"
+    tail = (completed.stdout or completed.stderr or "").strip().splitlines()
+    summary = tail[-1] if tail else f"exit {completed.returncode}"
+    return SUITE_FAILED, f"{suite.node_id} did NOT pass ({summary})"
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +288,29 @@ _COMPARISONS = {
 }
 
 
-def _evaluate_one(spec: GateSpec, metrics: Mapping[str, Any]) -> GateOutcome:
-    if spec.name not in metrics or metrics[spec.name] is None:
+def _evaluate_one(spec: GateSpec, metrics: Mapping[str, Any], *,
+                  run_delegated: bool = True,
+                  runner: Callable[[DelegatedSuite], tuple[float, str]] | None = None
+                  ) -> GateOutcome:
+    supplied = metrics.get(spec.name)
+    detail = ""
+    if spec.delegated is not None and supplied is None:
+        # A caller who already ran the suite supplies the metric and is
+        # believed; nobody should pay for a second subprocess.
+        if not run_delegated:
+            return GateOutcome(
+                spec.name, DELEGATED_NOT_RUN, None, spec.threshold,
+                spec.comparison, spec.hard,
+                reason=(f"{spec.name} is answered by running "
+                        f"{spec.delegated.node_id}, and this run skipped it "
+                        f"(--skip-delegated). Not a green gate and NOT an "
+                        f"unmeasurable one: drop the flag and it takes "
+                        f"seconds."))
+        value, detail = (runner or run_delegated_suite)(spec.delegated)
+        metrics = {**metrics, spec.name: value}
+        supplied = value
+
+    if spec.name not in metrics or supplied is None:
         return GateOutcome(
             spec.name, REFUSED, None, spec.threshold, spec.comparison, spec.hard,
             reason=(f"{spec.name} was not measured. It is REFUSED, not passed: "
@@ -212,6 +326,11 @@ def _evaluate_one(spec: GateSpec, metrics: Mapping[str, Any]) -> GateOutcome:
     reason = "" if passed else (
         f"{spec.name} = {value} violates {spec.comparison} {spec.threshold}"
         + (" -- HARD ZERO." if spec.hard else ""))
+    if detail:
+        # The node id belongs in the outcome whichever way it went: a green
+        # delegated gate that did not say what it ran is indistinguishable
+        # from one nobody ran.
+        reason = f"{reason} {detail}".strip() if reason else detail
     return GateOutcome(spec.name, PASS if passed else FAIL, value,
                        spec.threshold, spec.comparison, spec.hard, reason)
 
@@ -255,13 +374,38 @@ def _evaluate_no_regression(metrics: Mapping[str, Any],
 def evaluate_gates(metrics: Mapping[str, Any], *,
                    baseline: Mapping[str, Any] | None,
                    specs: Sequence[GateSpec] | None = None,
-                   gates_path: Path | str | None = None) -> GateReport:
-    """Evaluate EVERY gate. Nothing is skipped for being unmeasurable -- an
-    unmeasurable gate is reported as REFUSED, which blocks."""
-    resolved = tuple(specs) if specs is not None else load_gate_specs(gates_path)
-    outcomes = [_evaluate_one(spec, metrics) for spec in resolved]
-    outcomes.append(_evaluate_no_regression(
-        metrics, baseline, _no_regression_metrics(gates_path)))
+                   gates_path: Path | str | None = None,
+                   no_regression_metrics: Sequence[str] | None = None,
+                   run_delegated: bool = True,
+                   delegated_runner: Callable[[DelegatedSuite],
+                                              tuple[float, str]] | None = None
+                   ) -> GateReport:
+    """Evaluate EVERY gate.
+
+    Nothing is skipped for being unmeasurable -- an unmeasurable gate is
+    REFUSED, which blocks. Delegated gates are RUN by default: they cost
+    seconds and the alternative is a gate with no path to green.
+
+    `specs` is honoured FULLY (review round 1, M-4): supplying it means the
+    caller has assembled the policy in memory, so the config file is not read
+    at all -- not for the specs, and not for the no-regression list either.
+    A hidden YAML read behind an explicit argument is the kind of thing that
+    makes a test pass for the wrong reason.
+    """
+    if specs is not None:
+        resolved = tuple(specs)
+        watched = tuple(no_regression_metrics
+                        if no_regression_metrics is not None
+                        else NO_REGRESSION_METRICS)
+    else:
+        resolved = load_gate_specs(gates_path)
+        watched = tuple(no_regression_metrics
+                        if no_regression_metrics is not None
+                        else _no_regression_metrics(gates_path))
+    outcomes = [_evaluate_one(spec, metrics, run_delegated=run_delegated,
+                              runner=delegated_runner)
+                for spec in resolved]
+    outcomes.append(_evaluate_no_regression(metrics, baseline, watched))
     return GateReport(tuple(outcomes), dict(metrics))
 
 
@@ -278,17 +422,26 @@ def load_baseline(path: Path | str | None = None) -> Mapping[str, Any] | None:
 
 def render_report(report: GateReport,
                   per_stratum: Mapping[str, Mapping[str, Any]] | None = None,
-                  per_sector: Mapping[str, Mapping[str, Any]] | None = None) -> str:
-    """The gate table, then the breakdowns.
+                  per_sector: Mapping[str, Mapping[str, Any]] | None = None,
+                  unavailable: Mapping[str, str] | None = None) -> str:
+    """The gate table, the metrics nobody could produce, then the breakdowns.
 
     Task 7.2's DO NOT is inherited here: never report only aggregate. When a
     breakdown is absent this SAYS SO rather than quietly printing the
     aggregate alone, because an aggregate presented as the whole answer is
     how "excellent on crude, useless on policy" stays invisible.
+
+    `unavailable` (review round 1, M-5) is the harness's own list of metrics
+    the corpus protocol cannot express -- expected directness, distance,
+    evidence grade, section, and calibration. They correspond to no gate, so
+    a gate table alone renders them nowhere, and "the corpus carries no
+    expected directness" is a finding rather than a footnote.
     """
     lines = ["SHIPPING GATES", "=" * 60]
+    marks = {PASS: "PASS  ", FAIL: "FAIL  ", REFUSED: "REFUSE",
+             DELEGATED_NOT_RUN: "NOTRUN"}
     for outcome in report.outcomes:
-        mark = {PASS: "PASS  ", FAIL: "FAIL  ", REFUSED: "REFUSE"}[outcome.status]
+        mark = marks[outcome.status]
         value = "unmeasured" if outcome.value is None else outcome.value
         # The no-regression rule is a COMPARISON against a stored baseline,
         # not a threshold, so it carries neither -- and printing "( None)"
@@ -300,6 +453,15 @@ def render_report(report: GateReport,
             lines.append(f"        {outcome.reason}")
     lines.append("")
     lines.append(f"exit code: {report.exit_code}")
+
+    if unavailable:
+        lines.append("")
+        lines.append("UNAVAILABLE METRICS (no gate reads these; nobody can "
+                     "compute them)")
+        lines.append("-" * 60)
+        for name in sorted(unavailable):
+            lines.append(f"  {name}")
+            lines.append(f"        {unavailable[name]}")
 
     for title, breakdown in (("PER STRATUM", per_stratum),
                              ("PER SECTOR", per_sector)):
@@ -345,6 +507,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-baseline", action="store_true",
                         help="evaluate without the no-regression comparison; it "
                              "is then REFUSED, never passed")
+    parser.add_argument("--gates", default=None,
+                        help=f"gate policy YAML (default: {GATES_PATH})")
+    parser.add_argument("--skip-delegated", action="store_true",
+                        help="do not run the delegated Phase 0 suites. They "
+                             "become DELEGATED_NOT_RUN, which still blocks -- "
+                             "this is a speed switch, not a way to pass")
     args = parser.parse_args(argv)
 
     source = Path(args.metrics)
@@ -360,13 +528,16 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         baseline = None if args.no_baseline else load_baseline(args.baseline)
-        report = evaluate_gates(metrics, baseline=baseline)
+        report = evaluate_gates(metrics, baseline=baseline,
+                                gates_path=args.gates,
+                                run_delegated=not args.skip_delegated)
     except GateConfigError as exc:
         print(f"REFUSING TO EVALUATE: {exc}", file=sys.stderr)
         return EXIT_CANNOT_RUN
 
     print(render_report(report, per_stratum=payload.get("per_stratum"),
-                        per_sector=payload.get("per_sector")))
+                        per_sector=payload.get("per_sector"),
+                        unavailable=payload.get("unavailable")))
     if report.hard_violations:
         print("\nHARD ZERO VIOLATED -- this is an integrity failure, not a "
               "quality miss. Do not relax the gate.", file=sys.stderr)

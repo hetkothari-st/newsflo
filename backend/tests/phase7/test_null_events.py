@@ -55,16 +55,29 @@ def test_zero_primary_across_every_null_fixture_event(null_bundles):
 
 
 def test_every_null_fixture_fails_for_a_different_named_reason(null_bundles):
-    """Four events, four refusals. A null slice where everything dies of the
-    same cause measures one guard, not the system."""
+    """Four events, four refusals, ONE EACH.
+
+    Pinned per bundle rather than as a set union: a union is satisfied by one
+    event that happens to carry all four reasons, which would let three of
+    the fixtures silently degenerate into copies of the fourth and leave the
+    null slice measuring one guard instead of the system.
+    """
     from eval.harness import run_v5_path
 
-    reasons = set()
+    by_event = {}
     for bundle in null_bundles:
         output = run_v5_path(bundle)
-        reasons |= {r.rejection_reason for r in output.records}
-    assert reasons >= {"NO_MATERIAL_IMPACT", "ENTITY_AMBIGUOUS",
-                       "MACRO_CONTEXT_HAS_NO_COMPANIES", "UNBOUND_CLAIM"}, reasons
+        reasons = {r.rejection_reason for r in output.records}
+        assert len(reasons) == 1, (bundle.event_id, reasons)
+        by_event[bundle.event_id] = next(iter(reasons))
+
+    assert by_event == {
+        "fixture:null-1-immaterial": "NO_MATERIAL_IMPACT",
+        "fixture:null-2-ambiguous-entity": "ENTITY_AMBIGUOUS",
+        "fixture:null-3-unsizeable-shock": "MACRO_CONTEXT_HAS_NO_COMPANIES",
+        "fixture:null-4-unbound-claim": "UNBOUND_CLAIM",
+    }
+    assert len(set(by_event.values())) == len(by_event)
 
 
 def test_a_null_event_publishes_no_section_at_all(null_bundles):

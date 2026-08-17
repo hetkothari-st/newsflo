@@ -57,7 +57,7 @@ from app.output.sections import (
     zero_primary_state,
 )
 from eval import metrics as M
-from eval.cost_ledger import FRONTIER, CallLedger, StageCache
+from eval.cost_ledger import FRONTIER, SMALL, CallLedger, StageCache
 from scripts.score_baseline import cohens_kappa, kappa_over_corpus
 
 HARNESS_VERSION = "h7.0.0"
@@ -74,6 +74,11 @@ NULL_STRATUM = "null_event"
 #: carry this constant instead. It is not a claim about when anything
 #: happened; it is the absence of one.
 HARNESS_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+#: The two stages that can spend model budget on the V5 path. Both are
+#: counted by the ledger; neither constructs a client.
+FALSIFIER_STAGE = "FALSIFIER"
+FIREWALL_JUDGE_STAGE = "FIREWALL_JUDGE"
 
 TIER_PRIMARY = "PRIMARY"
 TIER_SECONDARY = "SECONDARY_RIPPLE"
@@ -566,7 +571,8 @@ def run_v5_path(bundle: StageBundle, *, falsifier_client: Any = None,
                 impact = reduce_company_impact(signals + list(objections), config)
 
         impacts.append(impact)
-        records.append(_record(bundle, impact, claims, evidence, judge,
+        records.append(_record(bundle, impact, claims, evidence,
+                               _counted_judge(judge, ledger, cache),
                                cross_model, taxonomy))
 
     sections = build_sections(impacts, taxonomy)
@@ -580,7 +586,7 @@ def _falsify(bundle: StageBundle, impact: CompanyImpact, company_id: int,
     from app.analysis.falsifier.engine import Falsifier
 
     policy = load_falsifier_config()
-    counted = ledger.wrap(client, tier=FRONTIER, stage="FALSIFIER",
+    counted = ledger.wrap(client, tier=FRONTIER, stage=FALSIFIER_STAGE,
                           model_id=policy.model_id,
                           prompt_version=policy.prompt_lineage, cache=cache)
     falsifier = Falsifier(client=counted, policy=policy)
@@ -590,6 +596,31 @@ def _falsify(bundle: StageBundle, impact: CompanyImpact, company_id: int,
                                 analysis_version=bundle.analysis_version,
                                 created_at=HARNESS_EPOCH)
     return signals, result.discipline.cross_model
+
+
+def _counted_judge(judge: Any, ledger: CallLedger, cache: StageCache | None):
+    """Route the firewall's stage-2 judge through the ledger (review round 1,
+    I-2).
+
+    The judge is a MODEL CALL and the cascade budget is a statement about
+    model calls, so a judge that bypassed the ledger made the budget a claim
+    about the stages somebody remembered to wrap. It is rung 3 (SMALL), not
+    rung 4: entailment judging is exactly what section 18 lists under the
+    small/fast model, and counting it as frontier spend would make a cheap
+    system look like it was breaching the one budget the spec gates.
+
+    `judge is None` stays None -- the firewall then runs stage 1 only, which
+    is the deployed state.
+    """
+    if judge is None:
+        return None
+    from app.output.entailment_prompt import PROMPT_LINEAGE, build_judge_prompt
+
+    return ledger.wrap_judge(
+        judge, tier=SMALL, stage=FIREWALL_JUDGE_STAGE,
+        prompt_builder=build_judge_prompt,
+        model_id=getattr(judge, "model_id", None),
+        prompt_version=PROMPT_LINEAGE, cache=cache)
 
 
 def _record(bundle: StageBundle, impact: CompanyImpact, claims, evidence,

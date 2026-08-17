@@ -243,23 +243,128 @@ def test_the_delegated_suites_are_named_not_assumed():
     """Reducer determinism (10k permutations) and market/fundamental
     isolation are proven by Phase 0's suites, not recomputed here. The
     evaluator must SAY which suite answers each gate."""
-    from eval.shipping_gates import DELEGATED_SUITES
+    from eval.shipping_gates import delegated_suites
 
-    assert set(DELEGATED_SUITES) == {"reducer_determinism",
-                                     "market_fundamental_isolation"}
-    for gate, suite in DELEGATED_SUITES.items():
+    suites = delegated_suites()
+    assert set(suites) == {"reducer_determinism", "market_fundamental_isolation"}
+    for gate, suite in suites.items():
         assert (BACKEND / suite.path).exists(), suite.path
         assert suite.test_name
 
 
 def test_the_delegated_suite_files_still_contain_the_named_tests():
-    from eval.shipping_gates import DELEGATED_SUITES
+    from eval.shipping_gates import delegated_suites
 
-    for gate, suite in DELEGATED_SUITES.items():
+    for gate, suite in delegated_suites().items():
         source = (BACKEND / suite.path).read_text(encoding="utf-8")
         assert f"def {suite.test_name}" in source, (
             f"{gate} delegates to {suite.path}::{suite.test_name}, which no "
             f"longer exists")
+
+
+# --- the delegated suites are RUN, not merely named -------------------------
+
+PROBE = "tests/phase7/fixtures/delegated_probe.py"
+
+
+def _delegated_only(suite, passing_metrics, **kwargs):
+    """Evaluate with ONLY the delegated gate's metric withheld, so the
+    outcome under test is the runner's answer and not a supplied number."""
+    from eval.shipping_gates import GateSpec, evaluate_gates
+
+    metrics = {k: v for k, v in passing_metrics.items()
+               if k != "reducer_determinism"}
+    specs = (GateSpec(name="reducer_determinism", comparison="==", threshold=1.0,
+                      hard=False, description="probe", delegated=suite),)
+    return evaluate_gates(metrics, baseline=None, specs=specs,
+                          no_regression_metrics=(), **kwargs)
+
+
+def test_a_delegated_gate_goes_green_when_its_suite_passes(passing):
+    """The happy path, exercised for real: a pytest subprocess runs the named
+    node id and its exit code becomes the gate's value."""
+    from eval.shipping_gates import DelegatedSuite
+
+    report = _delegated_only(
+        DelegatedSuite(path=PROBE, test_name="test_the_probe_passes"), passing)
+    outcome = {o.name: o for o in report.outcomes}["reducer_determinism"]
+    assert outcome.status == "PASS"
+    assert outcome.value == 1.0
+
+
+def test_a_delegated_gate_fails_when_its_suite_fails(passing):
+    """The path nothing in the real repo can exercise, because both real
+    delegated suites pass. Without this the runner is a formality."""
+    from eval.shipping_gates import DelegatedSuite
+
+    report = _delegated_only(
+        DelegatedSuite(path=PROBE, test_name="test_the_probe_fails"), passing)
+    outcome = {o.name: o for o in report.outcomes}["reducer_determinism"]
+    assert outcome.status == "FAIL"
+    assert outcome.value == 0.0
+    assert PROBE in outcome.reason and "test_the_probe_fails" in outcome.reason
+    assert report.exit_code != 0
+
+
+def test_a_missing_delegated_suite_file_fails_rather_than_refusing(passing):
+    from eval.shipping_gates import DelegatedSuite
+
+    report = _delegated_only(
+        DelegatedSuite(path="tests/phase7/fixtures/nope.py", test_name="test_x"),
+        passing)
+    outcome = {o.name: o for o in report.outcomes}["reducer_determinism"]
+    assert outcome.status == "FAIL"
+    assert outcome.value == 0.0
+
+
+def test_skipping_the_delegated_run_says_so_and_never_says_unmeasured(passing):
+    """DELEGATED_NOT_RUN is its own status. "was not measured" would be a lie:
+    the property is measurable in seconds and nobody asked."""
+    from eval.shipping_gates import DELEGATED_NOT_RUN, DelegatedSuite
+
+    report = _delegated_only(
+        DelegatedSuite(path=PROBE, test_name="test_the_probe_passes"), passing,
+        run_delegated=False)
+    outcome = {o.name: o for o in report.outcomes}["reducer_determinism"]
+    assert outcome.status == DELEGATED_NOT_RUN
+    assert PROBE in outcome.reason
+    assert "not measured" not in outcome.reason
+    assert "--skip-delegated" in outcome.reason
+    assert report.exit_code != 0, "a gate nobody ran is not a green gate"
+
+
+def test_a_supplied_metric_beats_the_runner(passing):
+    """A caller who already ran the suite (the harness does) must not pay for
+    a second subprocess."""
+    from eval.shipping_gates import DelegatedSuite, GateSpec, evaluate_gates
+
+    suite = DelegatedSuite(path=PROBE, test_name="test_the_probe_fails")
+    specs = (GateSpec(name="reducer_determinism", comparison="==", threshold=1.0,
+                      hard=False, delegated=suite),)
+    report = evaluate_gates({"reducer_determinism": 1.0}, baseline=None,
+                            specs=specs, no_regression_metrics=())
+    outcome = {o.name: o for o in report.outcomes}["reducer_determinism"]
+    assert outcome.status == "PASS", (
+        "the supplied metric was ignored and the failing probe ran instead")
+
+
+def test_the_delegated_runner_pins_the_scheduler_off():
+    """A delegated run is a pytest subprocess. It must inherit the same
+    hermetic guarantee the suite itself has."""
+    from eval.shipping_gates import delegated_environment
+
+    assert delegated_environment()["ENABLE_SCHEDULER"] == "false"
+
+
+def test_delegated_gates_run_by_default_in_the_evaluator(passing):
+    """The two properties pass today and cost seconds to prove, so the
+    evaluator proves them unless told not to."""
+    import inspect
+
+    from eval.shipping_gates import evaluate_gates
+
+    assert inspect.signature(
+        evaluate_gates).parameters["run_delegated"].default is True
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +484,52 @@ def test_the_cli_refuses_an_absent_metrics_file(tmp_path):
     assert main(["--metrics", str(tmp_path / "nope.json")]) == 2
 
 
+def test_the_cli_exits_two_on_a_relaxed_hard_zero(tmp_path, passing):
+    """The config error must reach `main`'s handler, which means the config
+    must NOT be read at import time -- a module that raises on import cannot
+    return an exit code at all."""
+    import yaml
+
+    from eval.shipping_gates import GATES_PATH, main
+
+    raw = yaml.safe_load(Path(GATES_PATH).read_text(encoding="utf-8"))
+    for entry in raw["gates"]:
+        if entry["name"] == "fabricated_numeral_rate":
+            entry["threshold"] = 0.01
+    relaxed = tmp_path / "relaxed.yaml"
+    relaxed.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({"metrics": passing}), encoding="utf-8")
+    assert main(["--metrics", str(path), "--gates", str(relaxed),
+                 "--no-baseline", "--skip-delegated"]) == 2
+
+
+def test_importing_the_module_reads_no_config():
+    """M-2, structurally: no MODULE-LEVEL statement calls the loader, so a
+    broken config is an exit code rather than an ImportError from inside
+    somebody else's import."""
+    import ast
+    from pathlib import Path as _Path
+
+    from tests.phase7.conftest import BACKEND
+
+    source = (_Path(BACKEND) / "eval" / "shipping_gates.py").read_text(
+        encoding="utf-8")
+    module = ast.parse(source)
+    top_level = [node for node in module.body
+                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                          ast.ClassDef))]
+    called = {
+        node.func.id
+        for statement in top_level
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "load_gate_specs" not in called
+    assert "delegated_suites" not in called
+    assert "load_baseline" not in called
+
+
 def test_the_module_header_says_where_to_wire_this_into_ci():
     import eval.shipping_gates as module
 
@@ -405,3 +556,48 @@ def test_rendering_without_a_breakdown_says_so(passing):
     assert "NOT REPORTED" in text
     assert "aggregate-only" in text
     assert "per stratum" in text.lower() and "per sector" in text.lower()
+
+
+def test_the_report_surfaces_metrics_the_harness_could_not_produce(passing):
+    """M-5. The three protocol-gap metrics are invisible in a gate table that
+    only lists gates -- and "no expected directness exists in the corpus" is
+    a finding, not a footnote."""
+    from eval.shipping_gates import render_report
+
+    text = render_report(_report(passing), unavailable={
+        "directness_accuracy": "eval_label carries no expected_directness column",
+        "calibration_ece": "calibration is DISABLED and structurally locked"})
+    assert "UNAVAILABLE" in text
+    assert "directness_accuracy" in text
+    assert "no expected_directness column" in text
+
+
+def test_rendering_without_an_unavailable_map_omits_the_block(passing):
+    from eval.shipping_gates import render_report
+
+    assert "UNAVAILABLE" not in render_report(_report(passing))
+
+
+def test_evaluate_gates_honours_supplied_specs_without_reading_the_config(passing):
+    """M-4. A caller who hands in specs must get exactly those specs -- no
+    silent YAML re-read for the no-regression list."""
+    from eval.shipping_gates import GateSpec, evaluate_gates
+
+    specs = (GateSpec(name="primary_precision", comparison=">=", threshold=0.5,
+                      hard=False),)
+    report = evaluate_gates({"primary_precision": 0.6}, baseline=None,
+                            specs=specs, no_regression_metrics=())
+    assert [o.name for o in report.outcomes] == ["primary_precision",
+                                                 "no_regression"]
+    assert report.outcomes[0].status == "PASS"
+
+
+def test_supplied_specs_do_not_have_to_carry_the_hard_zeros(passing):
+    """The hard-zero REFUSAL guards the FILE, which is what people edit. A
+    caller assembling specs in memory is not editing policy."""
+    from eval.shipping_gates import GateSpec, evaluate_gates
+
+    specs = (GateSpec(name="primary_precision", comparison=">=", threshold=0.95,
+                      hard=False),)
+    evaluate_gates({"primary_precision": 0.99}, baseline=None, specs=specs,
+                   no_regression_metrics=())

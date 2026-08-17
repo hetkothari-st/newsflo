@@ -37,12 +37,23 @@ from app.ledger.coverage import _percentile
 from app.ledger.freshness import p90_age_alert_days
 from app.ledger.staleness import exposure_ages
 
-#: The stages that spend V5 model budget. `FALSIFIER` is Phase 6's adversary
-#: (the only frontier caller); `FIREWALL_JUDGE` is the stage-2 entailment
-#: judge. Deliberately NOT the V4 stage names in `llm_call_usage`: a V4
-#: `impact_whys` call is not a V5 frontier call and counting it would make
-#: the section 18 budget look breached by a system that is not running.
-V5_LLM_STAGES = ("FALSIFIER", "FIREWALL_JUDGE")
+#: Section 18 rung 4. Phase 6's adversary is the only frontier caller, and
+#: the frontier budget is the one the spec gates (<= 0.10 calls per
+#: candidate).
+V5_FRONTIER_STAGES = ("FALSIFIER",)
+
+#: Section 18 rung 3. Entailment judging is listed under the SMALL/fast model,
+#: so the firewall's stage-2 judge is not frontier spend (review round 1,
+#: M-1). Counting it in the frontier ratio would make a cheap system look
+#: like it was breaching the one budget that is gated -- and dropping it
+#: entirely would make small-model spend the place cost hides, so it gets its
+#: own signal.
+V5_SMALL_STAGES = ("FIREWALL_JUDGE",)
+
+#: Every stage that spends V5 model budget. Deliberately NOT the V4 stage
+#: names in `llm_call_usage`: a V4 `impact_whys` call is not a V5 call, and
+#: counting it would measure a system that is not running.
+V5_LLM_STAGES = V5_FRONTIER_STAGES + V5_SMALL_STAGES
 
 #: p90 / p95, as integers -- the percentile helper takes a fraction, and a
 #: bare 0.9 in this file would be a threshold nobody named.
@@ -251,33 +262,52 @@ def publish_latency_p95(conn: sa.Connection) -> MonitoringSignal:
                  "DATA_GAPS sections 9.6 and 11."))
 
 
-def frontier_calls_per_event(conn: sa.Connection) -> MonitoringSignal:
-    """"cost control; deterministic layers must eliminate >= 90% of
-    candidates pre-LLM".
-
-    Counted over V5 STAGES ONLY. The `llm_call_usage` table is full of V4
-    calls; including them would measure a different system and would make the
-    section 18 budget look breached by a pipeline that never ran.
-    """
-    placeholders = ", ".join(f":s{i}" for i in range(len(V5_LLM_STAGES)))
-    params = {f"s{i}": stage for i, stage in enumerate(V5_LLM_STAGES)}
+def _calls_per_event(conn: sa.Connection, stages: Sequence[str], *, name: str,
+                     refusal: str) -> MonitoringSignal:
+    placeholders = ", ".join(f":s{i}" for i in range(len(stages)))
+    params = {f"s{i}": stage for i, stage in enumerate(stages)}
     row = conn.execute(sa.text(
         f"SELECT COUNT(*), COUNT(DISTINCT article_id) FROM llm_call_usage "
         f"WHERE stage IN ({placeholders}) "
         f"AND (cache_hit IS NULL OR cache_hit = 0)"), params).first()
     calls, events = (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
-    detail = {"calls": calls, "events": events,
-              "stages_counted": list(V5_LLM_STAGES)}
+    detail = {"calls": calls, "events": events, "stages_counted": list(stages)}
     if not events:
-        return MonitoringSignal(
-            "frontier_calls_per_event", None, "calls_per_event", detail,
-            refusal=("no V5 model call has ever been recorded: the falsifier "
-                     "is deliberately unwired and the firewall's stage-2 judge "
-                     "is never constructed (DATA_GAPS sections 10.2 and 10.3). "
-                     "Not 0 calls per event -- 0 would read as a triumph of "
-                     "cost control."))
-    return MonitoringSignal("frontier_calls_per_event", calls / events,
-                            "calls_per_event", detail)
+        return MonitoringSignal(name, None, "calls_per_event", detail,
+                                refusal=refusal)
+    return MonitoringSignal(name, calls / events, "calls_per_event", detail)
+
+
+def frontier_calls_per_event(conn: sa.Connection) -> MonitoringSignal:
+    """"cost control; deterministic layers must eliminate >= 90% of
+    candidates pre-LLM".
+
+    RUNG 4 ONLY. The firewall's stage-2 judge is rung 3 and lives in
+    `small_calls_per_event`; folding it in here would inflate the one ratio
+    section 18 actually gates. Counted over V5 stages only -- the
+    `llm_call_usage` table is full of V4 calls, and including them would
+    measure a different system.
+    """
+    return _calls_per_event(
+        conn, V5_FRONTIER_STAGES, name="frontier_calls_per_event",
+        refusal=("no V5 FRONTIER call has ever been recorded: the falsifier is "
+                 "deliberately unwired (DATA_GAPS sections 10.2 and 10.3). Not "
+                 "0 calls per event -- 0 would read as a triumph of cost "
+                 "control."))
+
+
+def small_calls_per_event(conn: sa.Connection) -> MonitoringSignal:
+    """Rung 3 spend, kept visible.
+
+    Moving the entailment judge out of the frontier ratio must not move it
+    out of view: a budget that watches only the expensive tier is a budget
+    that tells you where to hide cost.
+    """
+    return _calls_per_event(
+        conn, V5_SMALL_STAGES, name="small_calls_per_event",
+        refusal=("no V5 SMALL-model call has ever been recorded: the firewall's "
+                 "stage-2 entailment judge is never constructed (DATA_GAPS "
+                 "section 10.3). Not 0 -- nothing has run."))
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +326,7 @@ def all_signals(conn: sa.Connection, *, as_of: date) -> tuple[MonitoringSignal, 
         coverage_gap_depth(conn),
         publish_latency_p95(conn),
         frontier_calls_per_event(conn),
+        small_calls_per_event(conn),
     )
 
 

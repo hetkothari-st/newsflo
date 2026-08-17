@@ -104,21 +104,59 @@ def test_the_shipping_gate_config_holds_policy_not_data():
         assert token.lower() not in text.lower(), token
 
 
-def test_the_eval_package_holds_no_threshold_of_its_own():
+def test_the_eval_package_holds_no_unnamed_threshold():
     """Every gate number lives in `config/shipping_gates.yaml`, so a
-    threshold cannot drift between the file and the code. The cascade budget
-    (0.10) is the spec's own constant and is named, not scattered."""
+    threshold cannot drift between the file and the code.
+
+    A fractional literal is allowed in exactly one shape: bound to a
+    MODULE-LEVEL NAMED CONSTANT, where a reader can see what it means and a
+    reviewer can see it change. `SUITE_PASSED = 1.0` / `SUITE_FAILED = 0.0`
+    are the two points of a boolean domain, not a bar anybody chose; the bar
+    for those gates is `== 1.0` in the YAML like every other one. What stays
+    banned is the thing this test exists for: a bare fraction buried mid-
+    expression, which is how a threshold nobody agreed to gets shipped.
+
+    `test_the_gate_thresholds_match_the_spec_table` is the other half: every
+    gate bar is pinned to the config, so a code constant cannot become one.
+    """
     import re
 
-    allowed = {EVAL_PACKAGE / "cost_ledger.py", EVAL_PACKAGE / "metrics.py"}
+    allowed_files = {EVAL_PACKAGE / "cost_ledger.py", EVAL_PACKAGE / "metrics.py"}
+    named_constant = re.compile(r"^[A-Z][A-Z0-9_]* = [-+]?\d*\.?\d+$")
+    # Deliberately `0.x` only, as it has been since this guard was written: a
+    # fraction is what a threshold looks like. Widening it to every decimal
+    # would flag "DATA_GAPS section 9.4" inside a refusal message and teach
+    # the next person to disable the check.
+    fraction = re.compile(r"(?<![\w.])0\.\d+")
+
     offenders = []
     for path in package_sources(EVAL_PACKAGE):
-        if path in allowed:
+        if path in allowed_files:
             continue
         for number, line in code_lines(path):
-            if re.search(r"(?<![\w.])0\.\d+", line):
+            if named_constant.match(line.strip()):
+                continue
+            if fraction.search(line):
                 offenders.append(f"{path.name}:{number}: {line.strip()}")
     assert not offenders, offenders
+
+
+def test_the_named_constant_exemption_does_not_swallow_a_buried_threshold():
+    """The self-test for the rule above: a bare fraction inside an expression
+    must still be caught, or the exemption has quietly disabled the guard."""
+    import re
+
+    named_constant = re.compile(r"^[A-Z][A-Z0-9_]* = [-+]?\d*\.?\d+$")
+    fraction = re.compile(r"(?<![\w.])0\.\d+")
+
+    def flagged(line: str) -> bool:
+        return not named_constant.match(line.strip()) and bool(fraction.search(line))
+
+    assert flagged("    if value > 0.95:")
+    assert flagged("    return ratio <= 0.10")
+    assert flagged("SUITE_FAILED = 0.0  # a trailing comment defeats the shape")
+    assert not flagged("SUITE_FAILED = 0.0")
+    assert not flagged('        "unmeasurable (DATA_GAPS section 9.4)."')
 
 
 def test_no_row_was_written_by_importing_the_eval_package(phase7_engine):

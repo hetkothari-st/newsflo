@@ -35,6 +35,10 @@ SIGNAL_NAMES = (
     "coverage_gap_depth",
     "publish_latency_p95",
     "frontier_calls_per_event",
+    # M-1: rung 3 is not rung 4. The frontier budget is the one section 18
+    # gates, but small-model spend still has to be visible or it becomes the
+    # place cost hides.
+    "small_calls_per_event",
 )
 
 
@@ -61,7 +65,7 @@ def test_every_signal_on_an_empty_database_refuses_with_a_reason(phase7_engine):
     for name in ("firewall_deletion_rate", "exposure_staleness_p90",
                  "policy_state_staleness", "calibration_drift",
                  "rejection_reason_histogram", "publish_latency_p95",
-                 "frontier_calls_per_event"):
+                 "frontier_calls_per_event", "small_calls_per_event"):
         assert signals[name].value is None, name
         assert signals[name].refusal, name
 
@@ -220,22 +224,56 @@ def test_firewall_deletion_rate_needs_a_denominator_the_database_does_not_hold(
     assert supplied.value == 0.1
 
 
-def test_frontier_calls_per_event_reads_only_v5_stages(phase7_engine):
-    from eval.monitoring import V5_LLM_STAGES, frontier_calls_per_event
-
-    with phase7_engine.begin() as conn:
-        for stage, article in (("FALSIFIER", 1), ("FALSIFIER", 1),
-                               ("impact_whys", 1)):
+def _seed_llm_calls(engine, rows):
+    with engine.begin() as conn:
+        for stage, article in rows:
             conn.execute(sa.text(
                 "INSERT INTO llm_call_usage (created_at, provider, stage, "
                 "article_id, success) VALUES (:now, 'fixture', :stage, "
                 ":article, 1)"),
                 {"now": FIXTURE_NOW, "stage": stage, "article": article})
+
+
+def test_frontier_calls_per_event_reads_only_v5_stages(phase7_engine):
+    from eval.monitoring import V5_FRONTIER_STAGES, V5_LLM_STAGES, frontier_calls_per_event
+
+    _seed_llm_calls(phase7_engine, [("FALSIFIER", 1), ("FALSIFIER", 1),
+                                    ("impact_whys", 1)])
     with phase7_engine.connect() as conn:
         signal = frontier_calls_per_event(conn)
-    assert "FALSIFIER" in V5_LLM_STAGES
+    assert V5_FRONTIER_STAGES == ("FALSIFIER",)
+    assert set(V5_FRONTIER_STAGES) <= set(V5_LLM_STAGES)
     assert signal.value == 2.0
     assert signal.detail["events"] == 1
+
+
+def test_the_frontier_signal_does_not_count_the_entailment_judge(phase7_engine):
+    """M-1. The stage-2 judge is section 18's rung 3. Counting it in the
+    FRONTIER budget would make a cheap system look like it was breaching the
+    one budget the spec actually gates."""
+    from eval.monitoring import frontier_calls_per_event, small_calls_per_event
+
+    _seed_llm_calls(phase7_engine, [("FALSIFIER", 1), ("FIREWALL_JUDGE", 1),
+                                    ("FIREWALL_JUDGE", 1)])
+    with phase7_engine.connect() as conn:
+        frontier = frontier_calls_per_event(conn)
+        small = small_calls_per_event(conn)
+    assert frontier.value == 1.0
+    assert small.value == 2.0
+    assert small.detail["stages_counted"] == ["FIREWALL_JUDGE"]
+
+
+def test_small_model_spend_stays_visible(phase7_engine):
+    """Removing the judge from the frontier count must not remove it from
+    view -- that is how spend hides."""
+    from eval.monitoring import all_signals
+
+    _seed_llm_calls(phase7_engine, [("FIREWALL_JUDGE", 7)])
+    with phase7_engine.connect() as conn:
+        signals = {s.name: s for s in all_signals(conn, as_of=FIXTURE_TODAY)}
+    assert signals["small_calls_per_event"].value == 1.0
+    assert signals["frontier_calls_per_event"].value is None
+    assert signals["frontier_calls_per_event"].refusal
 
 
 def test_calibration_drift_refuses_while_calibration_is_disabled(phase7_engine):

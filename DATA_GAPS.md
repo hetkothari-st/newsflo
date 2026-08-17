@@ -692,15 +692,25 @@ path, which does not exist. What ships is machinery plus a fixture proof of
 each mechanism, and each unmeasurable thing refuses loudly instead of
 returning 0.0 or 1.0.
 
-### 11.1 No corpus, so no metric and no gate has ever been evaluated for real — OPEN
+### 11.1 No corpus, so twelve of the fourteen gates have never been evaluated — OPEN
 
-Same corpus as §1, and it is the blocker for the whole phase.
+Same corpus as §1, and it is the blocker for the whole phase — **but not for
+all of it**, and the distinction matters. Two gates are answered by RUNNING a
+Phase 0 suite rather than by a corpus metric, and both pass today:
+
+| gate | answered by | today |
+|---|---|---|
+| `reducer_determinism` | `tests/phase0/test_reducer_purity.py::test_reducer_output_is_byte_identical_across_10k_permutations` | **PASS** |
+| `market_fundamental_isolation` | `tests/phase0/test_market_isolation.py::test_mutating_market_data_leaves_company_impact_byte_identical` | **PASS** |
+
+They are not gaps and must not be counted as ones. Everything below is about
+the other twelve.
 
 | | |
 |---|---|
 | **What is needed** | The §1 corpus (Task 7.1 asks for 300 events, ≥ 50 of them null, every stratum represented, two independent labelers each, κ reported). `EXECUTION_CONTRACT.md` §2 scopes the first pass to 40 (30 crude + 10 null) — that is Gate Zero, not Task 7.1's full corpus, and Phase 7's `corpus_integrity()` reports both bars. |
 | **Rows today** | 0 in `eval_event`, `eval_label`, `eval_event_label`, `eval_adjudication`. |
-| **Consequence** | `eval.harness.corpus_integrity()` and `load_expectations()` raise `HarnessRefusal`. `tests/phase7/test_corpus_integrity.py` and `test_null_events.py` SKIP their corpus assertions with that reason in the skip message. Every shipping gate is REFUSED, so the evaluator exits non-zero. |
+| **Consequence** | `eval.harness.corpus_integrity()` and `load_expectations()` raise `HarnessRefusal`. `tests/phase7/test_corpus_integrity.py` and `test_null_events.py` SKIP their corpus assertions with that reason in the skip message. **Twelve of the fourteen shipping gates are REFUSED** — eleven for want of this corpus, and `p95_publish_latency_seconds` because nothing times the V5 path (§11.5) — so the evaluator exits 1. The two delegated gates PASS. |
 | **How to run it once the corpus exists** | Point `NEWSFLO_EVAL_CORPUS_DB` at the labeled database and the skipped tests run for real. |
 | **Owner** | **repo owner** (labeling is human work). |
 
@@ -724,6 +734,11 @@ distinct exit codes (0 pass · 1 failed or unmeasurable · 2 cannot run ·
 python -m eval.shipping_gates --metrics metrics.json
 ```
 
+The evaluator RUNS the two delegated Phase 0 suites itself (a pytest
+subprocess with `ENABLE_SCHEDULER=false`), so those two gates need no CI to be
+answered — `--skip-delegated` turns them into `DELEGATED_NOT_RUN`, which still
+blocks and is never reported as unmeasured.
+
 *What is needed:* one CI step running that command on every PR touching
 analysis code, failing the build on any non-zero exit.
 **Owner: repo owner** (choosing and provisioning CI is an infrastructure
@@ -743,7 +758,7 @@ proper exporter), retention so drift is visible over months, and alert routes
 for `policy_state_staleness`, `exposure_staleness_p90` and the
 rejection-reason collapse. **Owner: repo owner.**
 
-### 11.5 Seven of the nine monitoring signals cannot be computed today — OPEN
+### 11.5 Eight of the ten monitoring signals cannot be computed today — OPEN
 
 Not a defect in the signals: there is nothing running to measure. Each
 refuses with its own reason rather than reporting a healthy-looking zero.
@@ -756,10 +771,18 @@ refuses with its own reason rather than reporting a healthy-looking zero.
 | `calibration_drift` | calibration is disabled and locked; no fitted model | §9.4 |
 | `rejection_reason_histogram` | no canonical record exists; V5 is unserved | §10.3 |
 | `publish_latency_p95` | nothing times the V5 path | §9.6 |
-| `frontier_calls_per_event` | no V5 model call has ever been recorded | §10.2, §10.3 |
+| `frontier_calls_per_event` | no V5 FRONTIER (falsifier) call has ever been recorded | §10.2, §10.3 |
+| `small_calls_per_event` | no V5 SMALL-model (entailment judge) call has ever been recorded | §10.3 |
 
 `divergence_queue_volume` and `coverage_gap_depth` DO report — they are
 counts over tables that exist, and zero is a genuine measurement there.
+
+The frontier and small-model counts are **separate signals on purpose**
+(review round 1, M-1): the entailment judge is spec §18's rung 3 and the
+falsifier is rung 4, and §18 gates only the frontier ratio. Folding the
+judge into the frontier count would make a cheap system look like it was
+breaching the one budget that is gated; dropping it would make
+small-model spend the place cost hides.
 
 ### 11.6 The firewall does not persist the sentences it examined — OPEN
 

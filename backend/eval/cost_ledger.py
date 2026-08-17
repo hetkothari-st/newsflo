@@ -127,6 +127,64 @@ class _CountingClient:
         return response
 
 
+class _CountingJudge:
+    """The firewall's stage-2 seam: `entails(sentence, record_set) -> bool`
+    plus a `model_id`, and nothing else.
+
+    A SECOND wrapper is needed because the judge's seam is not the
+    falsifier's: it takes two arguments and returns a bool, so
+    `_CountingClient` cannot stand in for it. That asymmetry is exactly how
+    the judge escaped counting in the first place -- the budget was a claim
+    about the stages somebody remembered to wrap.
+    """
+
+    def __init__(self, judge: Any, *, ledger: "CallLedger", tier: str,
+                 stage: str, model_id: str | None, prompt_version: str | None,
+                 cache: StageCache | None,
+                 prompt_builder: Any):
+        self._judge = judge
+        self._ledger = ledger
+        self._tier = tier
+        self._stage = stage
+        self._model_id = model_id
+        self._prompt_version = prompt_version
+        self._cache = cache
+        self._prompt_builder = prompt_builder
+
+    @property
+    def model_id(self) -> str | None:
+        return self._model_id or getattr(self._judge, "model_id", None)
+
+    def entails(self, sentence: str, record_set: Any) -> bool:
+        # The cache is keyed on the PROMPT the judge would be sent, not on
+        # the sentence alone: two identical sentences judged against
+        # different record sets are different questions.
+        key = stage_cache_key(
+            stage=self._stage,
+            input_hash=input_hash(self._prompt_builder(sentence, record_set)),
+            model_id=self.model_id, prompt_version=self._prompt_version)
+        if self._cache is not None:
+            hit = self._cache.get(key)
+            if hit is not None:
+                self._ledger.record(self._tier, stage=self._stage,
+                                    model_id=self.model_id,
+                                    prompt_version=self._prompt_version,
+                                    cache_key=key, cached=True)
+                return hit == _TRUE
+        verdict = bool(self._judge.entails(sentence, record_set))
+        self._ledger.record(self._tier, stage=self._stage,
+                            model_id=self.model_id,
+                            prompt_version=self._prompt_version, cache_key=key)
+        if self._cache is not None:
+            self._cache.put(key, _TRUE if verdict else _FALSE)
+        return verdict
+
+
+#: The cache stores strings (it is a stage-RESULT cache and every other stage
+#: returns text), so a boolean verdict is stored as one of these two.
+_TRUE, _FALSE = "ENTAILED", "NOT_ENTAILED"
+
+
 @dataclass
 class CallLedger:
     records: list[CallRecord] = field(default_factory=list)
@@ -152,6 +210,23 @@ class CallLedger:
         return _CountingClient(client, ledger=self, tier=tier, stage=stage,
                                model_id=model_id, prompt_version=prompt_version,
                                cache=cache)
+
+    def wrap_judge(self, judge: Any, *, tier: str, stage: str, prompt_builder,
+                   model_id: str | None = None,
+                   prompt_version: str | None = None,
+                   cache: StageCache | None = None) -> _CountingJudge:
+        """Count the firewall's stage-2 entailment judge (section 18 rung 3).
+
+        `prompt_builder(sentence, record_set) -> str` is REQUIRED rather than
+        defaulted: the cache key has to be the question actually asked, and a
+        wrapper that invented its own key would report cache hits that the
+        provider never saw.
+        """
+        if tier not in TIERS:
+            raise ValueError(f"unknown cascade tier {tier!r}")
+        return _CountingJudge(judge, ledger=self, tier=tier, stage=stage,
+                              model_id=model_id, prompt_version=prompt_version,
+                              cache=cache, prompt_builder=prompt_builder)
 
     # -- reading -----------------------------------------------------------
     def _live(self) -> list[CallRecord]:

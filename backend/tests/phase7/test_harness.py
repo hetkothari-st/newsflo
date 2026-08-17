@@ -198,6 +198,68 @@ def test_scoring_zero_events_is_refused(corpus):
 
 def test_the_path_makes_no_model_call_when_no_client_is_injected(commodity_output):
     assert commodity_output.ledger.total_calls == 0
+    assert commodity_output.ledger.small_calls == 0
+
+
+class _AlwaysEntails:
+    """The firewall's stage-2 seam: `entails(sentence, record_set) -> bool`
+    plus a `model_id`. Nothing more, because nothing more is the contract."""
+
+    model_id = "fixture-judge-model"
+
+    def __init__(self):
+        self.calls = 0
+
+    def entails(self, sentence, record_set):
+        self.calls += 1
+        return True
+
+
+def test_the_entailment_judge_is_counted_by_the_ledger_too():
+    """I-2. The judge is a MODEL CALL and the cascade budget is about model
+    calls. A stage that can bypass the ledger makes the budget a claim about
+    the stages we remembered to count."""
+    from eval.harness import StageBundle, run_v5_path
+
+    judge = _AlwaysEntails()
+    output = run_v5_path(
+        StageBundle.from_dict(load_fixture("corpus_event_bundle.json")),
+        judge=judge)
+    assert judge.calls > 0, "the fixture produced no prose to judge"
+    assert output.ledger.small_calls == judge.calls
+    assert output.ledger.frontier_calls == 0, (
+        "the entailment judge is rung 3, not rung 4")
+    assert output.ledger.calls_by_stage["FIREWALL_JUDGE"] == judge.calls
+
+
+def test_an_identical_sentence_judged_twice_is_a_cache_hit():
+    from eval.cost_ledger import StageCache
+    from eval.harness import StageBundle, run_v5_path
+
+    bundle = StageBundle.from_dict(load_fixture("corpus_event_bundle.json"))
+    cache = StageCache()
+    first = _AlwaysEntails()
+    run_v5_path(bundle, judge=first, cache=cache)
+    second = _AlwaysEntails()
+    output = run_v5_path(bundle, judge=second, cache=cache)
+    assert second.calls == 0, "the identical repeat reached the judge"
+    assert output.ledger.cache_hits == first.calls
+
+
+def test_the_judge_verdict_still_reaches_the_firewall():
+    """The wrapper must not swallow the answer it is counting."""
+    from eval.harness import StageBundle, run_v5_path
+
+    class _RefusesEverything(_AlwaysEntails):
+        def entails(self, sentence, record_set):
+            self.calls += 1
+            return False
+
+    bundle = StageBundle.from_dict(load_fixture("corpus_event_bundle.json"))
+    permissive = run_v5_path(bundle, judge=_AlwaysEntails())
+    strict = run_v5_path(bundle, judge=_RefusesEverything())
+    assert sum(r.deletions for r in permissive.records) == 0
+    assert sum(r.deletions for r in strict.records) > 0
 
 
 def test_the_path_runs_the_falsifier_only_when_a_client_is_injected():
