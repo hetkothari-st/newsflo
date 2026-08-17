@@ -1,0 +1,109 @@
+{
+  "_fixture": true,
+  "_what_this_is": [
+    "The section-engine regression from BUILD_SPEC section 15, rebuilt out of",
+    "invented numbers and companies that do not exist.",
+    "",
+    "THE BUG IT PINS. In the V4 snapshot an integrated energy company was",
+    "rendered inside 'NEGATIVE -- OIL MARKETING & REFINING' alongside the pure",
+    "fuel retailers, because sectioning was done by SECTOR. For an integrated",
+    "name, crude is simultaneously a realisation (upstream), a feedstock cost",
+    "(refining, petrochemicals) and a marketing margin driver -- the record's",
+    "net effect is MIXED, and MIXED is not a direction. The spec calls this a",
+    "data-model fix rather than a prompting fix: economic_effect is part of the",
+    "section KEY, so a MIXED company cannot be placed in a directional section",
+    "however the label is worded.",
+    "",
+    "Every ticker here starts with FIX and belongs to no listed entity. Every",
+    "delta_ebitda_pct_p50 is a round invented number chosen to make the",
+    "ORDERING assertions readable -- none of them is a claim about anybody's",
+    "earnings."
+  ],
+  "companies": [
+    {
+      "_fixture": true,
+      "company_id": 6101,
+      "ticker": "FIXOMC1",
+      "name": "Fixture Fuel Retailers Ltd",
+      "publication_tier": "PRIMARY",
+      "net_effect": "NEGATIVE",
+      "mechanism_id": "refiner_marketing_margin",
+      "horizon_bucket": "NEAR_TERM",
+      "delta_ebitda_pct_p50": -3.2
+    },
+    {
+      "_fixture": true,
+      "company_id": 6102,
+      "ticker": "FIXOMC2",
+      "name": "Fixture Coastal Refiners Ltd",
+      "publication_tier": "PRIMARY",
+      "net_effect": "NEGATIVE",
+      "mechanism_id": "refiner_marketing_margin",
+      "horizon_bucket": "NEAR_TERM",
+      "delta_ebitda_pct_p50": -2.4
+    },
+    {
+      "_fixture": true,
+      "company_id": 6103,
+      "ticker": "FIXINT",
+      "name": "Fixture Integrated Energy Ltd",
+      "publication_tier": "PRIMARY",
+      "net_effect": "MIXED",
+      "mechanism_id": "integrated_energy",
+      "horizon_bucket": "NEAR_TERM",
+      "delta_ebitda_pct_p50": -0.4
+    },
+    {
+      "_fixture": true,
+      "company_id": 6104,
+      "ticker": "FIXUP",
+      "name": "Fixture Upstream Producers Ltd",
+      "publication_tier": "PRIMARY",
+      "net_effect": "POSITIVE",
+      "mechanism_id": "upstream_realization",
+      "horizon_bucket": "IMMEDIATE",
+      "delta_ebitda_pct_p50": 5.1
+    },
+    {
+      "_fixture": true,
+      "company_id": 6105,
+      "ticker": "FIXAIR",
+      "name": "Fixture Airlines Ltd",
+      "publication_tier": "SECONDARY_RIPPLE",
+      "net_effect": "NEGATIVE",
+      "mechanism_id": "aviation_fuel_cost",
+      "horizon_bucket": "NEAR_TERM",
+      "delta_ebitda_pct_p50": -1.8
+    },
+    {
+      "_fixture": true,
+      "company_id": 6106,
+      "ticker": "FIXPNT",
+      "name": "Fixture Paints Ltd",
+      "publication_tier": "SECONDARY_RIPPLE",
+      "net_effect": "NEGATIVE",
+      "mechanism_id": "paints_input_cost",
+      "horizon_bucket": "STRUCTURAL",
+      "delta_ebitda_pct_p50": -0.9
+    },
+    {
+      "_fixture": true,
+      "company_id": 6107,
+      "ticker": "FIXREJ",
+      "name": "Fixture Rejected Candidate Ltd",
+      "publication_tier": "REJECTED",
+      "net_effect": "NEGATIVE",
+      "mechanism_id": "paints_input_cost",
+      "horizon_bucket": "NEAR_TERM",
+      "delta_ebitda_pct_p50": null,
+      "rejection_reason": "PRIMARY_FAILED_EVIDENCE"
+    }
+  ],
+  "expected_sections": [
+    {"_fixture": true, "label": "POSITIVE — UPSTREAM OIL PRODUCERS", "tickers": ["FIXUP"]},
+    {"_fixture": true, "label": "NEGATIVE — OIL MARKETING & REFINING", "tickers": ["FIXOMC1", "FIXOMC2"]},
+    {"_fixture": true, "label": "MIXED — INTEGRATED ENERGY", "tickers": ["FIXINT"]},
+    {"_fixture": true, "label": "NEGATIVE — AVIATION", "tickers": ["FIXAIR"]},
+    {"_fixture": true, "label": "NEGATIVE — PAINTS & CHEMICALS", "tickers": ["FIXPNT"]}
+  ]
+}
