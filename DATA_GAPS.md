@@ -1099,6 +1099,10 @@ while the trigger refused it).
 | `input:bought_in_freight` | an asset-light 3PL does not burn diesel; it buys capacity from an operator who does. Tagging that `input:freight_diesel` would let a freight bill — wages, tolls, tyres, margin and some diesel — be read as a fuel cost with a fuel cost's elasticity |
 | `input:intermediated_air_capacity` | the air twin: chartered aircraft and purchased belly space, ATF-linked through fuel surcharges. Distinct from `input:atf`, which is an airline buying the fuel itself |
 
+`input:intermediated_air_capacity` shipped under a confirm-or-revert flag on
+the owner (commit `f2e9d902`); **accepted by owner 2026-08-17** — the leaf is
+permanent, and 0016's conditional downgrade has nothing left to decide.
+
 The intermediated pair is the substantive addition. It encodes a distinction
 the ledger previously could not make — **who is exposed to the commodity, and
 who is exposed to somebody else's exposure to it** — and every row carrying
