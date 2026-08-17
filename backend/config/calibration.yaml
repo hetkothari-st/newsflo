@@ -1,0 +1,47 @@
+# V5 calibrated-confidence policy (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §13,
+# docs/v5/06_PHASE_5_empirical_calibration.md Task 5.3).
+#
+# THIS FILE IS POLICY, NOT DATA. It carries no fitted parameter, no company
+# fact and no probability. A fitted model lives in `calibration_model`, which
+# ships empty and cannot be activated (see migration 0015).
+#
+# SHIPPED DISABLED, ON PURPOSE. The phase file: "until the corpus exists, ship
+# with calibration disabled and calibrated_p = null. The UI shows evidence
+# grade and band instead. Do not ship a fitted-looking model trained on
+# synthetic labels." There is no labeled corpus in this repo (DATA_GAPS §1),
+# so there is nothing honest to fit, and a plausible-looking calibration curve
+# is the most dangerous artifact this system could carry: it would make every
+# number look validated.
+#
+# TURNING IT ON TAKES THREE THINGS, not one flag:
+#   1. a labeled corpus of at least `activation.min_corpus_size` expert-judged
+#      calls (Phase 7);
+#   2. a fitted model recorded in `calibration_model`;
+#   3. a MIGRATION dropping `ck_calibration_model_never_active`.
+# Flipping `enabled` below on its own changes nothing.
+
+version: calibration-v5.0.0
+
+enabled: false
+
+activation:
+  # Expert-judged directional calls required before a fitted curve means
+  # anything. An isotonic fit on a few dozen labels is a memorised sample, not
+  # a calibration.
+  min_corpus_size: 500
+
+ood:
+  # Mahalanobis distance over the training manifold (§13.2). The threshold is
+  # the given quantile of the TRAINING distances: a candidate further from the
+  # training centre than all but this fraction of the training set is out of
+  # distribution, and its tier is capped at SECONDARY_RIPPLE.
+  method: mahalanobis
+  threshold_quantile: 0.99
+  # Ridge added to the covariance diagonal before inversion, as a fraction of
+  # its mean variance. Real feature sets contain exactly-collinear columns
+  # (a bucket and its own floor), which makes the raw covariance singular.
+  ridge_fraction: 0.00000001
+
+reporting:
+  # Bins for the reliability diagram and the ECE. Ten is the §13 convention.
+  ece_bins: 10
