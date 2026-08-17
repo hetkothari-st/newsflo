@@ -587,3 +587,83 @@ def test_an_engine_error_exits_non_zero(monkeypatch, tmp_path):
     right."""
     observation = _observation([], {}, error="boom")
     assert _drive_main(monkeypatch, tmp_path, observation) == 1
+
+
+# ---------------------------------------------------------------------------
+# fixture node ids must be CANONICAL (node-id consolidation, P6)
+# ---------------------------------------------------------------------------
+#
+# Two silent-fallback seams, both LATENT rather than broken today:
+#
+#   * `ReplayRouter` matches "<stage>@<parent_node>" against the engine's own
+#     canonical `context["parent_node"]`. A non-canonical key simply never
+#     matches, and the harness falls back to the STAGE DEFAULT -- which reads
+#     as "the model declined", not as a broken fixture;
+#   * `node_exposures[].node_key` seeds `CompanyNodeExposure`, which every
+#     reader queries with a canonical node id. A drifted key seeds a prior
+#     nothing will ever read.
+#
+# Both now fail LOUDLY at fixture-load time instead.
+
+def test_the_shipped_regression_corpus_carries_only_canonical_node_ids():
+    from tools.offline_benchmark import load_fixtures, non_canonical_node_ids
+
+    problems = []
+    for fixture in load_fixtures():
+        problems.extend(non_canonical_node_ids(fixture))
+    assert not problems, "\n".join(problems)
+
+
+def test_a_drifted_router_key_is_rejected_instead_of_replaying_the_default():
+    from tools.offline_benchmark import non_canonical_node_ids
+
+    problems = non_canonical_node_ids({
+        "id": "synthetic",
+        "router_responses": {"ripple_discovery@paints_input_cost": {}},
+    })
+    assert len(problems) == 1
+    assert "paints_input_cost" in problems[0]
+    assert "paint_input_cost" in problems[0]      # names the id it would need
+
+
+def test_a_drifted_node_exposure_key_is_rejected():
+    from tools.offline_benchmark import non_canonical_node_ids
+
+    problems = non_canonical_node_ids({
+        "id": "synthetic",
+        "universe": [{"ticker": "FIX.NS",
+                      "node_exposures": [{"node_key": "capital_goods_orders"}]}],
+    })
+    assert len(problems) == 1
+    assert "capital_good_order" in problems[0]
+
+
+def test_tickers_and_sector_slugs_are_not_node_ids_and_are_exempt():
+    """The engine deliberately does NOT normalize company/sector children --
+    those are already canonical vocabularies, and singularizing
+    `consumer_durables` would orphan the sector from its candidate pool.
+    Holding them to the node-id rule would be the domain conflation this
+    sweep exists to prevent."""
+    from tools.offline_benchmark import non_canonical_node_ids
+
+    assert non_canonical_node_ids({
+        "id": "synthetic",
+        "router_responses": {"map_companies@MARUTI.NS": {},
+                             "map_companies@consumer_durables": {}},
+        "universe": [{"ticker": "MARUTI.NS",
+                      "node_exposures": [{"node_key": "MARUTI.NS"}]}],
+    }) == []
+
+
+def test_load_fixtures_refuses_a_drifted_fixture(tmp_path, monkeypatch):
+    import json as _json
+
+    import tools.offline_benchmark as bench
+
+    (tmp_path / "drifted.json").write_text(_json.dumps({
+        "router_responses": {"ripple_discovery@nbfc_funding_cost": {}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(bench, "FIXTURE_DIR", tmp_path)
+    with pytest.raises(ValueError) as excinfo:
+        bench.load_fixtures()
+    assert "nbfc_financing_cost" in str(excinfo.value)

@@ -164,16 +164,79 @@ class ReplayRouter:
 
 # --- fixture loading / seeding ---------------------------------------------
 
+def non_canonical_node_ids(fixture: dict) -> list[str]:
+    """Every node id in this fixture that the engine would have rewritten.
+
+    Two seams, both of which fail SILENTLY without this check:
+
+      * ``router_responses`` keys of the form ``"<stage>@<parent_node>"`` are
+        matched against the engine's own ``context["parent_node"]``, which is
+        always ``normalize_node_id`` output. A non-canonical key never
+        matches and :class:`ReplayRouter` falls back to the stage default --
+        which the harness then scores as "the model declined", not as a
+        broken fixture;
+      * ``universe[].node_exposures[].node_key`` seeds ``CompanyNodeExposure``
+        rows, and every reader queries that table with a canonical node id, so
+        a drifted key seeds a prior nothing will ever read.
+
+    TICKERS AND SECTOR SLUGS ARE EXEMPT, deliberately. ``_register_edge``
+    does not normalize company/sector children -- those are already canonical
+    vocabularies, and singularizing ``consumer_durables`` would orphan the
+    sector from its candidate pool. Holding them to the node-id rule would be
+    a domain conflation, not a fix.
+    """
+    from app.analysis.impact_graph.normalize import normalize_node_id
+    from app.analysis.schemas import SECTORS
+
+    fixture_id = fixture.get("id") or fixture.get("_path") or "<fixture>"
+
+    def drifted(value: str) -> str | None:
+        text = str(value or "")
+        if not text or text in SECTORS or "." in text or text.isupper():
+            return None                      # sector slug or ticker
+        canonical = normalize_node_id(text)
+        return canonical if canonical != text else None
+
+    problems: list[str] = []
+    for key in (fixture.get("router_responses") or {}):
+        if "@" not in str(key):
+            continue
+        stage, _, node = str(key).partition("@")
+        canonical = drifted(node)
+        if canonical:
+            problems.append(
+                f"{fixture_id}: router_responses key {key!r} names a node the "
+                f"engine persists as {canonical!r} -- it would never match, and "
+                f"stage {stage!r} would silently replay its default")
+    for spec in (fixture.get("universe") or []):
+        for cached in (spec.get("node_exposures") or []):
+            canonical = drifted(cached.get("node_key"))
+            if canonical:
+                problems.append(
+                    f"{fixture_id}: node_exposures node_key "
+                    f"{cached.get('node_key')!r} is persisted as {canonical!r} "
+                    f"-- this row would seed a prior nothing reads")
+    return problems
+
+
 def load_fixtures(only: str | None = None) -> list[dict]:
     paths = sorted(FIXTURE_DIR.glob("*.json"))
     fixtures = []
+    problems: list[str] = []
     for path in paths:
         fixture = json.loads(path.read_text(encoding="utf-8"))
         fixture["_path"] = str(path)
         fixture.setdefault("id", path.stem)
         if only and fixture["id"] != only:
             continue
+        problems.extend(non_canonical_node_ids(fixture))
         fixtures.append(fixture)
+    if problems:
+        # Loud, at load time. A fixture keyed to a node id the engine rewrites
+        # scores as "the model declined" otherwise -- a green run that
+        # measured nothing.
+        raise ValueError("non-canonical node ids in the regression corpus:\n"
+                         + "\n".join(problems))
     return fixtures
 
 

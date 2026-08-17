@@ -166,6 +166,19 @@ def signals_from_entry(entry: Mapping[str, Any], *, event_id: str,
 
     materiality = MATERIALITY_GRADE_MAP.get(
         str(entry.get("materiality_grade") or "").upper(), "NONE")
+    # TWO VOCABULARIES SHARE THIS COLUMN, and whoever wires mechanism_edge-id
+    # validation onto `mechanism_id` must know that before they do it:
+    #
+    #   * here, it is a V4 ECONOMIC-NODE id -- `normalize_node_id` output,
+    #     free-form, whatever the impact graph discovered ("crude_price_up",
+    #     "paint_input_cost");
+    #   * on the Phase-2 sensitivity path it is a reviewed MECHANISM_EDGE id
+    #     from the closed V5 graph vocabulary, which is never normalized.
+    #
+    # `reducer.company_impact.mechanism_id` carries both, and the V5 section
+    # taxonomy renders both. Constraining the column to either vocabulary
+    # alone would silently drop the other one's sections. (Sweep C1; the
+    # taxonomy's own coverage is pinned in tests/phase6/test_sections.py.)
     mechanism_id = entry.get("causal_parent_id") or None
     for channel_id, direction in (() if sensitivity_channels
                                   else _channels_from_entry(entry)):
