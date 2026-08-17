@@ -30,6 +30,9 @@ Pages:
   GET  /divergence/review    one disagreement, with the sample behind it
   POST /divergence/resolve   UPHELD / MODEL_WRONG / NOISE / REGIME_CHANGED
                              (the last one requires an expiry)
+  GET  /monitoring.json      V5 Phase 7: Task 7.4's nine production signals,
+                             read-only, with an explicit refusal on every one
+                             that cannot be computed
   GET  /events               V5 Phase 6: every event with a canonical record
   GET  /event                one event -- shocks, sections, PRIMARY, ripple,
                              THE FULL REJECTED SET with reasons, evidence
@@ -60,6 +63,7 @@ from app.ledger import divergence_review_pages  # noqa: E402
 from app.ledger import edge_review_pages  # noqa: E402
 from app.ledger import event_review_pages  # noqa: E402
 from app.ledger import review as review_api  # noqa: E402
+from eval import monitoring_pages  # noqa: E402
 from app.ledger.coverage import (  # noqa: E402
     age_alert, coverage_rows, extractor_quality, ledger_stats, metrics_text,
 )
@@ -105,7 +109,8 @@ _NAV = ("<nav><a href='/'>exposure queue</a> &middot; "
         "<a href='/events'>events</a> &middot; "
         "<a href='/ledger/quality'>extractor quality</a> &middot; "
         "<a href='/ledger/coverage'>coverage</a> &middot; "
-        "<a href='/ledger/metrics'>metrics</a></nav>")
+        "<a href='/ledger/metrics'>metrics</a> &middot; "
+        "<a href='/monitoring.json'>monitoring</a></nav>")
 
 
 def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
@@ -378,6 +383,14 @@ def build_app(engine) -> FastAPI:
     # Gate Zero eval corpus. Same console, same reviewer, same discipline.
     # Nothing above this line changed.
     event_review_pages.register(app, engine, _page)
+
+    # V5 Phase 7, ADDITIVE and READ-ONLY: /monitoring.json. Task 7.4's nine
+    # production signals, computed on demand. This repo has no metrics stack
+    # and Phase 7 did not buy one, so the honest deliverable is the numbers
+    # themselves -- refusals included -- rather than a dashboard nobody
+    # scrapes. Dashboards and alerting are DATA_GAPS section 11. Nothing
+    # above this line changed.
+    monitoring_pages.register(app, engine, _page)
 
     return app
 
