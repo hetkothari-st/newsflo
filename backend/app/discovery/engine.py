@@ -319,14 +319,65 @@ def _extend_supply_chain(session, pool: CandidatePool) -> None:
 
 
 def _industry_of(session, company_ids: Sequence[int]) -> dict[int, str | None]:
+    """The industry key peer closure groups on, most specific source first.
+
+    `official_isubgroup` (the exchange's own industry classification) LEADS,
+    and that is the whole point. The previous key was `sub_sector or sector`,
+    and `sub_sector` is populated for 826 of 5,321 companies (15.5%), so
+    almost everything fell through to `sector` -- where 3,161 companies are
+    literally the string `'other'`. Measured: that produced ONE pseudo-industry
+    of 3,035 members. `peer_closure_min_members` is 2, so any two `'other'`
+    companies reached by a mechanism implicated the whole bucket, and the sweep
+    admitted every `'other'` company above the threshold. It is latent only
+    because `company_exposure` has 11 rows; it becomes a noise generator the
+    moment the ledger fills.
+
+    Measured on the same 5,321 companies, largest bucket by key:
+
+        sub_sector or sector (was)          3,035   ('other')
+        official_isubgroup only             282     -- but 652 companies NULL
+        official_isubgroup, sub_sector      282     -- 199 NULL
+        official_isubgroup, sub_sector,     282     -- 0 NULL, 'other' = 190
+          sector (this)
+
+    The three-level fall-through is chosen over `official_isubgroup` alone
+    because 652 companies have no `official_isubgroup`, and `_extend_peer_
+    closure` skips a falsy industry -- so keying on it alone would make those
+    652 permanently ineligible for peer closure. 453 of them do have a
+    `sub_sector`, and only 190 land on `'other'`. So the collapse shrinks from
+    3,035 to 190 (-94%) with no company losing eligibility.
+
+    The three vocabularies cannot collide: 190 title-case exchange names, 43
+    snake_case sub-sectors, 11 lowercase sectors.
+
+    `companies.sector` is READ, never written, and is deliberately LAST -- it
+    is written by two independent processes (the precision fix and the monthly
+    universe refresh), so it is the least trustworthy of the three as well as
+    the coarsest.
+    """
     if not company_ids:
         return {}
     placeholders = ", ".join(f":c{i}" for i in range(len(company_ids)))
     parameters = {f"c{i}": cid for i, cid in enumerate(company_ids)}
     rows = session.execute(text(
-        f"SELECT id, sub_sector, sector FROM companies WHERE id IN ({placeholders})"),
-        parameters).mappings().all()
-    return {int(row["id"]): (row["sub_sector"] or row["sector"]) for row in rows}
+        "SELECT id, official_isubgroup, sub_sector, sector FROM companies "
+        f"WHERE id IN ({placeholders})"), parameters).mappings().all()
+    return {int(row["id"]): _first_present(
+        row["official_isubgroup"], row["sub_sector"], row["sector"])
+        for row in rows}
+
+
+def _first_present(*values: str | None) -> str | None:
+    """The first value that is neither NULL nor blank.
+
+    `or` alone is not enough: these columns carry `''` as well as NULL in
+    practice, and an empty string is truthy in SQL terms but is not an
+    industry.
+    """
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
 
 
 def _extend_peer_closure(session, pool: CandidatePool, tag_edges, *,
