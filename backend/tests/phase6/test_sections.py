@@ -368,17 +368,25 @@ def _emittable(mechanism_id: str) -> tuple[bool, str]:
 
 
 def _mechanism_ids_in_fixtures() -> dict[str, set[str]]:
-    """Every mechanism id any V5 test fixture carries -> where it came from.
+    """Every EMITTED mechanism id any V5 test fixture carries -> its source.
 
     Both carriers are swept so a new fixture cannot reintroduce the defect:
-    `mechanism_id` / `expected_mechanism` values inside every JSON under
-    `tests/`, and the same keyword arguments written as literals in every
-    test module.
+    `mechanism_id` values inside every JSON under `tests/`, and the same
+    keyword argument written as a literal in every test module.
+
+    `expected_mechanism` is deliberately NOT swept. It is the other side of
+    the comparison -- what a HUMAN LABELER typed, and a labeler reads
+    `knowledge.MECHANISMS`, so "paints_input_cost" is the correct thing for
+    a label to say. Requiring the persisted dialect there would delete the
+    very case `eval.metrics._mechanism_token` exists to handle; that side is
+    pinned by
+    `tests/phase7/test_metrics.py::test_mechanism_accuracy_scores_a_label_
+    written_in_the_REGISTRY_dialect` instead.
     """
     import json
 
     tests_root = BACKEND / "tests"
-    keys = ("mechanism_id", "expected_mechanism")
+    keys = ("mechanism_id",)
     found: dict[str, set[str]] = {}
 
     def add(value, source):
