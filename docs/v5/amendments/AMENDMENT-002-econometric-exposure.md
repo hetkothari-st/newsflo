@@ -5,7 +5,7 @@
 > **Status: REJECTED and SUPERSEDED by
 > [`docs/v5/decisions/ADR-001-econometric-exposure.md`](../decisions/ADR-001-econometric-exposure.md).**
 > Read the ADR instead. This document is retained as the working argument, not as a
-> current record, and **should not be cited independently**. Three things in it are
+> current record, and **should not be cited independently**. Four things in it are
 > superseded:
 >
 > 1. **§6 discusses "the 2-in-52 that do disclose" as though those rows were `FILED`.
@@ -21,9 +21,20 @@
 >    correlation-without-mechanism objection, the real quarters-of-history distribution
 >    queried from the DB, and the alternative routes to exposure data.
 >
-> The ADR also records the **`pass_through_curve` redirect (this document's §7) as
-> DEFERRED, not rejected** — 4–5 pw, needs no amendment — and adds a postscript tracing
-> what actually blocks output through the code.
+> 4. **The `pass_through_curve` redirect (this document's §7) is REJECTED.** This
+>    banner said DEFERRED when it was written, which was true of the ADR at that
+>    hour: the redirect was recorded DEFERRED-PENDING-BACKTEST, at 4–5 pw and
+>    needing no amendment. The back-test was its stated reopening condition, it ran
+>    the same day, and it failed on its own nominated case — Savita Oil at 86.1%
+>    base oil, where the fit returns **+0.274 (p = 0.007), the wrong sign**, implying
+>    a pass-through of 1.47, outside the parameter's domain. The fitted lag profile
+>    is also neither monotone nor consistently signed, so **no §4.2-conformant curve
+>    can be read off it at all**. See ADR-001 *"The redirect — REJECTED"* and
+>    `AMENDMENT-002-BACKTEST.md`. Both parts of this proposal are now rejected;
+>    nothing in it is deferred.
+>
+> The ADR also adds a postscript tracing what actually blocks output through the
+> code.
 
 **Status: PROPOSED — NOT IMPLEMENTED. NOT ACCEPTED.**
 Nothing in this document is in the code. `MEASUREMENTS` in
