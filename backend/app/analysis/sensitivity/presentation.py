@@ -17,12 +17,25 @@ ASCII SEPARATOR. The spec renders the separator as a middle dot; this uses
 "|" so the string survives every console the repo runs on. The separator is
 cosmetic; the band and the source are not.
 
+V5 PHASE 4 adds two things to this contract, and they are the two the phase
+file says are worth more than the impact call itself:
+
+  * THE HEADLINE LEADS, THE OTHER TWO ARE THERE. `horizon_lines` renders all
+    three horizons in time order with the headline marked. A renderer that
+    shows only the headline is showing a V4 record; a renderer that has to
+    guess which two were dropped cannot exist, because none were.
+  * THE MODIFIERS ARE CHIPS. `modifier_chips` renders every policy modifier
+    considered -- applied, unknown-state, unresolvable or not triggered --
+    with a link to the notification. "We modelled the windfall levy and could
+    not size it" and "there is no windfall levy" must not look the same.
+
 There is no V5 serving path yet (Phase 0 ruling), so this is the surface a
 future renderer consumes, and it is tested as such.
 """
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from app.analysis.sensitivity.config import load_materiality_config
+from app.analysis.sensitivity.horizons import HORIZON_ORDER
 
 SOURCE_LABELS = {
     "FILED": "filed disclosure",
@@ -100,3 +113,66 @@ def materiality_line(impact) -> str:
         return head + "\nMost sensitive to: no parameter with any uncertainty"
     return head + "\nMost sensitive to: " + ", ".join(
         format_driver(driver) for driver in drivers)
+
+
+# --- V5 PHASE 4 (Task 4.4) --------------------------------------------------
+
+MODIFIER_STATUS_LABELS = {
+    "APPLIED": "modelled",
+    "UNKNOWN_STATE": "regime unknown, band widened",
+    "UNRESOLVED": "could not be sized, band widened",
+    "NOT_TRIGGERED": "considered, did not apply",
+}
+
+
+def horizon_lines(impact) -> list[str]:
+    """One line per horizon, IN TIME ORDER, with the headline marked.
+
+    All three are always returned, including the ones nobody evaluated, which
+    say so. The renderer decides what to collapse behind an expander; it never
+    decides what to DROP, because the dropping is the defect (§8).
+    """
+    out = []
+    for horizon in HORIZON_ORDER:
+        entry = impact.direction_by_horizon.get(horizon) or {}
+        marker = "> " if horizon == impact.headline_horizon else "  "
+        label = horizon.replace("_", " ")
+        if not entry.get("evaluated"):
+            out.append(f"{marker}{label}: not evaluated")
+            continue
+        magnitude = entry.get("delta_ebitda_pct_p50")
+        size = f" {_pct(float(magnitude))}" if magnitude is not None else ""
+        out.append(f"{marker}{label}: {entry['direction']} "
+                   f"({entry['materiality']}){size}")
+    return out
+
+
+def modifier_chips(impact) -> list[Mapping[str, Any]]:
+    """The chips Task 4.4 requires: `{label, modifier_id, modifier_type,
+    source_url, status, horizons, note}`, in a stable order.
+
+    A chip whose `source_url` is None is still rendered -- with no link. A
+    modifier we applied and cannot cite is a worse thing to hide than to show.
+    """
+    return [{
+        "label": f"{entry['modifier_id']} "
+                 f"({MODIFIER_STATUS_LABELS.get(str(entry.get('status')), str(entry.get('status')))})",
+        "modifier_id": entry["modifier_id"],
+        "modifier_type": entry.get("modifier_type"),
+        "source_url": entry.get("source_url"),
+        "status": entry.get("status"),
+        "horizons": list(entry.get("horizons") or ()),
+        "note": entry.get("note") or "",
+    } for entry in impact.policy_modifiers_detail]
+
+
+def impact_lines(impact) -> Sequence[str]:
+    """The whole company block a renderer needs: the headline materiality
+    line, the three horizons, and the modifier chips."""
+    lines = [materiality_line(impact), ""]
+    lines.extend(horizon_lines(impact))
+    chips = modifier_chips(impact)
+    if chips:
+        lines.append("")
+        lines.append("Policy: " + " | ".join(chip["label"] for chip in chips))
+    return lines

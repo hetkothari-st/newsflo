@@ -57,7 +57,7 @@
         "_fixture": true,
         "state_key": "fixture_revision_active",
         "when": {
-          "FROZEN": {"param_overrides": {"regulatory_capture_fraction": 0.0}}
+          "FROZEN": {"param_overrides": {"_fixture": true, "regulatory_capture_fraction": 0.0}}
         }
       },
       "effective_from": "2200-01-01",
@@ -112,7 +112,9 @@
       "modifier_type": "REGIONAL_MULTIPLIER",
       "parameters": {
         "_fixture": true,
-        "region_multipliers": {"NORTH_FIXTURE": 2.0, "SOUTH_FIXTURE": 0.5}
+        "region_multipliers": {
+          "_fixture": true, "NORTH_FIXTURE": 2.0, "SOUTH_FIXTURE": 0.5
+        }
       },
       "effective_from": "2200-01-01",
       "effective_to": null,
@@ -151,7 +153,7 @@
         "_fixture": true,
         "state_key": "fixture_retail_revision_active",
         "when": {
-          "FROZEN": {"param_overrides": {"regulatory_capture_fraction": 0.0}}
+          "FROZEN": {"param_overrides": {"_fixture": true, "regulatory_capture_fraction": 0.0}}
         }
       },
       "effective_from": "2200-01-01",
@@ -169,7 +171,7 @@
       "state_key": "fixture_revision_active",
       "state_value": {"state": "FROZEN"},
       "as_of": "2226-02-22",
-      "freshness_days": 30,
+      "freshness_days": 120,
       "source_url": "https://fixture.invalid/state/revision",
       "owner": "human:fixture-owner"
     },

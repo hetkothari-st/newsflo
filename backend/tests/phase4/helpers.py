@@ -79,7 +79,9 @@ def upstream_impact(*, levy_active: bool, policy_state_stale: bool = False,
     from app.analysis.sensitivity.engine import channel_signals
     from app.analysis.sensitivity.monte_carlo import serialize_materiality, simulate
     from app.analysis.sensitivity.config import load_materiality_config
-    from app.core.config_loader import load_gate_config, load_sensitivity_policy
+    from app.core.config_loader import (
+        load_gate_config, load_horizon_policy, load_sensitivity_policy,
+    )
     from app.core.reducer import EventContext, ReducerConfig, reduce_company_impact
     from app.core.signals import make_signal
 
@@ -132,7 +134,8 @@ def upstream_impact(*, levy_active: bool, policy_state_stale: bool = False,
         exposure_stale=False)
     return reduce_company_impact(signals, ReducerConfig(
         gate_config=load_gate_config(), event_context=context,
-        sensitivity_policy=load_sensitivity_policy()))
+        sensitivity_policy=load_sensitivity_policy(),
+        horizon_policy=load_horizon_policy()))
 
 
 # --- the ledger-backed horizon cases ----------------------------------------
@@ -218,7 +221,9 @@ def run_horizons(session, fixture: dict, *, company_id: int,
 
 def impact_from(run, *, company_id: int, ticker: str, event_context=None):
     """Reduce a `HorizonRun`'s signals into the canonical record."""
-    from app.core.config_loader import load_gate_config, load_sensitivity_policy
+    from app.core.config_loader import (
+        load_gate_config, load_horizon_policy, load_sensitivity_policy,
+    )
     from app.core.reducer import EventContext, ReducerConfig, reduce_company_impact
     from app.core.signals import make_signal
 
@@ -251,7 +256,8 @@ def impact_from(run, *, company_id: int, ticker: str, event_context=None):
         exposure_stale=False)
     return reduce_company_impact(signals, ReducerConfig(
         gate_config=load_gate_config(), event_context=context,
-        sensitivity_policy=load_sensitivity_policy()))
+        sensitivity_policy=load_sensitivity_policy(),
+        horizon_policy=load_horizon_policy()))
 
 
 def omc_fixture() -> dict:

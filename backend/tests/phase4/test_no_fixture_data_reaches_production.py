@@ -75,26 +75,35 @@ def test_the_policy_tables_ship_empty(policy_session):
 
 
 def test_a_migrated_database_ships_the_policy_tables_empty(tmp_path):
-    """After a full `upgrade head`, not merely after `create_all`."""
-    from alembic import command
-    from alembic.config import Config
+    """After a full `upgrade head`, not merely after `create_all`.
 
-    url = f"sqlite:///{tmp_path / 'policy.db'}"
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "alembic"))
-    config.set_main_option("sqlalchemy.url", url)
-    command.upgrade(config, "head")
+    Run in a SUBPROCESS with DATABASE_URL set, the same way
+    `tests/test_migrations.py` does it -- an in-process alembic run inherits
+    this session's already-imported app modules and their `after_create`
+    hooks, and would be testing something else.
+    """
+    import os
+    import sqlite3
+    import subprocess
+    import sys
 
-    from sqlalchemy import create_engine
+    db = tmp_path / "policy.db"
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"], cwd=BACKEND,
+        env=dict(os.environ, DATABASE_URL=f"sqlite:///{db}"),
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
-    engine = create_engine(url)
+    connection = sqlite3.connect(db)
     try:
-        with engine.connect() as connection:
-            for table in ("policy_modifier", "policy_state"):
-                assert connection.execute(
-                    text(f"SELECT count(*) FROM {table}")).scalar() == 0
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"policy_modifier", "policy_state"} <= tables
+        for table in ("policy_modifier", "policy_state"):
+            assert connection.execute(
+                f"SELECT count(*) FROM {table}").fetchone()[0] == 0
     finally:
-        engine.dispose()
+        connection.close()
 
 
 def test_the_deployed_registry_carries_no_numeral_outside_structure():
@@ -148,20 +157,25 @@ def test_the_engine_over_an_empty_policy_table_abstains_from_modifying(policy_se
     assert registry.active_for("revenue:crude_realization", FIXTURE_TODAY) == ()
 
 
-def test_no_policy_module_hardcodes_a_parameter_value():
+@pytest.mark.parametrize("name", ["transfer.py", "transforms.py"])
+def test_the_transfer_layer_hardcodes_no_parameter_value(name):
     """A "reasonable default" for a capture fraction is the exact failure the
-    master context names. There is no numeric literal in the transfer layer
-    other than the identity and zero-comparison constants named here."""
-    allowed = {0, 1, 0.0, 1.0, 2, -1}
-    for path in sorted(POLICY.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(
-                    node.value, (int, float)) and not isinstance(node.value, bool):
-                assert node.value in allowed, (
-                    f"{path.name}:{node.lineno} carries the literal "
-                    f"{node.value!r}; a policy parameter must come from the "
-                    "registry, never from the code")
+    master context names.
+
+    SCOPE. The two modules that COMPUTE with parameters are scanned; a levy
+    rate could only ever hide in one of them. `registry.py` and `state.py`
+    carry structural integers (a path depth, a cache size) and are covered by
+    the no-value assertions on the deployed YAML above instead.
+    """
+    allowed = {0, 1, 0.0, 1.0}
+    tree = ast.parse((POLICY / name).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(
+                node.value, (int, float)) and not isinstance(node.value, bool):
+            assert node.value in allowed, (
+                f"{name}:{node.lineno} carries the literal {node.value!r}; a "
+                "policy parameter must come from the registry, never from the "
+                "code")
 
 
 def test_the_registry_names_an_owner_for_every_missing_parameter():

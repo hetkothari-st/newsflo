@@ -216,6 +216,52 @@ def test_an_inventory_exposure_with_no_realisation_fraction_is_uncomputable(
     assert run.uncomputable_channels
 
 
+def test_the_ui_surface_leads_with_the_headline_and_keeps_the_other_two(omc):
+    """Task 4.4: "UI leads with headline horizon; other two on expand." The
+    renderer is a later phase; the SURFACE it consumes is this one, and it
+    can never be handed a record with a horizon missing."""
+    from app.analysis.sensitivity.presentation import (
+        horizon_lines, impact_lines, modifier_chips,
+    )
+
+    _, company_id, run = omc
+    impact = impact_from(run, company_id=company_id, ticker="FIXOMC")
+
+    lines = horizon_lines(impact)
+    assert len(lines) == 3
+    assert [line[2:].split(":")[0] for line in lines] == [
+        "IMMEDIATE", "NEAR TERM", "STRUCTURAL"]
+    assert lines[1].startswith("> "), "the headline horizon is not marked"
+    assert lines[0].startswith("  ") and lines[2].startswith("  ")
+
+    chips = modifier_chips(impact)
+    assert {chip["modifier_id"] for chip in chips} == {"FIXTURE_OMC_FREEZE"}
+    assert {chip["status"] for chip in chips} == {"APPLIED", "UNKNOWN_STATE"}
+    for chip in chips:
+        assert chip["horizons"]
+        assert chip["label"]
+
+    body = "\n".join(impact_lines(impact))
+    assert "STRUCTURAL" in body and "IMMEDIATE" in body
+    assert "FIXTURE_OMC_FREEZE" in body
+
+
+def test_the_inventory_channel_refuses_to_run_with_no_parameters_at_all():
+    """The Phase 2 no-defaults guard, extended to the channel type Phase 4
+    added. `tests/phase2/test_channel_math.py` names INVENTORY as covered
+    here rather than in its own frozen corpus."""
+    from app.analysis.sensitivity.channels import compute_channel
+    from app.analysis.sensitivity.params import InsufficientParameterData
+    from tests.phase4.conftest import make_exposure, make_shock
+
+    exposure = make_exposure(
+        exposure_kind="INVENTORY",
+        exposure_tag="realization:fixture_inventory_stock")
+    shock = make_shock(exposure_tag="realization:fixture_inventory_stock")
+    with pytest.raises(InsufficientParameterData):
+        compute_channel(exposure, shock, {}, horizon_days=5)
+
+
 def test_the_horizon_config_is_policy_not_data():
     """`config/horizons.yaml` states windows and weights. It carries no
     company, no coefficient and no financial figure."""

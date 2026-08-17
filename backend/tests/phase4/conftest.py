@@ -120,24 +120,30 @@ def policy_session(policy_engine):
 # --- registry / state construction from the fixture JSON --------------------
 
 def fixture_registry(*modifier_ids: str):
-    """A `PolicyRegistry` over the named FIXTURE modifiers only."""
+    """A `PolicyRegistry` over the NAMED fixture modifiers.
+
+    No argument means an EMPTY registry, not "all of them": a test must say
+    which modifiers are in force, because "which modifiers are in force" is
+    the thing under test.
+    """
     from app.analysis.policy.registry import PolicyRegistry, modifier_from_mapping
 
-    wanted = set(modifier_ids) or None
+    wanted = set(modifier_ids)
     entries = [modifier_from_mapping(raw)
                for raw in load_policy_fixtures()["modifiers"]
-               if wanted is None or raw["modifier_id"] in wanted]
+               if raw["modifier_id"] in wanted]
     return PolicyRegistry(tuple(entries))
 
 
 def fixture_policy_state(*state_keys: str):
-    """A `PolicyStateStore` over the named FIXTURE states only."""
+    """A `PolicyStateStore` over the NAMED fixture states. No argument means
+    an EMPTY store -- i.e. every regime is UNKNOWN."""
     from app.analysis.policy.state import PolicyStateStore, state_from_mapping
 
-    wanted = set(state_keys) or None
+    wanted = set(state_keys)
     entries = [state_from_mapping(raw)
                for raw in load_policy_fixtures()["states"]
-               if wanted is None or raw["state_key"] in wanted]
+               if raw["state_key"] in wanted]
     return PolicyStateStore(tuple(entries))
 
 
