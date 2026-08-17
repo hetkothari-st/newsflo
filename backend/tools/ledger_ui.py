@@ -30,6 +30,11 @@ Pages:
   GET  /divergence/review    one disagreement, with the sample behind it
   POST /divergence/resolve   UPHELD / MODEL_WRONG / NOISE / REGIME_CHANGED
                              (the last one requires an expiry)
+  GET  /events               V5 Phase 6: every event with a canonical record
+  GET  /event                one event -- shocks, sections, PRIMARY, ripple,
+                             THE FULL REJECTED SET with reasons, evidence
+                             links, causal path, band, modifiers, objections
+  POST /event/label          one-click label into the Gate Zero eval corpus
 """
 from __future__ import annotations
 
@@ -53,6 +58,7 @@ from fastapi.responses import (  # noqa: E402
 
 from app.ledger import divergence_review_pages  # noqa: E402
 from app.ledger import edge_review_pages  # noqa: E402
+from app.ledger import event_review_pages  # noqa: E402
 from app.ledger import review as review_api  # noqa: E402
 from app.ledger.coverage import (  # noqa: E402
     age_alert, coverage_rows, extractor_quality, ledger_stats, metrics_text,
@@ -89,10 +95,17 @@ _STYLE = """
 </style>
 """
 
-_NAV = ("<nav><a href='/'>queue</a> &middot; <a href='/ledger/quality'>extractor "
-        "quality</a> &middot; <a href='/ledger/coverage'>coverage</a> &middot; "
-        "<a href='/ledger/metrics'>metrics</a> &middot; "
-        "<a href='/divergence/queue'>divergence</a></nav>")
+# ONE CONSOLE, FOUR QUEUES (Phase 6): exposure proposals, coverage gaps,
+# divergence reviews and events. They are one reviewer's work, so they are
+# one navigation bar rather than four bookmarks.
+_NAV = ("<nav><a href='/'>exposure queue</a> &middot; "
+        "<a href='/graph/edges'>edges</a> &middot; "
+        "<a href='/graph/gaps'>coverage gaps</a> &middot; "
+        "<a href='/divergence/queue'>divergence</a> &middot; "
+        "<a href='/events'>events</a> &middot; "
+        "<a href='/ledger/quality'>extractor quality</a> &middot; "
+        "<a href='/ledger/coverage'>coverage</a> &middot; "
+        "<a href='/ledger/metrics'>metrics</a></nav>")
 
 
 def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
@@ -358,6 +371,13 @@ def build_app(engine) -> FastAPI:
     # an expiry -- which needs somewhere for the human to stand. Same console,
     # same reviewer, same discipline. Nothing above this line changed.
     divergence_review_pages.register(app, engine, _page)
+
+    # V5 Phase 6, ADDITIVE: /events, /event and /event/label. The per-event
+    # window Task 6.3 requires -- including the FULL REJECTED SET with its
+    # reasons (invariant 12) -- and the one-click labelling that fills the
+    # Gate Zero eval corpus. Same console, same reviewer, same discipline.
+    # Nothing above this line changed.
+    event_review_pages.register(app, engine, _page)
 
     return app
 

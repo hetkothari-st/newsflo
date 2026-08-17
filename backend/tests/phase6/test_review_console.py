@@ -39,28 +39,33 @@ def seeded(phase6_engine):
     session = sessionmaker(bind=phase6_engine)()
     fixture = load_fixture("integrated_energy_sections.json")
 
-    session.execute(text(
-        "INSERT INTO articles (id, source, url, title, published_at) VALUES "
-        "(6001, 'FIXTURE WIRE', 'https://fixture.invalid/crude-article', "
-        "'Fixture crude benchmark moves', :published)"),
-        {"published": FIXTURE_NOW})
-    session.execute(text(
-        "INSERT INTO alerts (id, article_id, category, created_at) VALUES "
-        "(7001, 6001, 'commodity', :created)"), {"created": FIXTURE_NOW})
-    session.execute(text(
-        "INSERT INTO evidence_records (id, event_id, company_id, evidence_class, "
-        "evidence_tier, source_type, source_name, source_url, fact_text) VALUES "
-        "(4242, 7001, 6103, 'FILING', 'A', 'ANNUAL_REPORT', "
-        "'Fixture Integrated Energy Ltd annual report', "
-        "'https://fixture.invalid/filings/integrated-energy-ar.pdf', "
-        "'fixture segment disclosure')"))
+    # Through the ORM, so the model's own defaults apply and the fixture does
+    # not have to restate the article table's shape.
+    from app.models import Alert, Article
+
+    session.add(Article(
+        id=6001, source="FIXTURE WIRE",
+        url="https://fixture.invalid/crude-article",
+        title="Fixture crude benchmark moves", content="fixture article body",
+        published_at=FIXTURE_NOW))
+    session.add(Alert(id=7001, article_id=6001, category="commodity",
+                      created_at=FIXTURE_NOW))
+    session.flush()
+    from app.models import Company, EvidenceRecord
+
+    session.add(EvidenceRecord(
+        id=4242, alert_id=7001, company_id=6103, evidence_class="FILING",
+        evidence_tier="A", source_type="ANNUAL_REPORT",
+        source_name="Fixture Integrated Energy Ltd annual report",
+        source_url="https://fixture.invalid/filings/integrated-energy-ar.pdf",
+        fact_text="fixture segment disclosure"))
 
     for row in fixture["companies"]:
-        session.execute(text(
-            "INSERT INTO companies (id, ticker, name, sector, market, "
-            "index_tier, tradeability) VALUES (:id, :ticker, :name, "
-            "'Fixture Sector', 'INDIA', 'OTHER', 'NORMAL')"),
-            {"id": row["company_id"], "ticker": row["ticker"], "name": row["name"]})
+        session.add(Company(
+            id=row["company_id"], ticker=row["ticker"], name=row["name"],
+            sector="Fixture Sector", market="INDIA", index_tier="OTHER",
+            tradeability="NORMAL"))
+    session.flush()
 
     for row in fixture["companies"]:
         record = helpers.impact(
@@ -300,16 +305,21 @@ def test_the_console_never_writes_a_canonical_record():
     console holds no reducer capability -- structurally, not by convention."""
     import ast
 
+    from tests.phase6.conftest import code_lines
+
     for name in ("event_review.py", "event_review_pages.py"):
-        source = (BACKEND / "app" / "ledger" / name).read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        path = BACKEND / "app" / "ledger" / name
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 upper = node.value.upper()
                 assert "INSERT INTO COMPANY_IMPACT" not in upper
                 assert "UPDATE COMPANY_IMPACT" not in upper
                 assert "INSERT INTO SIGNAL" not in upper
-        assert "reducer_session" not in source
+        # Docstrings stripped: a comment explaining that the console holds no
+        # reducer capability must not be what makes this pass.
+        executable = "\n".join(line for _, line in code_lines(path))
+        assert "reducer_session" not in executable
 
 
 def test_the_console_cannot_write_company_impact_at_runtime(seeded):
