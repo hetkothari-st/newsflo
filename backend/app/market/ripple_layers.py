@@ -32,6 +32,7 @@ from app.market.cap_tier import cap_tier_map
 from app.market.event_volatility import lookup_range, ranges_for_category
 from app.market.measure import classify_reaction
 from app.market.liquidity import compute_liquidity_tier
+from app.market.orphan_metrics import log_orphan_report, orphan_report
 from app.market.ripple_templates import RowContext, assign_to_template, template_layers_for
 from app.models import Alert, AlertRippleLayer, ImpactEdge, MarketMove
 from app.reasoning.ripple_relationship import is_exposure_only, relation_to_ripple_relationship
@@ -518,6 +519,16 @@ def _strict_sections(
               + _assemble(ripple_pairs, _KIND_RIPPLE)
               + _assemble(macro_pairs, _KIND_MACRO))
     _assert_section_invariants(layers)
+
+    # OBSERVATION ONLY (2026-08-17). `_label_for`'s fall-through to
+    # OTHER_LABEL was silent, and it is where most of this corpus lands: 45
+    # of 58 stored node ids resolve to no registry mechanism. This counts it
+    # and changes nothing -- `layers` is returned exactly as assembled, the
+    # resolver is the one that just ran rather than a second copy, and the
+    # metric cannot raise. See app/market/orphan_metrics.py.
+    log_orphan_report(orphan_report(
+        alert_id=alert.id, alert_companies=[ac for ac, _ in gated],
+        sections=layers, label_for=_label_for, other_label=OTHER_LABEL))
     return layers
 
 
