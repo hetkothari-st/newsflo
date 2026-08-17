@@ -1,0 +1,36 @@
+{
+  "_fixture": true,
+  "_what_this_is": "Invented returns. They describe no company, no index and no day that ever traded. The arithmetic they prove is documented in .superpowers/sdd/2026-08-17-v5-session0/phase5-estimator-design.md section 4.",
+  "estimation": {
+    "_fixture": true,
+    "_rule": "benchmark b_i = 0.002 * ((i mod 5) - 2); company r_i = 0.001 + 1.5 * b_i, EXACTLY. OLS over points on a straight line recovers alpha=0.001, beta=1.5 exactly.",
+    "days": 150,
+    "alpha": 0.001,
+    "beta": 1.5,
+    "benchmark_cycle": [-0.004, -0.002, 0.0, 0.002, 0.004]
+  },
+  "event_window": {
+    "_fixture": true,
+    "_rule": "offset 0 is the shock day and is INCLUDED in every CAR window.",
+    "observations": [
+      {"_fixture": true, "offset": 0, "benchmark": 0.010, "company": 0.020, "abnormal": 0.0040},
+      {"_fixture": true, "offset": 1, "benchmark": 0.005, "company": 0.004, "abnormal": -0.0045},
+      {"_fixture": true, "offset": 2, "benchmark": 0.000, "company": -0.002, "abnormal": -0.0030},
+      {"_fixture": true, "offset": 3, "benchmark": -0.005, "company": 0.000, "abnormal": 0.0065},
+      {"_fixture": true, "offset": 4, "benchmark": 0.002, "company": 0.006, "abnormal": 0.0020},
+      {"_fixture": true, "offset": 5, "benchmark": 0.001, "company": -0.001, "abnormal": -0.0035}
+    ],
+    "quiet_tail_rule": "offsets 6..20 carry company = 0.001 + 1.5 * benchmark, so every abnormal return there is exactly 0.",
+    "expected_car": {"_fixture": true, "1d": -0.0005, "5d": 0.0015, "20d": 0.0015}
+  },
+  "shock_series": {
+    "_fixture": true,
+    "_rule": "24 daily moves: ten at +1%, ten at -1%, two at +3%, two at -3%. Mean exactly 0. Population variance = (20*0.0001 + 4*0.0009)/24 = 0.000233333...; sigma = 0.0152752523..., 1.5*sigma = 0.0229128785...",
+    "moves": [0.01, -0.01, 0.01, -0.01, 0.03, -0.01, 0.01, -0.01, 0.01, 0.03,
+              -0.01, 0.01, -0.01, 0.01, -0.03, -0.01, 0.01, -0.01, 0.01, -0.03,
+              -0.01, 0.01, -0.01, 0.01],
+    "expected_sigma": 0.015275252316519465,
+    "expected_threshold": 0.022912878474779197,
+    "_dedupe_note": "the +3% at index 4 and the +3% at index 9 are five sessions apart and both survive; the -3% pair at indexes 14 and 19 likewise. The dedupe rule is exercised separately by a two-day pair built in the test."
+  }
+}
