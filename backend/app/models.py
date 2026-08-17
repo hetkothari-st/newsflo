@@ -2320,6 +2320,132 @@ class PolicyState(Base):
     owner = Column(String, nullable=False)
 
 
+class TransmissionEmpirical(Base):
+    """V5 PHASE 5 / spec §10.1 -- how a company ACTUALLY behaved across
+    historical shocks of one variable. SHIPS EMPTY.
+
+    Empty because THE PRICE DATA DOES NOT EXIST in this repo: eight-plus years
+    of adjusted daily returns for the listed universe, the sector benchmark
+    series and the dated shock instances per variable are all acquisition work
+    and all the owner's (DATA_GAPS §9). The estimator is complete and computes
+    over any `ReturnHistory` a caller supplies.
+
+    `estimator_version` is part of the PRIMARY KEY, so two estimators may
+    coexist and be compared instead of one silently replacing the other. A row
+    whose version no longer describes how it was computed is worse than no row.
+    """
+    __tablename__ = "transmission_empirical"
+
+    company_id = Column(Integer, primary_key=True)
+    shock_variable = Column(String, primary_key=True)
+    shock_sign = Column(String, primary_key=True)       # UP | DOWN
+    horizon = Column(String, primary_key=True)          # 1d | 5d | 20d
+    estimator_version = Column(String, primary_key=True)
+    n_events = Column(Integer, nullable=False)
+    median_car = Column(Numeric, nullable=False)
+    iqr_lo = Column(Numeric, nullable=True)
+    iqr_hi = Column(Numeric, nullable=True)
+    p_value = Column(Numeric, nullable=False)
+    sign_consistency = Column(Numeric, nullable=False)
+    computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class DivergenceReview(Base):
+    """V5 PHASE 5 / spec §10.3, §5.5 -- the queue a disagreement is ROUTED to.
+
+    TWO KINDS, ONE QUEUE. `EMPIRICAL_CONFLICT` (history disagrees with the
+    fundamental read) and `MARKET_DIVERGENCE` (the price move disagrees with
+    it). Neither is ever resolved silently in either direction: a conflict caps
+    the tier at SECONDARY_RIPPLE and lands here, and a market divergence does
+    nothing at all except land here.
+
+    `review_id` is CONTENT-ADDRESSED, so re-running the same analysis re-queues
+    the same review instead of growing the queue by one per run.
+    """
+    __tablename__ = "divergence_review"
+
+    review_id = Column(String, primary_key=True)
+    kind = Column(String, nullable=False)
+    event_id = Column(String, nullable=True)
+    company_id = Column(Integer, nullable=False)
+    shock_variable = Column(String, nullable=True)
+    shock_sign = Column(String, nullable=True)
+    horizon = Column(String, nullable=True)
+    fundamental_direction = Column(String, nullable=True)
+    empirical_status = Column(String, nullable=True)
+    n_events = Column(Integer, nullable=True)
+    median_car = Column(Numeric, nullable=True)
+    p_value = Column(Numeric, nullable=True)
+    excess_move_pct = Column(Numeric, nullable=True)
+    threshold_pct = Column(Numeric, nullable=True)
+    status = Column(String, nullable=False, default="OPEN",
+                    server_default="OPEN")
+    resolution = Column(String, nullable=True)
+    reason = Column(Text, nullable=True)
+    reviewed_by = Column(String, nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class RegimeChange(Base):
+    """V5 PHASE 5 / spec §10.3 -- a human's REGIME_CHANGED annotation.
+
+    "A human reviewer may mark the conflict REGIME_CHANGED with a reason;
+    PRIMARY then becomes available for that (company, shock_class) going
+    forward, recorded with an expiry date."
+
+    `expires_on` is NOT NULL, and there is no "permanent" option. A regime
+    claim nobody re-affirms is a regime claim nobody is maintaining -- the same
+    rule Phase 4 applied to `policy_state`. `reviewed_by` is NOT NULL for the
+    same reason: this annotation is what lets a company make a PRIMARY call
+    against its own measured history, and it needs an author.
+    """
+    __tablename__ = "regime_change"
+
+    annotation_id = Column(String, primary_key=True)
+    company_id = Column(Integer, nullable=False)
+    shock_class = Column(String, nullable=False)        # "<variable>:<sign>"
+    reason = Column(Text, nullable=False)
+    reviewed_by = Column(String, nullable=False)
+    effective_from = Column(Date, nullable=False)
+    expires_on = Column(Date, nullable=False)
+    review_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CalibrationModel(Base):
+    """V5 PHASE 5 / spec §13 -- the fitted-calibration registry. SHIPS EMPTY,
+    AND CANNOT BE ACTIVATED.
+
+    `is_active` carries a CHECK constraint pinning it to 0. That is the phase
+    file's "ship with calibration disabled and calibrated_p = null" made
+    STRUCTURAL rather than configured: switching calibration on requires a
+    labeled corpus above `config/calibration.yaml`'s minimum, a fitted model
+    recorded here, AND a migration that drops this constraint -- a deliberate,
+    reviewed act rather than a flag somebody flips.
+
+    "Do not ship a fitted-looking model trained on synthetic labels." A model
+    fitted on `_fixture` labels (which is the only kind of label that exists
+    today) is refused by `app.analysis.calibration.registry.record_model`
+    before it ever reaches this table.
+    """
+    __tablename__ = "calibration_model"
+    __table_args__ = (
+        CheckConstraint("is_active = 0", name="ck_calibration_model_never_active"),
+    )
+
+    model_version = Column(String, primary_key=True)
+    method = Column(String, nullable=False)             # isotonic | platt
+    fitted_at = Column(DateTime(timezone=True), nullable=True)
+    corpus_size = Column(Integer, nullable=False)
+    feature_names_json = Column(Text, nullable=True)
+    ece = Column(Numeric, nullable=True)
+    brier = Column(Numeric, nullable=True)
+    is_active = Column(Integer, nullable=False, default=0, server_default="0")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 # ---------------------------------------------------------------------------
 # V5 Phase 3 vocabulary guard + exposure index, SQLite
 # ---------------------------------------------------------------------------

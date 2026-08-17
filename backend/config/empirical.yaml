@@ -1,0 +1,57 @@
+# V5 empirical cross-check policy (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §10,
+# docs/v5/06_PHASE_5_empirical_calibration.md Tasks 5.1-5.2).
+#
+# THIS FILE IS POLICY, NOT DATA. It carries the thresholds and windows the
+# owner chooses for the event study. It carries NO company fact, NO CAR, NO
+# fitted parameter -- those may only come from `transmission_empirical`, which
+# is computed from a price history nobody has supplied yet (DATA_GAPS §9).
+#
+# THE ESTIMATOR THESE NUMBERS PARAMETERISE IS DOCUMENTED, WITH ITS ARITHMETIC,
+# in .superpowers/sdd/2026-08-17-v5-session0/phase5-estimator-design.md. That
+# document carries a PENDING-OWNER-VERIFICATION header: every value below is a
+# modelling choice that has never been validated against Indian market data.
+# Read it before trusting a row this config produces.
+
+version: empirical-v5.0.0
+
+shock_detection:
+  # |move| > 1.5 sigma of the variable's daily distribution (spec §10.1).
+  sigma_multiple: 1.5
+  # Deduplicated to one instance per 5-day window (spec §10.1). Two candidates
+  # FEWER than this many days apart are one episode; the larger |move| wins,
+  # ties resolve to the earlier date.
+  dedupe_days: 5
+  # ">= 8 years" of history per variable, in trading days. A shorter series is
+  # REFUSED rather than computed on: a sigma measured over two years is a
+  # different threshold wearing the same name.
+  min_series_days: 2000
+
+estimator:
+  # Trading-day offsets relative to the shock day. The window ends a month
+  # before the event so the run-up does not contaminate beta.
+  estimation_start_offset: -250
+  estimation_end_offset: -31
+  # Usable paired observations required before a beta may be estimated. Fewer
+  # => no estimate. Never a beta shrunk toward 1.0, which would be a number
+  # nobody measured.
+  min_estimation_days: 120
+  # Fraction of the event window that must have actually traded. A stale print
+  # is a zero return that is not a zero move.
+  min_event_window_traded_fraction: 0.8
+  # CAR windows, in trading days after the shock day INCLUSIVE of it. The key
+  # is the string persisted in transmission_empirical.horizon.
+  car_horizons:
+    "1d": 1
+    "5d": 5
+    "20d": 20
+
+check:
+  # spec §10.2, verbatim.
+  min_events: 10
+  max_p_value: 0.10
+
+divergence:
+  # |excess move| beyond which a disagreement between the fundamental
+  # direction and the market's move is written to `divergence_review`.
+  # A MONITORING signal: it never corrects a verdict in either direction.
+  threshold_pct: 3.0
