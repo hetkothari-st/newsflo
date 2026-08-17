@@ -1,0 +1,51 @@
+{
+  "_fixture": true,
+  "_description": "Metric sets for the shipping-gate evaluator's own tests. These are NOT measurements of anything -- they are INVENTED numbers whose only job is to prove that each gate in spec section 17.2 bites in both directions. The deployed harness produces its metric set from labels and records; this file exists because the corpus is empty and a gate nobody has ever seen fail is a gate nobody has tested.",
+  "passing": {
+    "_fixture": true,
+    "primary_precision": 0.97,
+    "primary_wrong_direction_rate": 0.01,
+    "primary_false_positives_on_null_events": 0,
+    "secondary_ripple_recall": 0.75,
+    "secondary_ripple_precision": 0.85,
+    "ripple_family_recall": 0.85,
+    "fabricated_numeral_rate": 0.0,
+    "firewall_deletion_rate_primary_prose": 0.0,
+    "internal_contradiction_rate": 0.0,
+    "calibration_ece": 0.03,
+    "section_assignment_accuracy": 0.99,
+    "reducer_determinism": 1.0,
+    "market_fundamental_isolation": 1.0,
+    "p95_publish_latency_seconds": 45.0
+  },
+  "violations": {
+    "_fixture": true,
+    "primary_precision": {"primary_precision": 0.94},
+    "primary_wrong_direction_rate": {"primary_wrong_direction_rate": 0.03},
+    "primary_false_positives_on_null_events": {"primary_false_positives_on_null_events": 1},
+    "secondary_ripple_recall": {"secondary_ripple_recall": 0.69},
+    "secondary_ripple_precision": {"secondary_ripple_precision": 0.79},
+    "ripple_family_recall": {"ripple_family_recall": 0.79},
+    "fabricated_numeral_rate": {"fabricated_numeral_rate": 0.004},
+    "firewall_deletion_rate_primary_prose": {"firewall_deletion_rate_primary_prose": 0.01},
+    "internal_contradiction_rate": {"internal_contradiction_rate": 0.002},
+    "calibration_ece": {"calibration_ece": 0.06},
+    "section_assignment_accuracy": {"section_assignment_accuracy": 0.97},
+    "reducer_determinism": {"reducer_determinism": 0.9999},
+    "market_fundamental_isolation": {"market_fundamental_isolation": 0.0},
+    "p95_publish_latency_seconds": {"p95_publish_latency_seconds": 91.0}
+  },
+  "baselines": {
+    "_fixture": true,
+    "worse_than_us": {
+      "_fixture": true,
+      "commit": "fixture-baseline-worse",
+      "metrics": {"primary_precision": 0.90, "ripple_family_recall": 0.80}
+    },
+    "better_than_us": {
+      "_fixture": true,
+      "commit": "fixture-baseline-better",
+      "metrics": {"primary_precision": 0.99, "ripple_family_recall": 0.95}
+    }
+  }
+}

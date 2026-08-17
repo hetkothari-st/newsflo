@@ -1,0 +1,121 @@
+{
+  "_fixture": true,
+  "_description": "Phase 7 COST-CASCADE fixtures (spec section 18 budget rule): a 250-candidate event, expressed as COHORTS rather than 250 near-identical objects. Every draft here is INVENTED FOR TESTING; no cohort describes a real company and no production code path reads this file. The drafts are fed to the DEPLOYED publication gate (app/core/gates.py over config/gates.yaml), so the >=90% elimination is performed by the real deterministic layer, not by the fixture asserting itself.",
+  "cohorts": [
+    {
+      "_fixture": true,
+      "name": "peer_closure_sweep",
+      "count": 150,
+      "_why": "The peer-closure sweep is the biggest source of candidates and the cheapest to kill: the sensitivity engine evaluated no material channel, so the bucket is NO_MATERIAL_IMPACT and the gate hard-blocks. No model ever sees one.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "ACTIVE", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "NO_MATERIAL_IMPACT", "graph_distance": 3,
+        "directness": "REMOTE", "evidence_grade": "D",
+        "weakest_link": "COST_EXPOSURE:SECTOR_PROXY", "sign_consistency": 0.5,
+        "empirical_status": "NO_DATA", "verifier_status": "AGREE",
+        "adv_20d_inr": null, "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_sweep",
+        "net_effect": "NO_MATERIAL_IMPACT"
+      }
+    },
+    {
+      "_fixture": true,
+      "name": "not_active_listings",
+      "count": 40,
+      "_why": "Suspended, delisted or merged listings the index still carries. entity_status != ACTIVE is a hard block, evaluated before anything expensive.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "SUSPENDED", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "HIGH", "graph_distance": 1, "directness": "DIRECT",
+        "evidence_grade": "A", "weakest_link": "COST_EXPOSURE:BOUND",
+        "sign_consistency": 0.95, "empirical_status": "NO_DATA",
+        "verifier_status": "AGREE", "adv_20d_inr": null, "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_a",
+        "net_effect": "NEGATIVE"
+      }
+    },
+    {
+      "_fixture": true,
+      "name": "far_and_weak",
+      "count": 38,
+      "_why": "Reached by a long graph walk on proxy parameters with an unbound claim behind them. Rejected by the gate on MORE THAN ONE rule, so it is not marginal at the gate boundary and no model is asked about it.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "ACTIVE", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "LOW", "graph_distance": 4, "directness": "REMOTE",
+        "evidence_grade": "D", "weakest_link": "PASS_THROUGH:UNBOUND",
+        "sign_consistency": 0.45, "empirical_status": "NO_DATA",
+        "verifier_status": "DISAGREE", "adv_20d_inr": null, "event_status": "RUMOUR",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_far",
+        "net_effect": "NEGATIVE"
+      }
+    },
+    {
+      "_fixture": true,
+      "name": "ripple_publishable",
+      "count": 10,
+      "_why": "Publishes as SECONDARY_RIPPLE. Entailment judging and extraction on these is the SMALL/fast model's job (section 18 rung 3); a ripple claim is not PRIMARY-eligible and does not buy frontier reasoning.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "ACTIVE", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "MEDIUM", "graph_distance": 2, "directness": "INDIRECT",
+        "evidence_grade": "C", "weakest_link": "COST_EXPOSURE:SECTOR_PROXY",
+        "sign_consistency": 0.9, "empirical_status": "NO_DATA",
+        "verifier_status": "AGREE", "adv_20d_inr": null, "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_ripple",
+        "net_effect": "NEGATIVE"
+      }
+    },
+    {
+      "_fixture": true,
+      "name": "primary_eligible",
+      "count": 8,
+      "_why": "PRIMARY-eligible. Section 18 rung 4 names exactly this as frontier work: PRIMARY-eligible FALSIFICATION -- the strongest claim gets the most expensive adversary.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "ACTIVE", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "HIGH", "graph_distance": 1, "directness": "DIRECT",
+        "evidence_grade": "A", "weakest_link": "COST_EXPOSURE:BOUND",
+        "sign_consistency": 0.95, "empirical_status": "NO_DATA",
+        "verifier_status": "AGREE", "adv_20d_inr": null, "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_a",
+        "net_effect": "NEGATIVE"
+      }
+    },
+    {
+      "_fixture": true,
+      "name": "mixed_needing_resolution",
+      "count": 4,
+      "_why": "Opposing material channels. Section 18 rung 4's second case: MIXED resolution is frontier work, and invariant 9 forbids collapsing it into a direction to make the question cheaper.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "ACTIVE", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "HIGH", "graph_distance": 1, "directness": "DIRECT",
+        "evidence_grade": "B", "weakest_link": "COST_EXPOSURE:BOUND",
+        "sign_consistency": 0.52, "empirical_status": "NO_DATA",
+        "verifier_status": "AGREE", "adv_20d_inr": null, "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_mixed",
+        "net_effect": "MIXED"
+      }
+    }
+  ],
+  "all_frontier_cohorts": [
+    {
+      "_fixture": true,
+      "name": "every_candidate_primary_eligible",
+      "count": 250,
+      "_why": "THE FALSIFIABILITY CONTROL. A pool in which the deterministic layers eliminate nothing must blow the budget: if this does not raise, the 0.10 assertion is not measuring anything.",
+      "draft": {
+        "_fixture": true,
+        "entity_status": "ACTIVE", "entity_ambiguous": false, "exposure_stale": false,
+        "materiality_bucket": "HIGH", "graph_distance": 1, "directness": "DIRECT",
+        "evidence_grade": "A", "weakest_link": "COST_EXPOSURE:BOUND",
+        "sign_consistency": 0.95, "empirical_status": "NO_DATA",
+        "verifier_status": "AGREE", "adv_20d_inr": null, "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9, "mechanism_id": "fixture_mechanism_a",
+        "net_effect": "NEGATIVE"
+      }
+    }
+  ]
+}

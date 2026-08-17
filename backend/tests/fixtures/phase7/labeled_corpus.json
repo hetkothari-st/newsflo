@@ -1,0 +1,123 @@
+{
+  "_fixture": true,
+  "_description": "A SIX-EVENT fixture corpus for the harness's own tests. It is NOT a Gate Zero corpus and is deliberately too small to satisfy any of Task 7.1's rules -- that is the point: the integrity report must SAY what is missing (300 events, 50 nulls, every stratum, two labelers each) rather than pass over it. Tickers are FIX*, labelers are obviously fake, and nothing here is loaded into any database but a throwaway in-memory one (tests/phase7/conftest.py::seed_corpus refuses anything else).",
+  "events": [
+    {
+      "event_id": "fx-commodity-1",
+      "stratum": "commodity",
+      "article_ref": "9000001",
+      "notes": "fixture: a crude shock the two labelers agreed about",
+      "labels": [
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXA", "expected_tier": "PRIMARY",
+         "expected_direction": "bearish", "expected_mechanism": "fixture_mechanism_a",
+         "expected_materiality": "HIGH", "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXA", "expected_tier": "PRIMARY",
+         "expected_direction": "bearish", "expected_mechanism": "fixture_mechanism_a",
+         "expected_materiality": "HIGH", "rationale": "fixture"},
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXB",
+         "expected_tier": "SECONDARY_RIPPLE", "expected_direction": "bearish",
+         "expected_mechanism": "fixture_mechanism_ripple", "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXB",
+         "expected_tier": "SECONDARY_RIPPLE", "expected_direction": "bearish",
+         "expected_mechanism": "fixture_mechanism_ripple", "rationale": "fixture"},
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXC", "expected_tier": "ABSENT",
+         "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXC", "expected_tier": "ABSENT",
+         "rationale": "fixture"}
+      ],
+      "event_labels": [
+        {"labeler": "fixture-labeler-a", "ripple_families": ["fixture_refining", "fixture_paints"]},
+        {"labeler": "fixture-labeler-b", "ripple_families": ["fixture_refining", "fixture_paints"]}
+      ]
+    },
+    {
+      "event_id": "fx-policy-1",
+      "stratum": "policy_regulatory",
+      "article_ref": "9000002",
+      "notes": "fixture: the two labelers disagreed and the adjudicator recorded DISPUTED",
+      "labels": [
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXD", "expected_tier": "PRIMARY",
+         "expected_direction": "bullish", "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXD",
+         "expected_tier": "SECONDARY_RIPPLE", "expected_direction": "bullish",
+         "rationale": "fixture"}
+      ],
+      "adjudications": [
+        {"company_ref": "FIXD", "resolution": "DISPUTED", "resolved_by": "fixture-adjudicator",
+         "resolved_note": "fixture: honest ambiguity, excluded from precision denominators"}
+      ],
+      "event_labels": [
+        {"labeler": "fixture-labeler-a", "ripple_families": []},
+        {"labeler": "fixture-labeler-b", "ripple_families": []}
+      ]
+    },
+    {
+      "event_id": "fx-null-1",
+      "stratum": "null_event",
+      "article_ref": "9000003",
+      "notes": "fixture: both labelers named companies and marked them ABSENT",
+      "labels": [
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXA", "expected_tier": "ABSENT",
+         "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXA", "expected_tier": "ABSENT",
+         "rationale": "fixture"},
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXB", "expected_tier": "ABSENT",
+         "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXB", "expected_tier": "ABSENT",
+         "rationale": "fixture"}
+      ]
+    },
+    {
+      "event_id": "fx-null-2",
+      "stratum": "null_event",
+      "article_ref": "9000004",
+      "notes": "fixture: a correct null label names NO company -- the event-level row is what records that the labeler did the work",
+      "event_labels": [
+        {"labeler": "fixture-labeler-a", "ripple_families": [],
+         "rationale": "fixture: nothing material here"},
+        {"labeler": "fixture-labeler-b", "ripple_families": [],
+         "rationale": "fixture: nothing material here"}
+      ]
+    },
+    {
+      "event_id": "fx-earnings-1",
+      "stratum": "earnings",
+      "article_ref": "9000005",
+      "notes": "fixture: ONE labeler only. Must be reported as under-labeled and excluded -- the single-labeler prohibition (Task 7.1 DO NOT #2).",
+      "labels": [
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXE", "expected_tier": "PRIMARY",
+         "expected_direction": "bullish", "rationale": "fixture"}
+      ]
+    },
+    {
+      "event_id": "fx-company-1",
+      "stratum": "company_action",
+      "article_ref": "9000006",
+      "notes": "fixture: both labelers agreed on a company action",
+      "labels": [
+        {"labeler": "fixture-labeler-a", "company_ref": "FIXE", "expected_tier": "PRIMARY",
+         "expected_direction": "bullish", "expected_mechanism": "fixture_mechanism_order",
+         "expected_materiality": "MEDIUM", "rationale": "fixture"},
+        {"labeler": "fixture-labeler-b", "company_ref": "FIXE", "expected_tier": "PRIMARY",
+         "expected_direction": "bullish", "expected_mechanism": "fixture_mechanism_order",
+         "expected_materiality": "MEDIUM", "rationale": "fixture"}
+      ],
+      "event_labels": [
+        {"labeler": "fixture-labeler-a", "ripple_families": ["fixture_capital_goods"]},
+        {"labeler": "fixture-labeler-b", "ripple_families": ["fixture_capital_goods"]}
+      ]
+    }
+  ],
+  "companies": [
+    {"id": 9801, "name": "Fixture Alpha Ltd", "ticker": "FIXA.NS", "sector": "fixture_energy",
+     "sub_sector": "fixture_refining"},
+    {"id": 9802, "name": "Fixture Beta Ltd", "ticker": "FIXB.NS", "sector": "fixture_materials",
+     "sub_sector": "fixture_paints"},
+    {"id": 9803, "name": "Fixture Gamma Ltd", "ticker": "FIXC.NS", "sector": "fixture_consumer",
+     "sub_sector": "fixture_staples"},
+    {"id": 9804, "name": "Fixture Delta Ltd", "ticker": "FIXD.NS", "sector": "fixture_financials",
+     "sub_sector": "fixture_banks"},
+    {"id": 9805, "name": "Fixture Epsilon Ltd", "ticker": "FIXE.NS",
+     "sector": "fixture_industrials", "sub_sector": "fixture_capital_goods"}
+  ]
+}

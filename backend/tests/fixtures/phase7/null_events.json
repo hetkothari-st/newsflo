@@ -1,0 +1,169 @@
+{
+  "_fixture": true,
+  "_description": "Phase 7 NULL-EVENT fixtures: four events that must publish ZERO PRIMARY, each failing for a DIFFERENT structural reason so the null slice measures four separate refusals rather than one. Company names, tickers and every number here are INVENTED FOR TESTING and marked `_fixture: true` on every object carrying a numeral, per docs/v5/00_MASTER_CONTEXT.md's fabrication guard. Nothing here describes a real company and no production code path reads this file. The stage-bundle shape is Phase 0's (tests/fixtures/phase0/crude_shock_event.json), so the harness runs the DEPLOYED reducer and the DEPLOYED gate policy over it -- a null event proven against a test-local gate would prove nothing.",
+  "bundles": [
+    {
+      "_fixture": true,
+      "event_id": "fixture:null-1-immaterial",
+      "_why_null": "Financial news that touches the company's world but moves no line of its P&L: every channel the sensitivity engine evaluated came back materiality NONE, so the record's bucket is NO_MATERIAL_IMPACT and the gate hard-blocks it. This is the commonest and most valuable null shape -- the system has something to say and says nothing.",
+      "analysis_version": "v5:fixture:phase7:null1",
+      "stratum": "null_event",
+      "event_context": {
+        "_fixture": true,
+        "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9,
+        "exposure_stale": false
+      },
+      "sectors": {"9701": "fixture_materials"},
+      "signals": [
+        {
+          "_fixture": true,
+          "stage": "ENTITY", "kind": "ENTITY_RESOLUTION", "company_id": 9701,
+          "created_by": "fixture:entity_resolver",
+          "payload": {"_fixture": true, "ticker": "FIXNUL1.NS", "isin": "INFIXTURE9701",
+                      "resolution": "RESOLVED", "entity_status": "ACTIVE"}
+        },
+        {
+          "_fixture": true,
+          "stage": "DISCOVERY", "kind": "DISCOVERY", "company_id": 9701,
+          "created_by": "fixture:engine",
+          "payload": {"_fixture": true, "discovery_source": "MENTION",
+                      "directness": "DIRECT", "graph_distance": 1}
+        },
+        {
+          "_fixture": true,
+          "stage": "SENSITIVITY", "kind": "CHANNEL", "company_id": 9701,
+          "created_by": "fixture:sensitivity_engine",
+          "payload": {"_fixture": true, "channel_id": "fixture_input_cost",
+                      "mechanism_id": "fixture_mechanism_a", "horizon": "NEAR_TERM",
+                      "direction": "NEGATIVE", "materiality": "NONE", "weight": 1.0,
+                      "evidence_ids": []}
+        },
+        {
+          "_fixture": true,
+          "stage": "EMPIRICAL", "kind": "EMPIRICAL_CHECK", "company_id": 9701,
+          "created_by": "fixture:empirical",
+          "payload": {"_fixture": true, "status": "NO_DATA"}
+        }
+      ]
+    },
+    {
+      "_fixture": true,
+      "event_id": "fixture:null-2-ambiguous-entity",
+      "_why_null": "The article names something that resolves to more than one listing. Invariant: never use ticker or name similarity as entity resolution (spec section 19.2) -- so the record is REJECTED with ENTITY_AMBIGUOUS rather than published against a guess.",
+      "analysis_version": "v5:fixture:phase7:null2",
+      "stratum": "null_event",
+      "event_context": {
+        "_fixture": true,
+        "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9,
+        "exposure_stale": false
+      },
+      "sectors": {"9702": "fixture_industrials"},
+      "signals": [
+        {
+          "_fixture": true,
+          "stage": "ENTITY", "kind": "ENTITY_RESOLUTION", "company_id": 9702,
+          "created_by": "fixture:entity_resolver",
+          "payload": {"_fixture": true, "ticker": "FIXNUL2.NS", "isin": "INFIXTURE9702",
+                      "resolution": "AMBIGUOUS", "entity_status": "ACTIVE"}
+        },
+        {
+          "_fixture": true,
+          "stage": "SENSITIVITY", "kind": "CHANNEL", "company_id": 9702,
+          "created_by": "fixture:sensitivity_engine",
+          "payload": {"_fixture": true, "channel_id": "fixture_demand",
+                      "mechanism_id": "fixture_mechanism_b", "horizon": "NEAR_TERM",
+                      "direction": "POSITIVE", "materiality": "HIGH", "weight": 1.0,
+                      "evidence_ids": []}
+        }
+      ]
+    },
+    {
+      "_fixture": true,
+      "event_id": "fixture:null-3-unsizeable-shock",
+      "_why_null": "A macro headline whose shock nobody can size. Section 7.4: a shock below the magnitude-confidence floor is a MACRO_CONTEXT statement at best, and MACRO_CONTEXT may never carry a company (invariant 6) -- so a per-company draft is REJECTED, not demoted.",
+      "analysis_version": "v5:fixture:phase7:null3",
+      "stratum": "null_event",
+      "event_context": {
+        "_fixture": true,
+        "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.2,
+        "exposure_stale": false
+      },
+      "sectors": {"9703": "fixture_financials"},
+      "signals": [
+        {
+          "_fixture": true,
+          "stage": "ENTITY", "kind": "ENTITY_RESOLUTION", "company_id": 9703,
+          "created_by": "fixture:entity_resolver",
+          "payload": {"_fixture": true, "ticker": "FIXNUL3.NS", "isin": "INFIXTURE9703",
+                      "resolution": "RESOLVED", "entity_status": "ACTIVE"}
+        },
+        {
+          "_fixture": true,
+          "stage": "DISCOVERY", "kind": "DISCOVERY", "company_id": 9703,
+          "created_by": "fixture:engine",
+          "payload": {"_fixture": true, "discovery_source": "MECHANISM",
+                      "directness": "DIRECT", "graph_distance": 1}
+        },
+        {
+          "_fixture": true,
+          "stage": "SENSITIVITY", "kind": "CHANNEL", "company_id": 9703,
+          "created_by": "fixture:sensitivity_engine",
+          "payload": {"_fixture": true, "channel_id": "fixture_rate_pass",
+                      "mechanism_id": "fixture_mechanism_c", "horizon": "NEAR_TERM",
+                      "direction": "NEGATIVE", "materiality": "HIGH", "weight": 1.0,
+                      "evidence_ids": []}
+        }
+      ]
+    },
+    {
+      "_fixture": true,
+      "event_id": "fixture:null-4-unbound-claim",
+      "_why_null": "The mechanism is plausible and nothing in the record binds it to this company. An UNBOUND claim is a hard block (spec section 11.1) -- the exact failure the null slice exists to catch, because an unbound claim is what a fluent model produces when it has nothing.",
+      "analysis_version": "v5:fixture:phase7:null4",
+      "stratum": "null_event",
+      "event_context": {
+        "_fixture": true,
+        "event_status": "CONFIRMED",
+        "shock_magnitude_confidence": 0.9,
+        "exposure_stale": false
+      },
+      "sectors": {"9704": "fixture_consumer"},
+      "signals": [
+        {
+          "_fixture": true,
+          "stage": "ENTITY", "kind": "ENTITY_RESOLUTION", "company_id": 9704,
+          "created_by": "fixture:entity_resolver",
+          "payload": {"_fixture": true, "ticker": "FIXNUL4.NS", "isin": "INFIXTURE9704",
+                      "resolution": "RESOLVED", "entity_status": "ACTIVE"}
+        },
+        {
+          "_fixture": true,
+          "stage": "DISCOVERY", "kind": "DISCOVERY", "company_id": 9704,
+          "created_by": "fixture:engine",
+          "payload": {"_fixture": true, "discovery_source": "MENTION",
+                      "directness": "DIRECT", "graph_distance": 1}
+        },
+        {
+          "_fixture": true,
+          "stage": "SENSITIVITY", "kind": "CHANNEL", "company_id": 9704,
+          "created_by": "fixture:sensitivity_engine",
+          "payload": {"_fixture": true, "channel_id": "fixture_input_cost",
+                      "mechanism_id": "fixture_mechanism_d", "horizon": "NEAR_TERM",
+                      "direction": "NEGATIVE", "materiality": "HIGH", "weight": 1.0,
+                      "evidence_ids": []}
+        },
+        {
+          "_fixture": true,
+          "stage": "EVIDENCE", "kind": "EVIDENCE_BINDING", "company_id": 9704,
+          "created_by": "fixture:evidence_classifier",
+          "payload": {"_fixture": true, "claim_id": "cl_fixture_null_unbound",
+                      "claim_type": "COST_EXPOSURE", "binding_status": "UNBOUND",
+                      "evidence_grade": null, "evidence_ids": []}
+        }
+      ]
+    }
+  ]
+}
