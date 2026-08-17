@@ -183,16 +183,50 @@ were all asserted by hand for this run. The publishable chain is therefore
 
 `company_exposure` has `freshness_days` plus a staleness checker and a HARD gate
 rule. `company_modifier` has **neither** — `_modifier_rows` filters only on
-`effective_from` / `effective_to`. The CEAT hedging disclosure covers FY2025-26;
-it was written with `effective_to = NULL` so the run would compute. Written
-honestly as `effective_to = 2026-03-31` it expires and the company abstains today.
-There is no freshness policy that makes that choice for a reviewer.
+`effective_from` / `effective_to`, and `company_modifier.as_of_date` is never
+read. The CEAT hedging disclosure covers FY2025-26; it was written with
+`effective_to = NULL` so the run would compute. Written honestly as
+`effective_to = 2026-03-31` it expires and the company abstains today. There is
+no freshness policy that makes that choice for a reviewer.
 
-### Reversal
+**Promoted to its own gap: [§17](modifier-staleness.md)**, together with the
+missing fourth disclosure state ("looked, and the company does not say", which
+currently collapses into "no row"). The `effective_to = NULL` written for this
+run has since been corrected to `2026-03-31` — see Rollback below.
 
-Four `INSERT`s, one company. To undo: delete the two `pass_through_curve` rows,
-the two `company_modifier` rows, the two `PENDING` `mechanism_edge` rows and the
-`(186, 'FY26')` `company_financials` row. Pre-run backup at
-`backend/newsflo.db.bak-20260817-ceat`. **Nothing was extrapolated to any other
-company, no sector-median curve was written, and `companies.sector` was not
-touched.**
+### The defects are now a register
+
+All nine are written up, in the owner's priority order, with the shape a fix must
+have and what must not be built, in
+[`docs/v5/defects/DEFECTS-001-ceat-proof-of-life.md`](../docs/v5/defects/DEFECTS-001-ceat-proof-of-life.md).
+**D5 leads it, not D1.** The absence of any crude→derivative elasticity in §5.1 is
+the finding that makes the magnitudes themselves wrong rather than merely
+mislabelled, and the note 45(iv) agreement recorded above **does not** validate it
+— CEAT's disclosure is stated as a move in the *input's own price* and carries the
+identical assumption, so the two agree because they share the gap, not because
+either tests it.
+
+### Rollback — executed 2026-08-17 on the owner's instruction
+
+Pre-rollback backup: `backend/newsflo.db.bak-20260817-prerollback`
+(pre-run backup `backend/newsflo.db.bak-20260817-ceat` also retained).
+
+* **DELETED — both `pass_through_curve` rows.** The owner rejected the
+  `reviewed_by` signature. The curve's *level* rested on the undisclosed
+  whole-book assumption recorded above, and the derivation had not been read by
+  the person whose name was on it. **Findings kept, data discarded.**
+* **CORRECTED — both `company_modifier` rows**, `effective_to` from `NULL` to
+  `2026-03-31`, matching the FY2025-26 disclosure. The `NULL` was an
+  implementer's convenience, not a statement in the source.
+* **KEPT — 5 rows.** `company_financials` ×1 (printed straight off the AR MD&A
+  P&L table, no derivation); `company_modifier` ×2 (`hedge_ratio = 0.0` is a
+  positive disclosure of zero under SEBI LODR Reg 34(3), verbatim); and
+  `mechanism_edge` ×2, still `AUTHORED` / `PENDING` / `reviewed_by NULL`, queued
+  for the owner. **Per D2 those two edges remain publishable while unreviewed —
+  dormant only because nothing publishes without a curve.**
+
+**Verified after rollback:** CEAT abstains at both `as_of = 2026-08-17` and
+`as_of = 2026-03-31` — 0 channels, 0 signals, `MISSING_ROW(pass_through)` on both
+tags, `no_ebitda = False` (the retained financial row resolves), `exposure_stale
+= False`. **Nothing was extrapolated to any other company, no sector-median curve
+was ever written, and `companies.sector` was not touched.**
