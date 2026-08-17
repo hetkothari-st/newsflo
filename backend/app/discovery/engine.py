@@ -342,10 +342,19 @@ def _industry_of(session, company_ids: Sequence[int]) -> dict[int, str | None]:
 
     The three-level fall-through is chosen over `official_isubgroup` alone
     because 652 companies have no `official_isubgroup`, and `_extend_peer_
-    closure` skips a falsy industry -- so keying on it alone would make those
-    652 permanently ineligible for peer closure. 453 of them do have a
-    `sub_sector`, and only 190 land on `'other'`. So the collapse shrinks from
-    3,035 to 190 (-94%) with no company losing eligibility.
+    closure` skips a falsy industry (`if industry and ...`) -- so keying on it
+    alone would make those 652 permanently ineligible for peer closure. 453 of
+    them do have a `sub_sector`, and only 190 land on `'other'`. So the
+    collapse shrinks from 3,035 to 190 (-94%) with no company losing
+    eligibility.
+
+    Recorded because it is a CORRECTION TO THE ORIGINAL INSTRUCTION, not a
+    deviation from it: the fix was specified as "key on official_isubgroup",
+    the strict reading was measured to strand 652 companies on the falsy-
+    industry skip, and the owner accepted the fall-through chain on that
+    evidence (2026-08-17). Reverting to the strict reading is deleting two
+    arguments from `_first_present` -- but it costs those 652 their
+    eligibility, which is the thing that was not obvious from reading.
 
     The three vocabularies cannot collide: 190 title-case exchange names, 43
     snake_case sub-sectors, 11 lowercase sectors.

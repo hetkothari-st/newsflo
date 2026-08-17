@@ -1,5 +1,16 @@
-# V5 AUTHORED MECHANISM EDGES — THE ADMINISTERED-PRICE FERTILIZER COMPLEX
-# (spec §6.2, addendum A2.3; queued for owner approval, NOT loaded)
+# V5 CANDIDATE MECHANISM EDGES — queued for owner approval
+# (spec §6.2, addendum A2.3)
+#
+# TWO GROUPS, and they are in different states:
+#   1-5  THE ADMINISTERED-PRICE FERTILIZER COMPLEX. Blocked, and the block is
+#        the deliverable -- see below. Not loadable today.
+#   6-7  CRUDE -> TYRES (CEAT). LOADABLE, and loaded 2026-08-17. Re-created
+#        here after being found hand-INSERTed into the dev DB with a from_node
+#        this loader refuses. Their own header sits above entry 6.
+#
+# Because 1-5 are blocked and 6-7 are not, `load_authored_edges` must be run
+# with `strict=False` to write the cleared subset -- deliberately, having read
+# the blockers. `strict=True` raises rather than writing three of seven.
 #
 # WHY THIS FILE EXISTS. The V4 impact graph produced five distinct mechanism
 # ids for the Indian fertilizer subsidy complex and every one of them was an
@@ -15,12 +26,15 @@
 # This file is the V5-shaped statement of what is missing.
 #
 # ---------------------------------------------------------------------------
-# NOTHING HERE IS LOADED, AND NOTHING HERE CAN BE LOADED TODAY
+# THE FIVE FERTILIZER ENTRIES CANNOT BE LOADED TODAY
 # ---------------------------------------------------------------------------
+# (Entries 6-7 are a separate case and ARE loadable -- see the top of file.)
+#
 # `mechanism_edge.exposure_tag` is NOT NULL and a database trigger
 # (`mechanism_edge_valid_tag_insert`, app/models.py) RAISEs on any tag absent
-# from `valid_exposure_tag`. All five entries below need a tag the vocabulary
-# does not have, so all five carry `exposure_tag: null` and a `pending_tag`
+# from `valid_exposure_tag`. All five fertilizer entries need a tag the
+# vocabulary does not have, so all five carry `exposure_tag: null` and a
+# `pending_tag`
 # naming the leaf `config/exposure_tags.yaml` would need -- the same
 # convention `config/policy_modifiers.yaml` already uses. THE VOCABULARY IS
 # NOT EXTENDED HERE: its own header makes that a review of that file plus a
@@ -258,3 +272,79 @@ edges:
       down rather than dropped so the owner can reject it explicitly --
       a rejected edge is retained with its reason (invariant 12), which is
       a better record than an edge nobody ever proposed.
+
+# ===========================================================================
+# CRUDE -> TYRES (CEAT). RE-CREATED 2026-08-17, and the reason matters.
+# ===========================================================================
+# These two edges EXISTED in the dev database, hand-INSERTed during the CEAT
+# proof-of-life run, and they were WRONG in a way this loader would have
+# caught: `from_node: 'commodity:crude_oil'`, while
+# config/discovery.yaml::modelled_shock_variables carries `BRENT_CRUDE`.
+# Discovery would have reported the node unmodelled and never walked either
+# edge. They looked live and were not.
+#
+# Verified rather than asserted -- `blockers()` on the rows exactly as stored:
+#
+#   ed030571-...: from_node 'commodity:crude_oil' is not in
+#   config/discovery.yaml::modelled_shock_variables, so discovery would report
+#   it unmodelled and never walk this edge.
+#
+# The same entries with from_node: BRENT_CRUDE return no blockers. That is the
+# closure check earning its place on a real case, not a synthetic one.
+#
+# The original edge_ids are KEPT so that DEFECTS-001, which cites both uuids,
+# still resolves. `review_note` from the old rows is NOT carried: that column
+# is the reviewer's, and these are unreviewed. The rationale it held is below
+# under `mechanism:`, where it belongs.
+#
+# Both load as MODEL_PROPOSED + PENDING + reviewed_by NULL -- inert on the
+# walk, visible in the review queue, awaiting the owner one at a time.
+
+  # -- 6 -------------------------------------------------------------------
+  - edge_id: ed030571-b85f-4a9a-92b5-f277a7f18585
+    from_node: BRENT_CRUDE
+    to_node: industry:tyres
+    relationship_type: INPUT_COST
+    distance: 2
+    derivation: MODEL_PROPOSED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: input:crude_derivative_rubber
+    parameters:
+      _required: [confidence]
+      confidence: 0.7
+    effective_from: 2025-04-01
+    effective_to: null
+    source_url: https://nsearchives.nseindia.com/annual_reports/AR_29958_CEATLTD_2025_2026_A_20312897_23072026115614.pdf#page=119
+    owner: OWNER-REQUIRED
+    mechanism: >
+      Crude oil -> carbon black feedstock oil (a refinery residual stream) ->
+      carbon black -> tyre compounding cost. Rubber process chemicals in the
+      same ledger row are petrochemical derivatives on the same crude chain.
+      Carbon black is 15.6% of CEAT's FY26 materials basket (143,495 of
+      919,712 lakh, AR note 29) and chemicals a further 7.2%.
+    note: >
+      distance 2, not 1: crude reaches the tyre maker through carbon black,
+      and the hop count is the AUTHOR'S, never the traversal distance.
+
+  # -- 7 -------------------------------------------------------------------
+  - edge_id: ca78e5c5-049c-4731-931d-b9ab1bedebf9
+    from_node: BRENT_CRUDE
+    to_node: industry:tyres
+    relationship_type: INPUT_COST
+    distance: 2
+    derivation: MODEL_PROPOSED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: input:crude_derivative_petchem
+    parameters:
+      _required: [confidence]
+      confidence: 0.7
+    effective_from: 2025-04-01
+    effective_to: null
+    source_url: https://nsearchives.nseindia.com/annual_reports/AR_29958_CEATLTD_2025_2026_A_20312897_23072026115614.pdf#page=119
+    owner: OWNER-REQUIRED
+    mechanism: >
+      Crude oil -> naphtha -> caprolactam / PTA -> nylon and polyester tyre
+      cord fabric -> tyre casing cost. 'Fabrics' is 8.2% of CEAT's FY26
+      materials basket (75,633 of 919,712 lakh, AR note 29).

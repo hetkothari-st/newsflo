@@ -168,10 +168,12 @@ def load_authored_edges(session, path: Path | None = None, *,
         session.execute(text(
             "INSERT INTO mechanism_edge (edge_id, from_node, to_node, "
             "exposure_tag, relationship_type, distance, io_total_coeff, "
-            "derivation, reviewed_by, review_status, confidence, source_url) "
+            "derivation, reviewed_by, review_status, confidence, source_url, "
+            "effective_from, effective_to) "
             "VALUES (:edge_id, :from_node, :to_node, :exposure_tag, "
             ":relationship_type, :distance, NULL, :derivation, NULL, "
-            ":review_status, :confidence, :source_url)"), {
+            ":review_status, :confidence, :source_url, :effective_from, "
+            ":effective_to)"), {
                 "edge_id": str(entry["edge_id"]),
                 "from_node": str(entry["from_node"]),
                 "to_node": str(entry["to_node"]),
@@ -181,6 +183,14 @@ def load_authored_edges(session, path: Path | None = None, *,
                 "derivation": str(entry.get("derivation", DEFAULT_DERIVATION)),
                 "review_status": REVIEW_STATUS_PENDING,
                 "confidence": float(entry["parameters"]["confidence"]),
-                "source_url": entry.get("source_url")})
+                "source_url": entry.get("source_url"),
+                # Effective dating is carried because without it a loaded edge
+                # is valid at every `as_of`, which is BROADER than what the
+                # file said. A loader that silently widens an edge's validity
+                # is not a transcription. `review_note` is deliberately NOT
+                # carried: it is the reviewer's field, and the mechanism's
+                # rationale belongs in the entry's own `mechanism:` text.
+                "effective_from": entry.get("effective_from"),
+                "effective_to": entry.get("effective_to")})
         written += 1
     return written

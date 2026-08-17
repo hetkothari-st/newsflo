@@ -397,17 +397,71 @@ unrelated (`docs/v5/KNOWN_BREAKAGE.md` KB-001).
 Open question 1 in the genericity handover — *"D10: does the AUTHORED exception
 survive?"* — is answered: **no.** Deleted, not narrowed.
 
-## What is NOT fixed
+## What is NOT fixed — D2-reader, and it is CUTOVER-SCOPED
 
-**D2's reader half remains open** in `DEFECTS-001`. D10 closes the practical
-path for mechanism ids arriving from `traverse`, but
-`app/core/signal_adapters.py:182` also produces one from V4's
-`causal_parent_id`, which never touches `mechanism_edge` at all.
+**D2's reader half remains open** in `DEFECTS-001`, and by owner ruling
+(2026-08-17) it is **not to be designed**. This section records the constraint
+and the scoping, and stops there.
 
-The gate cannot resolve it by lookup either: `gates.py` and `reducer.py` are
-PURE by Phase 0 rule 3, enforced by `tests/phase0/test_reducer_purity.py`, and
-`reduce_company_impact` takes no session. So the approval state must arrive as
-a field on the draft, set by an impure caller, with a policy knob in
-`gates.yaml` saying what its absence means — the shape `required_verifier_status`
-/ `unknown_verifier_status_passes` already uses. That is a design decision with
-an upstream wiring cost, and it was deliberately not taken here.
+### The constraint
+
+The gate cannot resolve a `mechanism_id` by lookup. `gates.py` and `reducer.py`
+are **PURE** by Phase 0 rule 3 — *"standard library only, no disk, no network,
+no clock, no unseeded randomness"* — enforced by
+`tests/phase0/test_reducer_purity.py`, and `reduce_company_impact(signals,
+config)` takes no session. So approval state must arrive as a **field on the
+draft, set by an impure caller**, with a policy knob in `gates.yaml` saying what
+its absence means (the shape `required_verifier_status` /
+`unknown_verifier_status_passes` already uses). Any implementation that queries
+`mechanism_edge` from inside the gate breaks a Phase 0 invariant that has its
+own test.
+
+### Why it is cutover-scoped — verified, and the owner's reading is CORRECT
+
+The owner's reasoning: `signal_adapters` mints mechanism ids from V4's
+`causal_parent_id`, V4 is the engine being replaced, so fixing D2-reader means
+building approval plumbing for a path that dies at cutover.
+
+Checked rather than accepted. **The V5 canonical path cannot mint an
+unresolvable `mechanism_id`.** Every value it produces is one of:
+
+| site | value | resolvable? |
+|---|---|---|
+| `discovery/engine.py:237` (MENTION) | `None` | n/a — the gate's non-null test already refuses it |
+| `discovery/engine.py:264` (MECHANISM) | `edge.edge_id` from `traverse` | yes, and now APPROVED + signed by construction |
+| `discovery/engine.py:427` (PEER_CLOSURE) | `edge.edge_id` from `traverse` | same |
+| `discovery/engine.py:314` (SUPPLY_CHAIN) | inherited `seed.mechanism_id` | same — still a traverse-sourced id |
+
+`reducer.py:612` then takes the minimum of the ids on material channels, so it
+cannot introduce one either. The only producer of an id that names no row is
+`signal_adapters.py:182`, consumed solely by `impact_writer.py:285`. **V4-only.
+Cutover-scoped, as the owner read it.**
+
+Corroborating: V5 is not wired to serving at all. Reference counts from
+`pipeline.py`, `main.py` and `routers/` to `app.discovery`, `app.core.gates`,
+`app.core.reducer`, `app.output.sections` and `app.graph.traverse` are **0, 0,
+0, 0, 0**.
+
+### The condition on that scoping — a cutover REQUIREMENT, not a decision now
+
+"Closes at cutover" holds **only while V5 never re-reads a persisted
+`mechanism_id` without re-validating it.** Today that is guaranteed trivially,
+because V5 serves nothing. It stops being trivial the moment it does:
+
+- `impact_writer.py:185` persists `mechanism_id` onto `company_impact`.
+- `output/sections.py:59` keys `section_key` off `impact.mechanism_id`.
+- `traverse._SELECT` filters on `effective_from` / `effective_to` against
+  `as_of`, and `approve_edge` / `reject_edge` can move `review_status` at any
+  time.
+
+So an edge that was APPROVED and in-window when a candidate was built can be
+REJECTED, or fall out of its effective window, **afterwards**. If the cutover
+renders sections from stored `company_impact` rows rather than re-running
+discovery, that stored id keeps publishing and nothing re-checks it — which is
+D2's failure mode arriving *with* the cutover rather than closing at it.
+
+**This is not a decision the owner needs to take now.** It is a condition to
+put on the cutover: either the serving path re-runs discovery (so every
+`mechanism_id` is re-derived from an approved edge), or it re-validates
+persisted ids against `mechanism_edge` before rendering. If neither is true,
+D2-reader reopens on the V5 side and stops being cutover-scoped.
