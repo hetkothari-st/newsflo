@@ -1,0 +1,167 @@
+# V5 SHIPPING GATES (docs/v5/NEWSFLO_V5_BUILD_SPEC.md section 17.2,
+# docs/v5/08_PHASE_7_eval_harness.md Task 7.3).
+#
+# THIS FILE IS POLICY, NOT DATA. It holds the bars the owner chose; it holds
+# no measurement, no company fact and no coefficient. Changing a number here
+# changes what may ship -- it never changes what is true.
+#
+# THIS IS NOT config/gates.yaml. That file is the PUBLICATION gate: what may
+# be said about one company. This file is the SHIPPING gate: what may be
+# released. They are different questions with different owners and they are
+# deliberately not in one file.
+#
+# THE THREE HARD ZEROS ARE NOT NEGOTIABLE.
+#
+#     primary_false_positives_on_null_events
+#     fabricated_numeral_rate
+#     internal_contradiction_rate
+#
+# "The three hard-zero gates are the definition of defensible. Everything
+# else is quality; those three are integrity" (section 17.2). Task 7.3's
+# fourth DO NOT is "do not relax a hard-zero gate to unblock a release", and
+# eval/shipping_gates.py REFUSES to load this file if one of them is
+# raised above zero, demoted to soft, or deleted. Editing the numbers below
+# is not how that conversation goes; a spec amendment under section 7.2 of
+# the execution contract is.
+#
+# A gate whose metric is MISSING is REFUSED, never passed. Most of them are
+# unmeasurable today because the Gate Zero corpus is empty (DATA_GAPS
+# section 1), and an unmeasured gate is not a green one.
+
+version: shipping-gates-v5.0.0
+
+gates:
+  - name: primary_precision
+    comparison: ">="
+    threshold: 0.95
+    hard: false
+    description: >-
+      Of everything published at PRIMARY, the share the labelers expected at
+      PRIMARY. DISPUTED pairs are excluded from the denominator.
+
+  - name: primary_wrong_direction_rate
+    comparison: "<="
+    threshold: 0.02
+    hard: false
+    description: >-
+      Published PRIMARY records whose direction opposes the labeled one, over
+      those where BOTH sides state a direction. MIXED is not a direction and
+      never enters this denominator.
+
+  - name: primary_false_positives_on_null_events
+    comparison: "=="
+    threshold: 0
+    hard: true
+    description: >-
+      HARD ZERO. A count, not a rate: one PRIMARY publication on an event
+      with no material listed impact is one too many, whatever the corpus
+      size. This is the only measurement of whether the system can say
+      nothing.
+
+  - name: secondary_ripple_recall
+    comparison: ">="
+    threshold: 0.70
+    hard: false
+    description: >-
+      Of the ripple exposures the labelers expected, the share published at
+      SECONDARY_RIPPLE.
+
+  - name: secondary_ripple_precision
+    comparison: ">="
+    threshold: 0.80
+    hard: false
+    description: >-
+      Of everything published at SECONDARY_RIPPLE, the share the labelers
+      expected there.
+
+  - name: ripple_family_recall
+    comparison: ">="
+    threshold: 0.80
+    hard: false
+    description: >-
+      Of the ripple FAMILIES the labelers expected an event to reach, the
+      share the published record set reached. Families, not names: this is
+      the coverage question, and it is the one V4 failed.
+
+  - name: fabricated_numeral_rate
+    comparison: "=="
+    threshold: 0
+    hard: true
+    description: >-
+      HARD ZERO. Published records whose prose carries a numeral the record
+      set does not contain. Section 19.8 -- no model-emitted numeral may
+      reach a user -- measured rather than asserted.
+
+  - name: firewall_deletion_rate_primary_prose
+    comparison: "=="
+    threshold: 0
+    hard: false
+    description: >-
+      Sentences the entailment firewall deleted from PRIMARY prose. Not a
+      hard zero: a deletion means the firewall WORKED, and the gate is at
+      zero because a compiled sentence should never have needed deleting.
+
+  - name: internal_contradiction_rate
+    comparison: "=="
+    threshold: 0
+    hard: true
+    description: >-
+      HARD ZERO. Published records that disagree with themselves -- a
+      direction below its own sign-consistency floor, a headline opposing its
+      own horizon vector, a publication carrying a rejection reason.
+
+  - name: calibration_ece
+    comparison: "<="
+    threshold: 0.05
+    hard: false
+    description: >-
+      Expected calibration error of the published confidence. Unmeasurable
+      while calibration is DISABLED (Phase 5) and therefore REFUSED, not
+      passed.
+
+  - name: section_assignment_accuracy
+    comparison: ">="
+    threshold: 0.98
+    hard: false
+    description: >-
+      Records placed in the section their own key names. Unmeasurable from
+      the Gate Zero label schema, which carries no expected section.
+
+  - name: reducer_determinism
+    comparison: "=="
+    threshold: 1.0
+    hard: false
+    delegated_to:
+      path: tests/phase0/test_reducer_purity.py
+      test: test_reducer_output_is_byte_identical_across_10k_permutations
+    description: >-
+      10,000 permutations of one signal set reduce to a byte-identical
+      record. Proven by the Phase 0 suite named above rather than recomputed
+      here; 1.0 means that suite passes.
+
+  - name: market_fundamental_isolation
+    comparison: "=="
+    threshold: 1.0
+    hard: false
+    delegated_to:
+      path: tests/phase0/test_market_isolation.py
+      test: test_mutating_market_data_leaves_company_impact_byte_identical
+    description: >-
+      Invariant 3. Market movement never influences fundamental direction,
+      materiality, evidence or tier. Proven by the Phase 0 suite named above.
+
+  - name: p95_publish_latency_seconds
+    comparison: "<="
+    threshold: 90.0
+    hard: false
+    description: >-
+      The product promise. Nothing times the V5 path today (there is no V5
+      serving path), so this is REFUSED rather than reported.
+
+# "No merge may reduce PRIMARY precision or ripple recall versus the current
+# main branch baseline, even if absolute gates still pass." The baseline
+# lives in eval/baselines/main.json and SHIPS ABSENT -- no corpus has ever
+# been scored -- so the rule REFUSES rather than passing vacuously.
+no_regression:
+  - primary_precision
+  - ripple_family_recall
