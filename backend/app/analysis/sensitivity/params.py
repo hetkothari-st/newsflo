@@ -82,6 +82,12 @@ RESOLVABLE_PARAMS = (
     "natural_hedge_fraction",
     "net_investment_hedge_ratio",
     "repricing_fraction",
+    # V5 PHASE 4: how much of an inventory revaluation reaches the P&L at the
+    # horizon being evaluated (spec §8's inventory-revaluation channel). Like
+    # every other parameter it is a ledger value or a sector median, never a
+    # default -- and like hedge cover it is usually a CURVE, because a
+    # revaluation is a one-off that decays as the horizon lengthens.
+    "inventory_realization_fraction",
 )
 
 

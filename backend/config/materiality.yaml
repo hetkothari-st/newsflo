@@ -85,3 +85,6 @@ param_bounds:
   regulatory_capture_fraction: [0.0, 1.0]
   repricing_fraction: [0.0, 1.0]
   contribution_margin: [0.0, 1.0]
+  # V5 PHASE 4: the share of an inventory revaluation that reaches the P&L at
+  # a given horizon. A share, so it cannot leave [0, 1].
+  inventory_realization_fraction: [0.0, 1.0]
