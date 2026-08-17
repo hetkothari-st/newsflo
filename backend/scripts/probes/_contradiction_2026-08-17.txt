@@ -1,0 +1,105 @@
+corpus 52 | published by a crude node: 33 | withheld (MIXED): 10 | no crude node: 9
+DENOMINATOR for the contradiction rate = 33
+
+
+============================================================================
+DISCLAIMS candidates -- 9 companies, 15 sentences
+============================================================================
+
+[BERGEPAINT.NS] paint_makers p193
+  (v) Equity price risk The Company does not have any investments in listed securities or in Equity Mutual Funds and thereby is not exposed to any Equity price risk.
+
+[CONCOR.NS] logistics_operators p302
+  299 CONTAINER CORPORATION OF INDIA LIMITED ANNUAL REPORT 2024-25 (vii) Other price risks The company is not exposed to price risk as its investments in debt based marketable securities are held in a business model to collect contractual amounts at maturity and are carried at amortised costs.
+
+[DELHIVERY.NS] logistics_operators p67
+  j) Commodity price risk or foreign exchange risk and their respective hedging activities The Company considers commodity price risk and currency risk to be low and does not hedge these risks.
+
+[GANDHAR.NS] lubricant_blenders p49
+  (iii) In case of imported technology (imported during the last three years reckoned from the beginning of the financial year): Company does not use any imported technology (iv) Research and Development: Our R&D facility at Silvassa Plant is registered with the Department of Scientific and Industrial Research, Ministry of Science and T echnology, Government of India (“DSIR”).
+
+[GOODYEAR.NS] tyre_makers p100
+  The company has limited exposure to foreign exchange risk due to low reliance on imported raw materials and thus the company does not hedge for the foreign currency exposure and rely on natural hedging to the extent possible.
+
+[JKTYRE.NS] tyre_makers p94
+  The Company does not have any exposure hedged through commodity derivatives.
+
+[KANSAINER.NS] paint_makers p75
+  Engineering Controls Where emissions cannot be fully eliminated at source, we deploy a comprehensive range of pollution control technologies across our facilities, including air handling units for controlled ventilation, dust collectors for particulate capture, fume extractors at solvent and resin handling stations, forced draft ventilation systems, scrubbers in resin manufacturing areas and activ
+
+[TCI.NS] logistics_operators p105
+  Ishwar Singh Sigar ceased to be the CEO–TCI Freight Division of the Company with effect from the close of business hours on March 31, 2026, pursuant to changes in his roles and responsibilities within the Company and Mr.
+
+[VRLLOG.NS] logistics_operators p219
+  Given that such investment is insignificant in relation to the overall financial position of the Company, and the related fair value changes are not material, the impact of price risk on the statement of profit and loss and equity is not considered significant.
+
+  companies: ['BERGEPAINT.NS', 'CONCOR.NS', 'DELHIVERY.NS', 'GANDHAR.NS', 'GOODYEAR.NS', 'JKTYRE.NS', 'KANSAINER.NS', 'TCI.NS', 'VRLLOG.NS']
+
+============================================================================
+INVERTS candidates -- 21 companies, 95 sentences
+============================================================================
+
+[ASIANPAINT.NS] paint_makers p19
+  Our VAM-VAE (Vinyl Acetate Monomer-Vinyl Acetate Ethylene Emulsion) emulsion manufacturing project at Dahej, Gujarat, has also progressed well.
+
+[BALKRISIND.NS] tyre_makers p22
+  Our carbon black and specialty materials business is evolving in sync from a backward integration initiative into a key pillar of our value proposition.
+
+[BERGEPAINT.NS] paint_makers p41
+  Additionally, we enhanced in-house resin manufacturing capabilities through strategic capacity additions, supporting better integration across our value chain and improved operational flexibility.
+
+[CEATLTD.NS] tyre_makers p38
+  Recycled Carbon Black Devulcanised Rubber Reclaimed Rubber Bio-based Oils Rice Husk Silica Recycled Raw Materials Sustainable Packaging Circular Materials and Product Innovation The Company is working to reduce dependence on virgin materials by increasing the use of recycled, renewable and bio-based inputs in tyre manufacturing.
+
+[COSMOFIRST.NS] packaging_film_makers p12
+  The Company has built a portfolio spanning ﬂexible packaging, rigid packaging, speciality chemicals, consumer products, and pet care - ﬁve verticals, each with a distinct identity and a shared foundation of innovation and customer focus.
+
+[GANDHAR.NS] lubricant_blenders p181
+  Petroleum Products Segment - Timely availability and also non-availability of good quality base oils from across the globe could negate the qualitative and quantitative production of the various products of the Company.
+
+[GRWRHITECH.NS] plastic_converters p23
+  The Company is a Pioneer and leader in development of new products and new applications for BOPET Films and Solar Control Window Films, Lidding Films and Paint Protective Film (PPF) for Automobile.
+
+[HUHTAMAKI.NS] packaging_film_makers p9
+  We offer lightweight, innovative and sustainable flexible packaging solutions in reel and pre-made forms for food and beverages segment, home and personal care, pet food and consumer healthcare product segments.
+
+[INDIGOPNTS.NS] paint_makers p6
+  28 Manufacturing plants supporting national operations Erection work for the water- based plant is progressing steadily, with a planned capacity of The brownfield expansion of the putty plant is also on track, which will double our capacity from Installation activities are for the solvent-based plant are currently underway.
+
+[JINDALPOLY.NS] packaging_film_makers p72
+  The company started manufacturing polyester chips for captive use in 1993.
+
+[JKTYRE.NS] tyre_makers p169
+  Its operating activities require the purchase of raw material and manufacturing of tyres and therefore require a continuous supply of certain raw materials such as natural rubber, synthetic rubber, carbon black, fabric, crude oil, bead wire rubber chemicals etc., To mitigate the commodity price risk, the Company has an approved supplier base to get best competitive prices for the commodities and t
+
+[KANSAINER.NS] paint_makers p70
+  Process Heat and Steam from Renewable Sources (Manufacturing Facilities) (%) 100 100 92 FY 2025-26 FY 2024-25 FY 2018-19 Specific Power Consumption (SPC): Manufacturing Facilities (KWH/ KL of FG) 193 203 185 FY 2025-26 FY 2024-25 FY 2018-19 Specific Fuel Consumption (SFC): Manufacturing Facilities (LT/ MT of Resin) 49 49 50 FY 2025-26 FY 2024-25 FY 2018-19 We aim to reduce our Specific Power Consu
+
+[MAHLOG.NS] logistics_operators p54
+  Segments 2025-26 2024-25 Amount (₹ in crores) % of Total Revenue from Operations Amount (₹ in crores) % of Total Revenue from Operations 3PL Contract Logistics 5,490.32 78.44% 4,743.66 77.70% Express 448.83 6.41% 358.82 5.88% Freight-Forwarding 348.01 4.97% 305.53 5.00% Last-Mile Delivery 325.87 4.66% 381.26 6.25% Mobility 386.27 5.52% 315.55 5.17% Revenue from Operations 6,999.30 100% 6,104.83 10
+
+[MRF.NS] tyre_makers p173
+  The Group, except for MRF Corp Ltd and MRF Foundation, the subsidiary companies, is engaged inter alia in the manufacture of Rubber Products such as Tyres, Tubes, Flaps, Tread Rubber and dealing and / or Trading in Rubber and Rubber Chemicals.
+
+[PANAMAPET.NS] lubricant_blenders p156
+  Particulars 2025-2026 2024-2025 Increase (Decrease) Increase (Decrease) Movement by 100 basis point 0.24 (0.24) 0.02 (0.02) c) Commodity Risk Raw Material Risk Timely availability and also non-availability of good quality base oils from across the globe could negate the qualitative and quantitative production of the various products of the Company.
+
+[POLYPLEX.NS] packaging_film_makers p58
+  The Company produces its own film grade PET resin.
+
+[SIRCA.NS] paint_makers p8
+  On technology, we made significant progress on our Italian formula transfer initiative for acrylic and polyester systems, a move that will strengthen localisation, improve cost economics, and deepen our manufacturing integration.
+
+[SOTL.NS] lubricant_blenders p181
+  ₹ in Lakhs Particulars 2025-26 2024-25 Floating rate borrowings 47.36 33.47 (c ) C ommodity Risk R aw Material Risk P etroleum Products Segment - Timely availability and also non-availability of good quality base oils from across the globe could negate the qualitative and quantitative production of various products of the Company.
+
+[TCIEXP.NS] logistics_operators p27
+  The Company will continue expanding its presence across Tier II and Tier III cities, emerging manufacturing clusters and high-growth industrial corridors supported by PM Gati Shakti, Dedicated Freight Corridors and logistics infrastructure development.
+
+[UFLEX.NS] packaging_film_makers p7
+  These capabilities are complemented by our PET resin manufacturing operations, with the upgraded Panipat, India, facility now capable of producing 480 TPD bottle-grade virgin PET chips, providing greater flexibility in optimizing product mix.
+
+[XPROINDIA.NS] packaging_film_makers p79
+  The revenues of the Company consist s primarily of sale of products of coextruded sheets, cast films and biaxially oriented films as a result of Company polymer processing operations.
+
+  companies: ['ASIANPAINT.NS', 'BALKRISIND.NS', 'BERGEPAINT.NS', 'CEATLTD.NS', 'COSMOFIRST.NS', 'GANDHAR.NS', 'GRWRHITECH.NS', 'HUHTAMAKI.NS', 'INDIGOPNTS.NS', 'JINDALPOLY.NS', 'JKTYRE.NS', 'KANSAINER.NS', 'MAHLOG.NS', 'MRF.NS', 'PANAMAPET.NS', 'POLYPLEX.NS', 'SIRCA.NS', 'SOTL.NS', 'TCIEXP.NS', 'UFLEX.NS', 'XPROINDIA.NS']

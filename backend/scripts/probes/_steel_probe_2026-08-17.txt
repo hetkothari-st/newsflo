@@ -1,0 +1,30 @@
+# auto-components corpus: 11 reports, 3929 pages
+
+input:steel_flat         RAW   1  SELF-REF   1  of 11
+input:steel_long         RAW   0  SELF-REF   0  of 11
+input:steel_generic      RAW  10  SELF-REF   7  of 11
+
+
+[input:steel_flat] TIINDIA.NS score=1 p44
+  Engineering TI’s Presence The Engineering segment of the Company consists of cold rolled steel strips and precision steel tubes viz., Cold Drawn Welded tubes (CDW) and Electric Resistance Welded tubes (ERW).
+
+[input:steel_generic] BHARATFORG.NS score=7 p97
+  As part of sustainable sourcing, we have ensured that 36% of the total raw material sourced in FY 2025-26 was secondary raw material (recycled steel).
+
+[input:steel_generic] BOSCHLTD.NS score=1 p197
+  For steel, we have strategic suppliers developed and released for Bosch India and as well Bosch worldwide need.
+
+[input:steel_generic] ENDURANCE.NS score=4 p179
+  Historically, as a practice, and as per our understanding with customers, the Company has passed on an increase in the cost of metals, especially aluminium and steel to its customers and does not foresee a significant risk to its statement of profit and loss on account of fluctuations in the material prices.
+
+[input:steel_generic] MOTHERSON.NS score=4 p47
+  The 25% US tariﬀ on steel and aluminium has increased eﬀective input costs for US-sourced materials and incentivised inventory pre- positioning.
+
+[input:steel_generic] SCHAEFFLER.NS score=4 p67
+  The Company depends on suppliers, primarily in the steel sector, to develop lower-carbon alternatives through research and development, which is critical for controlling the carbon footprint embedded in its products.
+
+[input:steel_generic] SONACOMS.NS score=7 p64
+  Disclosure of Commodity Price Risk and Commodity Hedging Activities The Company consumes alloy steel, steel, aluminium and copper as some of the major commodities directly or through procured components for manufacturing its products.
+
+[input:steel_generic] TIINDIA.NS score=1 p44
+  Engineering TI’s Presence The Engineering segment of the Company consists of cold rolled steel strips and precision steel tubes viz., Cold Drawn Welded tubes (CDW) and Electric Resistance Welded tubes (ERW).
