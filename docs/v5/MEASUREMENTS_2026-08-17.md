@@ -717,6 +717,162 @@ route rather than instead of it.
 
 ---
 
+## 9. ACQUISITION ECONOMICS — does one corpus serve more than one event class?
+
+**The question that decides whether the plan is viable.** §6's "17 of 52" is the
+reach on a corpus **acquired for crude**. It says nothing about a steel or an FX
+event — unless the same documents also answer those, in which case the acquisition
+cost amortises and the shape of the product changes.
+
+**Measured, not extrapolated.** All 166 pairs across all 28 leaves are hand-classified
+in `backend/scripts/probes/_v2_classification.tsv` (166 rows, cross-checked
+one-to-one against the probe output: 0 missing, 0 extra). Verdict totals:
+**USABLE 56 · MARGINAL 58 · FALSE 40 · FALSE_PRODUCER 12.**
+
+### 9.1 The same 52 reports, by event class
+
+Leaves grouped by the shock variable that reaches them
+(`config/discovery.yaml::modelled_shock_variables`):
+
+| event class (shock variable) | leaves | USABLE pairs | **distinct companies** |
+|---|---|---|---|
+| **BRENT_CRUDE** | 13 | 19 | **17** |
+| **USDINR** | 3 | 19 | **16** |
+| **REPO_RATE / GSEC_10Y** | 2 | 13 | **13** |
+| FREIGHT_RATE | 1 | 3 | 3 |
+| PET_COKE | 1 | 2 | 2 |
+| PALM_OIL | 1 | 2 | 2 |
+| ALUMINIUM | 1 | 1 | 1 |
+| SUGAR | 1 | 1 | 1 |
+| MILK | 1 | 1 | 1 |
+| **STEEL_FLAT** | 1 | 0 | **0** |
+| **STEEL_LONG** | 1 | 0 | **0** |
+| COPPER | 1 | 0 | 0 |
+| WHEAT | 1 | 0 | 0 |
+| NATURAL_GAS | 2 | 0 | 0 |
+| **union, all 15** | 28 | **56** | **34 of 52** |
+
+**Amortisation is real, and it is large — but only for one kind of exposure.**
+
+One acquisition of 52 filings, made for crude, produced a publishable population for
+**three** event classes: crude 17, USDINR 16, rates 13. Those are not the same
+companies; the union is 34 of 52. **The marginal cost of the second and third event
+class was zero.**
+
+### 9.2 And it is asymmetric — the split is the product's actual shape
+
+| kind of exposure | leaves | why the same corpus answers it | yield here |
+|---|---|---|---|
+| **CROSS-CUTTING** — every Indian company files it under Ind AS 107 | `fx:usd_*`, `rate:*` | a market-risk note is **mandatory**, so it is in every annual report ever filed, whatever the sector | **USDINR 16/52 (31%), rates 13/52 (25%)** |
+| **SECTOR-SPECIFIC** — only companies in that sector name it | `input:steel_*`, `input:copper`, `input:wheat`, `revenue:gas_*` | the input appears only in the filings of companies that buy it, and none is in this corpus | **0** |
+
+The crude leaves sit in between: they are sector-specific, but the corpus was
+*chosen* to be their sector.
+
+**So the acquisition unit is not the event class. It is the SECTOR.** Acquire a
+sector's filings once and you get: that sector's own input exposures, **plus** the FX
+and rate exposures of every company in it, for free. What you do **not** get is any
+other sector's inputs.
+
+### 9.3 Hit rate is a function of leaf vocabulary, not of corpus quality
+
+Per roster family, on the leaf that is **core** to that family's business:
+
+| roster family | n | core leaf | USABLE | rate |
+|---|---|---|---|---|
+| **lubricants** | 6 | `input:base_oil` | 5 | **83%** |
+| **tyres** | 7 | `input:crude_derivative_rubber` | 3 | **43%** |
+| **logistics** | 7 | 3 freight leaves | 3 | **43%** |
+| paints | 6 | `input:crude_derivative_petchem` | 1 | 17% |
+| packaging_films | 8 | `input:crude_derivative_petchem` | 1 | 12% |
+| specialty_chemicals | 10 | `input:crude_derivative_petchem` | 0 | **0%** |
+| fmcg_distribution | 8 | 2 freight leaves | 0 | **0%** |
+| **all** | 52 | | 13 | 25% |
+
+**The spread is 0% to 83% and it is not random.** Two variables explain all of it:
+
+1. **Leaf term specificity.** `base_oil` is one unambiguous two-word term → 83%.
+   `crude_derivative_petchem` is eleven generic words (`polymer`, `resin`, `solvent`,
+   `polyester`…) that appear in product descriptions, waste notes and directors'
+   biographies → 0–17% across the three families that depend on it.
+2. **Whether the company is a pure consumer.** specialty_chemicals scores **0% on a
+   leaf that is central to its cost base**, because those companies both buy and sell
+   petchem derivatives and every candidate sentence reads as a producer statement.
+   All 12 `FALSE_PRODUCER` verdicts are on `petchem` (9) and `rubber` (2) and
+   `freight_diesel` (1).
+
+**Do not use 25%, and do not use 33%.** Neither is a property of the method. The
+predictor is (specific leaf term) × (pure consumer).
+
+### 9.4 The steel estimate, honestly
+
+**What the corpus supports:** nothing. Steel scored **0 of 52** because no steel
+consumer is in it. That is a fact about the roster, not about steel.
+
+**What can be inferred, and how far.** The steel leaves are lexically like `base_oil`,
+not like `petchem`: `hot-rolled`, `cold-rolled`, `flat steel`, `galvanised steel`,
+`steel bar`, `wire rod` are specific, low-collision terms. And steel consumers — auto
+components, capital goods, consumer durables, construction — are **pure consumers**;
+they do not sell steel. Both predictors point at the high end.
+
+That is a two-data-point inference (lubricants 83%, tyres 43%), **not a measurement.**
+Stated as a range with its own error bar:
+
+| | |
+|---|---|
+| filings to acquire | **~50**, drawn from `Auto Components & Equipments` (136), `Industrial Products` (153), `Consumer Durables` (231), `Civil Construction` (125) |
+| expected usable **steel** companies | **20–40** (40–80%, by analogy with base_oil/rubber) — **inferred, not measured** |
+| expected usable **USDINR** companies, same 50 | **~15** (31%, corpus-independent) |
+| expected usable **rates** companies, same 50 | **~12** (25%, corpus-independent) |
+| acquisition + index + sweep effort | 50 downloads, one `index_pdfs.py` run, one sweep |
+
+**The probe that settles it, and it is cheap.** Acquire **10** filings from
+`Auto Components & Equipments`, index, sweep the two steel leaves. **One day, no new
+machinery** — `acquire.py`, `index_pdfs.py` and `qualitative_tag_yield_v2.py` all
+exist and all run repo-relative. 10 filings distinguishes 80% from 20% decisively;
+it does not distinguish 40% from 50%, and it does not need to.
+
+**Recommend running that probe before authoring any steel manifest.** It is the same
+one-day cost as the crude probe, and the crude probe is the reason this document can
+say anything at all.
+
+### 9.5 The one number per event class you asked for
+
+Under the honest model, per event class the cost is:
+
+| | |
+|---|---|
+| **a NEW sector-specific event class** (steel, copper, wheat, gas) | **~50 filings acquired → 20–40 usable companies** (range, term-specificity dependent), **plus ~15 FX and ~12 rate companies at zero marginal cost** |
+| **a CROSS-CUTTING event class** (USDINR, REPO_RATE, GSEC_10Y) | **0 filings. Already covered by every corpus you will ever acquire.** 16 and 13 companies exist today from the crude corpus alone |
+| **a second event class in an ALREADY-ACQUIRED sector** | **0 filings** — the annual report names all of that company's inputs at once |
+
+**Stated plainly, as asked:** it is **not** true that every event class needs its own
+~50-filing acquisition. Two of the fifteen modelled variables are already covered for
+free and will be covered by every future corpus. The sector-specific ones do each need
+an acquisition — but the acquisition is per **sector**, and one sector's acquisition
+serves every input that sector buys, not one leaf.
+
+The crude corpus is the existence proof: **52 filings, one acquisition, three
+publishable event classes, 34 distinct companies.**
+
+### 9.6 Two consequences for sequencing
+
+1. **`crude_derivative_petchem` must be split before more corpus is bought.** It
+   consumed 32 of 166 pairs (19%) and returned 4 usable and 9 producer-inversions —
+   the worst leaf measured, and the only leaf where a whole roster family scored 0%.
+   Splitting it into specific leaves (`input:polyester_chain`, `input:styrenics`,
+   `input:coating_resins`, `input:packaging_polymer`) is layer-2 work and would move
+   paints, packaging films and specialty chemicals off a leaf none of them can be
+   extracted against.
+2. **The cross-cutting leaves are the cheapest publishable feed in the system and
+   nothing is using them.** `fx:usd_cost_share` scored **10 usable of 11 pairs (91%
+   precision)** — the highest of any leaf — and `rate:floating_debt_share` 13 of 18.
+   A USDINR or repo-rate feed needs **no new acquisition at all**, and both variables
+   are already in `modelled_shock_variables`. They are also the two event classes a
+   reader sees most often.
+
+---
+
 ## 8. What I did not do
 
 * Did not implement the tier, write the isubgroup map, or touch `mechanism_edge`.

@@ -1,0 +1,182 @@
+# HAND CLASSIFICATION of every (leaf, ticker) pair in _v2_clean.tsv
+#
+# Verdicts are MINE, from reading the best-scoring excerpt for each pair. They
+# stand in for a reviewer's pass and are reproducible: every excerpt is in
+# _v2_clean.tsv, keyed on the same (LEAF, TICKER). They are NOT sourced data and
+# NOTHING here may be imported.
+#
+# USABLE          a reviewer would approve this excerpt as a FILED_QUALITATIVE
+#                 exposure row as it stands
+# MARGINAL        evidences the exposure but needs the surrounding note read
+# FALSE           not a claim about this company's exposure
+# FALSE_PRODUCER  the sentence names the input correctly and the company SELLS
+#                 it. Published under a consumer edge the direction is BACKWARDS.
+#                 Separated from FALSE because it is the dangerous class.
+#
+# LEAF	TICKER	VERDICT	NOTE
+fx:usd_cost_share	AARTIIND.NS	USABLE	assets/liabilities denominated in non-INR
+fx:usd_cost_share	BALKRISIND.NS	USABLE	consumption of imported raw materials
+fx:usd_cost_share	COLPAL.NS	USABLE	impacts costs of imported raw material
+fx:usd_cost_share	COSMOFIRST.NS	USABLE	hedges fx on purchases
+fx:usd_cost_share	EMAMILTD.NS	MARGINAL	generic fx exposure, cost side not stated
+fx:usd_cost_share	GANDHAR.NS	USABLE	currency risk on import payables
+fx:usd_cost_share	GOODYEAR.NS	USABLE	DISCLOSED_IMMATERIAL - low reliance on imported RM, does not hedge
+fx:usd_cost_share	PANAMAPET.NS	USABLE	currency risk on import payables
+fx:usd_cost_share	SIRCA.NS	USABLE	significant purchases in foreign currency
+fx:usd_cost_share	SOTL.NS	USABLE	currency risk on import payables
+fx:usd_cost_share	XPROINDIA.NS	USABLE	purchases made in foreign currency
+fx:usd_debt_share	ASIANPAINT.NS	MARGINAL	JPY ECB - leaf says USD, disclosure says JPY
+fx:usd_debt_share	COLPAL.NS	FALSE	FEMA secretarial boilerplate
+fx:usd_debt_share	COSMOFIRST.NS	MARGINAL	fx options/swaps, debt share not stated
+fx:usd_debt_share	DABUR.NS	MARGINAL	forward cover, not debt
+fx:usd_debt_share	DEEPAKNTR.NS	MARGINAL	USD sensitivity table, scorer penalised it
+fx:usd_debt_share	GANDHAR.NS	FALSE	rating agency boilerplate
+fx:usd_debt_share	GODREJCP.NS	FALSE	hedge table header row
+fx:usd_debt_share	HUHTAMAKI.NS	USABLE	availed ECB from fellow subsidiary
+fx:usd_debt_share	JKTYRE.NS	USABLE	borrowing mix includes foreign currency
+fx:usd_debt_share	JUBLCPL.NS	FALSE	board committee remit
+fx:usd_debt_share	KANSAINER.NS	FALSE	borrowing-cost accounting policy
+fx:usd_debt_share	SOTL.NS	FALSE	FEMA secretarial boilerplate
+fx:usd_debt_share	SRF.NS	USABLE	designates fx borrowings as hedging instruments
+fx:usd_debt_share	UFLEX.NS	FALSE	benchmark-linked rate - wrong leaf
+fx:usd_debt_share	XPROINDIA.NS	MARGINAL	forward derivative, not debt share
+fx:usd_revenue_share	AARTIIND.NS	MARGINAL	generic fx, revenue side not stated
+fx:usd_revenue_share	BALKRISIND.NS	MARGINAL	revenue-generating activities named generically
+fx:usd_revenue_share	BRITANNIA.NS	USABLE	export sales 2-3% of total, USD and EUR
+fx:usd_revenue_share	COSMOFIRST.NS	MARGINAL	hedge policy incl forecast sales
+fx:usd_revenue_share	GANDHAR.NS	USABLE	export receivables named
+fx:usd_revenue_share	JUBLCPL.NS	FALSE	board committee remit
+fx:usd_revenue_share	MRF.NS	USABLE	FOB value of exports disclosed
+fx:usd_revenue_share	PANAMAPET.NS	USABLE	export receivables named
+fx:usd_revenue_share	POLYPLEX.NS	USABLE	fx exposure relates to operating revenue
+fx:usd_revenue_share	SOTL.NS	USABLE	export receivables named
+input:aluminium	ASIANPAINT.NS	FALSE	subsidiary making aluminium windows
+input:aluminium	BERGEPAINT.NS	FALSE	supplies coatings FOR aluminium channels
+input:aluminium	COLPAL.NS	FALSE	ESG report header
+input:aluminium	INDIGOPNTS.NS	FALSE	macro commentary on US tariffs
+input:aluminium	PIDILITIND.NS	USABLE	key raw materials are derivatives of crude, paper, aluminium
+input:aluminium	SRF.NS	MARGINAL	principal-activities sentence, both sides
+input:aluminium	UFLEX.NS	MARGINAL	transition away from aluminium-based structures
+input:aluminium	VEEDOL.NS	FALSE	aluminium complex greases - a product
+input:base_oil	CASTROLIND.NS	USABLE	commodity price risk - we are a purchaser
+input:base_oil	GANDHAR.NS	USABLE	relies heavily on supply of base oil
+input:base_oil	GULFOILLUB.NS	USABLE	sizable user of imported base oil
+input:base_oil	PANAMAPET.NS	USABLE	import of base oil adverse impact on performance
+input:base_oil	VEEDOL.NS	USABLE	it is a purchaser of base oil
+input:bought_in_freight	AARTIIND.NS	MARGINAL	logistics optimisation narrative
+input:bought_in_freight	BERGEPAINT.NS	MARGINAL	coastal waterway, reducing freight cost
+input:bought_in_freight	CHEMPLASTS.NS	MARGINAL	location/transport-cost advantage
+input:bought_in_freight	CONCOR.NS	USABLE	rail and road freight expense lines - table form
+input:bought_in_freight	DELHIVERY.NS	FALSE	the CUSTOMERS' freight costs
+input:bought_in_freight	GODREJCP.NS	MARGINAL	product reformulation reducing transport cost
+input:bought_in_freight	GRWRHITECH.NS	MARGINAL	local procurement reduces transport cost
+input:bought_in_freight	POLYPLEX.NS	MARGINAL	optimising freight and packaging cost
+input:bought_in_freight	TCIEXP.NS	FALSE	Money Back Guarantee
+input:bought_in_freight	VINATIORGA.NS	USABLE	risk framework names freight cost volatility
+input:bought_in_freight	VRLLOG.NS	USABLE	lorry hire charges 5.54% -> 4.80% of revenue
+input:copper	UFLEX.NS	FALSE	alkaline copper plating process change
+input:crude_derivative_bitumen	BERGEPAINT.NS	FALSE	subsidiary list
+input:crude_derivative_petchem	AARTIIND.NS	FALSE_PRODUCER	its PRODUCTS are used in those industries
+input:crude_derivative_petchem	ANURAS.NS	FALSE_PRODUCER	product offerings extend to polymers
+input:crude_derivative_petchem	ASIANPAINT.NS	FALSE	a PU product launch
+input:crude_derivative_petchem	ATUL.NS	MARGINAL	class-A solvent storage - evidences use
+input:crude_derivative_petchem	BERGEPAINT.NS	FALSE	hazardous waste storage
+input:crude_derivative_petchem	CASTROLIND.NS	MARGINAL	post-consumer resin in packaging
+input:crude_derivative_petchem	CEATLTD.NS	MARGINAL	reclaimed rubber - wrong leaf
+input:crude_derivative_petchem	CHEMPLASTS.NS	MARGINAL	raw material supply chain disruption
+input:crude_derivative_petchem	COLPAL.NS	USABLE	purchase of raw materials especially corn, carton board, resins
+input:crude_derivative_petchem	CONCOR.NS	FALSE	transports PVC resin for others
+input:crude_derivative_petchem	COSMOFIRST.NS	MARGINAL	capex in BOPP/polyester lines
+input:crude_derivative_petchem	DABUR.NS	USABLE	packaging requirements incl PET, HDPE, PP
+input:crude_derivative_petchem	DEEPAKNTR.NS	FALSE_PRODUCER	building phenol/acetone capacity
+input:crude_derivative_petchem	EMAMILTD.NS	MARGINAL	minimising solvent dependency
+input:crude_derivative_petchem	GANDHAR.NS	FALSE_PRODUCER	manufactures petroleum products/specialty oils
+input:crude_derivative_petchem	GODREJCP.NS	FALSE	machine performance narrative
+input:crude_derivative_petchem	GRWRHITECH.NS	MARGINAL	used solvents as hazardous waste
+input:crude_derivative_petchem	HUHTAMAKI.NS	MARGINAL	reduced solvent consumption
+input:crude_derivative_petchem	INDIGOPNTS.NS	MARGINAL	solvent-based plant commissioning
+input:crude_derivative_petchem	JINDALPOLY.NS	FALSE_PRODUCER	manufactures polyester chips for captive use
+input:crude_derivative_petchem	JUBLCPL.NS	FALSE_PRODUCER	manufactures industrial polymers
+input:crude_derivative_petchem	KANSAINER.NS	USABLE	our processes use solvents, resins, pigments
+input:crude_derivative_petchem	PANAMAPET.NS	FALSE_PRODUCER	feeds resin/ink industries
+input:crude_derivative_petchem	PIDILITIND.NS	FALSE	industrial resins as a SALES category
+input:crude_derivative_petchem	POLYPLEX.NS	USABLE	cost of PET resin can impact operating margins
+input:crude_derivative_petchem	SIRCA.NS	FALSE	wood coatings positioning
+input:crude_derivative_petchem	SOTL.NS	FALSE	secretarial compliance boilerplate
+input:crude_derivative_petchem	SRF.NS	MARGINAL	principal activities - buys and sells polymers
+input:crude_derivative_petchem	UFLEX.NS	FALSE_PRODUCER	its Packaging Films & PET Resin business
+input:crude_derivative_petchem	VEEDOL.NS	MARGINAL	spent solvents as waste
+input:crude_derivative_petchem	VINATIORGA.NS	FALSE_PRODUCER	new product range anisole/4-MAP/TAA
+input:crude_derivative_petchem	XPROINDIA.NS	FALSE	director's prior employment
+input:crude_derivative_rubber	AARTIIND.NS	FALSE_PRODUCER	products derived from benzene/aniline/toluene
+input:crude_derivative_rubber	BALKRISIND.NS	MARGINAL	own carbon black business - BOTH, backward integrated
+input:crude_derivative_rubber	CEATLTD.NS	USABLE	sensitivity to 5% move in rubber and carbon black - note 45(iv)
+input:crude_derivative_rubber	JKTYRE.NS	USABLE	continuous supply of natural/synthetic rubber, carbon black
+input:crude_derivative_rubber	MRF.NS	USABLE	volatility in natural/synthetic/compound rubber
+input:crude_derivative_rubber	UFLEX.NS	FALSE_PRODUCER	converts waste INTO carbon black
+input:freight_diesel	ASIANPAINT.NS	MARGINAL	modal shift to rail and sea
+input:freight_diesel	BALKRISIND.NS	MARGINAL	displacement of diesel in transport loops
+input:freight_diesel	BERGEPAINT.NS	MARGINAL	replaced diesel heaters with bio-fuel
+input:freight_diesel	BRITANNIA.NS	MARGINAL	reducing reliance on conventional fuels
+input:freight_diesel	COLPAL.NS	MARGINAL	9% reduction in fuel consumption
+input:freight_diesel	DABUR.NS	MARGINAL	monitoring electricity and fuel consumption
+input:freight_diesel	DELHIVERY.NS	FALSE	signature block
+input:freight_diesel	GODREJCP.NS	MARGINAL	lowered fuel consumption
+input:freight_diesel	GULFOILLUB.NS	FALSE_PRODUCER	produces AdBlue diesel exhaust fluid
+input:freight_diesel	INDIGOPNTS.NS	FALSE	Executive Director's fuel expense entitlement
+input:freight_diesel	JKTYRE.NS	FALSE	ESG highlights header
+input:freight_diesel	JUBLINGREA.NS	MARGINAL	10% reduction in power and fuel cost
+input:freight_diesel	KANSAINER.NS	MARGINAL	specific fuel consumption as an energy KPI
+input:freight_diesel	PRIVISCL.NS	MARGINAL	emissions control on diesel generator sets
+input:freight_diesel	SIRCA.NS	MARGINAL	specific fuel consumption as an energy KPI
+input:freight_diesel	SOTL.NS	MARGINAL	optimised diesel generator capacity
+input:freight_diesel	SRF.NS	MARGINAL	converting diesel generators to PNG
+input:freight_diesel	TCI.NS	MARGINAL	alternate-fuel vehicles, VLSFO in ships
+input:freight_diesel	TCIEXP.NS	MARGINAL	EV and CNG to reduce fuel consumption
+input:freight_diesel	VEEDOL.NS	FALSE	plastic weight reduction
+input:freight_diesel	VRLLOG.NS	USABLE	pioneered bio-diesel for CV fleet, large quantity usage
+input:fuel_furnace_pet_coke	BRITANNIA.NS	MARGINAL	reducing reliance on furnace oil
+input:fuel_furnace_pet_coke	DEEPAKNTR.NS	USABLE	continues to rely on coal and furnace oil, exposes to energy cost volatility
+input:fuel_furnace_pet_coke	EMAMILTD.NS	MARGINAL	replacing furnace oil and LDO
+input:fuel_furnace_pet_coke	GANDHAR.NS	MARGINAL	solar to lessen fossil fuel reliance
+input:fuel_furnace_pet_coke	GODREJCP.NS	MARGINAL	bio-waste fuel in place of furnace oil
+input:fuel_furnace_pet_coke	KANSAINER.NS	USABLE	eliminating HSD/furnace oil from process equipment - states current use
+input:fuel_furnace_pet_coke	PIDILITIND.NS	MARGINAL	converting furnace-oil boilers to briquette
+input:intermediated_air_capacity	BLUEDART.NS	USABLE	charter flight services rendered exclusively to the Company
+input:milk	BRITANNIA.NS	USABLE	facility handles ~350 kilolitres of milk per day
+input:milk	DELHIVERY.NS	FALSE	"milk-run" logistics model
+input:milk	NESTLEIND.NS	MARGINAL	farm transformation programme - dairy sourcing, indirect
+input:palm_oil	COLPAL.NS	MARGINAL	deforestation-free sourcing commitment
+input:palm_oil	DABUR.NS	MARGINAL	sustainable sourcing commitment
+input:palm_oil	GODREJCP.NS	USABLE	input costs incl PFAD (palm fatty acid distillate)
+input:palm_oil	HINDUNILVR.NS	USABLE	reformulating soaps, reducing high-GHG palm oil
+input:sugar	COLPAL.NS	FALSE	"Sugar Acid Shield" product name
+input:sugar	DABUR.NS	MARGINAL	reformulating to cut sugar
+input:sugar	DEEPAKNTR.NS	FALSE	directorship at Dhampur Sugar Mills
+input:sugar	HINDUNILVR.NS	USABLE	sugar among crops that are 2/3 of agri raw material volumes
+input:sugar	VINATIORGA.NS	FALSE	APEDA export macro commentary
+rate:floating_debt_share	AARTIIND.NS	USABLE	PBT sensitivity to floating rate borrowings
+rate:floating_debt_share	APOLLOTYRE.NS	USABLE	mix of fixed and floating rate borrowings
+rate:floating_debt_share	BALKRISIND.NS	USABLE	floating rate loans expose the Company to cash-flow fluctuation
+rate:floating_debt_share	CEATLTD.NS	USABLE	PBT sensitivity to floating rate borrowings
+rate:floating_debt_share	COSMOFIRST.NS	MARGINAL	undrawn facilities table
+rate:floating_debt_share	GANDHAR.NS	USABLE	interest rate profile of instruments
+rate:floating_debt_share	GODREJCP.NS	MARGINAL	swap definition
+rate:floating_debt_share	GOODYEAR.NS	MARGINAL	undrawn facilities table
+rate:floating_debt_share	GULFOILLUB.NS	USABLE	interest rate risk from variable-rate short-term borrowings
+rate:floating_debt_share	JUBLCPL.NS	USABLE	exposure to interest rates on variable rate borrowings
+rate:floating_debt_share	JUBLINGREA.NS	USABLE	exposure to interest rates on floating rate borrowings
+rate:floating_debt_share	MRF.NS	MARGINAL	borrows in INR and foreign currency
+rate:floating_debt_share	PANAMAPET.NS	USABLE	converts floating rate liabilities to fixed
+rate:floating_debt_share	POLYPLEX.NS	USABLE	shifting floating rate debt to fixed
+rate:floating_debt_share	SOTL.NS	USABLE	floating rate borrowings disclosed
+rate:floating_debt_share	TCI.NS	USABLE	mix between fixed and floating borrowings
+rate:floating_debt_share	TCIEXP.NS	MARGINAL	interest rate risk management narrative
+rate:floating_debt_share	VRLLOG.NS	USABLE	PBT affected through impact on floating rate borrowings
+rate:nim_asset_sensitivity	AARTIIND.NS	FALSE	non-bank Ind AS 107 note, leaf means bank NIM
+rate:nim_asset_sensitivity	BALKRISIND.NS	FALSE	non-bank Ind AS 107 note
+rate:nim_asset_sensitivity	BLUEDART.NS	FALSE	non-bank Ind AS 107 note
+rate:nim_asset_sensitivity	GULFOILLUB.NS	FALSE	non-bank Ind AS 107 note
+rate:nim_asset_sensitivity	JKTYRE.NS	FALSE	non-bank Ind AS 107 note
+rate:nim_asset_sensitivity	POLYPLEX.NS	FALSE	non-bank Ind AS 107 note
+rate:nim_asset_sensitivity	TVSSRICHAK.NS	FALSE	non-bank Ind AS 107 note

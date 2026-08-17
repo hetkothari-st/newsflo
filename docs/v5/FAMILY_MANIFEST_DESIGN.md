@@ -6,6 +6,14 @@
 two places — the layer count is **six**, not four, and `role` moves off the
 classification map onto the graph node (`docs/v5/MEASUREMENTS_2026-08-17.md` §7.5).
 
+**Owner decisions recorded 2026-08-17:**
+
+| # | decision | where it lands |
+|---|---|---|
+| 1 | **ACCEPTED** — `role` moves to the graph node. Industry nodes with directional edges; membership is a separate question; `role` survives only as a per-company override. | §2.1–§2.3 |
+| 2 | **ACCEPTED** — `DISCLOSED_IMMATERIAL` as a third pass-through state. | §3 |
+| 3 | **REJECTED** — `official_igroup` is worse than `official_isubgroup`; not to be pursued. Settled by the Tyres-inside-`Auto Components` merge and the collapse of Commodity Chemicals + Specialty Chemicals + Petrochemicals — a consumer-mixed group, a `BOTH` group and a **producer** group — into one `Chemicals & Petrochemicals` bucket. `official_isubgroup` is the only classification axis this design uses. | `MEASUREMENTS` §7.3 |
+
 ---
 
 ## 1. What this exists to fix
@@ -143,6 +151,102 @@ second place the sign is decided, and the two would drift.** So: nodes carry
 membership; edges carry direction; the map answers *"which node"*, which is a
 question a sector taxonomy can actually answer.
 
+**ACCEPTED by the owner 2026-08-17.** §2.2 and §2.3 below cost it out.
+
+### 2.2 What it costs — the crude complex in nodes and edges
+
+**~17 nodes, ~21 edges, one manifest.** Enumerated:
+
+| # | node | leaf | `relationship_type` | sign |
+|---|---|---|---|---|
+| 1 | `industry:lubricant_blenders` | `input:base_oil` | INPUT_COST | − |
+| 2 | `industry:paint_makers` | `input:crude_derivative_petchem` | INPUT_COST | − |
+| 3 | `industry:tyre_makers` | `input:crude_derivative_rubber` | INPUT_COST | − |
+| 3b | *(same node)* | `input:crude_derivative_petchem` *(tyre cord)* | INPUT_COST | − |
+| 4 | `industry:plastic_converters` | `input:crude_derivative_petchem` | INPUT_COST | − |
+| 5 | `industry:packaging_film_makers` | `input:crude_derivative_petchem` | INPUT_COST | − |
+| 6 | `industry:airlines` | `input:atf` | INPUT_COST | − |
+| 7 | `industry:road_freight_operators` | `input:freight_diesel` | INPUT_COST | − |
+| 8 | `industry:asset_light_3pl` | `input:bought_in_freight` | INPUT_COST | − |
+| 9 | `industry:express_air_logistics` | `input:intermediated_air_capacity` | INPUT_COST | − |
+| 10 | `industry:energy_intensive_mfg` | `input:fuel_furnace_pet_coke` | INPUT_COST | − |
+| 11 | `industry:road_contractors` | `input:crude_derivative_bitumen` | INPUT_COST | − |
+| 12 | `industry:refiners` | `input:crude_direct` | INPUT_COST | − |
+| 12b | *(same node)* | `revenue:refining_gross_margin` | REVENUE_REALIZATION | + |
+| 13 | `industry:specialty_chemical_makers` | `input:crude_derivative_petchem` | INPUT_COST | − |
+| 13b | *(same node)* | `input:crude_derivative_petchem` | REVENUE_REALIZATION | + |
+| 14 | `industry:upstream_producers` | `revenue:crude_realization` | REVENUE_REALIZATION | + |
+| 15 | `industry:fuel_retailers` | `revenue:marketing_margin_retail_fuel` | REVENUE_REALIZATION | + |
+| 16 | `industry:petrochemical_producers` | `input:crude_derivative_petchem` | REVENUE_REALIZATION | + |
+| 17 | `industry:carbon_black_producers` | `input:crude_derivative_rubber` | REVENUE_REALIZATION | + |
+
+Four nodes carry two edges (3, 12, 13, and node 13's two are the `BOTH` case, which
+yields two channels of opposite sign → **MIXED**, exactly as the reducer already
+handles it).
+
+**Against today: 2 edges, both unreachable** (`from_node = 'commodity:crude_oil'`,
+which no shock walks from). 21 authored edges is one reviewed file, not a programme.
+
+**The producer nodes (14–17) are the ones that did not exist under role-on-map.**
+They are why the model change buys coverage rather than only correctness.
+
+### 2.3 THE CRUX — is membership derivable where role was not?
+
+**Yes, for most of the groups that failed. That is the finding.**
+
+The eight failures in `MEASUREMENTS_2026-08-17.md` §7 fail for **two different
+reasons**, and only one of them survives the model change:
+
+* **ROLE-ONLY failures** — the group is homogeneous, we just could not name its
+  side. **Role-on-node fixes these completely**: point the group at a producer node,
+  or at two nodes.
+* **APPLICABILITY failures** — the group's members do not share an exposure at all.
+  **Role-on-node does not help**, because there is no single node to point at.
+
+| isubgroup | n | failed on | membership derivable now? |
+|---|---|---|---|
+| Lubricants | 8 | — (survived) | **yes** → node 1 |
+| Paints | 9 | — (survived) | **yes** → node 2 |
+| Tyres & Rubber Products | 17 | — (2 exceptions) | **yes** → node 3, with Balkrishna also at node 17, Cochin Malabar excluded |
+| Plastic Products - Industrial | 58 | — (1 exception) | **yes** → node 4, Finolex also at node 16 |
+| **Petrochemicals** | **14** | **role** (producers) | **YES — now derivable** → node 16 |
+| **Specialty Chemicals** | **110** | **role** (`BOTH`) | **YES — now derivable** → node 13, both edges |
+| Rubber | 11 | role, **but 3-way mixed** | **partly** — producers/plantation/consumer split; 11 companies, cheap by hand |
+| Packaging | 75 | **applicability** (glass, paper, film) | **no** — needs sub-splitting |
+| Commodity Chemicals | 72 | **applicability** | **no** |
+| Auto Components & Equipments | 136 | **applicability** | **no** |
+| Logistics Solution Provider | 58 | **applicability** (right role, four different leaves) | **no** — but splits cleanly into nodes 7/8/9 by hand |
+
+**The coverage picture does change back:**
+
+| model | companies reachable by classification, crude complex |
+|---|---|
+| role on the map (§7's measurement) | **89** |
+| **role on the node** | **213** — 8 + 9 + 15 + 57 + **14** + **110** |
+| + Rubber, assigned per company | **224** |
+
+**2.5×, and the whole of the gain is the two role-only failures** (Petrochemicals 14,
+Specialty Chemicals 110).
+
+**One caveat, and it is large enough to state before you bank the number.** 110 of
+the 213 are Specialty Chemicals, and every one of them publishes **MIXED** by
+construction — they sit at a node with two opposite-signed edges. That is *honest*
+(invariant 9) and it is *low-value*: a section listing 110 companies as MIXED is a
+noise feed wearing a correctness badge, and §9.3 measured that this is also the
+population the filing route scores **0%** on.
+
+So the defensible split is:
+
+| | companies | claim |
+|---|---|---|
+| **directional** | **103** | Lubricants 8 + Paints 9 + Tyres 15 + Plastic Products 57 + Petrochemicals 14 |
+| MIXED-by-construction | 110 | Specialty Chemicals — recommend **withheld at first release** and gated on a rule about how many MIXED names a section may carry |
+
+**103 directional companies from four reviewed group mappings** is the number to
+plan against. It is still 1.9× the 89, and it is 6× the filing route's 17 — at the
+cost of `SECTOR_PROXY` binding and grade D, which is what the qualitative tier's
+lowest rung is for.
+
 ---
 
 ## 3. `MITIGATED` / `UNMITIGATED` — where the state lives
@@ -172,20 +276,43 @@ Everything else is already built and needs no change:
 * `ACCEPTED_SOURCES` already restricts it to the four filing types;
 * an `UNBOUND` claim is a hard gate REJECT.
 
-**Three states, and the third is not optional.** `MITIGATED` and `UNMITIGATED` are
-what the owner accepted. The corpus produced a third by accident and it is the only
-thing measured that can honestly keep a company **out** of a section without a
-percentage:
+**Three states. `DISCLOSED_IMMATERIAL` ACCEPTED by the owner 2026-08-17**, alongside
+`MITIGATED` and `UNMITIGATED`. It is the only thing measured that can honestly keep a
+company **out** of a section without a percentage:
 
 > **GOODYEAR** — *"The company has limited exposure to foreign exchange risk due to
 > low reliance on imported raw materials and thus the company does not hedge."*
 
 That is a filed, positive disclosure of **low exposure** — evidence of absence, not
-absence of evidence. It is `DATA_GAPS/modifier-staleness.md` §17.4's missing
-"asked and not disclosed" state, in its stronger form. **Recommend a third state,
-`DISCLOSED_IMMATERIAL`**, storable and publishable as a reason a company does *not*
-appear. Without it, the only way to exclude Goodyear from a crude section is to have
-never looked at it — which is D10 wearing a different hat.
+absence of evidence.
+
+**Recorded, as the owner asked:**
+
+1. **`DISCLOSED_IMMATERIAL` closes `DATA_GAPS/modifier-staleness.md` §17.4's
+   "asked and answered no" gap**, and closes it in the stronger form. §17.4 records
+   the missing state as *asked and not disclosed* — we put the question and the
+   company said nothing. Goodyear is the harder and more useful case: **we put the
+   question and the company answered, in a filing, that the exposure is small.**
+   §17.4 needs a state meaning *"no answer exists"*; this needs one meaning
+   *"the answer exists and it is no"*. Both are missing today and they are not the
+   same state — recommend §17.4's fix specify both, since one schema change carries
+   them.
+2. **Without it, exclusion requires never having looked.** There is no other
+   mechanism in the design that keeps a company out of a section on evidence. The
+   sized system excluded on a percentage below the floor; the qualitative tier has no
+   percentage. So the only remaining ways to omit Goodyear from a crude section are
+   (a) never acquire its filing, or (b) acquire it, read the disclosure, and discard
+   it — and (b) leaves the same output as (a) while destroying the evidence. **An
+   unsized system without `DISCLOSED_IMMATERIAL` can only express "not exposed" as
+   "not examined", which is D11 wearing a different hat** — the same conflation of
+   absence-of-measurement with measured-immateriality, arriving from the other
+   direction.
+
+**Measured, and it is not a rarity.** `fx:usd_cost_share` scored 10 usable of 11
+pairs (91% precision, the highest of any leaf) and **one of those ten is a
+`DISCLOSED_IMMATERIAL`** — Goodyear. On a leaf where nine companies disclose exposure,
+the tenth disclosing its *absence* is the same kind of sentence, found by the same
+sweep, at the same cost.
 
 Rendering, per tier:
 
@@ -292,18 +419,30 @@ enforce "no orphans".
 
 ## 6. Sequencing — what §7 of the measurements changes
 
-The classification route yields **89 companies for the crude family, not 4,669**
-(1.9%), and the survivors — Lubricants, Paints, Tyres, Plastic Products — **overlap
-the population the filing route already reaches.** Its marginal contribution is
-smallest exactly where the filing route works.
+**Revised after the role-on-node decision (§2.3) and the acquisition measurement
+(`MEASUREMENTS_2026-08-17.md` §9).**
 
-Therefore:
+Role-on-node raises the classification route from **89 to 213**, of which **103 are
+directional** and 110 are MIXED-by-construction. The filing route is 17 of 52
+measured. They overlap: Lubricants and Tyres are where both work.
 
-1. **Filing route first.** 17 of 52 measured, on a corpus already on disk.
-2. **The manifest second**, for the crude family, using the 89 as layer 6 — with
-   Lubricants and Paints as the first two nodes, because they are the only groups
-   that survived the role test **uniformly** (no named exceptions) and both are
+1. **Cross-cutting feeds first — they cost nothing.** `fx:usd_cost_share` (10 usable
+   of 11 pairs, 91% precision) and `rate:floating_debt_share` (13 of 18) give
+   **USDINR 16 companies and rates 13 companies from the corpus already on disk**,
+   with **zero new acquisition**. Both variables are already in
+   `modelled_shock_variables`. This is the cheapest publishable feed in the system
+   and nothing currently uses it.
+2. **Filing route for crude.** 17 of 52, measured, corpus on disk.
+3. **The manifest third**, crude family, using §2.2's 17 nodes / 21 edges — starting
+   with `industry:lubricant_blenders` and `industry:paint_makers`, the only two
+   groups that survived the role test with **no named exceptions**, both
    independently corroborated by filing sentences.
+4. **Withhold Specialty Chemicals (110) at first release.** MIXED-by-construction,
+   and the population the filing route scores 0% on. Gate it on a rule about how many
+   MIXED names a section may carry.
+5. **Before any steel manifest: run §9.4's 10-filing probe.** One day, no new
+   machinery. Steel is 0 of 52 in this corpus and the estimate of 20–40 usable
+   companies per ~50 filings is a two-point inference, not a measurement.
 3. **`crude_derivative_petchem` needs splitting before either.** It scored 4 usable
    of 32 pairs and produced 9 producer-inversions — the worst leaf measured — because
    it is swept by eleven generic words (`polymer`, `resin`, `solvent`, `polyester`…).
