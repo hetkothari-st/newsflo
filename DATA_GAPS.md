@@ -43,7 +43,8 @@ unserved, and wrong the moment it is not.
 | [What annual reports actually disclose](DATA_GAPS/filing-disclosure-limits.md) | §14 | MEASURED: Indian annual reports do not carry the raw-material breakup the ledger needs, and the vocabulary sub-gap closed with that run. |
 | [The administered-price fertilizer complex](DATA_GAPS/fertilizer-complex.md) | §15 (fertilizer) | No mechanism, no tag and no shock variable. NOTE: two sections carry the number 15 in the source file; both are preserved as written. |
 | [MOSPI Supply-Use at ripple-family granularity](DATA_GAPS/mospi-supply-use.md) | §15 (MOSPI) | MEASURED: the published IO tables are too coarse for a ripple family. The second section numbered 15. |
-| [The CEAT proof-of-life run](DATA_GAPS/ceat-proof-of-life.md) | §16 | MEASURED: one company, one shock, end to end — and the nine defects it exposed, none fixed. |
+| [The CEAT proof-of-life run](DATA_GAPS/ceat-proof-of-life.md) | §16 | MEASURED: one company, one shock, end to end — and the nine defects it exposed, none fixed. Curves since rolled back. |
+| [Parameter staleness and missing disclosure states](DATA_GAPS/modifier-staleness.md) | §17 | `company_modifier` has no freshness policy, checker or gate; and the ledger cannot say "we looked and it is not disclosed". |
 | [V5 SERVING CUTOVER CHECKLIST](DATA_GAPS/cutover-checklist.md) | checklist | **Read before serving V5.** Not gaps in the data — settings that are correct while V5 is parallel and unserved, and wrong the moment it is not. |
 | [Not gaps](DATA_GAPS/not-gaps.md) | closing | What is deliberately absent from this file, and why. |
 
