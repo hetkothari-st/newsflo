@@ -873,6 +873,101 @@ publishable event classes, 34 distinct companies.**
 
 ---
 
+## 10. THE 10-FILING AUTO-COMPONENTS PROBE — run, and it falsifies §9.4's mechanism
+
+Scripts: `backend/scripts/probes/acquire_auto_components.py` (acquisition),
+`_steel_probe_2026-08-17.txt` (sweep output).
+
+**Acquired 11 of 11**, all from NSE, ~204 MB, indexed to **3,929 pages**. The corpus
+is now **63 reports**. One of the eleven — **Asahi India Glass** — was included
+deliberately as a **negative control**: same isubgroup, makes glass, should yield no
+steel claim.
+
+### 10.1 The result
+
+| leaf | pattern | RAW | self-ref | of 11 |
+|---|---|---|---|---|
+| `input:steel_flat` | `hot-rolled`, `cold-rolled`, `flat steel`, `steel sheet`, `galvanised steel` | 1 | **1** | 9% |
+| `input:steel_long` | `TMT`, `steel bar`, `wire rod`, `long steel` | 0 | **0** | **0%** |
+| *(control)* `\bsteel\b`, `forging`, `metal cost` | generic | 10 | **7** | **64%** |
+
+**§9.4's prediction was 40–80% usable. The outcome lands in that range. The mechanism
+I gave for it was wrong, and the wrongness matters more than the number.**
+
+I predicted the high end because the steel leaf terms are *specific and
+low-collision*, like `base_oil`. **They are — and that is exactly why they fail.**
+`input:steel_flat` found **1 of 11** and `input:steel_long` **0 of 11**, because
+**auto-component makers do not say "hot-rolled coil". They say "steel".**
+
+Flat-versus-long is a **steel producer's** distinction. It is not a **steel buyer's**
+vocabulary. The leaf was written from the supply side and is being asked to match
+demand-side prose.
+
+### 10.2 Hand classification of the 7 self-referential hits
+
+| company | verdict | excerpt |
+|---|---|---|
+| **SONACOMS** | **USABLE** | *"The Company consumes alloy steel, steel, aluminium and copper as some of the major commodities directly or through procured components for manufacturing its products."* — under a "Disclosure of Commodity Price Risk" heading. Textbook. |
+| **ENDURANCE** | **USABLE + MITIGATED** | *"the Company has passed on an increase in the cost of metals, especially aluminium and steel to its customers and does not foresee a significant risk…"* — **an exposure claim and a qualitative pass-through in one sentence.** |
+| **BHARATFORG** | **USABLE** | *"36% of the total raw material sourced in FY 2025-26 was secondary raw material (recycled steel)."* |
+| **SCHAEFFLER** | **USABLE** | *"The Company depends on suppliers, primarily in the steel sector…"* |
+| **BOSCHLTD** | **USABLE** | *"For steel, we have strategic suppliers developed and released for Bosch India…"* |
+| **MOTHERSON** | **USABLE** | *"The 25% US tariff on steel and aluminium has increased effective input costs for US-sourced materials…"* |
+| **TIINDIA** | **MARGINAL / BOTH** | *"The Engineering segment … consists of cold rolled steel strips and precision steel tubes"* — TI **buys** hot-rolled and **sells** cold-rolled. A steel processor, not a pure consumer. |
+
+**Negative control passed:** Asahi India Glass returned nothing. So did Exide
+(lead-acid batteries) and Craftsman and Uno Minda.
+
+### 10.3 The number
+
+| denominator | usable | rate |
+|---|---|---|
+| all 11 acquired | 6 | **55%** |
+| the 9 that are plausibly steel consumers (excluding Asahi glass, Exide lead) | 6–7 | **67–78%** |
+
+**Steel behaves like base_oil (83%), not like petchem (0–17%) — but only once the leaf
+uses the word the buyer uses.** The probe did what it was for: it distinguishes 80%
+from 20% decisively, and 20% is excluded.
+
+### 10.4 What this changes
+
+1. **`input:steel_flat` and `input:steel_long` are close to unextractable as written**
+   (1 of 11 and 0 of 11) and must be revised before any steel manifest. Either add a
+   generic `input:steel` leaf, or let the extractor accept generic steel and leave
+   flat-versus-long to the edge. **This is the mirror image of
+   `crude_derivative_petchem`:** petchem is *one leaf covering eleven words that mean
+   different things*; steel is *two leaves covering a word buyers never use*. Both fail
+   for the same underlying reason and in opposite directions.
+2. **§9.3's model survives but its predictor must be restated.** Hit rate does not
+   track "term specificity" in the abstract. It tracks **whether the leaf's term is the
+   word the BUYER uses in its own filing.** `base_oil` works because lubricant blenders
+   say "base oil". `steel_flat` fails because auto-component makers say "steel". That
+   is a sharper and more testable rule, and it is checkable against a corpus *before*
+   authoring a leaf.
+3. **The §9.5 cost table stands, with a corrected mechanism.** ~50 filings still buys
+   20–40 usable steel companies — but only after the leaf is fixed. Run as written
+   today it would have bought **five**.
+4. **`MITIGATED` evidence is not rare in this sector.** Endurance discloses
+   pass-through in the same sentence as the exposure. That is the within-node
+   discriminator §4.1 of the membership assessment says the four filters cannot
+   supply, arriving free with the exposure sweep.
+
+### 10.5 Honest note on my own reasoning
+
+**This is the fourth time today that an architectural inference has been wrong, and it
+is the first one a measurement caught before it reached a design.** The estimate was
+right, the reason was wrong, and had the estimate been acted on without the probe, the
+steel manifest would have been authored against two leaves that find almost nothing —
+and the failure would have looked like "steel filings do not disclose inputs" rather
+than "we wrote the leaf in the wrong vocabulary".
+
+**Standing recommendation: no leaf is authored without first sweeping it against a
+corpus of the companies expected to carry it.** That check is cheap — the sweep is
+written and the acquisition is one script — and it would have caught both this and
+`crude_derivative_petchem`.
+
+---
+
 ## 8. What I did not do
 
 * Did not implement the tier, write the isubgroup map, or touch `mechanism_edge`.
