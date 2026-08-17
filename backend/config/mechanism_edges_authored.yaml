@@ -1,0 +1,250 @@
+# V5 AUTHORED MECHANISM EDGES — THE ADMINISTERED-PRICE FERTILIZER COMPLEX
+# (spec §6.2, addendum A2.3; queued for owner approval, NOT loaded)
+#
+# WHY THIS FILE EXISTS. The V4 impact graph produced five distinct mechanism
+# ids for the Indian fertilizer subsidy complex and every one of them was an
+# ORPHAN: no entry in `knowledge.MECHANISMS`, so each rendered as
+# "other verified mechanisms" with no section label, no directness and no
+# distance (measured 2026-08-17 on alert 21, "Cost Of Cheap Urea"). The
+# registry covers crude, rates, FX, consumption, trade and infra. It has
+# nothing for administered prices, subsidy receivables or nutrient policy --
+# a standing feature of Indian markets, not one story.
+#
+# That is a CONTENT gap, and it survives the V5 cutover: V5 reads
+# `mechanism_edge` rows, and there are no fertilizer rows to read either.
+# This file is the V5-shaped statement of what is missing.
+#
+# ---------------------------------------------------------------------------
+# NOTHING HERE IS LOADED, AND NOTHING HERE CAN BE LOADED TODAY
+# ---------------------------------------------------------------------------
+# `mechanism_edge.exposure_tag` is NOT NULL and a database trigger
+# (`mechanism_edge_valid_tag_insert`, app/models.py) RAISEs on any tag absent
+# from `valid_exposure_tag`. All five entries below need a tag the vocabulary
+# does not have, so all five carry `exposure_tag: null` and a `pending_tag`
+# naming the leaf `config/exposure_tags.yaml` would need -- the same
+# convention `config/policy_modifiers.yaml` already uses. THE VOCABULARY IS
+# NOT EXTENDED HERE: its own header makes that a review of that file plus a
+# loader re-run, never a side effect of another change.
+#
+# So `app/graph/authored_edges.py` currently loads ZERO of these and refuses
+# each one by name. That refusal is the deliverable. The gap is the point.
+#
+# ---------------------------------------------------------------------------
+# THIS FILE CONTAINS NO NUMBER ANYBODY BELIEVED
+# ---------------------------------------------------------------------------
+# `mechanism_edge.confidence` is NOT NULL and a confidence is a judgement, so
+# every entry carries `confidence: null` under a `_required` list rather than
+# a plausible-looking figure. `distance` IS filled: each edge below is a
+# single authored hop, which is structural (the same reasoning as
+# `io_bootstrap.edges.IO_EDGE_DISTANCE`), and the TRAVERSAL distance is
+# computed by the walk from the path, never read from here.
+#
+# ---------------------------------------------------------------------------
+# TWO SEMANTIC CONFLICTS THE OWNER SHOULD KNOW ABOUT BEFORE APPROVING
+# ---------------------------------------------------------------------------
+# 1. `derivation: AUTHORED` edges are NOT in the `edge_review` queue.
+#    `app/ledger/edge_review.pending_edges` selects
+#    `derivation IN ('IO_TABLE','EMPIRICAL')` only, and says why: "AUTHORED
+#    edges are not in the queue: they were written by a person in the first
+#    place." These were written by a MODEL proposing content, which is not
+#    the case that rule was written for.
+# 2. `app/graph/traverse.usable()` treats an AUTHORED edge as walkable while
+#    its `review_status` is still PENDING -- deliberately, per Task 3.4. So
+#    inserting these as AUTHORED would make them LIVE for discovery, not
+#    queued.
+#
+# Consequence: the approval act for this file is RUNNING THE LOADER, under
+# the owner's own name, not clicking approve in a console. Until then these
+# rows exist only as text. If the owner would rather they sit in the review
+# queue proper, the derivation must change and that is the owner's call --
+# `AUTHORED` is recorded here because it is what these are.
+#
+# GAPS: DATA_GAPS.md §15 lists every entry here and what it is missing.
+
+version: mechanism-edges-authored-v5.0.0
+
+# Shock variables these edges hang off. A root edge's `from_node` must be a
+# name `config/discovery.yaml::modelled_shock_variables` carries, or discovery
+# reports it `unmodelled` and never enters the graph. Only ONE of the two
+# needed is already modelled.
+shock_variables:
+  - name: NATURAL_GAS
+    status: MODELLED           # already in config/discovery.yaml
+  - name: FERTILIZER_SUBSIDY_OUTLAY
+    status: PENDING            # NOT in config/discovery.yaml -- owner decision
+    note: >
+      The budgeted-versus-actual nutrient subsidy outlay. It moves on budget
+      day, on supplementary demands, and on every import-price swing that
+      widens the gap between the administered farm-gate price and landed
+      cost. Adding it is an edit to config/discovery.yaml, not to this file.
+
+edges:
+
+  # -- 1 -------------------------------------------------------------------
+  - edge_id: fertilizer_subsidy_receivable_wc
+    from_node: FERTILIZER_SUBSIDY_OUTLAY
+    to_node: fertilizer_subsidy_receivable
+    relationship_type: REGULATORY
+    distance: 1
+    derivation: AUTHORED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: null
+    pending_tag: revenue:subsidy_realization_share
+    parameters:
+      _required: [confidence]
+      confidence: null
+    source_url: null
+    source_hint: >
+      Department of Fertilizers annual report / company annual report
+      "subsidy receivable from Government of India" note.
+    owner: OWNER-REQUIRED
+    section_label_proposed: FERTILIZER SUBSIDY RECEIVABLES
+    v4_orphan_ids: [shock_subsidy_receivable_wc, subsidy_receivable]
+    mechanism: >
+      A urea maker sells at a farm-gate price the government fixes and
+      recovers the difference as subsidy. When disbursement lags the sale,
+      the unpaid balance sits as a receivable and the company borrows to
+      fund the working-capital gap, so the interest line moves before
+      anything visible happens to volumes or realisations.
+    note: >
+      The exposure is the SHARE OF REVENUE that arrives from the government
+      rather than from the customer -- which is what `pending_tag` names.
+      `rate:floating_debt_share` already exists and is NOT a substitute: it
+      describes how the borrowing reprices, not how much of the revenue is
+      a receivable in the first place, and using it here would state a
+      different exposure than the one this mechanism carries.
+
+  # -- 2 -------------------------------------------------------------------
+  - edge_id: administered_farmgate_price_squeeze
+    from_node: FERTILIZER_SUBSIDY_OUTLAY
+    to_node: administered_price_margin
+    relationship_type: REVENUE_REALIZATION
+    distance: 1
+    derivation: AUTHORED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: null
+    pending_tag: revenue:administered_price_share
+    parameters:
+      _required: [confidence]
+      confidence: null
+    source_url: null
+    source_hint: >
+      Fertilizer (Control) Order notifications; NBS rates notified by the
+      Department of Fertilizers.
+    owner: OWNER-REQUIRED
+    section_label_proposed: ADMINISTERED PRICE SQUEEZE
+    v4_orphan_ids: [shock_subsidy_overrun]
+    mechanism: >
+      Landed input cost rises while the farm-gate price stays administered,
+      so the producer cannot pass it through and the gap widens against a
+      subsidy that is set annually and settled late. The margin compresses
+      for as long as the notified rate lags the input.
+    note: >
+      DISTINCT from edge 1 and the distinction is the point. Edge 1 is a
+      TIMING exposure (the money is owed and arrives late). This is a
+      PRICING exposure (the company cannot reprice at all). A company can
+      carry one without the other, and collapsing them would let a
+      well-funded producer inherit a working-capital claim it does not have.
+
+  # -- 3 -------------------------------------------------------------------
+  - edge_id: nutrient_subsidy_mix_shift
+    from_node: FERTILIZER_SUBSIDY_OUTLAY
+    to_node: complex_fertilizer_demand
+    relationship_type: DEMAND
+    distance: 1
+    derivation: AUTHORED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: null
+    pending_tag: revenue:complex_fertilizer_volume_share
+    parameters:
+      _required: [confidence]
+      confidence: null
+    source_url: null
+    source_hint: >
+      Nutrient Based Subsidy rate notifications; Soil Health Card scheme
+      published sampling data.
+    owner: OWNER-REQUIRED
+    section_label_proposed: NUTRIENT MIX SHIFT
+    v4_orphan_ids: [shock_policy_balanced_nutrition, balanced_nutrition_policy]
+    mechanism: >
+      Subsidy policy that favours balanced nutrition shifts demand from
+      plain urea toward complex NPK and micronutrient grades. A producer's
+      exposure is the share of its volume in the grades being favoured, and
+      the sign is OPPOSITE for a urea-only maker and a complex-grade maker
+      on the same announcement.
+    note: >
+      The opposite-sign property is why this is its own mechanism rather
+      than a direction on edge 2. A section keyed on this mechanism holds
+      winners and losers that must not share a heading.
+
+  # -- 4 -------------------------------------------------------------------
+  - edge_id: gas_ammonia_feedstock
+    from_node: NATURAL_GAS
+    to_node: ammonia_urea_feedstock
+    relationship_type: INPUT_COST
+    distance: 1
+    derivation: AUTHORED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: null
+    pending_tag: input:gas_feedstock
+    parameters:
+      _required: [confidence]
+      confidence: null
+    source_url: null
+    source_hint: >
+      Company annual report energy-consumption note (gas per tonne of urea);
+      PPAC pooled-gas price circulars.
+    owner: OWNER-REQUIRED
+    section_label_proposed: GAS FEEDSTOCK
+    v4_orphan_ids: [ammonia_gas_feedstock]
+    mechanism: >
+      Natural gas is the feedstock for ammonia and therefore for urea. A gas
+      price move goes into the cost of production directly, and the energy
+      norm the plant is held to decides how much of the move the producer
+      absorbs rather than recovers.
+    note: >
+      THE ONLY ONE OF THE FIVE WHOSE from_node ALREADY EXISTS -- NATURAL_GAS
+      is in config/discovery.yaml. It is also the case the impact prompts
+      already name as legitimate ("a gas-supply shock makes fertilizer
+      feedstock central; a generic crude move does not",
+      app/analysis/impact_graph/prompts.py:113), which makes its absence
+      from the vocabulary the clearest of the five gaps. The vocabulary has
+      `revenue:gas_realization_apm` and `revenue:gas_realization_market`
+      (the SELLER side) and no gas INPUT leaf at all.
+
+  # -- 5 -------------------------------------------------------------------
+  - edge_id: subsidised_volume_rationing
+    from_node: FERTILIZER_SUBSIDY_OUTLAY
+    to_node: allocated_volume_cap
+    relationship_type: REGULATORY
+    distance: 1
+    derivation: AUTHORED
+    reviewed_by: null
+    review_status: PENDING
+    exposure_tag: null
+    pending_tag: revenue:allocated_volume_share
+    parameters:
+      _required: [confidence]
+      confidence: null
+    source_url: null
+    source_hint: >
+      Department of Fertilizers movement orders / state allocation
+      notifications; cooperative marketing federation circulars.
+    owner: OWNER-REQUIRED
+    section_label_proposed: SUPPLY ALLOCATION
+    v4_orphan_ids: [shock_supply_rationing]
+    mechanism: >
+      To contain the subsidy bill the state rations allocation and imports,
+      so a producer's sellable volume is capped administratively rather than
+      by demand. Revenue falls with no change in price and no change in the
+      company's own cost position.
+    note: >
+      The WEAKEST of the five and recorded as such. It fires only in an
+      acute overrun and the observed evidence is one alert. It is written
+      down rather than dropped so the owner can reject it explicitly --
+      a rejected edge is retained with its reason (invariant 12), which is
+      a better record than an edge nobody ever proposed.

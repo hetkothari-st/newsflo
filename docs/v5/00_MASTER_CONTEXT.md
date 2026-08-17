@@ -35,6 +35,9 @@ Encode each as a test. A build that violates any of these must fail CI.
 10. Any claim of type `PASS_THROUGH`, `HEDGE`, `COMPETITIVE`, or `TIMING` requires company-named filing evidence.
 11. No exposure row with `measurement = 'MODELLED'` may exist without `reviewed_by`.
 12. Rejected candidates are retained with a reason and are visible in the review console.
+13. **No model may write `mechanism_edge`. Ever.** Every row is authored or approved by a named human: `IO_TABLE` and `EMPIRICAL` rows are queued unreviewed and become walkable only through `edge_review.approve_edge`; `AUTHORED` rows are written by a person in the first place. No module that constructs an LLM client, and no code path fed by model output, may INSERT or UPDATE that table.
+
+    *Why this is an invariant and not an implementation detail.* Everything V5 says about a mechanism — its section label, its directness, its distance, whether it publishes at all — is read off a `mechanism_edge` row. V4 let a model name mechanisms freely and 45 of 58 stored ids resolved to nothing, 13% of them proposing price-driven channels invariant 3 exists to refuse (`decisions/ADR-002`). V5 is immune to that **only** while this holds: the moment a model can write the table, V5 inherits V4's defect with V5's authority behind it. The immunity is conditional, so it is stated.
 
 ---
 
