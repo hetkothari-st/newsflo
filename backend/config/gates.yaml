@@ -97,7 +97,21 @@ primary:
   evidence_grades: [A, B, C]
   forbidden_weakest_link_statuses: [SECTOR_PROXY, UNBOUND]
   min_sign_consistency: 0.90
-  allowed_empirical_status: [AGREE, NO_DATA]
+  # V5 PHASE 5 (spec §10.2). CONFLICT is absent, which is what caps a
+  # contradicted candidate at SECONDARY_RIPPLE -- no code does that, this line
+  # does. WEAK joins AGREE and NO_DATA: "history is not significant either way"
+  # carries the same information as "there is no history", and letting an
+  # insignificant sample veto a fundamental read would be noise with a veto.
+  allowed_empirical_status: [AGREE, NO_DATA, WEAK]
+  # §10.3: a human reviewer who marks the conflict REGIME_CHANGED, with a
+  # reason and an EXPIRY, makes PRIMARY available again for that (company,
+  # shock class). The status stays CONFLICT -- the record keeps saying what
+  # history said; this only decides whether that blocks the strongest claim.
+  allow_regime_changed_conflict: true
+  # §13.2: a candidate outside the calibration training manifold cannot lead.
+  # UNKNOWN passes (no manifold is fitted and none can be until a labeled
+  # corpus exists), so this rule changes no verdict today. See gates.py.
+  allow_out_of_distribution: false
   max_objection_severity_sustained: WARN
   required_verifier_status: PASS
   min_adv_inr: null           # no liquidity feed wired yet -> see unknown_*
@@ -142,6 +156,15 @@ secondary_ripple:
   below_floor_allowed_effects: [MIXED, UNCERTAIN]
   # Invariant 7: SECONDARY_RIPPLE requires a non-null mechanism_id.
   require_mechanism_id: true
+  # V5 PHASE 5 (spec §10.3). THE ONE LINE THAT MAKES "CAP, DO NOT REJECT" TRUE.
+  # An empirical conflict attaches a SUSTAINED MAJOR objection, and the gate's
+  # objections rule refuses a sustained MAJOR at both tiers by default -- so
+  # without this exemption the phase file's "cap at SECONDARY_RIPPLE" would
+  # have been an auto-REJECT, which §10.3 explicitly forbids. Narrow by
+  # construction: ONE objection type, at ONE tier. PRIMARY does not exempt it,
+  # so a contradicted candidate still cannot lead a page, and every other MAJOR
+  # objection still rejects here exactly as it did before Phase 5.
+  objection_types_exempt_from_severity_cap: [EMPIRICAL_CONFLICT]
   unknown_verifier_status_passes: true
   unknown_empirical_status_passes: true
   # See the primary block: TRUE today because nothing computes these on the

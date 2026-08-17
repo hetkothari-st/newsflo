@@ -75,6 +75,25 @@ class TierPolicy:
     # become unpublishable AS A PRIMARY CALL. `None` = no rule (the behaviour
     # of every config that predates Phase 4); False = refused; True = admitted.
     allow_stale_policy_state: bool | None = None
+    # --- V5 PHASE 5, spec §10.3 / §13. ADDITIVE: a rule only when named.
+    #
+    # Objection TYPES this tier tolerates at any severity. Narrow on purpose:
+    # §10.3 says an empirical CONFLICT must "cap at SECONDARY_RIPPLE, attach an
+    # objection of severity MAJOR, and route to the review queue" -- but the
+    # objections rule below refuses a sustained MAJOR at BOTH tiers by default,
+    # which would have turned that cap into the auto-REJECT the phase file
+    # forbids. So the ripple tier names EMPIRICAL_CONFLICT here, and PRIMARY
+    # does not. Every other MAJOR objection still rejects exactly as before.
+    objection_types_exempt_from_severity_cap: tuple[str, ...] = ()
+    # Whether a CONFLICT a human has annotated REGIME_CHANGED (with a reason
+    # and an expiry) may still reach this tier. `None` = no rule.
+    allow_regime_changed_conflict: bool | None = None
+    # Whether a candidate whose feature vector lies OUTSIDE the calibration
+    # training manifold may reach this tier (§13.2: "novel event types must not
+    # inherit confidence from unrelated history"). `None` = no rule. An UNKNOWN
+    # in_distribution (which is every candidate today, because no manifold is
+    # fitted) is NOT a failure -- absence of a model is not evidence of novelty.
+    allow_out_of_distribution: bool | None = None
     # What an ABSENT input means for the two A5.1 rules, stated per tier in
     # the YAML exactly like the four Phase 0 `unknown_*` keys. There is no
     # computed band and no parameter provenance on the V4-fed canonical path
@@ -147,6 +166,14 @@ class ImpactDraft:
     # EXIST, so an unregistered regime is not somebody's maintenance failure
     # and does not block anything.
     policy_state_stale: bool = False
+    # --- V5 PHASE 5. Both default to the "no claim" value.
+    #
+    # True when a human has annotated this (company, shock_class) REGIME_CHANGED
+    # and the annotation has not expired (§10.3).
+    empirical_regime_changed: bool = False
+    # None = NOT KNOWN, and not known is not novel. False = the feature vector
+    # lies outside the calibration training manifold (§13.2).
+    in_distribution: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -170,10 +197,12 @@ class GateResult:
     gate_trace: tuple[GateRule, ...] = field(default_factory=tuple)
 
 
-def _sustained_at_least(objections: Sequence[Mapping], severity: str) -> bool:
+def _sustained_at_least(objections: Sequence[Mapping], severity: str,
+                        exempt_types: Sequence[str] = ()) -> bool:
     floor = _SEVERITY_ORDER.index(severity)
     return any(
         bool(o.get("sustained"))
+        and str(o.get("type", "")) not in tuple(exempt_types)
         and _SEVERITY_ORDER.index(str(o.get("severity", "WARN"))) >= floor
         for o in objections)
 
@@ -285,6 +314,12 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
         empirical_ok = (policy.unknown_empirical_status_passes
                         if draft.empirical_status is None
                         else draft.empirical_status in policy.allowed_empirical_status)
+        # V5 PHASE 5 / §10.3: a CONFLICT a human has annotated REGIME_CHANGED
+        # (with a reason and an unexpired date) stops blocking this tier. The
+        # STATUS is unchanged -- the record keeps saying what history said.
+        if (not empirical_ok and draft.empirical_regime_changed
+                and policy.allow_regime_changed_conflict):
+            empirical_ok = True
         rules.append(GateRule("empirical", empirical_ok,
                               str(draft.empirical_status),
                               unknown_escape=(empirical_ok
@@ -293,8 +328,11 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
     rules.append(GateRule(
         "objections",
         not _sustained_at_least(
-            draft.objections, _next_severity(policy.max_objection_severity_sustained)),
-        f"max_sustained={policy.max_objection_severity_sustained}"))
+            draft.objections, _next_severity(policy.max_objection_severity_sustained),
+            policy.objection_types_exempt_from_severity_cap),
+        f"max_sustained={policy.max_objection_severity_sustained}"
+        + (f" exempt={list(policy.objection_types_exempt_from_severity_cap)}"
+           if policy.objection_types_exempt_from_severity_cap else "")))
 
     if policy.required_verifier_status is not None:
         verifier_ok = (policy.unknown_verifier_status_passes
@@ -346,6 +384,29 @@ def _tier_rules(draft: ImpactDraft, policy: TierPolicy, tier: str) -> list[GateR
         rules.append(GateRule("policy_state_freshness",
                               not draft.policy_state_stale,
                               str(draft.policy_state_stale)))
+
+    # --- V5 PHASE 5, §13.2 --------------------------------------------------
+    if policy.allow_out_of_distribution is not None \
+            and not policy.allow_out_of_distribution:
+        # `None` PASSES. No calibration manifold is fitted (and none can be
+        # until a labeled corpus exists), so every candidate's in_distribution
+        # is unknown today. Capping everything at ripple because a model is
+        # ABSENT would be a silent tightening nobody chose -- absence of a
+        # model is not evidence of novelty. The moment a manifold exists, a
+        # False starts capping, which is what §13.2 asks for.
+        #
+        # NOT marked `unknown_escape`, deliberately, and this is a judgement
+        # call worth stating. That flag means "an input this system intends to
+        # supply was missing and the policy let it through" -- the partial
+        # rollout hazard `gate_warnings.py` shouts about. Calibration being off
+        # is not a rollout hole; it is the phase file's own instruction ("ship
+        # with calibration disabled"). Flagging it would fire a warning on
+        # EVERY primary publication forever and drown the cutover signal that
+        # channel exists to carry. The rule still appears in `gate_trace` with
+        # detail "None", so the record says it was not evaluated.
+        rules.append(GateRule("in_distribution",
+                              draft.in_distribution is not False,
+                              str(draft.in_distribution)))
 
     if policy.allow_sector_proxy is not None and not policy.allow_sector_proxy:
         proxy_ok = (policy.unknown_sector_proxy_passes

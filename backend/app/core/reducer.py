@@ -676,6 +676,12 @@ def reduce_company_impact(signals: Sequence[Signal],
 
     empirical = _payloads(ordered, SignalKind.EMPIRICAL_CHECK)
     empirical_status = str(empirical[0]["status"]) if empirical else None
+    # V5 PHASE 5 / §10.3. A human's REGIME_CHANGED annotation, already checked
+    # against its expiry by `app.analysis.empirical.check.assess` (the reducer
+    # reads no clock and therefore cannot check an expiry itself). It does NOT
+    # change the status above -- the record keeps saying what history said.
+    empirical_regime_changed = bool(
+        empirical and empirical[0].get("regime_changed"))
 
     # The verifier ran iff it emitted a signal; it PASSED iff it sustained
     # nothing. "Did not run" stays None -- the gate decides what that means.
@@ -770,6 +776,12 @@ def reduce_company_impact(signals: Sequence[Signal],
         # V5 PHASE 4: whether a tracked regime reading behind this company's
         # modifiers is past its freshness window (§9.3).
         "policy_state_stale": policy_state_stale,
+        # V5 PHASE 5: whether the empirical conflict this record carries has
+        # been adjudicated by a human (§10.3). `in_distribution` is
+        # deliberately NOT supplied: calibration is disabled, no manifold is
+        # fitted, and the gate's own rule treats an absent answer as unknown
+        # rather than as novelty.
+        "empirical_regime_changed": empirical_regime_changed,
     }
     for name, value in optional_draft_fields.items():
         if name in ImpactDraft.__dataclass_fields__:

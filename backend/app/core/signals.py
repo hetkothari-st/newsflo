@@ -53,7 +53,11 @@ HORIZONS = ("IMMEDIATE", "NEAR_TERM", "STRUCTURAL")
 BINDING_STATUSES = ("BOUND", "SECTOR_PROXY", "UNBOUND")
 EVIDENCE_GRADES = ("A", "B", "C", "D", "E")
 OBJECTION_SEVERITIES = ("BLOCKING", "MAJOR", "WARN")
-EMPIRICAL_STATUSES = ("AGREE", "CONFLICT", "NO_DATA")
+# V5 PHASE 5 (spec §10.2). WEAK joins the vocabulary: "history is not
+# significant either way" is a different fact from "there is no history", and
+# collapsing the two would let a noisy sample look like an absent one. A
+# widening, so no payload that was valid before Phase 5 becomes invalid.
+EMPIRICAL_STATUSES = ("AGREE", "CONFLICT", "WEAK", "NO_DATA")
 RESOLUTIONS = ("RESOLVED", "AMBIGUOUS", "UNRESOLVED")
 ENTITY_STATUSES = ("ACTIVE", "SUSPENDED", "DELISTED", "UNKNOWN")
 DISCOVERY_SOURCES = ("MENTION", "MECHANISM", "SUPPLY_CHAIN", "PEER_CLOSURE")
@@ -121,6 +125,25 @@ _SCHEMAS: dict[str, dict[str, tuple[bool, Any]]] = {
     SignalKind.EMPIRICAL_CHECK: {
         "status": (True, Vocab(EMPIRICAL_STATUSES)),
         "n_events": (False, (int, type(None))),
+        # --- V5 PHASE 5 (spec §10), all OPTIONAL ---------------------------
+        # The status travels WITH ITS SAMPLE. A payload carrying only
+        # "CONFLICT" leaves the record unable to explain itself, and §10.3's
+        # whole point is that the disagreement is a sentence you show the
+        # user: "in 34 comparable historical shocks this name's 5-day
+        # abnormal return was -1.4%".
+        "shock_variable": (False, (str, type(None))),
+        "shock_sign": (False, (str, type(None))),
+        "horizon": (False, (str, type(None))),
+        "median_car": (False, (int, float, type(None))),
+        "p_value": (False, (int, float, type(None))),
+        "sign_consistency": (False, (int, float, type(None))),
+        "estimator_version": (False, (str, type(None))),
+        # A human reviewer's REGIME_CHANGED annotation, still in force on the
+        # analysis date. It does NOT change the status -- the record keeps
+        # saying what history said -- it changes whether that conflict may
+        # block a PRIMARY call (§10.3).
+        "regime_changed": (False, bool),
+        "regime_change_expires_on": (False, (str, type(None))),
     },
     SignalKind.ENTITY_RESOLUTION: {
         "ticker": (True, str),
