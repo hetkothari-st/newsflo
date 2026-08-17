@@ -81,12 +81,63 @@ exists so this never happens.
   (`docs/v5/amendments/`).
 - Reports/ledgers under `.superpowers/` are per-session and untracked.
 
-## 7. Staging discipline (defense in depth)
+## 7. Staging discipline (residual backstop)
 
-Even inside your own worktree: explicit-path staging only, verify
-`git diff --cached --stat` before commit and `git show --stat HEAD` after.
+**§1 is the fix. This section is the backstop for what §1 does not cover.**
+Every measured instance of cross-session damage in this repository traces to
+sessions sharing one tree, and none of them is reachable from separate
+worktrees — there is no shared path for another session's bytes to arrive on.
+Careful staging is not an alternative to isolation. It is what you do in the
+integration tree, and on the day you discover you were in the wrong one.
+
+Even inside your own worktree: explicit-path staging only. Before committing,
+read `git diff --cached` **in full** — not `--stat`. `--stat` reports paths
+and line counts and **cannot show authorship**; a commit that carries another
+session's edits at a path you legitimately own passes every `--stat` check
+(see §7.1). Confirm each hunk is text this session wrote. After committing,
+`git show --stat HEAD`.
+
 Never stage: `.superpowers/`, `api_keys.txt`, `*.db`, another session's
 files. In the integration tree these rules are absolute.
+
+## 7.1 Never commit a hunk you did not write
+
+`git add <path>` stages the file **as it is on disk**, not as you last wrote
+it. In a shared tree those differ whenever another session touched the path in
+between, so **owning a path is not evidence that you authored its current
+contents**. Explicit-path staging controls *which paths* enter a commit; it
+says nothing about *what content is at them*. A session can follow §7 exactly
+and still commit another session's work.
+
+This is not hypothetical and it is not rare: three documents on 2026-08-17
+were committed by sessions that had not written them, by sessions doing
+staging correctly. `docs/v5/protocol/FINDING-001-shared-tree-authorship-carry.md`
+is the measurement.
+
+If `git diff --cached` shows a hunk you did not type, do one of:
+
+1. **Preferred** — leave it. `git restore --staged <path>` and let its author
+   commit it.
+2. **When the file cannot be split** (one document, two authors, and the other
+   session has stopped), commit it and **record the carry** with a trailer:
+
+   ```
+   Carried-From-Session: <session> <path> (<section or line range>)
+   ```
+
+A carry that is recorded is a coordination note. A carry that is not is a
+false authorship claim that survives in the log forever. The only thing that
+can correct it afterwards is a handover document — which `git log`, `git
+blame` and code review never read.
+
+**Why no check catches this automatically.** `--stat` compares paths and line
+counts; a preservation audit compares content before and after. Both answer
+*what is present*. This defect does not change what is present — it changes
+**who put it there**, so a contaminated commit and a clean one are
+indistinguishable to either. A mechanical backstop (a pre-commit hook refusing
+staged paths whose mtime post-dates this session's last write to them) is
+**recorded and deliberately not built**: §1 prevents the whole class, and
+building it would imply shared trees are a supported mode. They are not.
 
 ## 8. What this replaces
 
