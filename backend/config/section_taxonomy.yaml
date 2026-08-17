@@ -1,0 +1,124 @@
+# V5 SECTION TAXONOMY — RENDERED LABELS, KEYED BY mechanism_id
+# (docs/v5/NEWSFLO_V5_BUILD_SPEC.md §15, docs/v5/07_PHASE_6_falsification_sections.md
+#  Task 6.2)
+#
+# THIS FILE IS VOCABULARY, NOT DATA. Every entry is the WORDING for one
+# mechanism. There is no company here, no figure, no direction and no tier —
+# a test asserts the file carries no numeral outside `version`.
+#
+# WHAT A SECTION IS. Section identity is a pure function of the canonical
+# record:
+#
+#     section_key = (publication_tier, economic_effect, mechanism_id,
+#                    horizon_bucket)
+#
+# and the rendered label is `<effect><separator><label for mechanism_id>`.
+# An LLM has no role: it does not name a section, does not assign a company
+# to one, and does not decide whether one exists.
+#
+# WHY THE EFFECT IS IN THE KEY (this is the §15 fix). In the V4 snapshot an
+# integrated energy name was rendered inside "NEGATIVE — OIL MARKETING &
+# REFINING" because sectioning was done by SECTOR. For an integrated name
+# crude is a realisation, a feedstock cost and a marketing-margin driver at
+# once, so the record's net effect is MIXED — and MIXED is not a direction
+# (master-context invariant 9). With the effect in the key that placement is
+# not a wording mistake to be prompted away; it is unrepresentable.
+#
+# THE MECHANISM IDS BELOW are the ones this system can emit today: the
+# curated crude/rate/fx/tariff families it already reasons in, plus
+# `integrated_energy`, which is the mechanism a reviewer authors for a
+# company whose crude exposure runs in BOTH directions inside one listed
+# entity. A mechanism id with no entry here is NOT an error and NOT
+# invented prose — it renders through `unknown_label`, keyed on the id
+# itself, and keeps its own section (its key is distinct, so folding it into
+# a neighbouring section would misplace a company).
+
+version: section-taxonomy-v5.0.0
+
+# `<effect><separator><mechanism label>` — e.g. "MIXED — INTEGRATED ENERGY".
+separator: " — "
+
+# A company the event names directly carries no mechanism. That is a real
+# key, not a missing one, and it gets a label that borrows no word from the
+# directness vocabulary (invariant 4: a section label must never read as a
+# directness or a tier).
+no_mechanism_label: COMPANY-SPECIFIC EXPOSURE
+
+# A mechanism id this file does not name. `{mechanism_id}` is substituted
+# verbatim — the id is a fact, and writing prose about a mechanism nobody
+# described would be the fabrication this system exists to refuse.
+unknown_label: "UNCLASSIFIED MECHANISM ({mechanism_id})"
+# The word that marks such a label as unclassified, for tests and for the
+# console's own styling.
+unknown_label_word: UNCLASSIFIED
+
+# The §15 zero-PRIMARY state. Rendered from COUNTS the reducer produced —
+# there is no numeral in this file, only the placeholders that carry them.
+zero_primary:
+  headline: NO PRIMARY IMPACT IDENTIFIED
+  body: >-
+    No company shows a direct, evidenced, material exposure to this event.
+  bullets: "  • {second_order} second-order {effect_word} below   • {macro} macro {channel_word}   • {rejected} {candidate_word} rejected (view)"
+  # [singular, plural]. Counting words, not policy — but they belong beside
+  # the sentence they inflect rather than inside the engine.
+  plurals:
+    effect_word: [effect, effects]
+    channel_word: [channel, channels]
+    candidate_word: [candidate, candidates]
+
+labels:
+  # --- crude oil family ---------------------------------------------------
+  upstream_realization: UPSTREAM OIL PRODUCERS
+  refiner_marketing_margin: OIL MARKETING & REFINING
+  # A single listed entity carrying crude as realisation, feedstock cost and
+  # marketing margin at once. Its own mechanism, and therefore its own
+  # section — never inside the pure marketers' one.
+  integrated_energy: INTEGRATED ENERGY
+  lubricant_base_oil_cost: LUBRICANTS
+  petrochemical_feedstock: PETROCHEMICALS
+  paints_input_cost: PAINTS & CHEMICALS
+  tyre_input_cost: TYRES & RUBBER
+  aviation_fuel_cost: AVIATION
+  road_freight_fuel_cost: LOGISTICS & FREIGHT
+  cement_energy_freight: CEMENT & ENERGY-INTENSIVE
+  auto_fuel_demand: AUTO DEMAND
+  two_wheeler_fuel_demand: TWO-WHEELER DEMAND
+  ev_relative_advantage: ELECTRIC VEHICLES
+  vehicle_financier_stress: VEHICLE FINANCE
+  crude_inflation_pressure: INFLATION PASS-THROUGH
+  oil_import_bill_currency: IMPORT BILL & CURRENCY
+
+  # --- rates --------------------------------------------------------------
+  bank_nim_repricing: BANK MARGINS
+  nbfc_funding_cost: NBFC FUNDING COST
+  housing_demand_rates: HOUSING DEMAND
+  durables_financing_demand: CONSUMER DURABLES FINANCE
+  auto_financing_demand: AUTO FINANCE
+  corporate_capex_rates: CORPORATE CAPEX
+  rate_expectation_shift: RATE EXPECTATIONS
+
+  # --- consumption --------------------------------------------------------
+  staples_volume_pressure: STAPLES VOLUMES
+  discretionary_demand_squeeze: DISCRETIONARY DEMAND
+  rural_income_agri: RURAL INCOME
+  rural_fmcg_demand: RURAL FMCG
+  rural_two_wheeler_demand: RURAL TWO-WHEELERS
+  agrochemical_volume: AGROCHEMICALS
+
+  # --- currency and trade -------------------------------------------------
+  it_export_realization: IT EXPORT REALISATION
+  pharma_export_realization: PHARMA EXPORT REALISATION
+  textile_export_competitiveness: TEXTILE EXPORTS
+  import_cost_inflation: IMPORTED INPUT COSTS
+  electronics_import_cost: ELECTRONICS IMPORTS
+  domestic_producer_protection: DOMESTIC PRODUCER PROTECTION
+  downstream_input_cost_tariff: TARIFFED INPUT COSTS
+  freight_rate_spike: FREIGHT RATES
+
+  # --- infrastructure and capex ------------------------------------------
+  cement_demand_infra: CEMENT DEMAND
+  epc_order_book: EPC ORDER BOOKS
+  steel_demand_infra: STEEL DEMAND
+  capital_goods_orders: CAPITAL GOODS ORDERS
+  infra_logistics_volume: INFRASTRUCTURE LOGISTICS
+  defense_procurement_sentiment: DEFENCE PROCUREMENT
