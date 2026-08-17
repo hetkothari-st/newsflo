@@ -77,8 +77,13 @@ def upgrade() -> None:
             sa.Column('company_id', sa.Integer(), nullable=False),
             sa.Column('shock_variable', sa.String(), nullable=False),
             sa.Column('shock_sign', sa.String(), nullable=False),
+            # 1d | 5d | 20d -- trading sessions AFTER AND INCLUDING the shock
+            # day, so "1d" is TWO sessions (offsets 0 and +1). The shock is
+            # measured on day 0 and the reaction predominantly happens there.
             sa.Column('horizon', sa.String(), nullable=False),
             sa.Column('n_events', sa.Integer(), nullable=False),
+            # UNITS: a FRACTION of price, not a percent (-0.014 is -1.4%).
+            # Contrast divergence_review.excess_move_pct, which is a PERCENT.
             sa.Column('median_car', sa.Numeric(), nullable=False),
             sa.Column('iqr_lo', sa.Numeric(), nullable=True),
             sa.Column('iqr_hi', sa.Numeric(), nullable=True),
@@ -109,6 +114,12 @@ def upgrade() -> None:
             sa.Column('fundamental_direction', sa.String(), nullable=True),
             sa.Column('empirical_status', sa.String(), nullable=True),
             sa.Column('n_events', sa.Integer(), nullable=True),
+            # TWO UNITS IN ONE TABLE, deliberately, and they are not the same:
+            # `median_car` is a FRACTION copied from transmission_empirical
+            # (-0.014 = -1.4%); `excess_move_pct` and `threshold_pct` are
+            # PERCENTS, the unit the market layer hands over (-1.4 = -1.4%).
+            # Nothing compares one with the other; the console converts the
+            # fraction at the point a human reads it.
             sa.Column('median_car', sa.Numeric(), nullable=True),
             sa.Column('p_value', sa.Numeric(), nullable=True),
             sa.Column('excess_move_pct', sa.Numeric(), nullable=True),
@@ -177,11 +188,27 @@ def downgrade() -> None:
     not reproducible by re-running anything; a `transmission_empirical` row is
     reproducible only if the price history that produced it still exists. Take
     a backup before running this.
+
+    SYMMETRIC WITH `upgrade` (review round 1, m-12): upgrade creates each
+    table only if it is absent, so downgrade drops each only if it is present.
+    An asymmetric pair fails halfway on any database where one of the four was
+    created out of band -- which is exactly the database somebody is running a
+    downgrade against.
     """
-    op.drop_index('ix_regime_change_company_class', table_name='regime_change')
-    op.drop_index('ix_divergence_review_status', table_name='divergence_review')
-    op.drop_index('ix_transmission_empirical_company',
-                  table_name='transmission_empirical')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = set(inspector.get_table_names())
+
+    for table, index in (('regime_change', 'ix_regime_change_company_class'),
+                         ('divergence_review', 'ix_divergence_review_status'),
+                         ('transmission_empirical',
+                          'ix_transmission_empirical_company')):
+        if table not in existing:
+            continue
+        if index in {entry['name'] for entry in inspector.get_indexes(table)}:
+            op.drop_index(index, table_name=table)
+
     for table in ('calibration_model', 'regime_change', 'divergence_review',
                   'transmission_empirical'):
-        op.drop_table(table)
+        if table in existing:
+            op.drop_table(table)

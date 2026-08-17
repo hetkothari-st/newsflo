@@ -99,10 +99,20 @@ primary:
   min_sign_consistency: 0.90
   # V5 PHASE 5 (spec §10.2). CONFLICT is absent, which is what caps a
   # contradicted candidate at SECONDARY_RIPPLE -- no code does that, this line
-  # does. WEAK joins AGREE and NO_DATA: "history is not significant either way"
-  # carries the same information as "there is no history", and letting an
-  # insignificant sample veto a fundamental read would be noise with a veto.
-  allowed_empirical_status: [AGREE, NO_DATA, WEAK]
+  # does. WEAK is absent too, and that is a FROZEN SPEC VALUE, not a judgement
+  # this phase made: BUILD_SPEC §7.4's {AGREE, NO_DATA} allowlist is normative
+  # and EXECUTION_CONTRACT §7.1 freezes it, so amending it needs a failing
+  # measurement under §7.2 and none exists yet.
+  #
+  # Phase 5 ARGUED for admitting WEAK (an insignificant sample carries the same
+  # information as no sample, so "we measured and found nothing conclusive"
+  # currently publishes strictly worse than "we never measured"). That argument
+  # is recorded as PROPOSED SPEC AMENDMENT 1 in DATA_GAPS, with the missing
+  # prerequisite named. It is not implemented here.
+  #
+  # WEAK IS allowed at secondary_ripple -- that block states no
+  # allowed_empirical_status at all, so no empirical rule is walked there.
+  allowed_empirical_status: [AGREE, NO_DATA]
   # §10.3: a human reviewer who marks the conflict REGIME_CHANGED, with a
   # reason and an EXPIRY, makes PRIMARY available again for that (company,
   # shock class). The status stays CONFLICT -- the record keeps saying what

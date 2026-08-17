@@ -213,16 +213,7 @@ def test_precision_first_the_primary_walk_is_unchanged_by_this_task():
     assert primary.materiality_buckets == ("HIGH",)
     assert primary.evidence_grades == ("A", "B", "C")
     assert primary.forbidden_weakest_link_statuses == ("SECTOR_PROXY", "UNBOUND")
-    # V5 PHASE 5 widened this ONE tuple, deliberately, and it is not a
-    # relaxation of an A5.3 bar: `WEAK` did not exist when this line was
-    # written (the empirical vocabulary was AGREE/CONFLICT/NO_DATA), so
-    # nothing could ever emit it. §10.2 defines WEAK as "the sample is not
-    # significant either way", which is the same information content as
-    # NO_DATA -- and letting an insignificant sample veto a fundamental read
-    # would be noise with a veto. CONFLICT is still absent, which is what caps
-    # a contradicted candidate at SECONDARY_RIPPLE.
-    assert primary.allowed_empirical_status == ("AGREE", "NO_DATA", "WEAK")
-    assert "CONFLICT" not in primary.allowed_empirical_status
+    assert primary.allowed_empirical_status == ("AGREE", "NO_DATA")
     assert primary.required_verifier_status == "PASS"
 
 

@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from tests.phase5.conftest import (
     BACKEND, FIXTURE_COMPANY_ID, FIXTURE_EVENT_ID, FIXTURE_NOW, imported_modules,
+    package_sources,
 )
 from tests.phase5.helpers import impact_with_empirical
 
@@ -34,12 +35,47 @@ V5_PACKAGES = {
 def test_no_v5_package_imports_app_market(name):
     package = V5_PACKAGES[name]
     assert package.exists(), f"{package} does not exist"
-    for path in sorted(package.glob("*.py")):
+    for path in package_sources(package):
         offenders = {m for m in imported_modules(path)
                      if m == "app.market" or m.startswith("app.market.")}
         assert not offenders, (
             f"{path.relative_to(BACKEND)} imports {sorted(offenders)}: market "
             "movement may never influence a fundamental verdict (invariant 3)")
+
+
+def test_the_import_scan_sees_a_relative_import_too(tmp_path):
+    """REVIEW ROUND 1 (m-11). A scan nobody has seen fire is not a scan, and
+    this one had a hole: `from ..market import measure` has `node.level == 2`
+    and was invisible. Both spellings must resolve to `app.market`."""
+    module = BACKEND / "app" / "analysis" / "empirical" / "_scan_probe.py"
+    module.write_text(
+        # From `app.analysis.empirical`, three dots is `app` -- so this is the
+        # spelling that would actually reach the market layer.
+        "from ...market import measure\n"
+        "from ..market import other\n"
+        "import app.market.intensity\n", encoding="utf-8")
+    try:
+        seen = imported_modules(module)
+        assert "app.market" in seen, seen
+        assert "app.market.intensity" in seen, seen
+        # ...and the level count is honoured rather than flattened: two dots
+        # is the sibling package, which is a different module entirely.
+        assert "app.analysis.market" in seen, seen
+    finally:
+        module.unlink()
+
+
+def test_the_package_scan_reaches_a_subpackage(tmp_path):
+    """`glob('*.py')` would have let a subpackage exist unscanned."""
+    package = BACKEND / "app" / "analysis" / "empirical" / "_scan_probe_pkg"
+    package.mkdir()
+    (package / "inner.py").write_text("import app.market\n", encoding="utf-8")
+    try:
+        found = package_sources(BACKEND / "app" / "analysis" / "empirical")
+        assert (package / "inner.py") in found
+    finally:
+        (package / "inner.py").unlink()
+        package.rmdir()
 
 
 def test_the_price_history_protocols_live_outside_app_market():
@@ -69,7 +105,7 @@ def test_no_v5_package_reads_a_market_field_by_name():
               "reaction_direction", "volume_z")
     exempt = {"divergence.py"}
     for package in V5_PACKAGES.values():
-        for path in sorted(package.glob("*.py")):
+        for path in package_sources(package):
             if path.name in exempt:
                 continue
             for number, line in code_lines(path):

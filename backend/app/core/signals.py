@@ -53,6 +53,26 @@ HORIZONS = ("IMMEDIATE", "NEAR_TERM", "STRUCTURAL")
 BINDING_STATUSES = ("BOUND", "SECTOR_PROXY", "UNBOUND")
 EVIDENCE_GRADES = ("A", "B", "C", "D", "E")
 OBJECTION_SEVERITIES = ("BLOCKING", "MAJOR", "WARN")
+# V5 PHASE 5 (review round 1, m-8). §12.1's objection taxonomy is CONTROLLED,
+# and it is now closed at the signal bus rather than by convention: a
+# free-text objection type is how a stage starts inventing criticisms nobody
+# can aggregate, and the gate's per-type exemption list (§10.3) is only
+# trustworthy if the types it names are the types that exist.
+OBJECTION_TYPES = (
+    # spec §12.1, verbatim, in its own severity order
+    "ENTITY_WRONG", "MECHANISM_INVALID", "EXPOSURE_NOT_IN_LISTCO",
+    "OFFSET_IGNORED", "REGIME_MODIFIER_MISSING", "MAGNITUDE_IMMATERIAL",
+    "HORIZON_MISMATCH", "EVIDENCE_STALE", "ALREADY_PRICED",
+    "BASE_RATE_VIOLATION", "SECOND_ORDER_OVERREACH",
+    # V5 PHASE 5 (§10.3): measured history contradicts the fundamental read.
+    "EMPIRICAL_CONFLICT",
+    # V4 LEGACY, retained by name: `app.core.signal_adapters` emits it for
+    # every entry whose V4 verifier did not independently confirm the company.
+    # It is not in §12.1 because §12.1 describes the V5 falsifier, and this is
+    # the V4 verifier's one verdict -- deleting it would silently drop the only
+    # objection the live path produces.
+    "NOT_INDEPENDENTLY_VERIFIED",
+)
 # V5 PHASE 5 (spec §10.2). WEAK joins the vocabulary: "history is not
 # significant either way" is a different fact from "there is no history", and
 # collapsing the two would let a noisy sample look like an absent one. A
@@ -118,7 +138,7 @@ _SCHEMAS: dict[str, dict[str, tuple[bool, Any]]] = {
     },
     SignalKind.OBJECTION: {
         "objection_id": (True, str),
-        "type": (True, str),
+        "type": (True, Vocab(OBJECTION_TYPES)),
         "severity": (True, Vocab(OBJECTION_SEVERITIES)),
         "sustained": (True, bool),
     },

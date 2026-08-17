@@ -20,7 +20,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from tests.phase5.conftest import BACKEND, code_lines, imported_modules
+from tests.phase5.conftest import (
+    BACKEND, code_lines, imported_modules, package_sources,
+)
 from tests.phase5.helpers import clean_primary_draft, impact_with_empirical
 
 CALIBRATION = BACKEND / "app" / "analysis" / "calibration"
@@ -298,7 +300,7 @@ def test_a_confidence_number_without_its_band_and_driver_is_refused():
 @pytest.mark.parametrize("provider", PROVIDER_MODULES)
 def test_no_v5_module_imports_a_provider(provider):
     for package in V5_PACKAGES:
-        for path in sorted(package.glob("*.py")):
+        for path in package_sources(package):
             for module in imported_modules(path):
                 assert module != provider and not module.startswith(provider + "."), (
                     f"{path.relative_to(BACKEND)} imports {module}")
@@ -306,7 +308,7 @@ def test_no_v5_module_imports_a_provider(provider):
 
 def test_no_calibration_module_names_a_model_or_defines_a_prompt():
     banned = re.compile(r"\bprompt\b|claude|gpt-|gemini|llama|anthropic", re.IGNORECASE)
-    for path in sorted(CALIBRATION.glob("*.py")):
+    for path in package_sources(CALIBRATION):
         for number, line in code_lines(path):
             assert not banned.search(line), f"{path.name}:{number}: {line.strip()}"
 
@@ -384,17 +386,35 @@ def test_no_llm_confidence_reaches_the_canonical_record():
     assert "calibrated_p" not in list(_keys(payload))
 
 
-def test_the_ledgers_llm_extraction_confidence_never_reaches_the_engine():
+@pytest.mark.parametrize("package", [p for p in V5_PACKAGES],
+                         ids=lambda p: p.name)
+def test_the_ledgers_llm_extraction_confidence_never_reaches_a_v5_module(package):
     """The one LLM-sourced confidence that still exists in this repo is
     `company_exposure.confidence`, written from an extractor's
     `extraction_confidence` at review time. It is a REVIEW-QUEUE TRIAGE score
     (`app/ledger/review.py` ranks proposals by market cap x (1 - confidence))
-    and it must never become an input to a number. The sensitivity engine
-    does not read the column."""
-    sensitivity = BACKEND / "app" / "analysis" / "sensitivity"
-    for path in sorted(sensitivity.glob("*.py")):
+    and it must never become an input to a number.
+
+    REVIEW ROUND 1 (m-14): widened from the sensitivity package to ALL SIX V5
+    packages. Two allowances, both named rather than pattern-matched:
+
+      * `shock_magnitude_confidence` is a §7.4 GATE INPUT about the EVENT, not
+        a per-company model score, and it is None on the deployed path;
+      * `app/analysis/calibration/*` is the module that DEFINES the confidence
+        surface (and emits null); banning the word there would ban the fix.
+    """
+    allowed = ("shock_magnitude_confidence", "min_shock_magnitude_confidence",
+               "sign_consistency")
+    for path in package_sources(package):
         for number, line in code_lines(path):
-            assert "confidence" not in line.lower() or "sign_consistency" in line, (
+            lowered = line.lower()
+            assert "extraction_confidence" not in lowered, (
+                f"{path.name}:{number} reads the extractor's confidence")
+            if package.name == "calibration":
+                continue
+            if "confidence" not in lowered:
+                continue
+            assert any(name in line for name in allowed), (
                 f"{path.name}:{number} reads a confidence: {line.strip()}")
 
 

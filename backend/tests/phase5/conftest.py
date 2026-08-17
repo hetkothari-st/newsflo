@@ -102,12 +102,60 @@ def code_lines(path: Path) -> list[tuple[int, str]]:
 
 
 def imported_modules(path: Path) -> set[str]:
-    """Every module this file imports -- at module level or inside a function
-    (a lazy import is still an import)."""
+    """Every module this file imports, as an ABSOLUTE dotted name.
+
+    Two hardenings over the obvious version (review round 1, m-11):
+
+      * RELATIVE imports are resolved, not skipped. `from ..market import
+        measure` inside `app/analysis/…` is an import of `app.market`, and a
+        scan that only looked at `node.level == 0` would have called that file
+        clean. The package path is reconstructed from the file's location
+        under `backend/`, so the resolution needs no import of the module;
+      * a module named directly (`import app.market`) and a symbol taken from
+        it (`from app.market import measure`) both yield `app.market`.
+
+    Module level and function level alike -- a lazy import is still an import.
+    """
+    source = path.read_text(encoding="utf-8")
+    package = _package_of(path)
     modules: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            modules.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                if node.module:
+                    modules.add(node.module)
+                continue
+            base = _relative_base(package, node.level)
+            resolved = f"{base}.{node.module}" if node.module else base
+            if resolved:
+                modules.add(resolved.strip("."))
     return modules
+
+
+def _package_of(path: Path) -> str:
+    """`backend/app/analysis/empirical/check.py` -> `app.analysis.empirical`."""
+    try:
+        relative = path.resolve().relative_to(BACKEND)
+    except ValueError:                                # pragma: no cover
+        return ""
+    return ".".join(relative.parts[:-1])
+
+
+def _relative_base(package: str, level: int) -> str:
+    """The absolute package a `level`-dot relative import resolves against."""
+    parts = package.split(".") if package else []
+    trimmed = parts[:len(parts) - (level - 1)] if level > 1 else parts
+    return ".".join(trimmed)
+
+
+def package_sources(package: Path) -> list[Path]:
+    """Every module in a package INCLUDING subpackages (m-11).
+
+    `glob("*.py")` would have let `app/analysis/surprise/adapters/market.py`
+    exist unscanned. Nothing has subpackages today; the scans must not be the
+    reason that stays true.
+    """
+    return sorted(p for p in package.rglob("*.py")
+                  if "__pycache__" not in p.parts)

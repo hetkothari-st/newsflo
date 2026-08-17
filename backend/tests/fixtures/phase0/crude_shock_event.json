@@ -156,7 +156,7 @@
       "payload": {
         "_fixture": true,
         "objection_id": "ob_fixture_2",
-        "type": "MECHANISM_UNSUPPORTED",
+        "type": "MECHANISM_INVALID",
         "severity": "WARN",
         "sustained": false
       }

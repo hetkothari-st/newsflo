@@ -501,13 +501,6 @@ and unvalidated, and each is a one-constant change:
 
 ### 9.8 Phase 5 policy changes a reviewer should know about
 
-* **`WEAK` is admitted at PRIMARY** (`config/gates.yaml`
-  `allowed_empirical_status: [AGREE, NO_DATA, WEAK]`). `WEAK` did not exist
-  before this phase, so this is not a relaxation of a bar that was ever
-  applied; it is a decision about where a new vocabulary entry sits. An
-  insignificant historical sample must not get a veto over a fundamental
-  read. `CONFLICT` remains absent, which is what caps a contradicted
-  candidate at `SECONDARY_RIPPLE`.
 * **`objection_types_exempt_from_severity_cap: [EMPIRICAL_CONFLICT]` on the
   ripple tier.** Without it, the sustained MAJOR objection §10.3 requires
   would have failed the SECONDARY walk too and produced `REJECTED` — the
@@ -524,10 +517,50 @@ and unvalidated, and each is a one-constant change:
   `ReturnHistory` and a shock series as `module:factory` arguments and exits
   non-zero without them. Registering it with the scheduler is a one-line
   change the day §9.1–9.3 land.
-* **No UI renders any of this.** The empirical sentence
+* **No PRODUCT UI renders any of this.** The empirical sentence
   (`empirical_line`), the confidence line (`confidence_line`) and the
   surprise badge are formatting helpers with tests; V5 still has no serving
-  path (the standing Phase 0 ruling). **Owner: V5 serving phase.**
+  path (the standing Phase 0 ruling). **Owner: V5 serving phase.** The
+  INTERNAL review console is a different thing and it exists:
+  `/divergence/queue`, `/divergence/review` and `/divergence/resolve` on
+  `tools/ledger_ui.py`, added the same additive way Phase 3 added the
+  mechanism-edge pages.
+
+### 9.9 PROPOSED SPEC AMENDMENTS (§7.2 form required) — OPEN
+
+Changes Phase 5 believes the spec should make, recorded rather than
+implemented. **None of these is in the code.** EXECUTION_CONTRACT §7.2
+requires a *failing measurement* to amend a frozen value, and each entry below
+names the measurement that does not yet exist.
+
+**PROPOSED SPEC AMENDMENT 1 — admit `WEAK` to
+`primary.allowed_empirical_status`.**
+
+* *Current normative value:* BUILD_SPEC §7.4 — `{AGREE, NO_DATA}`, frozen by
+  EXECUTION_CONTRACT §7.1. Deployed unchanged in `config/gates.yaml`.
+* *Proposed value:* `{AGREE, NO_DATA, WEAK}`.
+* *Argument:* §10.2 defines `WEAK` as "the sample exists but is not
+  significant either way" — the same information content as `NO_DATA`, which
+  §7.4 already admits at PRIMARY. As frozen, a company we HAVE measured and
+  found inconclusive publishes strictly worse than a company we have never
+  measured: running the event study can only ever demote a candidate, never
+  confirm one. That is a perverse incentive against building the very matrix
+  §10.1 asks for, and it lets an insignificant historical sample veto a
+  fundamental read.
+* *Counter-argument (why the freeze may be right):* precision-first. Until
+  the matrix exists nobody knows how many PRIMARY candidates would carry
+  `WEAK`, and if the answer is "most of them" the amendment is a large,
+  unmeasured loosening of the strongest tier.
+* **Missing prerequisite:** a failing measurement. `transmission_empirical`
+  is EMPTY (§9.1–9.3), so no candidate has ever carried `WEAK` in anger and
+  the precision/recall cost of either choice is unmeasured. The measurement
+  becomes possible the day the matrix is populated: count PRIMARY-eligible
+  candidates by empirical status, and compare expert-judged precision of the
+  `WEAK` group against the `NO_DATA` group.
+* *Blast radius if adopted:* one line in `config/gates.yaml`, one assertion
+  in `tests/phase3/test_ripple_gates.py`, one in
+  `tests/phase5/test_empirical_check.py`. Nothing structural.
+* **Owner: repo owner** (spec amendment), after Phase 7's corpus.
 
 ---
 

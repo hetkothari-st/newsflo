@@ -2339,12 +2339,21 @@ class TransmissionEmpirical(Base):
     company_id = Column(Integer, primary_key=True)
     shock_variable = Column(String, primary_key=True)
     shock_sign = Column(String, primary_key=True)       # UP | DOWN
-    horizon = Column(String, primary_key=True)          # 1d | 5d | 20d
+    # 1d | 5d | 20d -- the CAR window in TRADING SESSIONS AFTER AND INCLUDING
+    # the shock day. "1d" is therefore TWO sessions (offsets 0 and +1), not
+    # one: the shock is measured on day 0 and the reaction predominantly
+    # happens there. Stated here because a reader who assumes "1d = one
+    # session" mis-reads every row in the table.
+    horizon = Column(String, primary_key=True)
     estimator_version = Column(String, primary_key=True)
     n_events = Column(Integer, nullable=False)
+    # UNITS: a FRACTION of price, not a percent. -0.014 is -1.4%. The three
+    # CAR columns share this unit; `divergence_review.excess_move_pct` is the
+    # other convention (percent) and the two must never be compared without
+    # converting -- see that table's own note.
     median_car = Column(Numeric, nullable=False)
-    iqr_lo = Column(Numeric, nullable=True)
-    iqr_hi = Column(Numeric, nullable=True)
+    iqr_lo = Column(Numeric, nullable=True)             # fraction, as median_car
+    iqr_hi = Column(Numeric, nullable=True)             # fraction, as median_car
     p_value = Column(Numeric, nullable=False)
     sign_consistency = Column(Numeric, nullable=False)
     computed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
@@ -2361,6 +2370,15 @@ class DivergenceReview(Base):
 
     `review_id` is CONTENT-ADDRESSED, so re-running the same analysis re-queues
     the same review instead of growing the queue by one per run.
+
+    **TWO UNITS LIVE IN THIS TABLE AND THEY ARE NOT THE SAME.** `median_car`
+    is a FRACTION copied verbatim from `transmission_empirical` (-0.014 is
+    -1.4%); `excess_move_pct` is a PERCENT, the unit the market layer hands
+    over (-1.4 is -1.4%), and `threshold_pct` is compared against it in that
+    unit. They are never compared with each other, and nothing multiplies one
+    by the other -- but a reviewer reading a row, or a later query joining
+    them, would have no way to know that without this note. The console
+    converts `median_car` to percent at the point a human reads it.
     """
     __tablename__ = "divergence_review"
 
@@ -2374,10 +2392,10 @@ class DivergenceReview(Base):
     fundamental_direction = Column(String, nullable=True)
     empirical_status = Column(String, nullable=True)
     n_events = Column(Integer, nullable=True)
-    median_car = Column(Numeric, nullable=True)
+    median_car = Column(Numeric, nullable=True)         # FRACTION (-0.014 = -1.4%)
     p_value = Column(Numeric, nullable=True)
-    excess_move_pct = Column(Numeric, nullable=True)
-    threshold_pct = Column(Numeric, nullable=True)
+    excess_move_pct = Column(Numeric, nullable=True)    # PERCENT (-1.4 = -1.4%)
+    threshold_pct = Column(Numeric, nullable=True)      # PERCENT, as excess_move_pct
     status = Column(String, nullable=False, default="OPEN",
                     server_default="OPEN")
     resolution = Column(String, nullable=True)

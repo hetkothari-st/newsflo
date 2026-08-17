@@ -58,13 +58,24 @@ class SyntheticHistory:
 
 def hand_computed_history(*, thin: bool = False, corporate_action_offset=None,
                           circuit_offset=None, not_listed: bool = False,
-                          estimation_gap_offset=None):
+                          estimation_gap_offset=None,
+                          stale_print_offsets=()):
     """The hand-computed fixture as a `SyntheticHistory`.
 
     Estimation window: offsets -250..-31, benchmark cycling through
     {-0.4%, -0.2%, 0, +0.2%, +0.4%} and company = 0.1% + 1.5 x benchmark
     EXACTLY, so OLS recovers alpha=0.001 and beta=1.5 on the nose.
     Event window: the six observations in the fixture, then a quiet tail.
+
+    THE STALE-PRINT SHAPE (review round 1, I-2). A day that did not trade
+    carries the previous close forward, so a real feed reports it as
+    `traded=False` with a perfectly well-formed `return_pct = 0.0` -- NOT as a
+    missing return. That is the shape that would sum as a genuine zero
+    abnormal return if the estimator only checked for None, so it is the shape
+    the fixtures must be able to produce:
+
+      * `thin=True` makes every other ESTIMATION day a stale print;
+      * `stale_print_offsets=(2,)` makes an EVENT-window day one.
     """
     from app.analysis.empirical.event_study import DailyObservation
 
@@ -84,13 +95,16 @@ def hand_computed_history(*, thin: bool = False, corporate_action_offset=None,
         r = alpha + beta * b
         traded = True
         if thin and index % 2 == 0:
-            # every other day did not trade at all: a thin name
+            # Every other session is a STALE PRINT: no trade, and the feed
+            # reports a well-formed 0.0 return rather than a missing one. Only
+            # the `traded` flag distinguishes it from a genuine flat day, which
+            # is exactly what the estimator has to honour.
             traded = False
         benchmark[offset] = DailyObservation(day=day_of(offset), offset=offset,
                                              return_pct=b)
         company[offset] = DailyObservation(
             day=day_of(offset), offset=offset,
-            return_pct=(None if not traded else r), traded=traded,
+            return_pct=(0.0 if not traded else r), traded=traded,
             corporate_action=("SPLIT" if offset == estimation_gap_offset else None))
         if offset == estimation_gap_offset:
             company[offset] = DailyObservation(
@@ -104,11 +118,12 @@ def hand_computed_history(*, thin: bool = False, corporate_action_offset=None,
         offset = int(entry["offset"])
         benchmark[offset] = DailyObservation(day=day_of(offset), offset=offset,
                                              return_pct=entry["benchmark"])
+        stale = offset in tuple(stale_print_offsets)
         company[offset] = DailyObservation(
             day=day_of(offset), offset=offset,
             return_pct=(None if offset == corporate_action_offset
-                        else entry["company"]),
-            traded=True,
+                        else 0.0 if stale else entry["company"]),
+            traded=not stale,
             circuit=("UPPER" if offset == circuit_offset else None),
             corporate_action=("SPLIT" if offset == corporate_action_offset else None))
 

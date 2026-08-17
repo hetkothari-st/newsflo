@@ -122,6 +122,31 @@ def active_regime_change(session, *, company_id: int, shock_class: str,
         review_id=(None if row["review_id"] is None else str(row["review_id"])))
 
 
+def listed_regime_changes(session, *, as_of: date | None = None
+                          ) -> tuple[dict, ...]:
+    """Every annotation ever written, newest first, each flagged `active` for
+    `as_of`. The review console renders this.
+
+    Lapsed rows are RETAINED and shown, not filtered: "we argued this regime
+    had changed and let the argument expire" is exactly the history a reviewer
+    needs before writing the same annotation again.
+    """
+    rows = session.execute(text(
+        "SELECT annotation_id, company_id, shock_class, reason, reviewed_by, "
+        "effective_from, expires_on, review_id FROM regime_change "
+        "ORDER BY effective_from DESC, annotation_id ASC")).mappings().all()
+    out = []
+    for row in rows:
+        entry = dict(row)
+        if as_of is None:
+            entry["active"] = None
+        else:
+            entry["active"] = (_as_date(row["effective_from"]) <= as_of
+                               <= _as_date(row["expires_on"]))
+        out.append(entry)
+    return tuple(out)
+
+
 def _as_date(value: Any) -> date:
     if isinstance(value, date):
         return value

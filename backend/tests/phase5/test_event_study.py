@@ -171,6 +171,66 @@ def test_a_corporate_action_inside_the_estimation_window_is_dropped_not_fatal():
     assert results["5d"].car == pytest.approx(0.0015, abs=1e-12)
 
 
+def test_a_stale_print_in_the_event_window_is_not_summed_as_a_zero_reaction():
+    """REVIEW ROUND 1 (I-2). A day that did not trade carries the previous
+    close forward, so the feed reports `traded=False` with a well-formed
+    `return_pct = 0.0`. Summing it would report "the company did not react" on
+    a day the company COULD not react -- and it would pass a None check.
+
+    Refuse, do not correct: dropping the day would silently shorten the
+    horizon, so a "5-day" CAR would be computed over four sessions.
+    """
+    from app.analysis.empirical.event_study import (
+        ABSTAIN_THIN_EVENT_WINDOW, estimate_car,
+    )
+
+    results = estimate_car(hand_computed_history(stale_print_offsets=(2,)),
+                           company_id=FIXTURE_COMPANY_ID,
+                           event_day=FIXTURE_EVENT_DAY, policy=tiny_policy())
+    assert results["5d"].car is None, (
+        "a stale print was summed as a genuine zero abnormal return")
+    assert results["5d"].abstain_reason == ABSTAIN_THIN_EVENT_WINDOW
+    # The +1d window closes before the untouched session and is unaffected.
+    assert results["1d"].car == pytest.approx(-0.0005, abs=1e-12)
+
+
+def test_enough_stale_prints_fail_the_traded_fraction_before_the_sum():
+    """The aggregate gate fires first, and names the same reason -- so a
+    mostly-untraded window and a single stale session are both refusals rather
+    than one refusal and one silently shortened horizon."""
+    from app.analysis.empirical.event_study import (
+        ABSTAIN_THIN_EVENT_WINDOW, estimate_car,
+    )
+
+    results = estimate_car(
+        hand_computed_history(stale_print_offsets=(1, 2, 3, 4)),
+        company_id=FIXTURE_COMPANY_ID, event_day=FIXTURE_EVENT_DAY,
+        policy=tiny_policy())
+    assert results["5d"].car is None
+    assert results["5d"].abstain_reason == ABSTAIN_THIN_EVENT_WINDOW
+
+
+def test_the_estimation_window_ignores_stale_prints_too():
+    """The same shape on the ESTIMATION side: 110 real sessions out of 220,
+    which is below the 120 the policy requires. If `traded` were ignored the
+    zeros would have flattened beta instead."""
+    from app.analysis.empirical.event_study import ABSTAIN_ESTIMATION, fit_market_model
+
+    assert fit_market_model(hand_computed_history(thin=True),
+                            company_id=FIXTURE_COMPANY_ID,
+                            event_day=FIXTURE_EVENT_DAY,
+                            policy=tiny_policy()) is None
+    results = estimate_car_of(hand_computed_history(thin=True))
+    assert all(r.abstain_reason == ABSTAIN_ESTIMATION for r in results.values())
+
+
+def estimate_car_of(history):
+    from app.analysis.empirical.event_study import estimate_car
+
+    return estimate_car(history, company_id=FIXTURE_COMPANY_ID,
+                        event_day=FIXTURE_EVENT_DAY, policy=tiny_policy())
+
+
 def test_a_circuit_day_is_kept_and_flagged_rather_than_dropped():
     """The move is real, it is merely truncated: the true reaction is AT
     LEAST this large. Dropping it understates; pretending it is complete

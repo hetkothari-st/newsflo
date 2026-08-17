@@ -25,6 +25,11 @@ Pages:
   GET  /ledger/coverage      coverage by sector and tag, ledger age
   GET  /ledger/coverage.json the same, as JSON
   GET  /ledger/metrics       Prometheus text format
+  GET  /divergence/queue     V5 Phase 5: open EMPIRICAL_CONFLICT /
+                             MARKET_DIVERGENCE reviews + regime annotations
+  GET  /divergence/review    one disagreement, with the sample behind it
+  POST /divergence/resolve   UPHELD / MODEL_WRONG / NOISE / REGIME_CHANGED
+                             (the last one requires an expiry)
 """
 from __future__ import annotations
 
@@ -46,6 +51,7 @@ from fastapi.responses import (  # noqa: E402
     HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
 )
 
+from app.ledger import divergence_review_pages  # noqa: E402
 from app.ledger import edge_review_pages  # noqa: E402
 from app.ledger import review as review_api  # noqa: E402
 from app.ledger.coverage import (  # noqa: E402
@@ -85,7 +91,8 @@ _STYLE = """
 
 _NAV = ("<nav><a href='/'>queue</a> &middot; <a href='/ledger/quality'>extractor "
         "quality</a> &middot; <a href='/ledger/coverage'>coverage</a> &middot; "
-        "<a href='/ledger/metrics'>metrics</a></nav>")
+        "<a href='/ledger/metrics'>metrics</a> &middot; "
+        "<a href='/divergence/queue'>divergence</a></nav>")
 
 
 def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
@@ -344,6 +351,13 @@ def build_app(engine) -> FastAPI:
     # discipline -- a machine proposes, a person decides. Nothing above this
     # line changed.
     edge_review_pages.register(app, engine, _page)
+
+    # V5 Phase 5, ADDITIVE: /divergence/queue, /divergence/review and
+    # /divergence/resolve. §10.3 routes an empirical conflict to a HUMAN
+    # reviewer and lets that reviewer record a REGIME_CHANGED annotation with
+    # an expiry -- which needs somewhere for the human to stand. Same console,
+    # same reviewer, same discipline. Nothing above this line changed.
+    divergence_review_pages.register(app, engine, _page)
 
     return app
 

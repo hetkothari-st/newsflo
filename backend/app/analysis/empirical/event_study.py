@@ -347,6 +347,7 @@ def estimate_car(history: ReturnHistory, *, company_id: int, event_day: date,
         censored = 0
         corporate_action = False
         missing = False
+        stale = False
         for offset in offsets:
             observation = company.get(offset)
             other = benchmark.get(offset)
@@ -356,6 +357,19 @@ def estimate_car(history: ReturnHistory, *, company_id: int, event_day: date,
                 missing = True
                 if observation is not None and observation.corporate_action:
                     corporate_action = True
+                break
+            if not observation.traded:
+                # A STALE PRINT IS NOT A ZERO MOVE (review round 1, I-2). A day
+                # that did not trade carries the previous close forward, so its
+                # `return_pct` is a perfectly well-formed 0.0 that describes
+                # nothing. Summing it would report "the company did not react"
+                # on a day the company could not react.
+                #
+                # REFUSE, DO NOT CORRECT (design doc §3.4). Dropping the day
+                # instead would silently shorten the horizon -- a "5-day" CAR
+                # computed over four sessions is not the number the column
+                # says it is -- so the whole window is abstained on.
+                stale = True
                 break
             if observation.circuit:
                 # The move is real, merely truncated: the true reaction is AT
@@ -368,10 +382,12 @@ def estimate_car(history: ReturnHistory, *, company_id: int, event_day: date,
             total += float(observation.return_pct) - (
                 model.alpha + model.beta * float(other.return_pct))
 
+        unusable = missing or stale
         results[label] = CarResult(
             company_id=company_id, event_day=event_day, horizon=label,
-            window_days=window, car=(None if missing else total),
-            abstain_reason=(ABSTAIN_MISSING_RETURN if missing else None),
+            window_days=window, car=(None if unusable else total),
+            abstain_reason=(ABSTAIN_MISSING_RETURN if missing
+                            else ABSTAIN_THIN_EVENT_WINDOW if stale else None),
             censored_days=censored, had_corporate_action=corporate_action,
             benchmark_id=benchmark_id, model=model)
     return results

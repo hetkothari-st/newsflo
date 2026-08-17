@@ -16,7 +16,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tests.phase5.conftest import BACKEND, code_lines, imported_modules
+from tests.phase5.conftest import (
+    BACKEND, code_lines, imported_modules, package_sources,
+)
 from tests.phase5.helpers import impact_with_empirical
 
 SURPRISE = BACKEND / "app" / "analysis" / "surprise"
@@ -39,7 +41,7 @@ PRIOR_OTHER = ("Monsoon rainfall ends fourteen percent above the long period "
 @pytest.mark.parametrize("package", [SENSITIVITY, POLICY, CORE],
                          ids=lambda p: p.name)
 def test_axis_a_imports_nothing_from_the_surprise_package(package):
-    for path in sorted(package.glob("*.py")):
+    for path in package_sources(package):
         offenders = {m for m in imported_modules(path)
                      if m == "app.analysis.surprise"
                      or m.startswith("app.analysis.surprise.")}
@@ -51,7 +53,7 @@ def test_axis_a_imports_nothing_from_the_surprise_package(package):
 def test_the_surprise_package_imports_nothing_that_opens_a_socket():
     banned = ("yfinance", "requests", "httpx", "urllib", "urllib3", "socket",
               "aiohttp", "http", "ftplib", "smtplib")
-    for path in sorted(SURPRISE.glob("*.py")):
+    for path in package_sources(SURPRISE):
         for module in imported_modules(path):
             assert module.split(".")[0] not in banned, f"{path.name}: {module}"
 
@@ -60,14 +62,14 @@ def test_the_surprise_package_names_no_model_and_computes_no_embedding():
     """Novelty is deterministic token overlap. An embedding would mean a
     model call, a network hop and a score nobody can reproduce."""
     banned = ("embedding", "claude", "gemini", "gpt-", "anthropic", "openai")
-    for path in sorted(SURPRISE.glob("*.py")):
+    for path in package_sources(SURPRISE):
         for number, line in code_lines(path):
             for needle in banned:
                 assert needle not in line.lower(), f"{path.name}:{number}"
 
 
 def test_the_surprise_package_reads_no_clock():
-    for path in sorted(SURPRISE.glob("*.py")):
+    for path in package_sources(SURPRISE):
         for number, line in code_lines(path):
             assert "now(" not in line and "utcnow" not in line, \
                 f"{path.name}:{number} reads a clock"
