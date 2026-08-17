@@ -1,0 +1,178 @@
+corpus: 52 indexed reports (14389 pages total)
+
+==============================================================================
+EXPOSURE LEAVES  (n = 52 indexed annual reports)
+==============================================================================
+key                                          RAW   HIT  GATEFAIL
+------------------------------------------------------------------------------
+fx:usd_cost_share                             14    11         0
+fx:usd_debt_share                             30    16         0
+fx:usd_revenue_share                          14    10         0
+input:aluminium                               17     8         0
+input:atf                                      3     1         0
+input:base_oil                                 6     5         0
+input:bought_in_freight                       33    11         0
+input:copper                                   3     1         0
+input:crude_derivative_bitumen                 1     1         0
+input:crude_derivative_petchem                41    32         0
+input:crude_derivative_rubber                 12     6         0
+input:crude_direct                             1     0         0
+input:freight_diesel                          43    21         0
+input:fuel_furnace_pet_coke                   14     7         0
+input:intermediated_air_capacity               2     1         0
+input:milk                                    20    11         0
+input:palm_oil                                 7     4         0
+input:steel_flat                               1     0         0
+input:steel_long                               0     0         0
+input:sugar                                   12     5         0
+input:wheat                                    7     0         0
+rate:floating_debt_share                      28    19         0
+rate:nim_asset_sensitivity                     9     7         0
+revenue:crude_realization                      0     0         0
+revenue:gas_realization_apm                    0     0         0
+revenue:gas_realization_market                 0     0         0
+revenue:marketing_margin_retail_fuel           0     0         0
+revenue:refining_gross_margin                  0     0         0
+------------------------------------------------------------------------------
+leaves with >=1 company-named hit             19
+DISTINCT COMPANIES with >=1 hit               50  of 52
+
+==============================================================================
+QUALITATIVE PASS_THROUGH  (n = 52 indexed annual reports)
+==============================================================================
+key                                          RAW   HIT  GATEFAIL
+------------------------------------------------------------------------------
+FUEL_SURCHARGE                                 3     1         0
+PRICE_ADJUSTMENT_CLAUSE                       13     3         0
+REGULATED_TARIFF_PASS                          0     0         0
+RM_ESCALATION                                 14     3         0
+------------------------------------------------------------------------------
+leaves with >=1 company-named hit              3
+DISTINCT COMPANIES with >=1 hit                6  of 52
+
+companies with BOTH an exposure hit and a pass-through hit: 5
+
+
+==============================================================================
+EXCERPTS — exposure leaves (gate-passing, verbatim)
+==============================================================================
+
+### fx:usd_cost_share   [11 companies]
+  - SOTL.NS p179: (a) Curr ency Risk The Company is exposed to currency risk mainly on account of its import payables and export receivables in foreign currency.
+  - COLPAL.NS p284: CURRENCY RISK The Company is subject to the risk of changes in foreign currency values that impact costs of imported raw material (directly and by local suppliers), import of ﬁnished goods, equipment for expansion at the plants, expatriate costs, service incom
+  - PANAMAPET.NS p155: Financial risk management (Contd..) a) Currency Risk The Company is exposed to currency risk mainly on account of its import payables and export receivables in foreign currency.
+  - XPROINDIA.NS p127: Considering that major borrowings are in foreign currency and also purchases are made in foreign currency, the Company’s exposure to foreign currency at each reporting date is disclosed herein.
+
+### fx:usd_debt_share   [16 companies]
+  - DABUR.NS p228: (ii) Foreign Exchange Risk and hedging activities As regards foreign exchange risks, keeping in view the position of rupee in the market vis-a-vis foreign currency, the Company has been taking forward cover for foreign currency exports and imports from time to
+  - ASIANPAINT.NS p213: The Company has taken Cross Currency Interest Rate Swap in order to hedge floating interest rate risk exposure related to its JPY denominated external commercial borrowing.
+  - SOTL.NS p53: We further report, that there were no events/actions in pursuance of: a) F oreign Exchange Management Act, 1999 and the rules and regulations made thereunder to the extent of Foreign Direct Investment, Overseas Direct Investment and External Commercial Borrowi
+  - JUBLCPL.NS p71: To deal with matters related to transaction(s) of purchase or sale of spot and forward Foreign Exchange against exports, imports and foreign currency loans of the Company and other forex transactions including Derivatives etc.
+
+### fx:usd_revenue_share   [10 companies]
+  - SOTL.NS p179: (a) Curr ency Risk The Company is exposed to currency risk mainly on account of its import payables and export receivables in foreign currency.
+  - JUBLCPL.NS p71: To deal with matters related to transaction(s) of purchase or sale of spot and forward Foreign Exchange against exports, imports and foreign currency loans of the Company and other forex transactions including Derivatives etc.
+  - BRITANNIA.NS p123: The Company has export sales (2% to 3% of total sales) primarily denominated in US dollars and Euro.
+  - PANAMAPET.NS p155: Financial risk management (Contd..) a) Currency Risk The Company is exposed to currency risk mainly on account of its import payables and export receivables in foreign currency.
+
+### input:aluminium   [8 companies]
+  - ASIANPAINT.NS p111: Weatherseal Fenestration Private Limited Weatherseal Fenestration Private Limited (“Weatherseal”) is a subsidiary of the Company, engaged in the business of uPVC and system aluminium windows and doors segment.
+  - INDIGOPNTS.NS p27: Recent imposition of US tariffs on industries such as steel and aluminium, however, is likely to propel oil prices higher and fuel inflationary pressures.
+  - COLPAL.NS p65: Driving Sustainability with Impact Annual & ESG Report 2025-2026 122(India) Limited Corporate Overview Statutory Reports Financial Statements 123Sustainability and Us Case Study Closing the Loop 100% Migration to Recyclable Tube Packaging Often rolled up by co
+  - PIDILITIND.NS p253: Commodity price risk / Foreign Exchange Risk and Hedging Activities Certain key raw materials and packing materials used by the Company are derivatives of commodities such as crude oil, paper, aluminium, etc.
+
+### input:atf   [1 companies]
+  - APOLLOTYRE.NS p137: Community Participation through Local Resource Networks: The Company through ATF promotes inclusive programme delivery by actively engaging Community Resource Persons (CRPs) and Peer Educators (PEs) drawn from within the beneficiary communities.
+
+### input:base_oil   [5 companies]
+  - CASTROLIND.NS p24: Continuing our efforts on circularity we collaborated with an OEM which led to the development of a more sustainable engine oil formulated using Re-Refined Base Oil (RRBO), designed specifically for BS IV vehicles.
+  - PANAMAPET.NS p48: OPPORTUNITIES THREATS Changes in Government policies, especially regarding import of Base Oil will have an adverse impact on the performance of the Company.
+  - VEEDOL.NS p120: iii) Commodity Price Risk The Company’s exposure to market risk with respect to commodity prices primarily arises from the fact that it is a purchaser of base oil.
+  - GULFOILLUB.NS p151: Annual Report 2024-25 179 Statutory Reports Financial StatementsCorporate Overview Corporate Governance Report (Contd.) Commodity risks faced by the Company during the financial year and their management The Company being a sizable user of imported Base oil, e
+
+### input:bought_in_freight   [11 companies]
+  - GODREJCP.NS p140: We have adopted a Transportation Management System that, has helped us optimize transportation routes and loads, reducing freight costs.
+  - CONCOR.NS p412: Terminal and Other Service Charges (₹ in crore) Particulars For the year ended March 31, 2025 For the year ended March, 2024 Rail freight expenses 5,022.02 4,910.09 Road freight expenses 326.65 269.86 Handling expenses 270.31 280.59 Shipping Freight expenses 0
+  - DELHIVERY.NS p34: Our early customers have already realised up to a 12% reduction in freight costs, in addition to the benefits of end-to-end digitisation of the freight movement process.
+  - GRWRHITECH.NS p48: By prioritizing local procurement, the Company reduces transportation costs, lowers its environmental footprint, and strengthens local economies by supporting nearby businesses and generating employment opportunities.
+
+### input:copper   [1 companies]
+  - UFLEX.NS p71: Environmentally Friendly Plating: We’ve switched to Alkaline Copper Plating, eliminating hazardous heavy metals (like Nickel) from entering the environment via air and water pollution.
+
+### input:crude_derivative_bitumen   [1 companies]
+  - BERGEPAINT.NS p52: Berger Rock Paints Private Limited ('Berger Rock') Berger Becker Coatings Private Limited ('Berger Becker') Berger Hesse Wood Coatings Private Limited ('Berger Hesse') CASE Construction Equipment VOLVO Excavator PROPEL Mining Equipment 96 Integrated Annual Rep
+
+### input:crude_derivative_petchem   [32 companies]
+  - DABUR.NS p122: In parallel, our packaging requirements are equally varied, spanning paper-based solutions such as mono-cartons and corrugated boxes, polymer-based formats including PET, HDPE, and PP, as well as flexible and rigid formats like laminates, labels, sleeves, glas
+  - ASIANPAINT.NS p19: Our VAM-VAE (Vinyl Acetate Monomer-Vinyl Acetate Ethylene Emulsion) emulsion manufacturing project at Dahej, Gujarat, has also progressed well.
+  - SOTL.NS p53: We further report that, having regard to the compliance system prevailing in the Company and on examination of the relevant documents and records in pursuance thereof, on test-check basis, the Company has complied with the following laws applicable specificall
+  - JUBLCPL.NS p43: OVERVIEW The Company is engaged in the business of manufacturing of Performance Polymers & Chemicals and Agri Products comprising Single Super Phosphate, a wide range of Crop Nutrition, Crop Growth at its manufacturing facilities situated at Gajraula & Sahibab
+
+### input:crude_derivative_rubber   [6 companies]
+  - CEATLTD.NS p38: Recycled Carbon Black Devulcanised Rubber Reclaimed Rubber Bio-based Oils Rice Husk Silica Recycled Raw Materials Sustainable Packaging Circular Materials and Product Innovation The Company is working to reduce dependence on virgin materials by increasing the 
+  - UFLEX.NS p56: Every day, we convert 6 tonnes of waste into liquid fuel, hydrocarbon gas, and carbon black.
+  - JKTYRE.NS p169: Its operating activities require the purchase of raw material and manufacturing of tyres and therefore require a continuous supply of certain raw materials such as natural rubber, synthetic rubber, carbon black, fabric, crude oil, bead wire rubber chemicals et
+  - AARTIIND.NS p107: The Company offers a diverse portfolio of more than 100 products derived from benzene, aniline, sulphuric acid, toluene and methanol, catering to industries such as agrochemicals, dyes, pigments, paints, printing inks, polymer additives, fuel additives, pharma
+
+### input:freight_diesel   [21 companies]
+  - DABUR.NS p309: During the year, the Company initiated comprehensive monitoring of electricity and fuel consumption across its operational footprint, including manufacturing facilities, offices, Annexure 9 warehouses, and employee residential facilities.
+  - ASIANPAINT.NS p61: Energy consumption by source at decorative paint manufacturing units (GJ) 24.7% Reduction in specific electricity consumption from baseline Renewable Energy Electricity & Steam: 227,379 Non-renewable energy Fuel: 274,439 Electricity & Steam: 186,421 Total: 460
+  - SOTL.NS p15: The Company also upgraded insulation across heating systems, overhauled thermopac units, introduced electric drum heating systems, replaced ageing pumps and motors with energy-efficient alternatives, optimised diesel generator capacity, installed energy-effici
+  - INDIGOPNTS.NS p250: Fuel and Entertainment Expenses: The Executive Director is entitled to claim the fuel expenses as incurred by him in accordance with the Company Policy.
+
+### input:fuel_furnace_pet_coke   [7 companies]
+  - GODREJCP.NS p152: Furthering our commitment to cleaner fuel alternatives, we transitioned to bio-waste fuels in place of furnace oil in the hot air generators at our South Cluster Pondicherry Coil plant .
+  - BRITANNIA.NS p24: At Britannia, we have adopted cleaner fuels such as biomass and natural gas while gradually reducing our reliance on conventional fuels like furnace and light diesel oil.
+  - DEEPAKNTR.NS p160: However, the Company continues to rely partly on conventional fuels such as coal and furnace oil, which exposes it to energy cost volatility and sustainability-related pressures.
+  - PIDILITIND.NS p151: In the area of thermal energy, the Company has undertaken measures including the conversion of coal and furnace oil-based boilers to briquette-based systems, as well as the replacement of furnace oil with lower-emission fuels such as PNG.
+
+### input:intermediated_air_capacity   [1 companies]
+  - BLUEDART.NS p328: “Express Air Charter Services" income is generated from the charter flight services rendered exclusively to the Company.
+
+### input:milk   [11 companies]
+  - ASIANPAINT.NS p97: The Company’s CoC for the Board of Directors and Senior Management Personal (SMP), and CoC for employees set the guidelines for the identification, avoidance and declaration of conflicts of interest.
+  - JUBLINGREA.NS p69: Ambrish Dixit, President-Speciality Chemicals, ceased to be a SMP effective from the close of business hours of March 31, 2026, consequent to his resignation from the Company.
+  - DELHIVERY.NS p38: Case studies HPCL’s lubricant distribution relied on a legacy milk-run model that resulted in long fulfilment times for dealers as the company waited to consolidate loads before shipping.
+  - BRITANNIA.NS p30: 000150), Cost Auditors of the Company are carrying out the Audit of the cost records relating to Milk Powder for FY 2024-25.
+
+### input:palm_oil   [4 companies]
+  - DABUR.NS p69: In parallel, the company is working toward 100% sustainable sourcing of high deforestation-risk materials including juice, laminates, paper, and palm oil by 2027.
+  - HINDUNILVR.NS p41: We are advancing low Greenhouse gas (GHG) soda ash procurement in partnership with a key supplier, and reformulating ingredients in soaps, by reducing Total Fatty Matter (TFM) and high GHG palm oil with environmentally sustainable Palm (NDP palm), while mainta
+  - GODREJCP.NS p70: Commodity Price V olatility Our supply chain faces the challenges of unexpected and cyclic fluctuations in input costs and commodity pricing pressures, specifically concerning commodities such as PFAD (palm fatty acid distillate) and crude oil.
+  - COLPAL.NS p60: We strive to consistently source deforestation- and conversion-free palm oil, soy, and paper-based packaging materials, improving responsible sourcing practices and helping protect natural ecosystems.
+
+### input:sugar   [5 companies]
+  - DABUR.NS p47: Reformulating to reduce saturated fat, trans- fat, sugar, and sodium will be essential to maintaining market access and positioning the Company as a leader in health-oriented product offerings.
+  - HINDUNILVR.NS p84: These crops include tea, palm oil, paper and board, cereal, sugar, dairy, cocoa, coconut oil, soy, starches, and vegetables & herbs, comprising more than two-third of our agricultural raw material volumes.
+  - COLPAL.NS p15: Colorful gel with Sugar Acid Shield, providing advanced cavity protection Arginine + Calcium Boost Technology,* providing 24-hour cavity protection** Family Care A Complete Range For Every Smile Annual & ESG Report 2025-2026 22(India) Limited Accelerating Prem
+  - DEEPAKNTR.NS p193: Directorships held in companies Nil Membership/Chairmanship of committees of public companies Nil Names of Listed entities from where he resigned in past 3 years Dhampur Sugar Mills Limited Shareholdings in the Company, including Shareholding as a Beneficial O
+
+### rate:floating_debt_share   [19 companies]
+  - SOTL.NS p181: ₹ in Lakhs Particulars 2025-26 2024-25 Floating rate borrowings 47.36 33.47 (c ) C ommodity Risk R aw Material Risk P etroleum Products Segment - Timely availability and also non-availability of good quality base oils from across the globe could negate the qua
+  - JUBLCPL.NS p150: The risk is managed by the Company by maintaining an appropriate mix between fixed and floating rate borrowings.
+  - JUBLINGREA.NS p127: Exposure to interest rate risk The interest rate profile of the Company’s interest bearing financial instruments, as reported to the management of the Company is as follows: (₹ in million) As at 31 March 2026 As at 31 March 2025 Floating rate borrowings 7,046.
+  - GODREJCP.NS p565: Interest rate swap Interest rate swap is a derivative instrument whereby the Group receives at a floating rate in return for a fixed rate liability.
+
+### rate:nim_asset_sensitivity   [7 companies]
+  - BLUEDART.NS p357: Interest rate sensitivity - fixed rate instruments The Group's fixed rate borrowings are carried at amortised cost.
+  - TVSSRICHAK.NS p115: Interest rate sensitivity analysis If interest rates had been 50 basis points higher/lower and all other variables were held constant, the Company's Profit for the year ended March 31, 2025 would decrease/increase by ₹4.25 Crores; as against ₹4.20 Crores for t
+  - JKTYRE.NS p141: With all other variables held constant, the Company's profit before tax is affected through the impact on finance cost with respect to our borrowing, as follows: ` in Crores (10 Million) Particulars As at 31.03.2026 As at 31.03.2025 Change in Basis Points + 25
+  - POLYPLEX.NS p249: The Company has following fixed rate and floating interest rate on long term borrowing: As at March 31, 2026 As at March 31, 2025 Floating rate borrowings 12,100.00 6,500.00 Fixed rate borrowings - - Total 12,100.00 6,500.00 Interest rate sensitivity The follo
+
+
+==============================================================================
+EXCERPTS — pass-through (gate-passing, verbatim)
+==============================================================================
+
+### FUEL_SURCHARGE   [1 companies]
+  - TCIEXP.NS p86: This risk is mitigated through a dynamic fuel surcharge mechanism, periodic freight rate revisions, and contractual arrangements that enable partial pass- through of cost fluctuations, supporting margin stability and ensuring a more predictable pricing framewo
+
+### PRICE_ADJUSTMENT_CLAUSE   [3 companies]
+  - UFLEX.NS p116: The pricing policy of the Company final product is structured in such a way that any change in price of raw materials is passed on to the customers in the final product however, with a time lag which mitigates the raw material price risk.
+  - POLYPLEX.NS p97: Hence, any adverse fluctuations in the cost of PET resin can impact the Company’s operating margins depending upon the Company’s ability to pass on cost increases to its customers.
+  - GANDHAR.NS p86: T o manage input-cost fluctuations, the Company enacts price-pass-through clauses in certain customer contracts.
+
+### RM_ESCALATION   [3 companies]
+  - JSWDULUX.NS p72: Service revenue (iv) The Company provides research and development services under cost plus agreed mark-up basis.
+  - APOLLOTYRE.NS p58: SWOT Analysis Weaknesses The Company’s profitability remains sensitive to volatility in raw material prices, particularly in scenarios of sharp cost escalation.
+  - UFLEX.NS p116: The pricing policy of the Company final product is structured in such a way that any change in price of raw materials is passed on to the customers in the final product however, with a time lag which mitigates the raw material price risk.
