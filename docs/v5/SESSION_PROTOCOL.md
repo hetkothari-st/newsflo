@@ -139,6 +139,37 @@ staged paths whose mtime post-dates this session's last write to them) is
 **recorded and deliberately not built**: §1 prevents the whole class, and
 building it would imply shared trees are a supported mode. They are not.
 
+## 7.2 A fixture default must never encode the semantics under test
+
+When a guarantee is `X implies Y`, **no fixture, seeder, factory or helper may
+derive Y from X.** Derive it and the fixture asserts the rule for free, so the
+test can no longer fail when the rule is wrong — the guarantee has moved into
+the layer that was supposed to be checking it, where nothing tests it at all.
+Make the caller state Y.
+
+The measured case (2026-08-17, defect D10). `mechanism_edge` rows are walkable
+iff `review_status = 'APPROVED'` with a non-null `reviewed_by`. The obvious
+convenience was for `seed_edge` to default `review_status` to `APPROVED`
+**when `reviewed_by` is non-null** — it made three failing tests pass with no
+edits. It also *is* the defect: "a reviewer name means approval" was exactly
+the conflation being fixed, and putting it in the seeder would have bought a
+smaller diff by encoding the bug into the instrument used to detect it. The
+seeder now takes `review_status` explicitly and defaults it unconditionally.
+
+**The symptom to watch for is a test that goes GREEN across a semantic
+change.** In the same fix, a test named for the old (wrong) rule passed
+untouched, because it inherited the new default — it would have been read by
+the next session as coverage of a rule it actually contradicted. A red test
+announces itself; a test passing for a reason other than the one it names does
+not. After changing a rule, look at what **stopped failing that you expected
+to fail**, not only at what broke.
+
+This is the second guarantee found living in the wrong layer in one day. The
+first was authorship (§7.1: a path you own is not evidence you wrote its
+contents). Both were invisible to the checks in place, for the same reason —
+the check compared the wrong thing, and comparing the wrong thing produces
+silence, not an error.
+
 ## 8. What this replaces
 
 The earlier ad-hoc rules ("serial writer", "explicit paths", per-dispatch

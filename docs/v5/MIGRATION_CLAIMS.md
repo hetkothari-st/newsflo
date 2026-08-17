@@ -9,7 +9,8 @@ Protocol: `docs/v5/SESSION_PROTOCOL.md` §2.
 | 0001–0009 | APPLIED | (history) | V4 baseline through fact-provenance |
 | 0010–0015 | APPLIED | V5 program (sessions 0–8) | Gate Zero eval tables through empirical/calibration |
 | 0016 | APPLIED | genericity session | valid_exposure_tag re-sync (base_oil, bought_in_freight, intermediated_air_capacity) |
-| 0017 | **UNCLAIMED** | — | next available — request before use |
+| 0017 | **CLAIMED** | merge-integration session | `exposure_coverage` view re-key: GROUP BY `companies.sector` → `official_isubgroup`. DROP VIEW + CREATE VIEW, no table touched, `companies.sector` neither read as a key nor written |
+| 0018 | **UNCLAIMED** | — | next available — request before use |
 
 Rules:
 - A session needing a migration requests the next UNCLAIMED number from the

@@ -299,3 +299,115 @@ until its two edges are approved). Both should be in the same change.
   on three content gaps (§15) as well as on this schema hole.
 * No exposure leaf, no shock variable, no table row was added. `derivation`
   is unchanged, `usable()` is unchanged, `pending_edges` is unchanged.
+
+---
+
+# POSTSCRIPT — what the fix actually cost, measured after the fact
+
+**Added 2026-08-17 by the merge-integration session. Nothing above is edited.**
+D10 is FIXED as of this postscript. The body is left exactly as raised,
+including the cost estimate this postscript corrects, because a defect register
+that quietly updates its own predictions stops being evidence of anything.
+
+## The count was 5 sites. It was 7.
+
+The body states: *"the true cost of the strict variant is: 3 seeder signatures,
+1 test with a wrong premise, and 1 test assertion that inverts by design. Not
+26."* Measured against the implemented fix:
+
+| site | predicted | actual |
+|---|---|---|
+| `tests/phase3/conftest.py::seed_edge` | yes | signature gains `review_status="APPROVED"` |
+| `tests/coverage/conftest.py::_insert_edge` | yes | SQL literal |
+| `tests/genericity/…::_seed` | yes | SQL literal |
+| `test_an_unreviewed_io_edge_appears_in_the_review_queue` | yes, inverts | `["io-1"]` → `["io-1", "auth-1"]` |
+| `test_a_reviewed_io_table_edge_can_be_traversed` | yes, wrong premise | see below — **it did not fail** |
+| `test_the_queue_is_ranked_by_coefficient` | **no** | needs explicit `review_status="PENDING"` |
+| `test_approving_an_edge_records_the_reviewer` | **no** | needs explicit `review_status="PENDING"` |
+
+## Why the two extra appeared — the prediction was shaped by the measuring instrument
+
+The body dismisses those two: *"The remaining 3 are an artefact of that blunt
+patch, not breakage… The correct seeder takes `review_status` as a parameter
+defaulting to `APPROVED`, and those three pass `PENDING`."*
+
+That second sentence contains its own refutation. **"Those three pass
+`PENDING`" IS the edit.** Once the seeder's default is `APPROVED`, a fixture
+wanting a row awaiting review must say so — three call sites change, one of
+which was already counted separately for its inverting assertion. So two sites
+were predicted as "not breakage" and are in fact edits, of the smallest kind.
+
+The prediction was an artefact of the blunt patch in the same way the failures
+were. Variants were measured by patching `usable()` in memory and running; a
+blunt patch cannot distinguish *"this test breaks"* from *"this test now needs
+an argument it never passed"*, because both surface identically as a red line.
+Separating them required writing the seeder, which the measurement deliberately
+did not do. The error is small and in the honest direction, and it is recorded
+because a cost table that was right about 26→3 and wrong about 3→5 is more
+useful with both halves visible.
+
+## The finding worth more than the count: a test went GREEN and should not have
+
+`tests/phase3/test_discovery_sources.py::test_a_reviewed_io_table_edge_can_be_traversed`
+is named in the body as *"the one genuinely semantic test change in the whole
+set"*. Under the implemented fix it **passed without being touched.**
+
+It seeds `reviewed_by="human:fixture-reviewer"` and no `review_status`. Once
+the seeder defaulted to `APPROVED`, the row came out approved-and-signed, the
+test traversed it and went green — while still being named for, and structured
+around, the proposition that *a non-null reviewer name is approval*. That
+proposition is defect D2. A test asserting the defect would have survived the
+fix silently and been read by the next session as coverage of it.
+
+A failing test announces itself. A test that passes for a reason other than the
+one it claims does not — and the D2/D10 pair is exactly this class of error one
+layer down: a guarantee living in a column nothing checked.
+
+Fixed by making both fields explicit, renaming to
+`test_an_approved_io_table_edge_can_be_traversed`, and adding the assertion
+whose absence let the conflation stand:
+`test_a_named_reviewer_alone_does_not_make_an_edge_traversable` — a PENDING row
+WITH a reviewer name must not traverse, and must appear in the queue.
+
+## The tempting shortcut that was rejected
+
+Defaulting `review_status` to `APPROVED` **only when `reviewed_by` is
+non-null** makes all three queue tests pass with no edits at all. Rejected:
+that rule is "a reviewer name implies approval", which is D2 itself, relocated
+into the fixture layer where no test can see it. It buys a smaller diff by
+encoding the defect into the tool used to test for the defect.
+
+**Generalised into protocol rather than left in a commit message:** a fixture
+default must never encode the semantics the fixture exists to test —
+`docs/v5/SESSION_PROTOCOL.md` §7.2.
+
+## What shipped
+
+`usable()` reads no `derivation`; `REVIEW_REQUIRED_DERIVATIONS` deleted, not
+extended; the same condition pushed into `traverse._SELECT` so it cannot be
+bypassed; `pending_edges` and `edge_queue_stats` keyed on `review_status`
+alone; `derivation = 'MODEL_PROPOSED'` added as provenance, read by no
+decision; the five fertilizer candidates relabelled. `pending_edges` also lost
+its `reviewed_by IS NULL` clause — a named-but-PENDING row would otherwise have
+been inert AND invisible, which is D10 one column over.
+
+Suite: **3966 passed, 10 skipped, 2 failed** — both failures pre-existing and
+unrelated (`docs/v5/KNOWN_BREAKAGE.md` KB-001).
+
+Open question 1 in the genericity handover — *"D10: does the AUTHORED exception
+survive?"* — is answered: **no.** Deleted, not narrowed.
+
+## What is NOT fixed
+
+**D2's reader half remains open** in `DEFECTS-001`. D10 closes the practical
+path for mechanism ids arriving from `traverse`, but
+`app/core/signal_adapters.py:182` also produces one from V4's
+`causal_parent_id`, which never touches `mechanism_edge` at all.
+
+The gate cannot resolve it by lookup either: `gates.py` and `reducer.py` are
+PURE by Phase 0 rule 3, enforced by `tests/phase0/test_reducer_purity.py`, and
+`reduce_company_impact` takes no session. So the approval state must arrive as
+a field on the draft, set by an impure caller, with a policy knob in
+`gates.yaml` saying what its absence means — the shape `required_verifier_status`
+/ `unknown_verifier_status_passes` already uses. That is a design decision with
+an upstream wiring cost, and it was deliberately not taken here.
