@@ -188,16 +188,64 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
 
 # --- 3. shock -> node id (mirrors the engine's own construction) ----------
 
-def node_ids_for_shock(shock: dict, stage: str) -> set[str]:
-    """The `GraphEdge.child_id` the engine would build from this shock.
+def load_node_normalizer():
+    """The engine's own `normalize_node_id`, or an identity fallback.
 
-    Both call sites read `shock_id or label`, but only `_build_graph`
-    (initial_shocks) normalizes: ``.strip().lower().replace(" ", "_")``.
-    Both spellings are returned so a join stays robust to which path ran.
+    LOAD-BEARING (defect fixed 2026-08-17): the id a shock ends up STORED
+    under is NOT the id its call site constructs. `_register_edge`
+    (engine.py) rewrites every non company/sector child before the edge is
+    kept::
+
+        if edge.child_type not in ("company", "sector"):
+            edge.child_id = normalize_node_id(edge.child_id)
+
+    and a shock node is never a company/sector child, so this always runs.
+    `normalize_node_id` drops noise words, singularizes, hoists direction
+    words ("spike"/"cut"/"hike") into one canonical `_up`/`_down` suffix and
+    applies phrase merges -- so "Crude Oil Price Spike" is persisted as
+    `crude_price_up`, not `crude_oil_price_spike`. Reconstructing without it
+    silently misses every shock whose id was not already canonical.
+
+    `app.analysis.impact_graph.normalize` imports ONLY `re` (its docstring
+    pins "Pure string rules; no LLM ever spends tokens on this"), so this
+    stays inside the zero-network contract. On import failure the audit
+    degrades to identity and SAYS SO -- a silent regression to the broken
+    reconstruction must not be possible.
+    """
+    try:
+        backend_root = str(pathlib.Path(__file__).resolve().parents[1])
+        if backend_root not in sys.path:
+            sys.path.insert(0, backend_root)
+        from app.analysis.impact_graph.normalize import (  # noqa: PLC0415
+            normalize_node_id,
+        )
+        return normalize_node_id, "app.analysis.impact_graph.normalize"
+    except Exception:  # noqa: BLE001 -- an audit tool must still produce numbers
+        return (lambda value: value), "FALLBACK identity (engine normalizer unavailable)"
+
+
+#: Resolved once; `node_ids_for_shock` is called per shock.
+_NORMALIZE_NODE_ID, NODE_NORMALIZER_SOURCE = load_node_normalizer()
+
+
+def node_ids_for_shock(shock: dict, stage: str) -> set[str]:
+    """Every spelling of the node id this shock can be STORED under.
+
+    Both call sites read `shock_id or label`; `_build_graph`
+    (initial_shocks) additionally pre-snakes it with
+    ``.strip().lower().replace(" ", "_")``; and `_register_edge` then
+    normalizes whatever either produced (see `load_node_normalizer`). All
+    spellings are returned so the join matches the persisted id AND still
+    matches a legacy row written before the normalizer existed.
     """
     base = str(shock.get("shock_id") or shock.get("label") or "shock")
-    normalized = base.strip().lower().replace(" ", "_")
-    return {base, normalized} if stage == "initial_shocks" else {base, normalized}
+    snake = base.strip().lower().replace(" ", "_")
+    ids = {base, snake, _NORMALIZE_NODE_ID(snake)}
+    if stage != "initial_shocks":
+        # narrow_graph does not pre-snake -- _register_edge normalizes the
+        # raw string itself, which can land somewhere else again.
+        ids.add(_NORMALIZE_NODE_ID(base))
+    return {node_id for node_id in ids if node_id}
 
 
 # --- 4. serving predicate --------------------------------------------------
@@ -229,6 +277,13 @@ def load_serving_helpers():
 
 def run(conn: sqlite3.Connection, limit: int) -> dict:
     is_displayable_tier, tier_primary, predicate_source = load_serving_helpers()
+    normalizer_notes: list[str] = []
+    if NODE_NORMALIZER_SOURCE.startswith("FALLBACK"):
+        normalizer_notes.append(
+            "the engine's `normalize_node_id` could not be imported, so shock node ids were "
+            "reconstructed WITHOUT it -- the shock->company join will miss every shock whose "
+            "id is not already canonical, and the affected rate is a LOWER BOUND for that "
+            "reason alone.")
     ac_columns = _columns(conn, "alert_companies")
     has_v4_columns = {"display_tier", "gate_state", "causal_parent_id", "materiality"} <= ac_columns
 
@@ -262,7 +317,7 @@ def run(conn: sqlite3.Connection, limit: int) -> dict:
 
     # --- (c): served companies whose chain contains a defaulted shock -----
     served_strict, served_deep, affected_strict, affected_deep = [], [], set(), set()
-    join_notes: list[str] = []
+    join_notes: list[str] = list(normalizer_notes)
     if has_v4_columns:
         for alert in measurable:
             rows = conn.execute(
@@ -339,6 +394,7 @@ def run(conn: sqlite3.Connection, limit: int) -> dict:
         },
         "materiality_distribution": distribution,
         "serving_predicate_source": predicate_source,
+        "node_normalizer_source": NODE_NORMALIZER_SOURCE,
         "has_v4_columns": has_v4_columns,
         "join_notes": join_notes,
         "raw_shock_stage_rows": {stage: n for stage, n in conn.execute(
@@ -367,20 +423,29 @@ def _row_is_affected(row, reachable: set, alert_defaults: dict) -> bool:
 def reachable_from_nodes(conn: sqlite3.Connection, alert_id: int, seeds: set[str]) -> set[str]:
     """Transitive closure over this alert's `impact_edges` label graph.
 
-    LIMITATION (stated in the report): `impact_edges` stores human labels
-    (`from_label`/`to_label`), not the engine's `node_id`s, so this walk is a
-    label-equality approximation of the real graph. Where the two disagree the
-    walk UNDER-counts; it can never invent a link that no edge row asserts.
+    Vocabulary note: on v4 engine-written rows `from_label`/`to_label` ARE
+    node ids -- `pipeline._v3_edges` sets them from `edge.parent_id` /
+    `edge.child_id`. Only legacy `app.analysis.cascade` rows carry human
+    labels. Both ends are therefore expanded into every spelling (raw,
+    snaked, and engine-normalized) so a walk works in either vocabulary.
+    Where they still disagree the walk UNDER-counts; it can never invent a
+    link that no edge row asserts.
     """
     if not seeds or not _table_exists(conn, "impact_edges"):
         return set()
     edges = conn.execute(
         "SELECT from_label, to_label FROM impact_edges WHERE alert_id = ?", (alert_id,)).fetchall()
+
+    def _spellings(label) -> set[str]:
+        raw = str(label)
+        snake = raw.strip().lower().replace(" ", "_")
+        return {value for value in (raw, snake, _NORMALIZE_NODE_ID(snake)) if value}
+
     adjacency: dict[str, set[str]] = {}
     for edge in edges:
-        for key in {edge["from_label"], str(edge["from_label"]).strip().lower().replace(" ", "_")}:
-            adjacency.setdefault(key, set()).add(edge["to_label"])
-            adjacency[key].add(str(edge["to_label"]).strip().lower().replace(" ", "_"))
+        children = _spellings(edge["to_label"])
+        for key in _spellings(edge["from_label"]):
+            adjacency.setdefault(key, set()).update(children)
     reachable: set[str] = set()
     frontier = list(seeds)
     while frontier:
@@ -432,6 +497,7 @@ def render_markdown(stats: dict, db_path: pathlib.Path) -> str:
         f"{stats['unmeasurable_alerts']}",
         f"- raw shocks examined: {stats['shocks_examined']}",
         f"- serving predicate source: {stats['serving_predicate_source']}",
+        f"- node-id normalizer source: {stats['node_normalizer_source']}",
         "",
         "## Headline",
         "",
