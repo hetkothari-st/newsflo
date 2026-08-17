@@ -1,5 +1,7 @@
 """Blueprint §11/§12/§21: every mechanism carries a controlled relation,
 directness, and section label; no raw ids can leak as labels."""
+import pytest
+
 from app.analysis.impact_graph import knowledge
 
 EDGE_RELATIONS = {
@@ -157,3 +159,59 @@ def test_the_alias_map_is_derived_never_restated():
 
     for mid in knowledge.MECHANISMS:
         assert knowledge.resolve_mechanism_id(normalize_node_id(mid)) == mid
+
+
+# --- the 33 non-drifting mechanisms behave byte-identically (R6) -----------
+#
+# The consolidation must be a NO-OP for every mechanism `normalize_node_id`
+# leaves alone: raw and persisted are one string there, so the new accessors,
+# the old raw-keyed primitives, the V5 taxonomy and the publication gate must
+# all agree, on every one of them, at every distance. Recorded before/after
+# over all four resolution paths: diff EMPTY.
+
+def _stable_mechanism_ids():
+    from app.analysis.impact_graph.normalize import normalize_node_id
+
+    return sorted(mid for mid in knowledge.MECHANISMS
+                  if normalize_node_id(mid) == mid)
+
+
+def test_the_stable_set_is_the_other_thirty_three():
+    assert len(_stable_mechanism_ids()) == 33
+    assert len(_stable_mechanism_ids()) + len(_drifting()) == len(knowledge.MECHANISMS)
+
+
+@pytest.mark.parametrize("mechanism_id", _stable_mechanism_ids())
+def test_a_stable_mechanism_resolves_identically_through_every_path(mechanism_id):
+    """Raw-key lookup and node lookup are the SAME answer here -- raw ==
+    normalized -- so any divergence would be a regression introduced by the
+    accessors themselves rather than a correction."""
+    from app.output.section_config import load_section_taxonomy
+
+    assert knowledge.resolve_mechanism_id(mechanism_id) == mechanism_id
+    # the new accessor and the raw-keyed primitive it wraps
+    assert (knowledge.mechanism_meta_for_node(mechanism_id)
+            == knowledge.mechanism_meta(mechanism_id))
+    assert (knowledge.section_label_for_node("economic_node", mechanism_id)
+            == knowledge.section_label_for("economic_node", mechanism_id))
+    # the V5 taxonomy names it -- never the UNCLASSIFIED fallback
+    taxonomy = load_section_taxonomy()
+    label = taxonomy.mechanism_label(mechanism_id)
+    assert taxonomy.unknown_label_word not in label
+    assert label == taxonomy.labels[mechanism_id]
+
+
+@pytest.mark.parametrize("mechanism_id", _stable_mechanism_ids())
+@pytest.mark.parametrize("distance", (1, 2, 3))
+def test_a_stable_mechanism_gets_its_registry_directness_at_every_distance(
+        mechanism_id, distance):
+    from app.analysis.impact_graph.publication_gate import derive_directness
+
+    class _Candidate:
+        causal_parent_id = mechanism_id
+        causal_parent_type = "economic_node"
+        causal_distance = distance
+        causal_directness = None
+
+    assert (derive_directness(_Candidate())
+            == knowledge.MECHANISMS[mechanism_id]["directness"])
