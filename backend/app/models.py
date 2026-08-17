@@ -2069,18 +2069,33 @@ FROM exposure_proposal
 GROUP BY created_by, extractor_version
 """
 
-_EXPOSURE_COVERAGE_VIEW = """
+# Re-keyed off `companies.sector` onto the industry fall-through by migration
+# 0017 -- `sector` is 'other' for 3,161 of 5,321 companies, so the 0012 shape
+# reported one bucket of ~3,000 and called it a sector. Must stay in step with
+# `app/discovery/engine.py::_industry_of`, which resolves the same three
+# columns in the same order.
+#
+# THIS NO LONGER MATCHES 0012, and that is correct: 0012 is history. A
+# create_all-built database must match the LATEST migration, which for this
+# view is 0017. See tests/phase1/test_migration_0012.py.
+_EXPOSURE_COVERAGE_INDUSTRY = (
+    "COALESCE(NULLIF(TRIM(COALESCE(c.official_isubgroup, '')), ''), "
+    "NULLIF(TRIM(COALESCE(c.sub_sector, '')), ''), c.sector)")
+
+_EXPOSURE_COVERAGE_VIEW = f"""
 CREATE VIEW IF NOT EXISTS exposure_coverage AS
-SELECT t.sector AS sector,
+SELECT t.industry AS industry,
        t.exposure_tag AS exposure_tag,
        count(*) AS companies_tagged,
        sum(COALESCE(t.market_cap, 0)) AS tagged_market_cap,
        (SELECT sum(COALESCE(c2.market_cap, 0)) FROM companies c2
-         WHERE c2.sector = t.sector) AS sector_market_cap
-FROM (SELECT DISTINCT c.sector AS sector, e.exposure_tag AS exposure_tag,
+         WHERE {_EXPOSURE_COVERAGE_INDUSTRY.replace("c.", "c2.")} = t.industry)
+         AS industry_market_cap
+FROM (SELECT DISTINCT {_EXPOSURE_COVERAGE_INDUSTRY} AS industry,
+             e.exposure_tag AS exposure_tag,
              c.id AS company_id, c.market_cap AS market_cap
         FROM company_exposure e JOIN companies c ON c.id = e.company_id) t
-GROUP BY t.sector, t.exposure_tag
+GROUP BY t.industry, t.exposure_tag
 """
 
 LEDGER_TRIGGER_DDL = (

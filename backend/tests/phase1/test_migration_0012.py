@@ -118,7 +118,20 @@ def test_migration_is_rerunnable_over_its_own_output(tmp_path):
     engine.dispose()
 
 
-def test_models_and_0012_ddl_are_byte_identical():
+def test_models_and_the_latest_ledger_ddl_are_byte_identical():
+    """A create_all-built DB must match a MIGRATED one.
+
+    This used to compare `models.py` against 0012 alone, which held only while
+    no migration had ever altered ledger DDL. Migration 0017 is the first: it
+    re-keys `exposure_coverage` off `companies.sector` onto the industry
+    fall-through. So the invariant is not "models.py equals 0012" -- it is
+    "models.py equals the LATEST definition of each object", which is 0017 for
+    that one view and 0012 for the other four.
+
+    Pinning to 0012 unconditionally would now mean either freezing the schema
+    or editing a shipped migration. Both are worse than naming which migration
+    currently owns each literal.
+    """
     from app.models import V5_LEDGER_DDL
 
     source = MIGRATION.read_text(encoding="utf-8")
@@ -127,10 +140,49 @@ def test_models_and_0012_ddl_are_byte_identical():
     assert len(found) == len(V5_LEDGER_DDL), (
         f"0012 defines {len(found)} DDL literals, models.py exports "
         f"{len(V5_LEDGER_DDL)}")
+
     normalize = lambda s: " ".join(s.split())  # noqa: E731
-    assert [normalize(s) for s in found] == [normalize(s) for s in V5_LEDGER_DDL], (
-        "the ledger DDL in 0012 has drifted from app/models.py -- migrated "
-        "and create_all-built DBs would enforce different rules")
+    superseded = {
+        normalize(_ZERO12_EXPOSURE_COVERAGE):
+            normalize(_load_0017().EXPOSURE_COVERAGE_VIEW_0017),
+    }
+
+    expected = [superseded.get(normalize(s), normalize(s)) for s in found]
+    assert expected == [normalize(s) for s in V5_LEDGER_DDL], (
+        "the ledger DDL has drifted from app/models.py -- migrated and "
+        "create_all-built DBs would enforce different rules. If a migration "
+        "after 0012 changed one of these objects, add it to `superseded`.")
+
+
+def _load_0017():
+    """Load migration 0017 by path. `alembic/versions/` is not a package, so
+    the revision files are not importable by name."""
+    import importlib.util
+
+    path = (MIGRATION.parent
+            / "0017_v5_exposure_coverage_isubgroup_rekey.py")
+    spec = importlib.util.spec_from_file_location("_mig_0017", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# 0012's own text for the one object a later migration replaced. Kept here,
+# not imported from 0012, so this test still describes what 0012 shipped even
+# if the regex above ever stops matching it.
+_ZERO12_EXPOSURE_COVERAGE = """
+CREATE VIEW IF NOT EXISTS exposure_coverage AS
+SELECT t.sector AS sector,
+       t.exposure_tag AS exposure_tag,
+       count(*) AS companies_tagged,
+       sum(COALESCE(t.market_cap, 0)) AS tagged_market_cap,
+       (SELECT sum(COALESCE(c2.market_cap, 0)) FROM companies c2
+         WHERE c2.sector = t.sector) AS sector_market_cap
+FROM (SELECT DISTINCT c.sector AS sector, e.exposure_tag AS exposure_tag,
+             c.id AS company_id, c.market_cap AS market_cap
+        FROM company_exposure e JOIN companies c ON c.id = e.company_id) t
+GROUP BY t.sector, t.exposure_tag
+"""
 
 
 def test_the_postgres_role_ddl_is_documented_for_the_port():

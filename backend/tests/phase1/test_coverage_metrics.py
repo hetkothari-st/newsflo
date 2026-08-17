@@ -46,7 +46,11 @@ def test_coverage_of_an_empty_ledger_is_empty_not_zero_percent(ledger_session):
     assert coverage_rows(ledger_session, as_of=AS_OF) == []
 
 
-def test_coverage_reports_companies_and_sector_market_cap_share(ledger_session):
+def test_coverage_reports_companies_and_industry_market_cap_share(ledger_session):
+    """Keyed on INDUSTRY since migration 0017. These fixtures set no
+    `official_isubgroup` and no `sub_sector`, so they fall through to `sector`
+    and the arithmetic is unchanged -- which is the point of keeping `sector`
+    as the last resort rather than dropping it."""
     from app.ledger.coverage import coverage_rows
 
     tagged = make_company(ledger_session, ticker="FIXA.NS", name="Fixture Alpha Ltd",
@@ -60,11 +64,42 @@ def test_coverage_reports_companies_and_sector_market_cap_share(ledger_session):
     rows = coverage_rows(ledger_session, as_of=AS_OF)
     assert len(rows) == 1
     row = rows[0]
-    assert row["sector"] == "Fixture Sector"
+    assert row["industry"] == "Fixture Sector"
     assert row["exposure_tag"] == "input:fixture_foo"
     assert row["companies_tagged"] == 1
-    assert row["pct_sector_market_cap_tagged"] == 25.0
+    assert row["pct_industry_market_cap_tagged"] == 25.0
+    # the age join keys on the same expression as the view; if it ever drifts
+    # this silently becomes None rather than raising
     assert row["median_exposure_age_days"] == 100
+
+
+def test_coverage_splits_an_other_sector_by_official_isubgroup(ledger_session):
+    """The 0017 defect, at the coverage layer.
+
+    Two companies share `sector = 'other'` -- 3,161 of 5,321 real companies do
+    -- and differ only by exchange industry. Before 0017 they were one row and
+    the percentage was computed over their combined market cap.
+    """
+    from app.ledger.coverage import coverage_rows
+
+    alpha = make_company(ledger_session, ticker="FIXC.NS", name="Fixture Gamma Ltd",
+                         isin="INFIXTUREC01", sector="other", market_cap=1000.0)
+    make_company(ledger_session, ticker="FIXD.NS", name="Fixture Delta Ltd",
+                 isin="INFIXTURED01", sector="other", market_cap=3000.0)
+    ledger_session.execute(text(
+        "UPDATE companies SET official_isubgroup = 'Pharmaceuticals' "
+        "WHERE ticker = 'FIXC.NS'"))
+    ledger_session.execute(text(
+        "UPDATE companies SET official_isubgroup = 'Industrial Products' "
+        "WHERE ticker = 'FIXD.NS'"))
+    _exposure(ledger_session, alpha.id, as_of_date=AS_OF - timedelta(days=10),
+              exposure_tag="input:fixture_foo", exposure_id="fixture-cov-2")
+
+    rows = coverage_rows(ledger_session, as_of=AS_OF)
+    assert [r["industry"] for r in rows] == ["Pharmaceuticals"]
+    # 100%, not 25%: the tagged company is the whole of ITS industry. Under the
+    # old key it was 1000/4000 of a bucket called 'other'.
+    assert rows[0]["pct_industry_market_cap_tagged"] == 100.0
 
 
 def test_median_exposure_age_is_a_median(ledger_session):

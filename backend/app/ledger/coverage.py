@@ -30,44 +30,62 @@ from sqlalchemy import text
 
 from app.ledger.freshness import p90_age_alert_days
 
+# The industry key, identical to migration 0017's view and to
+# `app/discovery/engine.py::_industry_of`. One definition, aliased `industry`.
+_INDUSTRY_SQL = (
+    "COALESCE(NULLIF(TRIM(COALESCE(c.official_isubgroup, '')), ''), "
+    "NULLIF(TRIM(COALESCE(c.sub_sector, '')), ''), c.sector) AS industry")
+
 
 def _rows(result) -> list[dict]:
     return [dict(row) for row in result.mappings().all()]
 
 
 def coverage_rows(session, *, as_of: date) -> list[dict]:
-    """Per (sector, exposure_tag): companies tagged, % of sector market cap
-    tagged, median exposure age in days."""
+    """Per (industry, exposure_tag): companies tagged, % of industry market cap
+    tagged, median exposure age in days.
+
+    KEYED ON INDUSTRY, NOT SECTOR, since migration 0017. `companies.sector` is
+    'other' for 3,161 of 5,321 companies, so the old key reported one bucket of
+    roughly a third of the listed universe and labelled it a sector.
+
+    The age join below MUST use the identical key expression. It is spelled out
+    rather than shared with the view because the view is DDL and this is a
+    query -- but if the two ever diverge, every `median_exposure_age_days`
+    silently becomes None (the lookup misses on every row) rather than raising.
+    `tests/phase1/test_migration_0017.py` pins them together for that reason.
+    """
     rows = _rows(session.execute(text(
-        "SELECT sector, exposure_tag, companies_tagged, tagged_market_cap, "
-        "       sector_market_cap FROM exposure_coverage "
-        "ORDER BY sector ASC, exposure_tag ASC")))
+        "SELECT industry, exposure_tag, companies_tagged, tagged_market_cap, "
+        "       industry_market_cap FROM exposure_coverage "
+        "ORDER BY industry ASC, exposure_tag ASC")))
     if not rows:
         return []
 
     ages: dict[tuple, list[int]] = {}
-    for sector, tag, age in session.execute(text(
-            "SELECT c.sector, e.exposure_tag, "
+    for industry, tag, age in session.execute(text(
+            f"SELECT {_INDUSTRY_SQL}, e.exposure_tag, "
             "       CAST(julianday(:as_of) - julianday(e.as_of_date) AS INTEGER) "
             "FROM company_exposure e JOIN companies c ON c.id = e.company_id"),
             {"as_of": as_of.isoformat()}).all():
-        ages.setdefault((sector, tag), []).append(int(age))
+        ages.setdefault((industry, tag), []).append(int(age))
 
     out = []
     for row in rows:
-        sector_cap = float(row["sector_market_cap"] or 0)
+        industry_cap = float(row["industry_market_cap"] or 0)
         tagged_cap = float(row["tagged_market_cap"] or 0)
-        bucket = ages.get((row["sector"], row["exposure_tag"]), [])
+        bucket = ages.get((row["industry"], row["exposure_tag"]), [])
         out.append({
-            "sector": row["sector"],
+            "industry": row["industry"],
             "exposure_tag": row["exposure_tag"],
             "companies_tagged": int(row["companies_tagged"]),
             "tagged_market_cap": tagged_cap,
-            "sector_market_cap": sector_cap,
-            # None, not 0.0: a sector whose market caps we do not have is a
-            # sector whose coverage we cannot express as a percentage.
-            "pct_sector_market_cap_tagged": (
-                round(100.0 * tagged_cap / sector_cap, 4) if sector_cap else None),
+            "industry_market_cap": industry_cap,
+            # None, not 0.0: an industry whose market caps we do not have is an
+            # industry whose coverage we cannot express as a percentage.
+            "pct_industry_market_cap_tagged": (
+                round(100.0 * tagged_cap / industry_cap, 4)
+                if industry_cap else None),
             "median_exposure_age_days": (
                 int(median(sorted(bucket))) if bucket else None),
         })
