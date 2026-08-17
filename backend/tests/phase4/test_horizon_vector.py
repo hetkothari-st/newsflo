@@ -8,6 +8,8 @@ The fixture is the phase file's OMC worked example rebuilt from fake numbers
     STRUCTURAL : UNCERTAIN (LOW)     depends on revision permission
     net_effect : MIXED,  headline = NEAR_TERM
 """
+import json
+
 import pytest
 
 from tests.phase4.conftest import fixture_policy_state, fixture_registry
@@ -140,9 +142,9 @@ def test_single_horizon_collapse_is_structurally_impossible(omc):
                    ["fundamental"]["direction_by_horizon"]) == set(HORIZONS)
 
 
-def test_a_sensitivity_fed_record_must_evaluate_all_three_horizons(omc):
-    """The write-time check. A record carrying a computed band for one horizon
-    only is refused by the writer rather than persisted as a truth."""
+def test_a_record_naming_fewer_than_three_horizons_is_refused_at_the_writer(omc):
+    """The write-time check, and the STRUCTURAL half of it: a record that
+    names two horizons is missing one, not agreeing about it."""
     from app.core.impact_writer import HorizonVectorError, validate_horizon_vector
     from app.core.reducer import CompanyImpact
 
@@ -156,6 +158,99 @@ def test_a_sensitivity_fed_record_must_evaluate_all_three_horizons(omc):
             "NEAR_TERM": impact.direction_by_horizon["NEAR_TERM"]}})
     with pytest.raises(HorizonVectorError):
         validate_horizon_vector(collapsed)
+
+
+# --- FIX ROUND 1 (I-1): partial vectors are legal and must persist ----------
+
+def test_a_single_horizon_run_persists_rather_than_being_dropped(policy_session):
+    """REGRESSION. A caller that runs `analyse_company` at ONE horizon produces
+    a computed band on NEAR_TERM and honest `evaluated: false` elsewhere. The
+    writer used to refuse it, and `app/pipeline.py` wraps the V5 hook in a bare
+    `except`, so the canonical record would have been dropped IN SILENCE."""
+    from sqlalchemy import text
+
+    from app.core.impact_writer import persist_company_impact, validate_horizon_vector
+    from tests.phase4.helpers import upstream_impact
+
+    impact = upstream_impact(levy_active=True)
+    assert impact.sensitivity is not None
+    assert impact.direction_by_horizon["NEAR_TERM"]["evaluated"] is True
+    assert impact.direction_by_horizon["IMMEDIATE"]["evaluated"] is False
+    assert impact.direction_by_horizon["STRUCTURAL"]["evaluated"] is False
+
+    validate_horizon_vector(impact)
+    persist_company_impact(policy_session, impact, reducer_run_seq=1)
+    assert policy_session.execute(text(
+        "SELECT count(*) FROM company_impact")).scalar() == 1
+
+
+def test_a_horizon_whose_only_channel_decays_to_zero_persists(policy_session):
+    """REGRESSION. An inventory revaluation is a one-off: its realisation
+    fraction is 0 at 270 days, so the company has NO computable channel at the
+    structural horizon and the engine emits no band there. That is the correct
+    answer, and the record must persist saying so."""
+    from sqlalchemy import text
+
+    from app.core.impact_writer import persist_company_impact
+    from tests.phase4.conftest import (
+        fixture_policy_state, fixture_registry, make_company, seed_exposure,
+        seed_financials, seed_modifier,
+    )
+    from tests.phase4.helpers import impact_from, run_horizons
+
+    fixture = {
+        "shock": {"delta_pct": 0.064, "level_before": 100.0, "level_after": 106.4},
+        "exposures": [{"exposure_tag": "realization:fixture_inventory_stock"}]}
+    company = make_company(policy_session, ticker="FIXDECAY",
+                           name="Fixture Decay Ltd")
+    seed_financials(policy_session, company_id=company.id,
+                    ebitda_inr=1_000_000_000.0)
+    seed_exposure(policy_session, exposure_id="fixture-decay-inventory",
+                  company_id=company.id,
+                  exposure_tag="realization:fixture_inventory_stock",
+                  exposure_kind="INVENTORY", base_value_inr=5_000_000_000.0,
+                  share_of_base=1.0)
+    seed_modifier(policy_session, modifier_id="fixture-decay-mod",
+                  company_id=company.id,
+                  applies_to_tag="realization:fixture_inventory_stock",
+                  modifier_kind="PASS_THROUGH", parameters={
+                      "measurement": "FILED",
+                      "inventory_realization_fraction_curve": [
+                          {"lag_days": 5, "fraction": 0.5},
+                          {"lag_days": 90, "fraction": 0.1},
+                          {"lag_days": 270, "fraction": 0.0}]})
+
+    run = run_horizons(policy_session, fixture, company_id=company.id,
+                       registry=fixture_registry(),
+                       policy_state=fixture_policy_state())
+    impact = impact_from(run, company_id=company.id, ticker="FIXDECAY")
+
+    assert impact.direction_by_horizon["IMMEDIATE"]["evaluated"] is True
+    assert impact.direction_by_horizon["NEAR_TERM"]["evaluated"] is True
+    # zero delta at 270d -> no channel -> no band, honestly recorded
+    assert impact.direction_by_horizon["STRUCTURAL"]["evaluated"] is False
+
+    persist_company_impact(policy_session, impact, reducer_run_seq=1)
+    stored = policy_session.execute(text(
+        "SELECT direction_by_horizon_json FROM company_impact "
+        "WHERE company_id = :company_id"), {"company_id": company.id}).scalar()
+    assert set(json.loads(stored)) == set(HORIZONS)
+
+
+def test_a_band_with_no_evaluated_horizon_at_all_is_still_refused():
+    """DO NOT OVER-RELAX. A computed band behind which NO horizon was
+    evaluated is a number from nowhere, and the writer still refuses it."""
+    from app.core.impact_writer import HorizonVectorError, validate_horizon_vector
+    from app.core.reducer import UNEVALUATED_HORIZON, CompanyImpact
+    from tests.phase4.helpers import upstream_impact
+
+    impact = upstream_impact(levy_active=True)
+    hollow = CompanyImpact(**{
+        **impact.__dict__,
+        "direction_by_horizon": {name: dict(UNEVALUATED_HORIZON)
+                                 for name in HORIZONS}})
+    with pytest.raises(HorizonVectorError, match="no horizon"):
+        validate_horizon_vector(hollow)
 
 
 def test_the_unknown_regime_is_what_makes_the_structural_horizon_uncertain(omc):

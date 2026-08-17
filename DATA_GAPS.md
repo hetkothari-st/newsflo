@@ -384,6 +384,25 @@ the registry is waiting on appears in this file.
   `CompanyImpact` payload with id, type, status, source URL and the horizons
   each status held at. Nothing renders them, because V5 has no serving path
   (the established Phase 0 ruling). **Owner: V5 serving phase.**
+* **FRBM / borrowing-calendar effects on rates are NOT scaffolded.** Spec §9's
+  "maintain at minimum, for India" list names them and the registry has no
+  entry. They act on a rate PATH rather than on a company exposure, so the
+  transfer function is not obviously one of the six and the tag is not
+  obviously one of the vocabulary's — modelling them as `FORMULA_PRICING` on
+  `rate:floating_debt_share` would be a guess about the mechanism, not only
+  about the parameters. Scaffolding an entry whose *shape* is wrong is worse
+  than an honest omission, because a shape looks decided. **Owner: repo owner
+  (domain judgement first, then parameters).**
+* **`review_interval_days` measures maintenance cadence, not forecast reach**
+  (design note, no schema change this round). A modifier's review interval
+  says how often somebody re-reads the notification; `policy_state.
+  freshness_days` currently does double duty as both "how stale is this
+  reading" and "how far forward does it speak", which is what the
+  beyond-horizon ruling above leans on. A separate
+  `policy_state.predictive_horizon_days` column would separate the two
+  honestly. Recommended, deliberately not built: it is a schema change on a
+  table with no rows and no owner, and inventing a predictive reach per state
+  would be the same fabrication as inventing the state. **Owner: repo owner.**
 
 ---
 

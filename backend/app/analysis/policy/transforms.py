@@ -34,6 +34,28 @@ PURE. No I/O, no clock, no randomness, no model. Determinism is by
 construction: channels are walked in `channel_id` order and modifiers in
 `modifier_id` order, and `tests/phase4/test_policy_modifiers.py` offers the
 same registry in both orders and compares the output.
+
+TWO THINGS ABOUT THAT ORDERING THAT ARE EASY TO MISREAD (fix round 1, M-6/M-7).
+
+  * `channel.channel_id` IS the exposure tag. `channels._build` sets
+    `channel_id=exposure.exposure_tag`, which is why `registry.active_for` can
+    be handed `channel.channel_id` directly. It also means TWO EXPOSURE ROWS
+    ON THE SAME TAG produce two channels with the SAME `channel_id`, so the
+    `sorted(..., key=channel_id)` below is not a total order over them. Python's
+    sort is stable, so their relative order is the CALLER'S -- and that is
+    harmless HERE because each channel is transformed independently and the
+    output list is consumed by `simulate`, which sorts by `channel_id` itself
+    and sums in that fixed order. It would stop being harmless the moment a
+    modifier read state across channels, so: do not add cross-channel state to
+    this loop without giving `ChannelResult` a genuinely unique id first.
+  * MODIFIER ORDER DOES NOT CHANGE THE NUMBER, and not because multiplication
+    commutes. Scaling modifiers contribute FACTORS that are all applied at the
+    end (`ChannelResult.evaluate`), and STATE_DEPENDENT modifiers replace
+    PARAMETERS in a map. The point estimate is computed once, from the final
+    map and the final factor list. What order DOES decide is which of two
+    STATE_DEPENDENT modifiers overriding the SAME parameter wins -- and that
+    is settled by `modifier_id`, deterministically. Pinned by
+    `test_a_parameter_override_and_a_scaling_modifier_commute`.
 """
 from dataclasses import dataclass
 from datetime import date
@@ -128,9 +150,23 @@ def _override_params(channel: ChannelResult, overrides: Mapping[str, Any],
 
 def _rebuilt(channel: ChannelResult, *, params=None, grade_cap=None,
              modifiers=None, notes=None) -> ChannelResult:
+    """A new `ChannelResult` with the modifier's effects folded in, and its
+    point estimate recomputed under them.
+
+    FIX ROUND 1 (I-2). `param_sources` is DERIVED FROM `params` here rather
+    than carried over. It used to be carried over, so a STATE_DEPENDENT
+    override replaced a parameter with an ADMINISTERED value while the
+    channel's own provenance map went on saying DISCLOSED_CALL -- a
+    field-level contradiction inside one record, in exactly the field a reader
+    consults to ask "where did this number come from", and the same class of
+    defect this phase exists to make impossible. The two are now one
+    projection of one map and cannot disagree.
+    """
+    params = params if params is not None else channel.params
     rebuilt = ChannelResult(**{
         **channel.__dict__,
-        "params": params if params is not None else channel.params,
+        "params": params,
+        "param_sources": {name: dist.source for name, dist in params.items()},
         "grade_cap": grade_cap if grade_cap is not None else channel.grade_cap,
         "modifiers": modifiers if modifiers is not None else channel.modifiers,
         "policy_notes": notes if notes is not None else channel.policy_notes,

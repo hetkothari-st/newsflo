@@ -46,6 +46,28 @@ REQUIRED_PARAMETERS: Mapping[str, tuple[str, ...]] = {
     REGIONAL_MULTIPLIER: ("region_multipliers",),
 }
 
+# FIX ROUND 1 (M-3). Parameters that are a SHARE OF SOMETHING and therefore
+# cannot leave [0, 1]. A `capture_fraction_above` of 1.2 does not mean a
+# harsher levy, it means the transfer function returns a NEGATIVE factor and
+# silently INVERTS the channel's sign -- a typo in a YAML would become a
+# reversed impact call with no error anywhere. The registry refuses such an
+# entry at load (`registry.modifier_from_mapping`), which is the earliest
+# point at which the mistake is still cheap.
+#
+# Deliberately NOT bounded, and each for a stated reason:
+#   threshold_level / cap_level     a LEVEL in the exposed variable's own
+#                                   units. Bounds here would be inventing the
+#                                   units.
+#   administered_delta_pct          a relative move, legitimately negative and
+#                                   legitimately greater than 1. The division
+#                                   it feeds is guarded against a zero market
+#                                   move in `formula_pricing`.
+#   region_multipliers              multipliers, not shares.
+FRACTION_PARAMETERS: Mapping[str, tuple[float, float]] = {
+    "capture_fraction_above": (0.0, 1.0),
+    "retained_fraction": (0.0, 1.0),
+}
+
 
 class TransferInputMissing(LookupError):
     """A parameter or a channel-side input this transfer function needs and

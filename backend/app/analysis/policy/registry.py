@@ -40,7 +40,8 @@ import yaml
 from sqlalchemy import text
 
 from app.analysis.policy.transfer import (
-    MODIFIER_TYPES, REQUIRED_PARAMETERS, TRANSFER_FUNCTIONS,
+    FRACTION_PARAMETERS, MODIFIER_TYPES, REQUIRED_PARAMETERS,
+    TRANSFER_FUNCTIONS,
 )
 
 # backend/config/policy_modifiers.yaml
@@ -157,6 +158,36 @@ def _as_date(value) -> date | None:
     return date.fromisoformat(str(value))
 
 
+def _check_domains(modifier_id: str, parameters: Mapping[str, Any]) -> None:
+    """FIX ROUND 1 (M-3). Refuse a share-of-something outside [0, 1].
+
+    A `capture_fraction_above` of 1.2 is not a harsher levy: the transfer
+    function returns `1 - 1.2 = -0.2` and the channel SILENTLY FLIPS SIGN. A
+    `retained_fraction` of -0.1 does the same. Nothing downstream would
+    notice, because a negative factor is a perfectly good float. So a typo is
+    refused where it is still cheap -- at load, naming the entry, the
+    parameter, the value and the domain -- rather than published as a
+    reversed impact call.
+
+    A NULL value is not a domain error. It is a scaffold entry saying it has
+    no value yet, which is the deployed state of every entry in the file.
+    """
+    for name, bounds in FRACTION_PARAMETERS.items():
+        value = parameters.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise PolicyRegistryError(
+                f"{modifier_id}: parameter {name!r} is {value!r}; a share must "
+                f"be a number")
+        if not bounds[0] <= float(value) <= bounds[1]:
+            raise PolicyRegistryError(
+                f"{modifier_id}: parameter {name!r} is {value!r}, outside its "
+                f"domain [{bounds[0]}, {bounds[1]}]. It is a SHARE of "
+                f"something; outside that range the transfer function silently "
+                f"inverts the channel's sign rather than strengthening it.")
+
+
 def modifier_from_mapping(raw: Mapping[str, Any]) -> PolicyModifier:
     """One YAML / JSON / DB mapping -> one `PolicyModifier`, with its status
     DECIDED HERE rather than trusted from the file.
@@ -183,6 +214,7 @@ def modifier_from_mapping(raw: Mapping[str, Any]) -> PolicyModifier:
         parameters = json.loads(parameters or "{}")
     parameters = dict(parameters or {})
     parameters.pop("_fixture", None)
+    _check_domains(modifier_id, parameters)
 
     owner = raw.get("owner")
     owner = str(owner) if owner else None

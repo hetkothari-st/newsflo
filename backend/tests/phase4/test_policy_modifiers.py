@@ -515,6 +515,177 @@ def test_a_state_beyond_its_freshness_window_is_unknown_at_that_horizon():
         "nothing_by_that_name", as_of=FIXTURE_TODAY, horizon_days=5)
 
 
+# --- FIX ROUND 1 -----------------------------------------------------------
+
+def test_an_administered_override_rewrites_the_channels_provenance(
+        ):
+    """I-2 REGRESSION. A STATE_DEPENDENT override replaces a parameter with an
+    ADMINISTERED value. The channel's `param_sources` must say so: leaving it
+    at DISCLOSED_CALL is a field-level contradiction inside one record, in
+    exactly the field a reader consults to ask where a number came from."""
+    from app.analysis.policy.transforms import apply_modifiers
+
+    channel = realization_channel(
+        exposure_tag="realization:fixture_state_dependent", delta_pct=0.10,
+        elasticity=1.0, capture=0.5, source="DISCLOSED_CALL")
+    assert channel.param_sources["regulatory_capture_fraction"] == "DISCLOSED_CALL"
+
+    result = apply_modifiers(
+        (channel,), as_of_date=FIXTURE_TODAY,
+        policy_state=fixture_policy_state("fixture_revision_active"),
+        registry=fixture_registry("FIXTURE_C_STATE"))
+
+    modified = result.channels[0]
+    assert modified.params["regulatory_capture_fraction"].source == "ADMINISTERED"
+    assert modified.param_sources["regulatory_capture_fraction"] == "ADMINISTERED"
+    # the parameter the modifier did NOT touch keeps its own provenance
+    assert modified.param_sources["realization_elasticity"] == "DISCLOSED_CALL"
+    assert (set(modified.param_sources) == set(modified.params)), (
+        "param_sources and params are one map projected twice; they cannot "
+        "name different parameters")
+
+
+def test_the_administered_source_reaches_the_channel_signal_payload():
+    """I-2, one layer out: the provenance the reader actually sees."""
+    from app.analysis.policy.transforms import apply_modifiers
+    from app.analysis.sensitivity.config import load_materiality_config
+    from app.analysis.sensitivity.engine import channel_signals
+    from app.analysis.sensitivity.monte_carlo import serialize_materiality, simulate
+    from tests.phase4.conftest import (
+        FIXTURE_ANALYSIS_VERSION, FIXTURE_EVENT_ID, FIXTURE_NOW,
+    )
+
+    config = load_materiality_config()
+    channel = realization_channel(
+        exposure_tag="realization:fixture_state_dependent", delta_pct=0.10,
+        elasticity=1.0, capture=0.5, source="DISCLOSED_CALL")
+    modified = apply_modifiers(
+        (channel,), as_of_date=FIXTURE_TODAY,
+        policy_state=fixture_policy_state("fixture_revision_active"),
+        registry=fixture_registry("FIXTURE_C_STATE"))
+    materiality = simulate(
+        modified.channels, ebitda_ttm_inr=1_000_000_000.0,
+        event_id=FIXTURE_EVENT_ID, company_id=9401,
+        analysis_version=FIXTURE_ANALYSIS_VERSION, config=config)
+    signals, _ = channel_signals(
+        modified.channels,
+        materiality_block=serialize_materiality(materiality, config),
+        ebitda_ttm_inr=1_000_000_000.0, event_id=FIXTURE_EVENT_ID,
+        company_id=9401, analysis_version=FIXTURE_ANALYSIS_VERSION,
+        created_at=FIXTURE_NOW, config=config,
+        policy_modifiers=modified.as_payload())
+
+    sources = signals[0].payload["param_sources"]
+    assert sources["regulatory_capture_fraction"] == "ADMINISTERED"
+    assert sources["realization_elasticity"] == "DISCLOSED_CALL"
+
+
+def test_a_parameter_override_and_a_scaling_modifier_commute():
+    """M-6. A STATE_DEPENDENT override and a scaling modifier on the SAME
+    channel, offered in both orders, produce the same number.
+
+    Not because multiplication commutes: scaling modifiers contribute factors
+    applied at the end, the override replaces an entry in a parameter map, and
+    the point estimate is computed once from the final map and the final
+    factor list."""
+    from app.analysis.policy.registry import PolicyRegistry, modifier_from_mapping
+    from app.analysis.policy.transforms import apply_modifiers
+    from tests.phase4.conftest import fixture_modifier
+
+    override = dict(fixture_modifier("FIXTURE_C_STATE"),
+                    modifier_id="FIXTURE_M_OVERRIDE")
+    scaling = dict(fixture_modifier("FIXTURE_D_SUBSIDY"),
+                   modifier_id="FIXTURE_Z_SCALE",
+                   applies_to_tag="realization:fixture_state_dependent")
+    entries = [modifier_from_mapping(override), modifier_from_mapping(scaling)]
+
+    channel = realization_channel(
+        exposure_tag="realization:fixture_state_dependent", delta_pct=0.10,
+        elasticity=1.0, capture=0.5)
+    results = [
+        apply_modifiers((channel,), as_of_date=FIXTURE_TODAY,
+                        policy_state=fixture_policy_state("fixture_revision_active"),
+                        registry=PolicyRegistry(tuple(order)))
+        for order in (entries, list(reversed(entries)))]
+
+    # capture 0.5 -> 0.0 doubles the channel to 100,000,000; the subsidy share
+    # then retains a quarter of it.
+    assert results[0].channels[0].delta_ebitda_inr == pytest.approx(25_000_000.0)
+    assert (results[0].channels[0].delta_ebitda_inr
+            == results[1].channels[0].delta_ebitda_inr)
+    assert results[0].applied == results[1].applied == (
+        "FIXTURE_M_OVERRIDE", "FIXTURE_Z_SCALE")
+
+
+@pytest.mark.parametrize("name,value", [
+    ("capture_fraction_above", 1.2),
+    ("capture_fraction_above", -0.1),
+    ("retained_fraction", 1.5),
+    ("retained_fraction", -0.01),
+])
+def test_a_share_outside_its_domain_is_refused_at_load(name, value):
+    """M-3. A `capture_fraction_above` of 1.2 does not mean a harsher levy --
+    the transfer function returns a NEGATIVE factor and the channel silently
+    flips sign. A typo in a YAML must not become a reversed impact call."""
+    from app.analysis.policy.registry import PolicyRegistryError, modifier_from_mapping
+
+    with pytest.raises(PolicyRegistryError, match="domain"):
+        modifier_from_mapping({
+            "modifier_id": "FIXTURE_OUT_OF_DOMAIN",
+            "applies_to_tag": "realization:fixture_product",
+            "jurisdiction": "FIXTURELAND",
+            "modifier_type": ("THRESHOLD_CAPTURE"
+                              if name == "capture_fraction_above"
+                              else "SUBSIDY_SHARE"),
+            "parameters": {"threshold_level": 100.0, name: value},
+            "effective_from": "2200-01-01", "effective_to": None,
+            "source_url": "https://fixture.invalid/x", "owner": "human:fixture",
+            "review_interval_days": 30, "last_reviewed_at": "2226-02-22"})
+
+
+def test_a_null_share_is_a_scaffold_not_a_domain_error():
+    """A null parameter says "nobody has supplied one yet", which is the
+    deployed state of every entry in the registry. Refusing nulls as out of
+    domain would refuse the whole file."""
+    from app.analysis.policy.registry import MINIMUM_INDIA_REGISTRY, load_registry
+
+    assert len(load_registry().entries) == len(MINIMUM_INDIA_REGISTRY)
+
+
+@pytest.mark.parametrize("value", [0.0, 1.0, 0.25])
+def test_a_share_inside_its_domain_loads(value):
+    from app.analysis.policy.registry import modifier_from_mapping
+
+    entry = modifier_from_mapping({
+        "modifier_id": "FIXTURE_IN_DOMAIN",
+        "applies_to_tag": "realization:fixture_product",
+        "jurisdiction": "FIXTURELAND", "modifier_type": "SUBSIDY_SHARE",
+        "parameters": {"retained_fraction": value},
+        "effective_from": "2200-01-01", "effective_to": None,
+        "source_url": "https://fixture.invalid/x", "owner": "human:fixture",
+        "review_interval_days": 30, "last_reviewed_at": "2226-02-22"})
+    assert entry.status == "ACTIVE"
+
+
+def test_the_migration_downgrade_is_symmetric_with_its_upgrade():
+    """M-4. `upgrade` creates each object only if absent, so `downgrade` must
+    drop each only if present -- otherwise a half-built schema raises halfway
+    through a downgrade and ends in a state neither version describes."""
+    import ast
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parents[2] / "alembic" /
+              "versions" / "0014_v5_policy_horizon.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    downgrade = next(node for node in ast.walk(tree)
+                     if isinstance(node, ast.FunctionDef)
+                     and node.name == "downgrade")
+    guards = [node for node in ast.walk(downgrade) if isinstance(node, ast.If)]
+    assert len(guards) >= 3, (
+        "every drop in downgrade() must be guarded on the object existing")
+    assert "get_table_names" in source
+
+
 def test_make_params_helper_is_not_smuggling_a_band_width():
     """Guard on the tests themselves: the fixture bands come from the deployed
     policy file, so a test can never silently disagree with the product."""

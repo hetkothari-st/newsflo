@@ -77,11 +77,30 @@ def validate_horizon_vector(impact) -> None:
     """The write-time check. Two separate assertions:
 
       1. EVERY record names all three horizons. A record that names two is
-         missing one, not agreeing about it;
-      2. a record carrying a COMPUTED band must have EVALUATED all three. The
-         V4-forwarded path evaluates one and says so (`evaluated: false` on
-         the other two), which is honest; a sensitivity-fed record has no
-         such excuse, because the engine runs all three by construction.
+         missing one, not agreeing about it. This is the STRUCTURAL check and
+         it is the one that makes collapse impossible;
+      2. a record carrying a COMPUTED band evaluated AT LEAST ONE horizon. A
+         band with no horizon behind it is a number from nowhere.
+
+    FIX ROUND 1 (I-1). Assertion 2 used to demand that all three horizons be
+    EVALUATED whenever `impact.sensitivity` was set, and that was wrong -- it
+    contradicted the reducer's own `UNEVALUATED_HORIZON` contract, which
+    exists precisely so a record can say "this horizon was not evaluated"
+    instead of implying agreement. Two legitimate shapes were refused:
+
+      * a caller that runs `analyse_company` at ONE horizon (the levy fixture,
+        and any single-horizon caller the engine still supports) produces a
+        computed band on NEAR_TERM and honest `evaluated: false` elsewhere;
+      * a company whose only channel DECAYS TO ZERO at a horizon -- an
+        inventory revaluation at 270 days is exactly this -- has no computable
+        channel there, so the engine emits no band for it. That is the correct
+        answer, not a collapsed vector.
+
+    Both were raised inside `_row_from_impact`, and `app/pipeline.py` wraps
+    the V5 hook in a bare `except` so the record would have been dropped in
+    SILENCE at cutover. The structural guarantee (three keys, always) is
+    untouched; what is dropped is a claim about how many horizons a caller
+    must have run, which is not this function's business.
     """
     from app.core.reducer import HORIZONS
 
@@ -94,13 +113,11 @@ def validate_horizon_vector(impact) -> None:
             f"of them mean anything.")
     if impact.sensitivity is None:
         return
-    unevaluated = [name for name in HORIZONS
-                   if not impact.direction_by_horizon[name].get("evaluated")]
-    if unevaluated:
+    if not any(impact.direction_by_horizon[name].get("evaluated")
+               for name in HORIZONS):
         raise HorizonVectorError(
-            f"this record carries a computed band and did not evaluate "
-            f"{unevaluated}; a sensitivity-fed record evaluates all three "
-            f"horizons or it is a collapsed vector")
+            "this record carries a computed band and evaluated NO horizon; a "
+            "band with no horizon behind it is a number from nowhere")
 
 
 def event_id_for_article(article_id: int) -> str:

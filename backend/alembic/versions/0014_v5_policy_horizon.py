@@ -114,7 +114,23 @@ def downgrade() -> None:
     modifier is a maintained reading of a live regulation and is NOT
     reproducible by re-running anything -- `config/policy_modifiers.yaml`
     holds the structure, never the values. Take a backup before running this.
+
+    FIX ROUND 1 (M-4): SYMMETRIC WITH `upgrade`. `upgrade` creates each object
+    only if it is absent, so a database where one of them already existed
+    (this repo also builds schemas with `Base.metadata.create_all`) can reach
+    this function with the other one missing. An unconditional drop would then
+    raise halfway through and leave the schema in a state neither version
+    describes. Each drop is now conditional on the object actually being
+    there.
     """
-    op.drop_index('ix_policy_modifier_tag', table_name='policy_modifier')
+    bind = op.get_bind()
+    existing = set(sa.inspect(bind).get_table_names())
+
+    if 'policy_modifier' in existing:
+        indexes = {index['name']
+                   for index in sa.inspect(bind).get_indexes('policy_modifier')}
+        if 'ix_policy_modifier_tag' in indexes:
+            op.drop_index('ix_policy_modifier_tag', table_name='policy_modifier')
     for table in ('policy_state', 'policy_modifier'):
-        op.drop_table(table)
+        if table in existing:
+            op.drop_table(table)

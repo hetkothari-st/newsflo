@@ -19,6 +19,12 @@ POLICY = BACKEND / "app" / "analysis" / "policy"
 PROVIDER_MODULES = (
     "anthropic", "openai", "groq", "google", "google.generativeai",
     "transformers", "httpx",
+    # FIX ROUND 1 (M-8). The list above is the one Phase 2 froze, and it is
+    # the set of providers THIS REPO has used. A scan that only knows the
+    # providers already in the repo cannot catch the next one, and "the policy
+    # layer never asks a model" is a claim about all of them.
+    "vertexai", "google.cloud.aiplatform", "cohere", "mistralai", "litellm",
+    "ollama", "boto3", "bedrock", "together", "replicate", "huggingface_hub",
     "app.analysis.claude_client",
     "app.analysis.impact_graph.claude_json",
     "app.analysis.impact_graph.gemini_json",
