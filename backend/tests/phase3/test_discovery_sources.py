@@ -340,15 +340,46 @@ def test_an_io_table_edge_without_a_reviewer_cannot_be_traversed(ripple_session)
     assert traverse(ripple_session, "BRENT_CRUDE", as_of=FIXTURE_TODAY) == ()
 
 
-def test_a_reviewed_io_table_edge_can_be_traversed(ripple_session):
+def test_an_approved_io_table_edge_can_be_traversed(ripple_session):
+    """Renamed from `test_a_reviewed_io_table_edge_can_be_traversed`, and the
+    rename is the fix.
+
+    It used to seed `reviewed_by` and NOTHING ELSE, then assert traversal --
+    which pinned the rule that *a non-null reviewer name is approval*. That is
+    defect D2's conflation, asserted as a guarantee. Approval is a decision
+    with a state (`review_status`), and a name is only the signature on it.
+
+    Both halves are now stated explicitly, and the negative case below is the
+    assertion whose absence let the conflation stand.
+    """
     from app.graph.traverse import traverse
 
     seed_edge(ripple_session, edge_id="e-io2", from_node="BRENT_CRUDE",
               to_node="petchem", exposure_tag=TAG_PETCHEM,
               derivation="IO_TABLE", reviewed_by="human:fixture-reviewer",
-              io_total_coeff=0.31)
+              review_status="APPROVED", io_total_coeff=0.31)
     edges = traverse(ripple_session, "BRENT_CRUDE", as_of=FIXTURE_TODAY)
     assert [e.edge_id for e in edges] == ["e-io2"]
+
+
+def test_a_named_reviewer_alone_does_not_make_an_edge_traversable(ripple_session):
+    """A reviewer name on a PENDING row is not approval (D2/D10).
+
+    This is the case the old `test_a_reviewed_io_table_edge_can_be_traversed`
+    asserted the opposite of. A row can carry a name because someone was
+    assigned it, or looked at it, or wrote it -- none of which is a decision.
+    """
+    from app.graph.traverse import traverse
+    from app.ledger.edge_review import pending_edges
+
+    seed_edge(ripple_session, edge_id="e-io3", from_node="BRENT_CRUDE",
+              to_node="petchem", exposure_tag=TAG_PETCHEM,
+              derivation="IO_TABLE", reviewed_by="human:fixture-reviewer",
+              review_status="PENDING", io_total_coeff=0.31)
+
+    assert traverse(ripple_session, "BRENT_CRUDE", as_of=FIXTURE_TODAY) == ()
+    # and it is queued rather than lost -- inert AND visible, both halves
+    assert [r["edge_id"] for r in pending_edges(ripple_session)] == ["e-io3"]
 
 
 def test_an_empirical_edge_without_a_reviewer_cannot_be_traversed(ripple_session):
@@ -545,3 +576,104 @@ def test_a_stale_exposure_row_does_not_produce_a_candidate(ripple_session,
                   freshness_days=400)
     pool = discover(ripple_session, crude_event(), as_of=FIXTURE_TODAY)
     assert stale.id not in {c.company_id for c in pool.candidates}
+
+
+# ---------------------------------------------------------------------------
+# D2 + D10 ACCEPTANCE (docs/v5/defects/DEFECTS-002-mechanism-edge-review-
+# authority.md, paired with DEFECTS-001 D2)
+#
+# The guarantee, stated once: A ROW IS WALKABLE IFF A NAMED HUMAN APPROVED IT.
+# Every derivation, no exceptions. The two tests below are the same three
+# steps run against MODEL_PROPOSED and against AUTHORED, and they must read
+# identically -- that identity IS the assertion. Before the fix, the AUTHORED
+# version of step 1 failed (the edge was live) and step 2 failed too (it was
+# in no queue), and the reason was that `derivation` carried the authority.
+#
+# Step 2 is the half worth insisting on: "inert" alone is satisfiable by
+# dropping the row on the floor. The defect was that no state existed which
+# was BOTH inert AND queued.
+# ---------------------------------------------------------------------------
+
+def _inert_then_queued_then_walkable(session, *, edge_id, derivation):
+    from app.graph.traverse import traverse
+    from app.ledger.edge_review import approve_edge, pending_edges
+
+    seed_edge(session, edge_id=edge_id, from_node="BRENT_CRUDE",
+              to_node="petchem", exposure_tag=TAG_PETCHEM,
+              derivation=derivation, reviewed_by=None, review_status="PENDING")
+
+    # 1. inert on the walk
+    assert traverse(session, "BRENT_CRUDE", as_of=FIXTURE_TODAY) == ()
+
+    # 2. and VISIBLE -- the half the schema could not express before
+    assert [r["edge_id"] for r in pending_edges(session)] == [edge_id]
+
+    # 3. approval by a named human is what makes it walkable
+    approve_edge(session, edge_id, reviewed_by="human:owner")
+    assert [e.edge_id for e in
+            traverse(session, "BRENT_CRUDE", as_of=FIXTURE_TODAY)] == [edge_id]
+
+    # and it leaves the queue by being decided, not by being hidden
+    assert pending_edges(session) == []
+
+
+def test_a_model_proposed_edge_is_inert_and_queued_until_approved(ripple_session):
+    _inert_then_queued_then_walkable(
+        ripple_session, edge_id="fert-1", derivation="MODEL_PROPOSED")
+
+
+def test_an_authored_edge_reads_identically_to_a_model_proposed_one(ripple_session):
+    """The point of deleting the AUTHORED exception.
+
+    If this test ever diverges from the MODEL_PROPOSED one above, an exemption
+    has come back -- and `derivation` is self-declared, so an exemption keyed
+    on it means anything able to write that string can authorise its own edge.
+    """
+    _inert_then_queued_then_walkable(
+        ripple_session, edge_id="auth-2", derivation="AUTHORED")
+
+
+def test_the_walk_refuses_an_unapproved_edge_in_sql_not_only_in_usable(ripple_session):
+    """The rule is in `_SELECT`, so it cannot be bypassed.
+
+    `usable()` is a readable restatement. A caller that runs the module's own
+    query directly -- or a future one that forgets the predicate -- must still
+    not see an unapproved row.
+    """
+    from app.graph.traverse import _SELECT
+
+    seed_edge(ripple_session, edge_id="e-pend", from_node="BRENT_CRUDE",
+              to_node="petchem", exposure_tag=TAG_PETCHEM,
+              derivation="AUTHORED", reviewed_by=None, review_status="PENDING")
+    seed_edge(ripple_session, edge_id="e-named-pend", from_node="BRENT_CRUDE",
+              to_node="petchem", exposure_tag=TAG_PETCHEM,
+              derivation="AUTHORED", reviewed_by="human:someone",
+              review_status="PENDING")
+
+    rows = ripple_session.execute(
+        text(_SELECT), {"node": "BRENT_CRUDE",
+                        "as_of": FIXTURE_TODAY.isoformat()}).mappings().all()
+    assert [r["edge_id"] for r in rows] == []
+
+
+def test_derivation_is_not_read_by_the_walk(ripple_session):
+    """`derivation` is provenance. No value of it changes walkability.
+
+    Pinned as a property rather than a case list, so a new derivation added
+    later cannot quietly acquire an exemption.
+    """
+    from app.graph.traverse import traverse
+
+    for index, derivation in enumerate(
+            ("IO_TABLE", "EMPIRICAL", "AUTHORED", "MODEL_PROPOSED")):
+        seed_edge(ripple_session, edge_id=f"appr-{index}",
+                  from_node=f"NODE_{index}", to_node="petchem",
+                  exposure_tag=TAG_PETCHEM, derivation=derivation,
+                  reviewed_by="human:owner", review_status="APPROVED")
+        seed_edge(ripple_session, edge_id=f"pend-{index}",
+                  from_node=f"NODE_{index}", to_node="petchem",
+                  exposure_tag=TAG_PETCHEM, derivation=derivation,
+                  reviewed_by=None, review_status="PENDING")
+        walked = [e.edge_id for e in
+                  traverse(ripple_session, f"NODE_{index}", as_of=FIXTURE_TODAY)]
+        assert walked == [f"appr-{index}"], f"{derivation} walked differently"

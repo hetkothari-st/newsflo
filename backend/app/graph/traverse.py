@@ -5,16 +5,41 @@ A breadth-first walk, so the FIRST time a node is reached is by its shortest
 path and `graph_distance` is the shortest hop count -- which matters, because
 the distance chooses the exposure threshold a candidate must clear.
 
-TWO RULES THE WALK ENFORCES, both of which are the difference between a
-causal graph and a correlation dump:
+ONE RULE THE WALK ENFORCES, and it is the difference between a causal graph
+and a correlation dump:
 
-  * an IO_TABLE or EMPIRICAL edge with no `reviewed_by` is NOT WALKED
-    (addendum A2.4 and A3.2). Input-output tables are a hypothesis generator
-    published at industry granularity with a multi-year lag; an event study
-    is a statistic. Either may propose an edge. Neither may BE one until a
-    named human has said what the mechanism is.
-  * a REJECTED edge is never walked again, and is never deleted either
-    (invariant 12) -- the reviewer's "no" is part of the record.
+    **An edge is walkable if and only if a named human approved it** --
+    `review_status = 'APPROVED'` AND `reviewed_by IS NOT NULL`. Every
+    derivation, no exceptions. A REJECTED edge is never walked again and is
+    never deleted either (invariant 12) -- the reviewer's "no" is part of the
+    record.
+
+WHY `derivation` IS NOT READ HERE (defect D10, `docs/v5/defects/
+DEFECTS-002-mechanism-edge-review-authority.md`). This walk used to exempt
+`AUTHORED` rows: it gated `derivation IN ('IO_TABLE','EMPIRICAL')` on
+`reviewed_by` and let everything else through. That made `derivation` --
+a **self-declared provenance string written by whoever inserts the row** --
+the authorisation boundary, so anything that could write the characters
+`AUTHORED` could authorise its own edge. It was not hypothetical: this repo's
+own fixture seeder defaulted to `derivation="AUTHORED"`, so "skip review" was
+what you got by not thinking about it.
+
+An AUTHORED row is not harder to write under the new rule. A person who
+authors an edge sets `review_status='APPROVED'` and `reviewed_by='human:...'`
+in the same INSERT -- one extra field, at the moment they are already typing
+the row, converting a self-declared *category* into a recorded *signature*.
+`edge_review.approve_edge` already writes exactly that pair, so the approval
+path already produces the state this walk requires.
+
+`derivation` survives as PROVENANCE ONLY: it says what kind of thing produced
+the row (`IO_TABLE`, `EMPIRICAL`, `AUTHORED`, `MODEL_PROPOSED`) and is carried
+onto `GraphEdge` for readers. It is an input to no decision, here or anywhere.
+
+THE RULE IS IN THE SQL, not only in `usable()`. `_SELECT` filters on the same
+two columns, so a caller that queries the table directly, or that forgets to
+call `usable()`, cannot walk an unapproved edge by accident. `usable()` is
+kept as the readable statement of the rule and as the second half of the pin
+in `tests/phase3/test_discovery_sources.py`.
 
 `distance` on the row is the AUTHOR'S hop length for that edge and is carried
 through untouched; `graph_distance` on the result is a property of the PATH
@@ -26,8 +51,10 @@ from datetime import date
 
 from sqlalchemy import text
 
-# A hypothesis until a human says otherwise (addendum A2.4, A3.2).
-REVIEW_REQUIRED_DERIVATIONS = ("IO_TABLE", "EMPIRICAL")
+# The one state a row must be in to be walked. Named so the SQL in `_SELECT`
+# and the predicate in `usable()` cannot drift apart silently.
+APPROVED = "APPROVED"
+REJECTED = "REJECTED"
 
 
 @dataclass(frozen=True)
@@ -54,7 +81,8 @@ SELECT edge_id, from_node, to_node, exposure_tag, relationship_type,
        io_total_coeff, effective_from, effective_to
 FROM mechanism_edge
 WHERE from_node = :node
-  AND review_status <> 'REJECTED'
+  AND review_status = 'APPROVED'
+  AND reviewed_by IS NOT NULL
   AND (effective_from IS NULL OR effective_from <= :as_of)
   AND (effective_to IS NULL OR effective_to >= :as_of)
 ORDER BY edge_id ASC
@@ -65,27 +93,21 @@ def usable(row) -> bool:
     """Whether this edge may be used in DISCOVERY.
 
     A database CHECK cannot express "used in discovery" -- the constraint is
-    about a query, not a row -- so the rule lives here and in the SQL above,
-    and `tests/phase3/test_discovery_sources.py` pins both halves.
+    about a query, not a row -- so the rule lives in `_SELECT` above and is
+    restated here, and `tests/phase3/test_discovery_sources.py` pins both
+    halves.
 
-    AN `AUTHORED` EDGE IS TRAVERSABLE WHILE ITS `review_status` IS STILL
-    `PENDING`, and that is deliberate rather than an oversight. The spec
-    gates exactly two derivations -- "CONSTRAINT: derivation IN
-    ('IO_TABLE','EMPIRICAL') requires reviewed_by NOT NULL before the edge
-    may be used in discovery" (phase file Task 3.4) -- because those two are
-    generated in BULK by a machine and are hypotheses by construction. An
-    AUTHORED edge was written by a person in the first place, so there is no
-    second person for it to be waiting on; `review_status` on it records a
-    later re-review, not its birth. Requiring approval for AUTHORED edges too
-    would be a stricter rule than the spec's, and adopting one silently is
-    how a spec stops describing the system. REJECTED still blocks every
-    derivation, including AUTHORED.
+    ONE RULE, EVERY DERIVATION: a row is walkable iff a named human approved
+    it. `derivation` is NOT READ. It is self-declared provenance and cannot be
+    an authorisation boundary -- see this module's header and defect D10.
+
+    `REJECTED` is checked first and explicitly. It is already excluded by the
+    `APPROVED` test, but a rejection is a decision a person took and this
+    function says so rather than letting it fall out of an equality check.
     """
-    if str(row["review_status"]) == "REJECTED":
+    if str(row["review_status"]) == REJECTED:
         return False
-    if str(row["derivation"]) in REVIEW_REQUIRED_DERIVATIONS:
-        return bool(row["reviewed_by"])
-    return True
+    return str(row["review_status"]) == APPROVED and bool(row["reviewed_by"])
 
 
 def traverse(session, variable: str, *, as_of: date,

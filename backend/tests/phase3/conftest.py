@@ -115,20 +115,36 @@ def seed_edge(session, *, edge_id: str, from_node: str, to_node: str,
               exposure_tag: str, relationship_type: str = "INPUT_COST",
               distance: int = 1, derivation: str = "AUTHORED",
               reviewed_by: str | None = "human:fixture-reviewer",
+              review_status: str = "APPROVED",
               confidence: float = 0.5, io_total_coeff: float | None = None,
               effective_from: date | None = None, effective_to: date | None = None):
+    """Seed one `mechanism_edge`.
+
+    `review_status` DEFAULTS TO APPROVED and is stated explicitly rather than
+    inferred from `reviewed_by`. Inferring it would re-encode the exact
+    conflation defect D2 names -- that a non-null reviewer name IS approval --
+    inside the fixture layer, where it would then be invisible. A test that
+    wants an unapproved row passes `review_status="PENDING"` and says so.
+
+    Note that the default pair (APPROVED + a reviewer name) is what makes an
+    edge walkable, so existing fixtures that expect traversal keep working
+    without change. Callers passing `reviewed_by=None` get an APPROVED row
+    with no signature, which `traverse.usable` still refuses -- correctly.
+    """
     session.execute(text(
         "INSERT INTO mechanism_edge (edge_id, from_node, to_node, exposure_tag, "
         "relationship_type, distance, io_total_coeff, derivation, reviewed_by, "
-        "confidence, effective_from, effective_to, source_url, created_at) VALUES "
+        "review_status, confidence, effective_from, effective_to, source_url, "
+        "created_at) VALUES "
         "(:edge_id, :from_node, :to_node, :exposure_tag, :relationship_type, "
-        ":distance, :io_total_coeff, :derivation, :reviewed_by, :confidence, "
-        ":effective_from, :effective_to, 'https://fixture.invalid/edge', "
-        ":created_at)"), {
+        ":distance, :io_total_coeff, :derivation, :reviewed_by, :review_status, "
+        ":confidence, :effective_from, :effective_to, "
+        "'https://fixture.invalid/edge', :created_at)"), {
             "edge_id": edge_id, "from_node": from_node, "to_node": to_node,
             "exposure_tag": exposure_tag, "relationship_type": relationship_type,
             "distance": distance, "io_total_coeff": io_total_coeff,
             "derivation": derivation, "reviewed_by": reviewed_by,
+            "review_status": review_status,
             "confidence": confidence,
             "effective_from": effective_from.isoformat() if effective_from else None,
             "effective_to": effective_to.isoformat() if effective_to else None,

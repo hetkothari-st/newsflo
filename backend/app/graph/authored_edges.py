@@ -21,13 +21,24 @@ nicety:
     report it `unmodelled` and never walk the edge, so writing it would
     create a row that looks live and is not.
 
-It writes `reviewed_by = NULL` and `review_status = 'PENDING'` always.
+It writes `reviewed_by = NULL` and `review_status = 'PENDING'` always, and it
+carries each entry's own `derivation` through untouched.
 
-READ `config/mechanism_edges_authored.yaml`'s header before running this.
-Two deployed semantics interact with `derivation: AUTHORED` in ways the file
-spells out: AUTHORED edges are not in the `edge_review` queue, and
-`traverse.usable()` walks an AUTHORED edge while it is still PENDING. Running
-this loader IS the approval act, and it should carry the owner's name.
+WHAT LOADING DOES AND DOES NOT DO. A loaded row is **inert and queued**: not
+walkable by discovery (`traverse.usable` requires APPROVED with a named
+reviewer, for every derivation) and visible in `edge_review.pending_edges`
+(which keys on `review_status`, not on derivation). **Running this loader is
+NOT the approval act** -- approving is `edge_review.approve_edge`, one row at
+a time, with a name recorded on each.
+
+That is a correction, and it is worth stating rather than quietly rewriting.
+This module's header used to say the opposite: that AUTHORED edges were absent
+from the queue, that `traverse.usable()` walked an AUTHORED edge while it was
+still PENDING, and that therefore *"running this loader IS the approval act"*.
+All three were true of the code as deployed, and together they were defect D10
+(`docs/v5/defects/DEFECTS-002-mechanism-edge-review-authority.md`): a loader
+could authorise its own writes by choosing a string. None of the three is true
+now.
 """
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -39,7 +50,12 @@ from sqlalchemy import text
 AUTHORED_EDGES_PATH = (
     Path(__file__).resolve().parents[2] / "config" / "mechanism_edges_authored.yaml")
 
-DERIVATION = "AUTHORED"
+# Provenance an entry may declare. MODEL_PROPOSED is the default: this file
+# holds candidates, and the honest label for a mechanism a model suggested and
+# a person transcribed is not AUTHORED. Neither value changes what the loader
+# writes or what the walk does -- see the module header.
+DEFAULT_DERIVATION = "MODEL_PROPOSED"
+PERMITTED_DERIVATIONS = ("MODEL_PROPOSED", "AUTHORED")
 REVIEW_STATUS_PENDING = "PENDING"
 
 
@@ -98,6 +114,14 @@ def blockers(entry: Mapping, *, modelled: Iterable[str]) -> tuple[str, ...]:
             f"{edge_id}: from_node {from_node!r} is not in "
             f"config/discovery.yaml::modelled_shock_variables, so discovery "
             f"would report it unmodelled and never walk this edge.")
+    derivation = entry.get("derivation", DEFAULT_DERIVATION)
+    if derivation not in PERMITTED_DERIVATIONS:
+        out.append(
+            f"{edge_id}: derivation {derivation!r} is not one this file may "
+            f"declare {PERMITTED_DERIVATIONS}. IO_TABLE and EMPIRICAL rows are "
+            f"written by their own bootstraps, which record where the "
+            f"coefficient or the study came from; a hand-maintained YAML "
+            f"cannot substantiate either claim.")
     return tuple(out)
 
 
@@ -154,7 +178,7 @@ def load_authored_edges(session, path: Path | None = None, *,
                 "exposure_tag": str(entry["exposure_tag"]),
                 "relationship_type": str(entry["relationship_type"]),
                 "distance": int(entry["distance"]),
-                "derivation": DERIVATION,
+                "derivation": str(entry.get("derivation", DEFAULT_DERIVATION)),
                 "review_status": REVIEW_STATUS_PENDING,
                 "confidence": float(entry["parameters"]["confidence"]),
                 "source_url": entry.get("source_url")})

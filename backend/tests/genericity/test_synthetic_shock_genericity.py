@@ -120,12 +120,15 @@ def _seed(session, config):
 
     register_vocabulary(session, config["exposure_tags"])
 
+    # APPROVED + a reviewer name is what makes an edge walkable, for every
+    # derivation (app/graph/traverse.py). This edge is the one the synthetic
+    # commodity is discovered through, so it is seeded approved and signed.
     session.execute(text(
         "INSERT INTO mechanism_edge (edge_id, from_node, to_node, exposure_tag, "
-        "relationship_type, distance, derivation, reviewed_by, confidence, "
-        "source_url, created_at) VALUES (:edge_id, :from_node, :to_node, :tag, "
-        "'INPUT_COST', 1, 'AUTHORED', 'human:fixture-reviewer', 0.5, "
-        "'https://fixture.invalid/edge', :created_at)"), {
+        "relationship_type, distance, derivation, reviewed_by, review_status, "
+        "confidence, source_url, created_at) VALUES (:edge_id, :from_node, "
+        ":to_node, :tag, 'INPUT_COST', 1, 'AUTHORED', 'human:fixture-reviewer', "
+        "'APPROVED', 0.5, 'https://fixture.invalid/edge', :created_at)"), {
             "edge_id": MECHANISM_ID, "from_node": SHOCK_VARIABLE,
             "to_node": "synth_x_users", "tag": EXPOSURE_TAG,
             "created_at": FIXTURE_NOW.isoformat()})

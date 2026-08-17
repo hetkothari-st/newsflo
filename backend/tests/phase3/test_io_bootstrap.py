@@ -258,12 +258,17 @@ def test_an_unreviewed_io_edge_appears_in_the_review_queue(ripple_session):
 
     seed_edge(ripple_session, edge_id="io-1", from_node="petrochemicals",
               to_node="paints", exposure_tag=TAG_PETCHEM, derivation="IO_TABLE",
-              reviewed_by=None, io_total_coeff=0.31)
+              reviewed_by=None, review_status="PENDING", io_total_coeff=0.31)
     seed_edge(ripple_session, edge_id="auth-1", from_node="BRENT_CRUDE",
               to_node="paints", exposure_tag=TAG_PETCHEM, derivation="AUTHORED",
-              reviewed_by=None)
+              reviewed_by=None, review_status="PENDING")
     queue = pending_edges(ripple_session)
-    assert [row["edge_id"] for row in queue] == ["io-1"]
+    # BOTH. This assertion was `== ["io-1"]` and inverting it is the point of
+    # the D10 fix, not a casualty of it: the queue is keyed on review_status,
+    # so an unreviewed AUTHORED row is queued exactly like an unreviewed
+    # IO_TABLE one. Under the old derivation filter `auth-1` was in no queue
+    # AND walkable, which is the state D10 says must not exist.
+    assert [row["edge_id"] for row in queue] == ["io-1", "auth-1"]
 
 
 def test_the_queue_is_ranked_by_coefficient(ripple_session):
@@ -271,10 +276,10 @@ def test_the_queue_is_ranked_by_coefficient(ripple_session):
 
     seed_edge(ripple_session, edge_id="io-small", from_node="a", to_node="b",
               exposure_tag=TAG_PETCHEM, derivation="IO_TABLE", reviewed_by=None,
-              io_total_coeff=0.05)
+              review_status="PENDING", io_total_coeff=0.05)
     seed_edge(ripple_session, edge_id="io-big", from_node="a", to_node="c",
               exposure_tag=TAG_RUBBER, derivation="IO_TABLE", reviewed_by=None,
-              io_total_coeff=0.42)
+              review_status="PENDING", io_total_coeff=0.42)
     assert [row["edge_id"] for row in pending_edges(ripple_session)] == [
         "io-big", "io-small"]
 
@@ -284,7 +289,7 @@ def test_approving_an_edge_records_the_reviewer(ripple_session):
 
     seed_edge(ripple_session, edge_id="io-2", from_node="a", to_node="b",
               exposure_tag=TAG_PETCHEM, derivation="IO_TABLE", reviewed_by=None,
-              io_total_coeff=0.31)
+              review_status="PENDING", io_total_coeff=0.31)
     approve_edge(ripple_session, "io-2", reviewed_by="human:fixture-reviewer")
     assert pending_edges(ripple_session) == []
     assert ripple_session.execute(text(

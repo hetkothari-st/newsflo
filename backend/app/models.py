@@ -2154,11 +2154,19 @@ class MechanismEdge(Base):
     industry, the node it reaches, and the exposure tag that carries the
     effect. SHIPS EMPTY.
 
-    `derivation` is load-bearing. IO_TABLE edges are generated in bulk from
-    published input-output tables and EMPIRICAL edges from event studies;
-    BOTH are hypotheses, and `app/graph/traverse.py` refuses to walk either
-    one until a named human has reviewed it (A2.4, A3.2). AUTHORED edges were
-    written by a human in the first place.
+    `derivation` is PROVENANCE ONLY -- it records what kind of thing produced
+    the row and is an input to no decision. IO_TABLE comes from published
+    input-output tables, EMPIRICAL from event studies, MODEL_PROPOSED from a
+    model's suggestion transcribed by a person, AUTHORED from a person
+    writing the edge directly.
+
+    WHAT MAKES A ROW WALKABLE IS `review_status = 'APPROVED'` WITH A NON-NULL
+    `reviewed_by`, for every derivation without exception -- enforced in
+    `app/graph/traverse.py`'s SQL and predicate together. `derivation` used to
+    carry that authority (AUTHORED was exempt from review), which made a
+    self-declared string the security boundary: anything that could write
+    'AUTHORED' could authorise its own edge. That is defect D10,
+    `docs/v5/defects/DEFECTS-002-mechanism-edge-review-authority.md`.
 
     `distance` is the AUTHORED hop length of this edge. It is NOT the
     traversal distance, which is a property of the path and is computed by
@@ -2177,8 +2185,9 @@ class MechanismEdge(Base):
     relationship_type = Column(String, nullable=False)
     distance = Column(Integer, nullable=False)
     io_total_coeff = Column(Numeric, nullable=True)   # NULL for non-IO edges
-    derivation = Column(String, nullable=False)       # IO_TABLE|EMPIRICAL|AUTHORED
-    reviewed_by = Column(String, nullable=True)       # mandatory for IO_TABLE/EMPIRICAL
+    # IO_TABLE|EMPIRICAL|AUTHORED|MODEL_PROPOSED -- provenance, never authority
+    derivation = Column(String, nullable=False)
+    reviewed_by = Column(String, nullable=True)       # required to walk, any derivation
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     # PENDING | APPROVED | REJECTED. A rejected edge is RETAINED with its
     # reason (invariant 12) and can never be traversed again.

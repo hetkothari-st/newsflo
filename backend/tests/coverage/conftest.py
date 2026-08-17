@@ -51,13 +51,17 @@ def expected_for(variable: str) -> dict:
 
 
 def _insert_edge(session, edge):
+    """`review_status = 'APPROVED'` with a reviewer name is what makes an edge
+    walkable, for every derivation (`app/graph/traverse.py`). These fixture
+    edges exist to be traversed, so they are seeded approved and signed."""
     session.execute(text(
         "INSERT INTO mechanism_edge (edge_id, from_node, to_node, exposure_tag, "
-        "relationship_type, distance, derivation, reviewed_by, confidence, "
-        "source_url, created_at) VALUES (:edge_id, :from_node, :to_node, "
-        ":exposure_tag, :relationship_type, 1, 'AUTHORED', "
-        "'human:fixture-reviewer', 0.5, 'https://fixture.invalid/edge', "
-        ":created_at)"), dict(edge, created_at=FIXTURE_NOW.isoformat()))
+        "relationship_type, distance, derivation, reviewed_by, review_status, "
+        "confidence, source_url, created_at) VALUES (:edge_id, :from_node, "
+        ":to_node, :exposure_tag, :relationship_type, 1, 'AUTHORED', "
+        "'human:fixture-reviewer', 'APPROVED', 0.5, "
+        "'https://fixture.invalid/edge', :created_at)"),
+        dict(edge, created_at=FIXTURE_NOW.isoformat()))
 
 
 def build_universe(session, *, untagged_families: tuple[str, ...] = (),

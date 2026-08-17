@@ -40,24 +40,34 @@
 # computed by the walk from the path, never read from here.
 #
 # ---------------------------------------------------------------------------
-# TWO SEMANTIC CONFLICTS THE OWNER SHOULD KNOW ABOUT BEFORE APPROVING
+# THE TWO SEMANTIC CONFLICTS THIS FILE USED TO CARRY ARE FIXED
 # ---------------------------------------------------------------------------
-# 1. `derivation: AUTHORED` edges are NOT in the `edge_review` queue.
-#    `app/ledger/edge_review.pending_edges` selects
-#    `derivation IN ('IO_TABLE','EMPIRICAL')` only, and says why: "AUTHORED
-#    edges are not in the queue: they were written by a person in the first
-#    place." These were written by a MODEL proposing content, which is not
-#    the case that rule was written for.
-# 2. `app/graph/traverse.usable()` treats an AUTHORED edge as walkable while
-#    its `review_status` is still PENDING -- deliberately, per Task 3.4. So
-#    inserting these as AUTHORED would make them LIVE for discovery, not
-#    queued.
+# This header previously warned about two deployed behaviours, both real at
+# the time and both now gone (defect D10,
+# docs/v5/defects/DEFECTS-002-mechanism-edge-review-authority.md):
 #
-# Consequence: the approval act for this file is RUNNING THE LOADER, under
-# the owner's own name, not clicking approve in a console. Until then these
-# rows exist only as text. If the owner would rather they sit in the review
-# queue proper, the derivation must change and that is the owner's call --
-# `AUTHORED` is recorded here because it is what these are.
+#   1. AUTHORED edges were absent from the `edge_review` queue, because
+#      `pending_edges` selected `derivation IN ('IO_TABLE','EMPIRICAL')`.
+#      It now selects on `review_status` alone, so every PENDING row is
+#      queued whatever produced it.
+#   2. `traverse.usable()` walked an AUTHORED edge while its `review_status`
+#      was still PENDING. It now requires `review_status = 'APPROVED'` with a
+#      non-null `reviewed_by`, for every derivation, and the same condition is
+#      in `traverse._SELECT` so it cannot be bypassed.
+#
+# Consequence, and it is the inversion of what this header used to say:
+# RUNNING THE LOADER IS NOT THE APPROVAL ACT. A loaded row lands inert and
+# queued. Approval is `edge_review.approve_edge`, one row at a time, each
+# carrying the name of the person who approved it -- including
+# `subsidised_volume_rationing`, which this file flags as the weakest of the
+# five and which can now be REJECTED individually, with its reason retained
+# (invariant 12), instead of arriving live with its four siblings.
+#
+# `derivation: MODEL_PROPOSED` on all five. These were proposed by a model and
+# transcribed by a person; AUTHORED would overstate them. The label is
+# provenance for a reader and is an input to no decision -- it changes nothing
+# about what the loader writes or what the walk does, which is the property
+# that makes it safe to be honest with.
 #
 # GAPS: DATA_GAPS.md §15 lists every entry here and what it is missing.
 
@@ -86,7 +96,7 @@ edges:
     to_node: fertilizer_subsidy_receivable
     relationship_type: REGULATORY
     distance: 1
-    derivation: AUTHORED
+    derivation: MODEL_PROPOSED
     reviewed_by: null
     review_status: PENDING
     exposure_tag: null
@@ -121,7 +131,7 @@ edges:
     to_node: administered_price_margin
     relationship_type: REVENUE_REALIZATION
     distance: 1
-    derivation: AUTHORED
+    derivation: MODEL_PROPOSED
     reviewed_by: null
     review_status: PENDING
     exposure_tag: null
@@ -154,7 +164,7 @@ edges:
     to_node: complex_fertilizer_demand
     relationship_type: DEMAND
     distance: 1
-    derivation: AUTHORED
+    derivation: MODEL_PROPOSED
     reviewed_by: null
     review_status: PENDING
     exposure_tag: null
@@ -186,7 +196,7 @@ edges:
     to_node: ammonia_urea_feedstock
     relationship_type: INPUT_COST
     distance: 1
-    derivation: AUTHORED
+    derivation: MODEL_PROPOSED
     reviewed_by: null
     review_status: PENDING
     exposure_tag: null
@@ -222,7 +232,7 @@ edges:
     to_node: allocated_volume_cap
     relationship_type: REGULATORY
     distance: 1
-    derivation: AUTHORED
+    derivation: MODEL_PROPOSED
     reviewed_by: null
     review_status: PENDING
     exposure_tag: null

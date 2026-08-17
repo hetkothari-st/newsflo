@@ -4,13 +4,22 @@ Same shape as Phase 1's exposure review (`app/ledger/review.py`), because it
 is the same discipline applied to a different artefact: a machine PROPOSES,
 a person DECIDES, and the decision is recorded with a name on it.
 
-WHAT IS IN THE QUEUE. Edges whose `derivation` is IO_TABLE or EMPIRICAL and
-which nobody has reviewed. Those are the two derivations that produce
-hypotheses in bulk -- an input-output table proposes thousands of
-industry-to-industry requirements, an event study proposes every industry
-that moved -- and neither may be walked by discovery until reviewed
-(addendum A2.4, A3.2). AUTHORED edges are not in the queue: they were
-written by a person in the first place.
+WHAT IS IN THE QUEUE. **Every edge whose `review_status` is PENDING**, of any
+derivation. The queue is keyed on the state a row is in, never on what kind of
+thing produced it.
+
+That is a change, and the reason is defect D10 (`docs/v5/defects/
+DEFECTS-002-mechanism-edge-review-authority.md`). This queue used to select
+`derivation IN ('IO_TABLE','EMPIRICAL')`, on the argument that AUTHORED rows
+were written by a person and had nobody to wait on. Paired with a traversal
+gate that also read `derivation`, it produced a row that was **live on the
+walk and in no queue at the same time** -- there was no state in which an
+unreviewed AUTHORED edge was both inert and visible to a reviewer. It was
+either walkable, or it did not exist.
+
+A queue keyed on "what state is this in" answers the question a reviewer is
+actually asking. A queue keyed on "what kind of thing made this" cannot, and
+silently omitted an entire derivation.
 
 WHAT REJECTION MEANS. A rejected edge is RETAINED with its reason and is
 never traversed again (invariant 12). Deleting it would throw away the one
@@ -24,7 +33,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
-REVIEWABLE_DERIVATIONS = ("IO_TABLE", "EMPIRICAL")
+PENDING = "PENDING"
 
 
 class EdgeReviewError(ValueError):
@@ -36,13 +45,19 @@ def _now() -> str:
 
 
 def pending_edges(session, limit: int = 200) -> list[dict]:
+    """Every edge awaiting a decision, of any derivation.
+
+    Filters on `review_status` ALONE -- not on `derivation`, and not on
+    `reviewed_by IS NULL` either. Dropping the reviewer test matters: a row
+    carrying a name but still PENDING has not been approved, so it is not
+    walkable (`traverse.usable`), and if this queue also hid it the row would
+    be inert AND invisible -- D10 again, one column over.
+    """
     return [dict(row) for row in session.execute(text(
         "SELECT * FROM mechanism_edge "
-        "WHERE derivation IN ('IO_TABLE', 'EMPIRICAL') "
-        "  AND reviewed_by IS NULL "
-        "  AND review_status = 'PENDING' "
+        "WHERE review_status = :pending "
         "ORDER BY COALESCE(io_total_coeff, 0) DESC, edge_id ASC "
-        "LIMIT :limit"), {"limit": int(limit)}).mappings().all()]
+        "LIMIT :limit"), {"pending": PENDING, "limit": int(limit)}).mappings().all()]
 
 
 def rejected_edges(session, limit: int = 200) -> list[dict]:
@@ -66,8 +81,8 @@ def approve_edge(session, edge_id: str, *, reviewed_by: str,
     reviewer = (reviewed_by or "").strip()
     if not reviewer:
         raise EdgeReviewError(
-            "an approval needs a reviewer: an IO_TABLE or EMPIRICAL edge is a "
-            "hypothesis until a named human says what the mechanism is")
+            "an approval needs a reviewer: an edge is a hypothesis until a "
+            "named human says what the mechanism is, whatever produced it")
     edge = get_edge(session, edge_id)
     if edge is None:
         raise EdgeReviewError(f"no such edge: {edge_id}")
@@ -109,14 +124,24 @@ def reject_edge(session, edge_id: str, *, reviewed_by: str, reason: str) -> dict
 
 
 def edge_queue_stats(session) -> dict:
+    """Queue depth by REVIEW STATE, plus a provenance breakdown for display.
+
+    `pending` counts the same rows `pending_edges` returns -- review_status
+    only. It previously carried the `derivation IN ('IO_TABLE','EMPIRICAL')`
+    filter, which made the console report a queue depth smaller than the
+    queue.
+
+    `authored` and `model_proposed` are DISPLAY counts. They tell a reviewer
+    where a row came from; nothing branches on them.
+    """
     row = session.execute(text(
         "SELECT "
-        " sum(CASE WHEN review_status = 'PENDING' AND reviewed_by IS NULL "
-        "          AND derivation IN ('IO_TABLE','EMPIRICAL') THEN 1 ELSE 0 END) "
-        "   AS pending, "
+        " sum(CASE WHEN review_status = 'PENDING' THEN 1 ELSE 0 END) AS pending, "
         " sum(CASE WHEN review_status = 'APPROVED' THEN 1 ELSE 0 END) AS approved, "
         " sum(CASE WHEN review_status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected, "
         " sum(CASE WHEN derivation = 'AUTHORED' THEN 1 ELSE 0 END) AS authored, "
+        " sum(CASE WHEN derivation = 'MODEL_PROPOSED' THEN 1 ELSE 0 END) "
+        "   AS model_proposed, "
         " count(*) AS total "
         "FROM mechanism_edge")).mappings().first()
     return {key: int(value or 0) for key, value in dict(row).items()}
